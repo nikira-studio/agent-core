@@ -59,6 +59,7 @@ docker-compose.yml
 # Private/local project material
 private/
 AGENTS.md
+CLAUDE.md
 scratch/
 temp.txt
 plan.md
