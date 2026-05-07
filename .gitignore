@@ -1,0 +1,70 @@
+# Runtime data and SQLite artifacts
+data/
+*.db
+*.db-wal
+*.db-shm
+*-wal
+*-shm
+*.sqlite
+*.sqlite3
+*.zip
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyc
+.pytest_cache/
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+._*
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Logs
+logs/
+*.log
+.playwright-cli/
+
+# Coverage
+.coverage
+htmlcov/
+
+# Claude Code internal files (worktrees, session data)
+.claude/
+
+# Personal docker-compose overrides (use docker-compose.example.yml as a base)
+docker-compose.yml
+
+# Private/local project material
+private/
+AGENTS.md
+scratch/
+temp.txt
+plan.md
+fixes.md
+
+# Generated credentials
+vault.key
+vault.keyring
+broker.credential

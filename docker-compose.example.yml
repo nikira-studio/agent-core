@@ -1,0 +1,32 @@
+# Agent Core - Docker Compose Configuration
+#
+# Copy this file to docker-compose.yml and customize as needed.
+# DO NOT commit your actual docker-compose.yml with secrets to version control.
+#
+# Quick start:
+#   cp docker-compose.example.yml docker-compose.yml
+#   docker compose up -d
+#
+# Runtime:
+#   The Dockerfile uses Python 3.11. Local development should use Python 3.11
+#   too, or run `python3.11 -m compileall app tests` before rebuilding.
+
+services:
+  agent-core:
+    container_name: agent-core
+    build: .
+    ports:
+      - "3500:3500"
+    volumes:
+      - ./data:/data
+    environment:
+      - AGENT_CORE_DATA_PATH=/data
+      # Generate encryption key automatically on first start
+      # IMPORTANT: Once set, changing this will make existing vault entries unreadable
+      - AGENT_CORE_ENCRYPTION_KEY=auto
+      # For production, set a fixed key instead:
+      # - AGENT_CORE_ENCRYPTION_KEY=your-32-byte-fernet-key-here
+    restart: unless-stopped
+
+volumes:
+  agent-core-data:
