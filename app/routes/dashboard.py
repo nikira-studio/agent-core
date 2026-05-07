@@ -3660,7 +3660,7 @@ def _build_user_instructions(target, base_url, user_scope, workspace_scope, agen
     )
     return f"""# Agent Core Instructions
 
-Use these steps to connect an AI tool to Agent Core as `{agent_display}` for {user_display}.
+Use these steps to connect an AI tool to Agent Core for {user_display}.
 
 ## What To Generate
 
@@ -3675,7 +3675,7 @@ Use these steps to connect an AI tool to Agent Core as `{agent_display}` for {us
 Click the one-time key button on `MCP Config` when you are ready to connect the tool.
 Use the one-time key button on `Environment Variables` only when you need shell or launcher environment variables.
 That rotates this agent's API key and inserts the new key into the generated output.
-The key is shown once. Generating again invalidates the previous key for `{agent_display}`.
+The key is shown once. Generating again invalidates the previous key for this connection.
 The API key is the authoritative agent identity. Agent Core identifies requests as `{agent_scope}` by looking up the bearer token; repo instruction files do not set identity.
 
 ## Where Things Go
@@ -3692,7 +3692,7 @@ The API key is the authoritative agent identity. Agent Core identifies requests 
 - User: `{user_scope}`
 - Workspace: `{workspace_scope or "optional / not selected"}`
 
-Use the full prefixed scope names exactly as shown. Do not use plain workspace IDs like `{workspace_name}` or agent IDs like `{agent_display}` as memory scopes.
+Use the full prefixed scope names exactly as shown. Do not use plain workspace IDs like `{workspace_name}` or agent IDs as memory scopes.
 
 {workspace_line}
 """
