@@ -3536,7 +3536,7 @@ def _build_agent_setup_output(
         content = _build_session_prompt(target, base_url, user_scope, workspace_scope, agent_scope, agent_display, user_display, workspace_name)
     elif output_type == "claude_md":
         label = "CLAUDE.md — paste into workspace repository root"
-        content = _build_claude_md(base_url, user_scope, workspace_scope, agent_scope, agent_display, user_display, workspace_name)
+        content = _build_claude_md(base_url, user_scope, workspace_scope, agent_scope, agent_display, workspace_name)
     elif output_type == "agents_md":
         label = "AGENTS.md — paste into workspace repository root"
         content = _build_agents_md(base_url, user_scope, workspace_scope, agent_scope, workspace_name)
@@ -3722,7 +3722,7 @@ Start by confirming you can reach Agent Core at {base_url}/mcp, then search `{de
 """
 
 
-def _build_claude_md(base_url, user_scope, workspace_scope, agent_scope, agent_display, user_display, workspace_name):
+def _build_claude_md(base_url, user_scope, workspace_scope, agent_scope, agent_display, workspace_name):
     default_scope = workspace_scope or "the authenticated/default user scope from your Agent Core connection"
     workspace_scope_label = workspace_scope or "No workspace scope selected"
     private_scope_guidance = (

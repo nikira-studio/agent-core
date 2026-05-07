@@ -1,5 +1,6 @@
 import pytest
 import json
+import re
 from app.services.auth_service import create_user, create_session, get_user_by_id
 from app.services.agent_service import create_agent, get_agent_by_id
 from app.services.workspace_service import create_workspace
@@ -94,9 +95,13 @@ def test_agent_setup_generates_claude_md(agent_setup_client):
     )
     assert r.status_code == 200
     html = r.text
+    output_match = re.search(r"<pre class='output-block'>(.*?)</pre>", html, re.S)
+    assert output_match is not None
+    output = output_match.group(1)
     assert "CLAUDE.md" in html
-    assert "workspace:agent-core" in html
-    assert "user:brian" not in html
+    assert "workspace:agent-core" in output
+    assert "user:brian" not in output
+    assert "Brian" not in output
     assert "active Agent Core user and agent identities are determined by the MCP/API key" in html
     assert "Agent ID:" not in html
     assert "ghp_" not in html
