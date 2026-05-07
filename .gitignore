@@ -64,6 +64,7 @@ scratch/
 temp.txt
 plan.md
 fixes.md
+roadmap.md
 
 # Generated credentials
 vault.key
