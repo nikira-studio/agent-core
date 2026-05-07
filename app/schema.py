@@ -208,6 +208,60 @@ CREATE TABLE IF NOT EXISTS system_settings (
 INSERT OR IGNORE INTO system_settings (key, value) VALUES ('scratchpad_retention_days', '7');
 INSERT OR IGNORE INTO system_settings (key, value) VALUES ('solo_mode_enabled', 'true');
 INSERT OR IGNORE INTO system_settings (key, value) VALUES ('installed_version', '1.0.0');
+
+-- Connector types table
+CREATE TABLE IF NOT EXISTS connector_types (
+    id TEXT PRIMARY KEY,
+    display_name TEXT NOT NULL,
+    description TEXT,
+    auth_type TEXT NOT NULL DEFAULT 'api_key' CHECK (auth_type IN ('api_key', 'bearer', 'oauth2', 'basic')),
+    supported_actions_json TEXT NOT NULL DEFAULT '[]',
+    required_credential_fields_json TEXT NOT NULL DEFAULT '[]',
+    default_binding_rules_json TEXT,
+    is_active INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0, 1)),
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_connector_types_active ON connector_types(is_active);
+
+-- Connector bindings table
+CREATE TABLE IF NOT EXISTS connector_bindings (
+    id TEXT PRIMARY KEY,
+    connector_type_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    scope TEXT NOT NULL,
+    credential_id TEXT,
+    config_json TEXT,
+    enabled INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0, 1)),
+    last_tested_at TEXT,
+    last_error TEXT,
+    created_by TEXT,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (connector_type_id) REFERENCES connector_types(id),
+    FOREIGN KEY (credential_id) REFERENCES vault_entries(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_bindings_scope ON connector_bindings(scope, enabled);
+CREATE INDEX IF NOT EXISTS idx_bindings_connector ON connector_bindings(connector_type_id);
+CREATE INDEX IF NOT EXISTS idx_bindings_credential ON connector_bindings(credential_id);
+
+-- Connector executions table
+CREATE TABLE IF NOT EXISTS connector_executions (
+    id TEXT PRIMARY KEY,
+    binding_id TEXT NOT NULL,
+    action TEXT NOT NULL,
+    params_json TEXT,
+    result_status TEXT NOT NULL CHECK (result_status IN ('success', 'failure', 'error')),
+    result_body_json TEXT,
+    error_message TEXT,
+    duration_ms INTEGER,
+    executed_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (binding_id) REFERENCES connector_bindings(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_executions_binding ON connector_executions(binding_id, executed_at DESC);
 """
 
 
@@ -231,3 +285,61 @@ def create_schema(conn) -> None:
         conn.execute("ALTER TABLE otp_secrets ADD COLUMN pending_secret_encrypted TEXT")
     if not _column_exists(conn, "otp_secrets", "pending_at"):
         conn.execute("ALTER TABLE otp_secrets ADD COLUMN pending_at TEXT")
+
+    _seed_connector_types(conn)
+
+
+def _seed_connector_types(conn) -> None:
+    import json
+
+    connectors = [
+        {
+            "id": "github",
+            "display_name": "GitHub",
+            "description": "GitHub API integration for issues, comments, and repo metadata",
+            "auth_type": "bearer",
+            "supported_actions": ["create_issue", "comment_issue", "read_repo"],
+            "required_credential_fields": ["token"],
+            "default_binding_rules": {"scope": "workspace"},
+        },
+        {
+            "id": "slack",
+            "display_name": "Slack",
+            "description": "Slack API for posting messages and fetching channel lists",
+            "auth_type": "bearer",
+            "supported_actions": ["post_message", "list_channels"],
+            "required_credential_fields": ["token"],
+            "default_binding_rules": {"scope": "workspace"},
+        },
+        {
+            "id": "generic_http",
+            "display_name": "Generic HTTP API",
+            "description": "Generic authenticated HTTP API connector",
+            "auth_type": "api_key",
+            "supported_actions": ["call_endpoint"],
+            "required_credential_fields": ["token"],
+            "default_binding_rules": None,
+        },
+    ]
+
+    for c in connectors:
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO connector_types
+            (id, display_name, description, auth_type, supported_actions_json,
+             required_credential_fields_json, default_binding_rules_json)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                c["id"],
+                c["display_name"],
+                c["description"],
+                c["auth_type"],
+                json.dumps(c["supported_actions"]),
+                json.dumps(c["required_credential_fields"]),
+                json.dumps(c["default_binding_rules"])
+                if c["default_binding_rules"]
+                else None,
+            ),
+        )
+    conn.commit()
