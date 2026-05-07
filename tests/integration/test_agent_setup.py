@@ -53,7 +53,7 @@ def test_agent_setup_page_loads(agent_setup_client):
     assert r.status_code == 200
     html = r.text
     assert "Integrations" in html
-    assert "Generate user setup steps" in html
+    assert "Generate setup instructions" in html
     assert "Current tool preset" in html
     assert "First-class presets are Claude Code, Codex, Cursor, Windsurf, and Generic MCP/REST" in html
     assert 'href="/agent-setup"' in html
@@ -83,7 +83,7 @@ def test_agent_setup_generates_instructions_output(agent_setup_client):
     assert "workspace:agent-core" in html
     assert "user:brian" in html
     assert "agent:claude-code" in html
-    assert "User Instructions" in html
+    assert "Instructions" in html
     assert "What To Generate" in html
     assert "Generate One-Time Key" in html
 
@@ -216,7 +216,7 @@ def test_agent_setup_output_tabs_present(agent_setup_client):
     assert r.status_code == 200
     html = r.text
     assert "setup-tabs" in html
-    assert "User Instructions" in html
+    assert "Instructions" in html
     assert "MCP Config" in html
     assert "Session Prompt" in html
     assert "CLAUDE.md" in html

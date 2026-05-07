@@ -2777,12 +2777,12 @@ def _agent_user_matches(agent, user_id):
 
 def _agent_setup_output_options(target=None):
     return [
-        ("instructions", "User Instructions", "agent-core-user-instructions.md"),
+        ("instructions", "Instructions", "agent-core-instructions.md"),
         ("mcp_json", "MCP Config", "agent-core-mcp-config.txt"),
-        ("env", "Environment Variables (optional key storage)", "agent-core.env"),
+        ("env", "Environment Variables", "agent-core.env"),
+        ("claude_md", "CLAUDE.md", "CLAUDE.md"),
+        ("agents_md", "AGENTS.md", "AGENTS.md"),
         ("session", "Session Prompt", "agent-core-session-prompt.md"),
-        ("claude_md", "Workspace CLAUDE.md", "CLAUDE.md"),
-        ("agents_md", "Workspace AGENTS.md", "AGENTS.md"),
         ("verification", "Verification Prompt", "agent-core-verification.md"),
     ]
 
@@ -3254,7 +3254,7 @@ async def agent_setup_page(
     body = f"""
     <div class="page-header setup-page-header">
       <h1>Integrations</h1>
-      <p class="subtitle">Generate user setup steps, environment variables, MCP config, and AI-facing prompts for connecting tools to Agent Core.</p>
+      <p class="subtitle">Generate setup instructions, environment variables, MCP config, and AI-facing prompts for connecting tools to Agent Core.</p>
       <div class="text-muted" style="font-size:0.86rem;margin-top:8px">
         Current tool preset: <strong>{escape_html(tool_label)}</strong>. First-class presets are Claude Code, Codex, Cursor, Windsurf, and Generic MCP/REST. Claude Desktop and OpenClaw are static examples in <code>templates/integrations/</code>.
       </div>
@@ -3308,9 +3308,9 @@ async def agent_setup_page(
     <div class="setup-next-steps">
       <h3>Next Steps</h3>
       <ol>
-        <li>Start with User Instructions if you are not sure which output to use.</li>
+        <li>Start with Instructions if you are not sure which output to use.</li>
         <li>For most tools, MCP Config is the required connection step. Environment is optional and only stores values for shell or launcher use.</li>
-        <li>Add AI-facing prompts or tool files only where the connected tool reads them.</li>
+        <li>Add CLAUDE.md, AGENTS.md, or Session Prompt only where the connected tool reads them.</li>
         <li>Run the Verification Prompt after setup to confirm connectivity.</li>
       </ol>
     </div>
@@ -3529,16 +3529,16 @@ def _build_agent_setup_output(
     workspace_name = workspace.get("name", workspace["id"]) if workspace else "No workspace selected"
 
     if output_type == "instructions":
-        label = "User Instructions"
+        label = "Instructions"
         content = _build_user_instructions(target, base_url, user_scope, workspace_scope, agent_scope, agent_display, user_display, workspace_name)
     elif output_type == "session":
         label = "Session Prompt"
         content = _build_session_prompt(target, base_url, user_scope, workspace_scope, agent_scope, agent_display, user_display, workspace_name)
     elif output_type == "claude_md":
-        label = "Workspace CLAUDE.md — paste into workspace repository root"
+        label = "CLAUDE.md — paste into workspace repository root"
         content = _build_claude_md(base_url, user_scope, workspace_scope, agent_scope, agent_display, user_display, workspace_name)
     elif output_type == "agents_md":
-        label = "Workspace AGENTS.md — paste into workspace repository root"
+        label = "AGENTS.md — paste into workspace repository root"
         content = _build_agents_md(base_url, user_scope, workspace_scope, agent_scope, workspace_name)
     elif output_type == "mcp_json":
         label = "MCP Config"
@@ -3550,7 +3550,7 @@ def _build_agent_setup_output(
         label = "MCP Config (Windsurf)"
         content = _build_windsurf_mcp_json(base_url, api_key)
     elif output_type == "env":
-        label = "Environment Variables (optional key storage)"
+        label = "Environment Variables"
         content = _build_env_vars(base_url, agent["id"], user_scope, workspace_scope, api_key)
     else:
         label = "Verification Prompt"
@@ -3658,22 +3658,22 @@ def _build_user_instructions(target, base_url, user_scope, workspace_scope, agen
         if workspace_scope
         else f"No workspace is selected. Generated prompts use `{user_scope}` as the default shared context."
     )
-    return f"""# Agent Core User Instructions
+    return f"""# Agent Core Instructions
 
 Use these steps to connect an AI tool to Agent Core as `{agent_display}` for {user_display}.
 
 ## What To Generate
 
 1. Generate `MCP Config` when you are ready to connect the tool to Agent Core. This is the normal connection step for MCP-capable tools.
-2. Generate `Environment Variables (optional key storage)` only when your MCP config or launcher reads values from environment variables.
-3. Generate `Workspace CLAUDE.md` or `Workspace AGENTS.md` for reusable repository-level guidance shared by multiple agents.
+2. Generate `Environment Variables` only when your MCP config or launcher reads values from environment variables.
+3. Generate `CLAUDE.md` or `AGENTS.md` for reusable repository-level guidance shared by multiple agents.
 4. Generate `Session Prompt` when you want one-time agent-specific instructions pasted into a chat/session.
 5. Generate `Verification Prompt` after setup and paste it into the tool to confirm Agent Core connectivity.
 
 ## Connection Key
 
 Click the one-time key button on `MCP Config` when you are ready to connect the tool.
-Use the one-time key button on `Environment Variables (optional key storage)` only when you need shell or launcher environment variables.
+Use the one-time key button on `Environment Variables` only when you need shell or launcher environment variables.
 That rotates this agent's API key and inserts the new key into the generated output.
 The key is shown once. Generating again invalidates the previous key for `{agent_display}`.
 The API key is the authoritative agent identity. Agent Core identifies requests as `{agent_scope}` by looking up the bearer token; repo instruction files do not set identity.
@@ -3914,7 +3914,7 @@ def _build_env_vars(base_url, agent_id, user_scope, workspace_scope, api_key=Non
         if workspace_scope
         else '# export AGENT_CORE_WORKSPACE_SCOPE="workspace:your-workspace-id"  # Optional'
     )
-    return f"""# Agent Core Environment Variables (optional key storage)
+    return f"""# Agent Core Environment Variables
 # Use these only when your MCP config, launcher, or script reads Agent Core values from the environment.
 # MCP config is still the normal connection setup for MCP-capable tools.
 # Do not commit these to workspace files.
