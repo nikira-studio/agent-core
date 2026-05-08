@@ -135,6 +135,8 @@ def create_app() -> FastAPI:
     settings.data_dir
     init_db()
     ensure_broker_credential()
+    from app.connectors import github  # noqa: F401 - registers GitHub connector
+    from app.connectors import get_connector  # noqa: F401 - forces module evaluation
 
     return app
 

@@ -6,7 +6,7 @@ def test_mcp_manifest(test_client, agent_token):
     assert r.status_code == 200
     data = r.json()
     assert data["schema_version"] == "1.0"
-    assert len(data["tools"]) == 9
+    assert len(data["tools"]) == 14
 
 
 def test_mcp_jsonrpc_initialize(test_client, agent_token):
@@ -52,7 +52,7 @@ def test_mcp_jsonrpc_tools_list(test_client, agent_token):
     data = r.json()
     assert data["jsonrpc"] == "2.0"
     assert data["id"] == 2
-    assert len(data["result"]["tools"]) == 9
+    assert len(data["result"]["tools"]) == 14
     assert data["result"]["tools"][0]["inputSchema"]["type"] == "object"
 
 
@@ -185,13 +185,18 @@ def test_mcp_activity_update_heartbeats_existing_activity(test_client, agent_tok
     assert activity["heartbeat_at"] != "2000-01-01T00:00:00"
 
 
-def test_mcp_activity_update_can_change_existing_task_and_scope(test_client, agent_token):
+def test_mcp_activity_update_can_change_existing_task_and_scope(
+    test_client, agent_token
+):
     created = test_client.post(
         "/mcp",
         headers={"Authorization": f"Bearer {agent_token}"},
         json={
             "tool": "activity_update",
-            "params": {"task_description": "Initial task", "memory_scope": "agent:testagent"},
+            "params": {
+                "task_description": "Initial task",
+                "memory_scope": "agent:testagent",
+            },
         },
     )
     assert created.status_code == 201, created.json()
@@ -202,7 +207,10 @@ def test_mcp_activity_update_can_change_existing_task_and_scope(test_client, age
         headers={"Authorization": f"Bearer {agent_token}"},
         json={
             "tool": "activity_update",
-            "params": {"task_description": "Updated task", "memory_scope": "agent:testagent"},
+            "params": {
+                "task_description": "Updated task",
+                "memory_scope": "agent:testagent",
+            },
         },
     )
     assert updated.status_code == 200, updated.json()
