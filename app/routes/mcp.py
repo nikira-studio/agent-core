@@ -7,7 +7,13 @@ from app.security.dependencies import get_current_agent
 from app.security.scope_enforcer import ScopeEnforcer, build_agent_context
 from app.security.response_helpers import success_response, error_response
 from app.security.pii_detector import contains_pii
-from app.services import memory_service, vault_service, activity_service, briefing_service, audit_service
+from app.services import (
+    memory_service,
+    vault_service,
+    activity_service,
+    briefing_service,
+    audit_service,
+)
 from app.models.enums import MEMORY_CLASSES, SOURCE_KINDS
 
 
@@ -63,7 +69,11 @@ MANIFEST = {
                     "topic": {"type": "string"},
                     "confidence": {"type": "number", "default": 0.5},
                     "importance": {"type": "number", "default": 0.5},
-                    "source_kind": {"type": "string", "enum": list(SOURCE_KINDS), "default": "agent_inference"},
+                    "source_kind": {
+                        "type": "string",
+                        "enum": list(SOURCE_KINDS),
+                        "default": "agent_inference",
+                    },
                     "supersedes_id": {"type": "string"},
                 },
                 "required": ["content", "memory_class", "scope"],
@@ -136,15 +146,75 @@ MANIFEST = {
                 "required": ["briefing_id"],
             },
         },
+        {
+            "name": "connectors_list",
+            "description": "List available connector types",
+            "inputSchema": {
+                "type": "object",
+                "properties": {},
+            },
+        },
+        {
+            "name": "connectors_bindings_list",
+            "description": "List connector bindings in authorized scopes",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "scope": {"type": "string"},
+                    "connector_type_id": {"type": "string"},
+                    "enabled_only": {"type": "boolean", "default": True},
+                },
+            },
+        },
+        {
+            "name": "connectors_bindings_test",
+            "description": "Test a connector binding by resolving the credential and calling the connector's test_connection",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "binding_id": {"type": "string"},
+                },
+                "required": ["binding_id"],
+            },
+        },
+        {
+            "name": "connectors_actions_list",
+            "description": "List actions available for a connector type",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "connector_type_id": {"type": "string"},
+                },
+                "required": ["connector_type_id"],
+            },
+        },
+        {
+            "name": "connectors_run",
+            "description": "Run a connector action server-side using a stored credential; the raw secret is never exposed to the agent",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "binding_id": {"type": "string"},
+                    "action": {"type": "string"},
+                    "params": {"type": "object"},
+                },
+                "required": ["binding_id", "action"],
+            },
+        },
     ],
 }
 
 
 def _mcp_error(code: str, message: str, status: int = 400) -> JSONResponse:
-    return JSONResponse(content={"ok": False, "error": {"code": code, "message": message}}, status_code=status)
+    return JSONResponse(
+        content={"ok": False, "error": {"code": code, "message": message}},
+        status_code=status,
+    )
 
 
-def _jsonrpc_response(request_id, result=None, error=None, status: int = 200) -> JSONResponse:
+def _jsonrpc_response(
+    request_id, result=None, error=None, status: int = 200
+) -> JSONResponse:
     payload = {"jsonrpc": "2.0", "id": request_id}
     if error is not None:
         payload["error"] = error
@@ -153,7 +223,9 @@ def _jsonrpc_response(request_id, result=None, error=None, status: int = 200) ->
     return JSONResponse(content=payload, status_code=status)
 
 
-def _jsonrpc_error(request_id, code: int, message: str, status: int = 200, data=None) -> JSONResponse:
+def _jsonrpc_error(
+    request_id, code: int, message: str, status: int = 200, data=None
+) -> JSONResponse:
     error = {"code": code, "message": message}
     if data is not None:
         error["data"] = data
@@ -168,7 +240,10 @@ def _mcp_tool_result_from_custom_response(response: JSONResponse) -> JSONRespons
     try:
         payload = json.loads(response.body.decode("utf-8"))
     except Exception:
-        payload = {"ok": False, "error": {"message": "Tool returned an invalid response"}}
+        payload = {
+            "ok": False,
+            "error": {"message": "Tool returned an invalid response"},
+        }
     return payload
 
 
@@ -191,6 +266,7 @@ def _query_noise_free(query: str) -> bool:
 def _embedding_backend_status() -> dict:
     try:
         from app.services import embedding_service
+
         return embedding_service.get_embedding_backend_status()
     except Exception:
         return {"backend": "unavailable", "model_configured": False}
@@ -201,7 +277,9 @@ def _embedding_backend_label(status: dict) -> str:
 
 
 def _retrieval_is_degraded(status: dict) -> bool:
-    return status.get("backend") != "healthy" or not status.get("model_configured", False)
+    return status.get("backend") != "healthy" or not status.get(
+        "model_configured", False
+    )
 
 
 @router.get("/mcp")
@@ -230,16 +308,19 @@ async def _handle_mcp_jsonrpc(body: dict, request: Request, agent: dict):
     method = body.get("method")
 
     if method == "initialize":
-        return _jsonrpc_response(request_id, {
-            "protocolVersion": "2024-11-05",
-            "capabilities": {
-                "tools": {},
+        return _jsonrpc_response(
+            request_id,
+            {
+                "protocolVersion": "2024-11-05",
+                "capabilities": {
+                    "tools": {},
+                },
+                "serverInfo": {
+                    "name": "Agent Core",
+                    "version": "1.0.0",
+                },
             },
-            "serverInfo": {
-                "name": "Agent Core",
-                "version": "1.0.0",
-            },
-        })
+        )
 
     if method == "notifications/initialized":
         return Response(status_code=202)
@@ -257,21 +338,36 @@ async def _handle_mcp_jsonrpc(body: dict, request: Request, agent: dict):
         if not tool_name:
             return _jsonrpc_error(request_id, -32602, "Tool name is required")
 
-        custom_response = await _handle_custom_mcp_tool({"tool": tool_name, "params": arguments}, agent)
+        custom_response = await _handle_custom_mcp_tool(
+            {"tool": tool_name, "params": arguments}, agent
+        )
         payload = _mcp_tool_result_from_custom_response(custom_response)
         is_error = custom_response.status_code >= 400 or not payload.get("ok", False)
-        text = json.dumps(payload.get("data") if payload.get("ok") else payload.get("error", payload), indent=2, default=str)
-        return _jsonrpc_response(request_id, {
-            "content": [{"type": "text", "text": text}],
-            "isError": is_error,
-        })
+        text = json.dumps(
+            payload.get("data") if payload.get("ok") else payload.get("error", payload),
+            indent=2,
+            default=str,
+        )
+        return _jsonrpc_response(
+            request_id,
+            {
+                "content": [{"type": "text", "text": text}],
+                "isError": is_error,
+            },
+        )
 
     return _jsonrpc_error(request_id, -32601, f"Method not found: {method}")
 
 
 async def _handle_custom_mcp_tool(body: dict, agent: dict):
     ctx = build_agent_context(agent)
-    enforcer = ScopeEnforcer(ctx.read_scopes, ctx.write_scopes, ctx.agent_id, is_admin=ctx.is_admin, active_workspace_ids=ctx.active_workspace_ids)
+    enforcer = ScopeEnforcer(
+        ctx.read_scopes,
+        ctx.write_scopes,
+        ctx.agent_id,
+        is_admin=ctx.is_admin,
+        active_workspace_ids=ctx.active_workspace_ids,
+    )
 
     tool = body.get("tool")
     params = body.get("params", {})
@@ -282,22 +378,37 @@ async def _handle_custom_mcp_tool(body: dict, agent: dict):
     if tool == "memory_search":
         query_text = params.get("query", "").strip()
         if not _query_noise_free(query_text):
-            return _mcp_error("QUERY_NOISE", "Query is too trivial or contains credential-like pattern", 400)
+            return _mcp_error(
+                "QUERY_NOISE",
+                "Query is too trivial or contains credential-like pattern",
+                400,
+            )
         memory_class = params.get("memory_class")
         if memory_class and memory_class not in MEMORY_CLASSES:
-            return _mcp_error("INVALID_CLASS", f"memory_class must be one of {MEMORY_CLASSES}", 400)
+            return _mcp_error(
+                "INVALID_CLASS", f"memory_class must be one of {MEMORY_CLASSES}", 400
+            )
         min_confidence = params.get("min_confidence", 0.0)
         if not 0.0 <= min_confidence <= 1.0:
-            return _mcp_error("INVALID_CONFIDENCE", "min_confidence must be between 0.0 and 1.0", 400)
+            return _mcp_error(
+                "INVALID_CONFIDENCE", "min_confidence must be between 0.0 and 1.0", 400
+            )
         allowed = enforcer.filter_readable_scopes(ctx.read_scopes)
         if not allowed:
             embedding_status = _embedding_backend_status()
-            return JSONResponse(content={"ok": True, "data": {
-                "records": [],
-                "retrieval_mode": "fts_only",
-                "embedding_backend_status": _embedding_backend_label(embedding_status),
-                "total": 0,
-            }})
+            return JSONResponse(
+                content={
+                    "ok": True,
+                    "data": {
+                        "records": [],
+                        "retrieval_mode": "fts_only",
+                        "embedding_backend_status": _embedding_backend_label(
+                            embedding_status
+                        ),
+                        "total": 0,
+                    },
+                }
+            )
         records, mode = memory_service.search_memory(
             query=query_text,
             authorized_scopes=allowed,
@@ -312,8 +423,12 @@ async def _handle_custom_mcp_tool(body: dict, agent: dict):
         )
         embedding_status = _embedding_backend_status()
         audit_service.write_event(
-            actor_type="agent", actor_id=ctx.agent_id, action="memory_search",
-            resource_type="memory_search", resource_id=None, result="success",
+            actor_type="agent",
+            actor_id=ctx.agent_id,
+            action="memory_search",
+            resource_type="memory_search",
+            resource_id=None,
+            result="success",
             details={
                 "query": query_text,
                 "results": len(records),
@@ -331,19 +446,27 @@ async def _handle_custom_mcp_tool(body: dict, agent: dict):
                 result="success",
                 details={
                     "retrieval_mode": mode,
-                    "embedding_backend_status": _embedding_backend_label(embedding_status),
-                    "model_configured": bool(embedding_status.get("model_configured", False)),
+                    "embedding_backend_status": _embedding_backend_label(
+                        embedding_status
+                    ),
+                    "model_configured": bool(
+                        embedding_status.get("model_configured", False)
+                    ),
                 },
             )
-        return JSONResponse(content={
-            "ok": True,
-            "data": {
-                "records": records,
-                "retrieval_mode": mode,
-                "embedding_backend_status": _embedding_backend_label(embedding_status),
-                "total": len(records),
+        return JSONResponse(
+            content={
+                "ok": True,
+                "data": {
+                    "records": records,
+                    "retrieval_mode": mode,
+                    "embedding_backend_status": _embedding_backend_label(
+                        embedding_status
+                    ),
+                    "total": len(records),
+                },
             }
-        })
+        )
 
     elif tool == "memory_get":
         if params.get("scope"):
@@ -359,35 +482,53 @@ async def _handle_custom_mcp_tool(body: dict, agent: dict):
             allowed = enforcer.filter_readable_scopes(ctx.read_scopes)
             all_records = []
             for scope in allowed:
-                all_records.extend(memory_service.get_memory_by_scope(scope, limit=50, offset=0))
+                all_records.extend(
+                    memory_service.get_memory_by_scope(scope, limit=50, offset=0)
+                )
             all_records.sort(key=lambda r: r.get("created_at", ""), reverse=True)
             records = all_records[: params.get("limit", 50)]
-        return JSONResponse(content={"ok": True, "data": {"records": records, "total": len(records)}})
+        return JSONResponse(
+            content={"ok": True, "data": {"records": records, "total": len(records)}}
+        )
 
     elif tool == "memory_write":
         scope = params["scope"]
         if not enforcer.can_write(scope):
             return _mcp_error("SCOPE_DENIED", "Access denied to this scope", 403)
         if params["memory_class"] not in MEMORY_CLASSES:
-            return _mcp_error("INVALID_CLASS", f"memory_class must be one of {MEMORY_CLASSES}", 400)
+            return _mcp_error(
+                "INVALID_CLASS", f"memory_class must be one of {MEMORY_CLASSES}", 400
+            )
         source_kind = params.get("source_kind", "agent_inference")
         if source_kind not in SOURCE_KINDS:
-            return _mcp_error("INVALID_SOURCE_KIND", f"source_kind must be one of {SOURCE_KINDS}", 400)
+            return _mcp_error(
+                "INVALID_SOURCE_KIND", f"source_kind must be one of {SOURCE_KINDS}", 400
+            )
         confidence = params.get("confidence", 0.5)
         importance = params.get("importance", 0.5)
         if not 0.0 <= confidence <= 1.0:
-            return _mcp_error("INVALID_CONFIDENCE", "confidence must be between 0.0 and 1.0", 400)
+            return _mcp_error(
+                "INVALID_CONFIDENCE", "confidence must be between 0.0 and 1.0", 400
+            )
         if not 0.0 <= importance <= 1.0:
-            return _mcp_error("INVALID_IMPORTANCE", "importance must be between 0.0 and 1.0", 400)
+            return _mcp_error(
+                "INVALID_IMPORTANCE", "importance must be between 0.0 and 1.0", 400
+            )
         supersedes_id = params.get("supersedes_id")
         if supersedes_id:
             old = memory_service.get_memory_record(supersedes_id)
             if not old:
                 return _mcp_error("NOT_FOUND", "Record to supersede not found", 404)
             if old["record_status"] != "active":
-                return _mcp_error("INVALID_SUPERSESSION", "Cannot supersede non-active record", 400)
+                return _mcp_error(
+                    "INVALID_SUPERSESSION", "Cannot supersede non-active record", 400
+                )
             if not enforcer.can_write(old["scope"]):
-                return _mcp_error("SCOPE_DENIED", "Access denied to scope of record being superseded", 403)
+                return _mcp_error(
+                    "SCOPE_DENIED",
+                    "Access denied to scope of record being superseded",
+                    403,
+                )
         record, pii_flag = memory_service.write_memory(
             content=params["content"],
             memory_class=params["memory_class"],
@@ -400,12 +541,22 @@ async def _handle_custom_mcp_tool(body: dict, agent: dict):
             supersedes_id=supersedes_id,
         )
         if pii_flag == "PII_DETECTED":
-            return _mcp_error("PII_DETECTED", "Content contains PII and cannot be written to shared scope", 422)
+            return _mcp_error(
+                "PII_DETECTED",
+                "Content contains PII and cannot be written to shared scope",
+                422,
+            )
         audit_service.write_event(
-            actor_type="agent", actor_id=ctx.agent_id, action="memory_write",
-            resource_type="memory_record", resource_id=record["id"], result="success",
+            actor_type="agent",
+            actor_id=ctx.agent_id,
+            action="memory_write",
+            resource_type="memory_record",
+            resource_id=record["id"],
+            result="success",
         )
-        return JSONResponse(content={"ok": True, "data": {"record": record}}, status_code=201)
+        return JSONResponse(
+            content={"ok": True, "data": {"record": record}}, status_code=201
+        )
 
     elif tool == "memory_retract":
         record = memory_service.get_memory_record(params["record_id"])
@@ -415,10 +566,16 @@ async def _handle_custom_mcp_tool(body: dict, agent: dict):
             return _mcp_error("SCOPE_DENIED", "Access denied to this scope", 403)
         memory_service.retract_memory(params["record_id"])
         audit_service.write_event(
-            actor_type="agent", actor_id=ctx.agent_id, action="memory_retract",
-            resource_type="memory_record", resource_id=params["record_id"], result="success",
+            actor_type="agent",
+            actor_id=ctx.agent_id,
+            action="memory_retract",
+            resource_type="memory_record",
+            resource_id=params["record_id"],
+            result="success",
         )
-        return JSONResponse(content={"ok": True, "data": {"message": "Memory record retracted"}})
+        return JSONResponse(
+            content={"ok": True, "data": {"message": "Memory record retracted"}}
+        )
 
     elif tool == "vault_get":
         entry = vault_service.get_vault_entry(params["entry_id"])
@@ -427,17 +584,25 @@ async def _handle_custom_mcp_tool(body: dict, agent: dict):
         if not enforcer.can_read(entry["scope"]):
             return _mcp_error("SCOPE_DENIED", "Access denied to this scope", 403)
         audit_service.write_event(
-            actor_type="agent", actor_id=ctx.agent_id, action="vault_reference",
-            resource_type="vault_entry", resource_id=entry["id"], result="success",
+            actor_type="agent",
+            actor_id=ctx.agent_id,
+            action="vault_reference",
+            resource_type="vault_entry",
+            resource_id=entry["id"],
+            result="success",
         )
-        return JSONResponse(content={"ok": True, "data": {"reference_name": entry["reference_name"]}})
+        return JSONResponse(
+            content={"ok": True, "data": {"reference_name": entry["reference_name"]}}
+        )
 
     elif tool == "vault_list":
         scope = params.get("scope")
         if scope:
             if not enforcer.can_read(scope):
                 return _mcp_error("SCOPE_DENIED", "Access denied to this scope", 403)
-            entries = vault_service.list_vault_entries(scope=scope, limit=min(params.get("limit", 50), 100))
+            entries = vault_service.list_vault_entries(
+                scope=scope, limit=min(params.get("limit", 50), 100)
+            )
         else:
             allowed = enforcer.filter_readable_scopes(ctx.read_scopes)
             all_entries = []
@@ -445,17 +610,27 @@ async def _handle_custom_mcp_tool(body: dict, agent: dict):
                 all_entries.extend(vault_service.list_vault_entries(scope=s, limit=100))
             all_entries.sort(key=lambda e: e.get("created_at", ""), reverse=True)
             entries = all_entries[: params.get("limit", 50)]
-        return JSONResponse(content={"ok": True, "data": {"entries": entries, "total": len(entries)}})
+        return JSONResponse(
+            content={"ok": True, "data": {"entries": entries, "total": len(entries)}}
+        )
 
     elif tool == "activity_update":
-        existing = activity_service.get_active_activity_for_agent(ctx.agent_id, ctx.user_id)
+        existing = activity_service.get_active_activity_for_agent(
+            ctx.agent_id, ctx.user_id
+        )
         if existing:
             memory_scope = params.get("memory_scope")
             if memory_scope and not enforcer.can_write(memory_scope):
                 return _mcp_error("SCOPE_DENIED", "Access denied to memory_scope", 403)
             if params.get("status"):
-                if params["status"] in ("completed", "cancelled", "blocked") and existing["status"] not in ("active", "stale"):
-                    return _mcp_error("INVALID_TRANSITION", "Cannot close a non-active activity", 400)
+                if params["status"] in (
+                    "completed",
+                    "cancelled",
+                    "blocked",
+                ) and existing["status"] not in ("active", "stale"):
+                    return _mcp_error(
+                        "INVALID_TRANSITION", "Cannot close a non-active activity", 400
+                    )
                 activity_service.update_activity(
                     existing["id"],
                     task_description=params.get("task_description"),
@@ -471,13 +646,24 @@ async def _handle_custom_mcp_tool(body: dict, agent: dict):
             else:
                 activity_service.heartbeat_activity(existing["id"])
             audit_service.write_event(
-                actor_type="agent", actor_id=ctx.agent_id, action="activity_update",
-                resource_type="activity", resource_id=existing["id"], result="success",
+                actor_type="agent",
+                actor_id=ctx.agent_id,
+                action="activity_update",
+                resource_type="activity",
+                resource_id=existing["id"],
+                result="success",
             )
-            return JSONResponse(content={"ok": True, "data": {"activity": activity_service.get_activity(existing["id"])}})
+            return JSONResponse(
+                content={
+                    "ok": True,
+                    "data": {"activity": activity_service.get_activity(existing["id"])},
+                }
+            )
         else:
             if not params.get("task_description"):
-                return _mcp_error("TASK_REQUIRED", "task_description required to create activity", 400)
+                return _mcp_error(
+                    "TASK_REQUIRED", "task_description required to create activity", 400
+                )
             memory_scope = params.get("memory_scope") or f"agent:{ctx.agent_id}"
             if not enforcer.can_write(memory_scope):
                 return _mcp_error("SCOPE_DENIED", "Access denied to memory_scope", 403)
@@ -488,16 +674,26 @@ async def _handle_custom_mcp_tool(body: dict, agent: dict):
                 memory_scope=memory_scope,
             )
             audit_service.write_event(
-                actor_type="agent", actor_id=ctx.agent_id, action="activity_update",
-                resource_type="activity", resource_id=act["id"], result="success",
+                actor_type="agent",
+                actor_id=ctx.agent_id,
+                action="activity_update",
+                resource_type="activity",
+                resource_id=act["id"],
+                result="success",
             )
-            return JSONResponse(content={"ok": True, "data": {"activity": act}}, status_code=201)
+            return JSONResponse(
+                content={"ok": True, "data": {"activity": act}}, status_code=201
+            )
 
     elif tool == "activity_get":
         activity = activity_service.get_activity(params["activity_id"])
         if not activity:
             return _mcp_error("NOT_FOUND", "Activity not found", 404)
-        if activity.get("agent_id") != ctx.agent_id and activity.get("assigned_agent_id") != ctx.agent_id and not ctx.is_admin:
+        if (
+            activity.get("agent_id") != ctx.agent_id
+            and activity.get("assigned_agent_id") != ctx.agent_id
+            and not ctx.is_admin
+        ):
             return _mcp_error("FORBIDDEN", "Access denied", 403)
         return JSONResponse(content={"ok": True, "data": {"activity": activity}})
 
@@ -506,9 +702,165 @@ async def _handle_custom_mcp_tool(body: dict, agent: dict):
         if not briefing:
             return _mcp_error("NOT_FOUND", "Briefing not found", 404)
         act = activity_service.get_activity(params["briefing_id"])
-        if act and act.get("agent_id") != ctx.agent_id and act.get("assigned_agent_id") != ctx.agent_id and not ctx.is_admin:
+        if (
+            act
+            and act.get("agent_id") != ctx.agent_id
+            and act.get("assigned_agent_id") != ctx.agent_id
+            and not ctx.is_admin
+        ):
             return _mcp_error("FORBIDDEN", "Access denied", 403)
         return JSONResponse(content={"ok": True, "data": {"briefing": briefing}})
+
+    elif tool == "connectors_list":
+        from app.services import connector_service
+
+        types = connector_service.list_connector_types()
+        return JSONResponse(content={"ok": True, "data": {"connectors": types}})
+
+    elif tool == "connectors_bindings_list":
+        from app.services import connector_service
+
+        scope = params.get("scope")
+        if scope:
+            if not enforcer.can_read(scope):
+                return _mcp_error("SCOPE_DENIED", "Access denied to this scope", 403)
+        allowed = enforcer.filter_readable_scopes(ctx.read_scopes)
+        effective_scope = scope if (scope and enforcer.can_read(scope)) else None
+        if effective_scope:
+            bindings = connector_service.list_bindings(
+                scope=effective_scope,
+                connector_type_id=params.get("connector_type_id"),
+                enabled=params.get("enabled_only", True)
+                if params.get("enabled_only") is not None
+                else True,
+            )
+        else:
+            all_bindings = []
+            for s in allowed:
+                all_bindings.extend(
+                    connector_service.list_bindings(
+                        scope=s,
+                        connector_type_id=params.get("connector_type_id"),
+                        enabled=params.get("enabled_only", True)
+                        if params.get("enabled_only") is not None
+                        else True,
+                    )
+                )
+            all_bindings.sort(key=lambda b: b.get("created_at", ""), reverse=True)
+            bindings = all_bindings[: params.get("limit", 50)]
+        return JSONResponse(
+            content={"ok": True, "data": {"bindings": bindings, "total": len(bindings)}}
+        )
+
+    elif tool == "connectors_bindings_test":
+        from app.services import connector_service
+
+        binding = connector_service.get_binding(params["binding_id"])
+        if not binding:
+            return _mcp_error("NOT_FOUND", "Binding not found", 404)
+        if not enforcer.can_read(binding["scope"]):
+            return _mcp_error("SCOPE_DENIED", "Access denied to this binding", 403)
+        result = connector_service.test_binding(params["binding_id"])
+        audit_service.write_event(
+            actor_type="agent",
+            actor_id=ctx.agent_id,
+            action="connector_test",
+            resource_type="connector_binding",
+            resource_id=params["binding_id"],
+            result=result.get("success") and "success" or "failure",
+            details={"connector_type_id": binding["connector_type_id"]},
+        )
+        return JSONResponse(content={"ok": True, "data": result})
+
+    elif tool == "connectors_actions_list":
+        from app.services import connector_service
+
+        ct = connector_service.get_connector_type(params["connector_type_id"])
+        if not ct:
+            return _mcp_error("NOT_FOUND", "Connector type not found", 404)
+        return JSONResponse(
+            content={
+                "ok": True,
+                "data": {
+                    "connector_type_id": ct["id"],
+                    "display_name": ct["display_name"],
+                    "actions": ct["supported_actions"],
+                },
+            }
+        )
+
+    elif tool == "connectors_run":
+        from app.services import connector_service
+        import time
+
+        binding = connector_service.get_binding(params["binding_id"])
+        if not binding:
+            return _mcp_error("NOT_FOUND", "Binding not found", 404)
+        if not enforcer.can_read(binding["scope"]):
+            return _mcp_error("SCOPE_DENIED", "Access denied to this binding", 403)
+        if not binding.get("enabled"):
+            return _mcp_error("DISABLED", "Binding is disabled", 400)
+
+        binding_with_cred = connector_service.get_binding_with_credential(
+            params["binding_id"]
+        )
+        credential = binding_with_cred.get("credential_plaintext")
+        if not credential:
+            return _mcp_error(
+                "NO_CREDENTIAL", "No credential linked to this binding", 400
+            )
+
+        connector_type = connector_service.get_connector_type(
+            binding["connector_type_id"]
+        )
+        if not connector_type:
+            return _mcp_error("NOT_FOUND", "Connector type not found", 404)
+
+        if params["action"] not in connector_type["supported_actions"]:
+            return _mcp_error(
+                "INVALID_ACTION", f"Action not supported: {params['action']}", 400
+            )
+
+        start = time.time()
+        try:
+            from app.connectors import get_connector
+
+            connector = get_connector(connector_type["id"])
+            if not connector:
+                return _mcp_error("NOT_FOUND", "Connector handler not found", 404)
+            result = connector.execute(
+                action=params["action"],
+                params=params.get("params") or {},
+                credential=credential,
+                config_json=binding.get("config_json"),
+            )
+        except Exception as e:
+            result = {"success": False, "error": str(e)}
+        duration_ms = int((time.time() - start) * 1000)
+
+        connector_service.log_execution(
+            binding_id=params["binding_id"],
+            action=params["action"],
+            params_json=json.dumps(params.get("params")),
+            result_status="success" if result.get("success") else "failure",
+            result_body_json=json.dumps(result) if result.get("success") else None,
+            error_message=result.get("error") if not result.get("success") else None,
+            duration_ms=duration_ms,
+        )
+        audit_service.write_event(
+            actor_type="agent",
+            actor_id=ctx.agent_id,
+            action="connector_run",
+            resource_type="connector_binding",
+            resource_id=params["binding_id"],
+            result=result.get("success") and "success" or "failure",
+            details={
+                "connector_type_id": binding["connector_type_id"],
+                "action": params["action"],
+                "duration_ms": duration_ms,
+            },
+        )
+        return JSONResponse(content={"ok": True, "data": result})
 
     else:
         return _mcp_error("UNKNOWN_TOOL", f"Unknown tool: {tool}", 400)

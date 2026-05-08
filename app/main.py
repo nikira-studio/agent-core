@@ -8,7 +8,23 @@ from fastapi.responses import JSONResponse
 from starlette.middleware.cors import CORSMiddleware
 
 from app.config import settings
-from app.routes import health_router, spec_router, auth_router, agents_router, workspaces_router, vault_router, internal_router, memory_router, activity_router, briefings_router, mcp_router, dashboard_router, dashboard_api_router, backup_router
+from app.routes import (
+    health_router,
+    spec_router,
+    auth_router,
+    agents_router,
+    workspaces_router,
+    vault_router,
+    internal_router,
+    memory_router,
+    activity_router,
+    briefings_router,
+    mcp_router,
+    dashboard_router,
+    dashboard_api_router,
+    backup_router,
+    connector_router,
+)
 from app.security.exceptions import APIError
 from app.services.broker_service import ensure_broker_credential
 from app.database import init_db
@@ -35,15 +51,23 @@ def create_app() -> FastAPI:
         if content_length and int(content_length) > MAX_REQUEST_SIZE:
             return JSONResponse(
                 status_code=413,
-                content={"ok": False, "error": {"code": "PAYLOAD_TOO_LARGE", "message": "Request body too large"}},
+                content={
+                    "ok": False,
+                    "error": {
+                        "code": "PAYLOAD_TOO_LARGE",
+                        "message": "Request body too large",
+                    },
+                },
             )
         return await call_next(request)
 
     if ALLOWED_IPS:
+
         @app.middleware("http")
         async def ip_allowlist(request: Request, call_next):
             if request.client and request.client.host:
                 import ipaddress
+
                 try:
                     remote_ip = ipaddress.ip_address(request.client.host)
                     allowed = False
@@ -55,7 +79,13 @@ def create_app() -> FastAPI:
                     if not allowed:
                         return JSONResponse(
                             status_code=403,
-                            content={"ok": False, "error": {"code": "IP_BLOCKED", "message": "Your IP is not allowed"}},
+                            content={
+                                "ok": False,
+                                "error": {
+                                    "code": "IP_BLOCKED",
+                                    "message": "Your IP is not allowed",
+                                },
+                            },
                         )
                 except Exception:
                     pass
@@ -97,6 +127,7 @@ def create_app() -> FastAPI:
     app.include_router(activity_router, tags=["activity"])
     app.include_router(briefings_router, tags=["briefings"])
     app.include_router(mcp_router, tags=["mcp"])
+    app.include_router(connector_router, tags=["connector_bindings"])
     app.include_router(dashboard_api_router, tags=["dashboard_api"])
     app.include_router(backup_router, tags=["backup"])
     app.include_router(dashboard_router, prefix="", tags=["dashboard"])

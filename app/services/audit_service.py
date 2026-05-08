@@ -56,6 +56,11 @@ AUDIT_ACTIONS = (
     "user_deleted",
     "setup_verification",
     "system_setting_updated",
+    "connector_binding_created",
+    "connector_binding_updated",
+    "connector_binding_deleted",
+    "connector_binding_tested",
+    "connector_action_executed",
 )
 
 
@@ -87,12 +92,29 @@ def write_event(
             (actor_type, actor_id, action, resource_type, resource_id, result, details_json, ip_address)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (actor_type, actor_id, action, resource_type, resource_id, result, details_json, ip_address),
+            (
+                actor_type,
+                actor_id,
+                action,
+                resource_type,
+                resource_id,
+                result,
+                details_json,
+                ip_address,
+            ),
         )
         return cursor.lastrowid
 
 
-SECRET_KEYWORDS = ("password", "secret", "token", "key", "credential", "value", "api_key")
+SECRET_KEYWORDS = (
+    "password",
+    "secret",
+    "token",
+    "key",
+    "credential",
+    "value",
+    "api_key",
+)
 
 
 def _is_secret_key(key: str) -> bool:
