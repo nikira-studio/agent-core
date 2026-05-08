@@ -206,7 +206,7 @@ MANIFEST = {
 }
 
 
-def _mcp_error(code: str, message: str, status: int = 400) -> JSONResponse:
+def _mcp_error(code: str, message: str, status: int = 200) -> JSONResponse:
     return JSONResponse(
         content={"ok": False, "error": {"code": code, "message": message}},
         status_code=status,
@@ -762,9 +762,9 @@ async def _handle_custom_mcp_tool(body: dict, ctx: RequestContext):
             return _mcp_error("SCOPE_DENIED", "Access denied to this binding", 403)
         result = connector_service.test_binding(params["binding_id"])
         audit_service.write_event(
-            actor_type="agent",
-            actor_id=ctx.agent_id,
-            action="connector_test",
+            actor_type=ctx.actor_type,
+            actor_id=ctx.actor_id,
+            action="connector_binding_tested",
             resource_type="connector_binding",
             resource_id=params["binding_id"],
             result=result.get("success") and "success" or "failure",
@@ -795,11 +795,11 @@ async def _handle_custom_mcp_tool(body: dict, ctx: RequestContext):
 
         binding = connector_service.get_binding(params["binding_id"])
         if not binding:
-            return _mcp_error("NOT_FOUND", "Binding not found", 404)
+            return _mcp_error("NOT_FOUND", "Binding not found", 200)
         if not enforcer.can_read(binding["scope"]):
-            return _mcp_error("SCOPE_DENIED", "Access denied to this binding", 403)
+            return _mcp_error("SCOPE_DENIED", "Access denied to this binding", 200)
         if not binding.get("enabled"):
-            return _mcp_error("DISABLED", "Binding is disabled", 400)
+            return _mcp_error("DISABLED", "Binding is disabled", 200)
 
         binding_with_cred = connector_service.get_binding_with_credential(
             params["binding_id"]
@@ -807,18 +807,18 @@ async def _handle_custom_mcp_tool(body: dict, ctx: RequestContext):
         credential = binding_with_cred.get("credential_plaintext")
         if not credential:
             return _mcp_error(
-                "NO_CREDENTIAL", "No credential linked to this binding", 400
+                "NO_CREDENTIAL", "No credential linked to this binding", 200
             )
 
         connector_type = connector_service.get_connector_type(
             binding["connector_type_id"]
         )
         if not connector_type:
-            return _mcp_error("NOT_FOUND", "Connector type not found", 404)
+            return _mcp_error("NOT_FOUND", "Connector type not found", 200)
 
         if params["action"] not in connector_type["supported_actions"]:
             return _mcp_error(
-                "INVALID_ACTION", f"Action not supported: {params['action']}", 400
+                "INVALID_ACTION", f"Action not supported: {params['action']}", 200
             )
 
         start = time.time()
@@ -848,9 +848,9 @@ async def _handle_custom_mcp_tool(body: dict, ctx: RequestContext):
             duration_ms=duration_ms,
         )
         audit_service.write_event(
-            actor_type="agent",
-            actor_id=ctx.agent_id,
-            action="connector_run",
+            actor_type=ctx.actor_type,
+            actor_id=ctx.actor_id,
+            action="connector_action_executed",
             resource_type="connector_binding",
             resource_id=params["binding_id"],
             result=result.get("success") and "success" or "failure",
