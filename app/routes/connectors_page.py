@@ -1,12 +1,11 @@
 from fastapi import APIRouter, Depends, Request
-from app.security.dependencies import require_auth
 from app.security.context import build_user_context
 from app.security.scope_enforcer import ScopeEnforcer
 from app.services import vault_service
 from app.services import workspace_service
 from app.services import connector_service
 from app.services.agent_service import list_agents
-from app.routes.dashboard import render_page, escape_html
+from app.routes.dashboard import render_page, escape_html, require_auth
 
 router = APIRouter()
 
@@ -15,8 +14,11 @@ router = APIRouter()
 async def connectors_page(request: Request, session: dict = Depends(require_auth)):
     ctx = build_user_context(session)
     enforcer = ScopeEnforcer(
-        ctx.read_scopes, ctx.write_scopes, ctx.agent_id,
-        is_admin=ctx.is_admin, active_workspace_ids=ctx.active_workspace_ids
+        ctx.read_scopes,
+        ctx.write_scopes,
+        ctx.agent_id,
+        is_admin=ctx.is_admin,
+        active_workspace_ids=ctx.active_workspace_ids,
     )
 
     connector_types = connector_service.list_connector_types()
@@ -24,13 +26,17 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
     all_bindings = connector_service.list_bindings()
     visible_bindings = [b for b in all_bindings if enforcer.can_read(b["scope"])]
 
-    workspaces = workspace_service.list_workspaces() if ctx.is_admin \
+    workspaces = (
+        workspace_service.list_workspaces()
+        if ctx.is_admin
         else workspace_service.list_workspaces(owner_user_id=ctx.user_id)
+    )
 
     agents = list_agents() if ctx.is_admin else list_agents(owner_user_id=ctx.user_id)
 
     vault_entries = [
-        e for e in (vault_service.list_vault_entries(limit=500) or [])
+        e
+        for e in (vault_service.list_vault_entries(limit=500) or [])
         if enforcer.can_read(e.get("scope", ""))
     ]
 
@@ -41,12 +47,13 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
     )
     agent_scope_opts = "".join(
         f'<option value="agent:{a["id"]}">agent:{a["id"]}</option>'
-        for a in agents if a.get("is_active")
+        for a in agents
+        if a.get("is_active")
     )
     scope_options = (
         f'<option value="{user_scope}">{user_scope}</option>\n'
-        f'{workspace_scope_opts}\n'
-        f'{agent_scope_opts}'
+        f"{workspace_scope_opts}\n"
+        f"{agent_scope_opts}"
     )
 
     connector_type_opts = "".join(
@@ -55,28 +62,34 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
     )
 
     vault_opts = "".join(
-        f'<option value="{e["id"]}">{escape_html(e.get("name", e["id"]))} ({escape_html(e.get("scope","")}) / {escape_html(e.get("reference_name",""))})</option>'
+        f'<option value="{e["id"]}">{escape_html(e.get("name", e["id"]))} ({escape_html(e.get("scope", ""))} / {escape_html(e.get("reference_name", ""))})</option>'
         for e in vault_entries
     )
 
     bindings_rows = ""
     for b in visible_bindings:
-        ct = next((c for c in connector_types if c["id"] == b["connector_type_id"]), None)
+        ct = next(
+            (c for c in connector_types if c["id"] == b["connector_type_id"]), None
+        )
         if b.get("enabled") and not b.get("last_error"):
             status_cls = "status-ok"
             status_text = "Enabled" if b.get("enabled") else "Disabled"
         else:
             status_cls = "status-error"
-            status_text = f"Error" if b.get("last_error") else ("Disabled" if not b.get("enabled") else "OK")
+            status_text = (
+                f"Error"
+                if b.get("last_error")
+                else ("Disabled" if not b.get("enabled") else "OK")
+            )
         if b.get("last_error"):
             status_text = f"Error: {str(b['last_error'])[:40]}"
         elif b.get("last_tested_at"):
             status_text = f"OK ({b['last_tested_at'][:10]})"
         bindings_rows += f"""
         <tr data-binding-id="{b["id"]}">
-          <td>{escape_html(b.get("name",""))}</td>
-          <td>{escape_html(ct.get("display_name","") if ct else b.get("connector_type_id",""))}</td>
-          <td><code>{escape_html(b.get("scope",""))}</code></td>
+          <td>{escape_html(b.get("name", ""))}</td>
+          <td>{escape_html(ct.get("display_name", "") if ct else b.get("connector_type_id", ""))}</td>
+          <td><code>{escape_html(b.get("scope", ""))}</code></td>
           <td class="{status_cls}">{escape_html(status_text)}</td>
           <td>
             <button type='button' class='btn btn-sm btn-secondary' onclick='editBinding("{b["id"]}")'>Edit</button>
@@ -90,17 +103,21 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
         <table><thead><tr><th>Name</th><th>Type</th><th>Scope</th><th>Status</th><th class='actions-cell'>Actions</th></tr></thead>
         <tbody>{bindings_rows}</tbody></table>"""
     else:
-        bindings_html = "<div class='empty'>No connector bindings yet. Create one below.</div>"
+        bindings_html = (
+            "<div class='empty'>No connector bindings yet. Create one below.</div>"
+        )
 
     ct_cards = ""
     for ct in connector_types:
-        actions = ", ".join(f"<code>{a}</code>" for a in ct.get("supported_actions", []))
+        actions = ", ".join(
+            f"<code>{a}</code>" for a in ct.get("supported_actions", [])
+        )
         ct_cards += f"""
         <div class='connector-type-card'>
           <div class='connector-type-name'>{escape_html(ct["display_name"])}</div>
-          <div class='connector-type-desc'>{escape_html(ct.get("description","") or "No description")}</div>
+          <div class='connector-type-desc'>{escape_html(ct.get("description", "") or "No description")}</div>
           <div class='connector-type-meta'>
-            Auth: <code>{ct.get("auth_type","")}</code> |
+            Auth: <code>{ct.get("auth_type", "")}</code> |
             Actions: {actions}
           </div>
         </div>"""

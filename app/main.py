@@ -24,6 +24,7 @@ from app.routes import (
     dashboard_api_router,
     backup_router,
     connector_router,
+    connectors_page_router,
 )
 from app.security.exceptions import APIError
 from app.services.broker_service import ensure_broker_credential

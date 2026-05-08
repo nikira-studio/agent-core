@@ -53,13 +53,15 @@ def test_dashboard_vault_filters_by_readable_scopes(test_client, clean_db):
         created_by="user2",
     )
 
-    vault_html = test_client.get("/vault", cookies={"session_token": user1_session}).text
+    vault_html = test_client.get(
+        "/connectors", cookies={"session_token": user1_session}
+    ).text
     assert "user1-secret" in vault_html
     assert "user2-secret" not in vault_html
 
 
 def test_dashboard_routes_importable():
     from app.routes import dashboard
-    assert hasattr(dashboard, 'router')
-    assert hasattr(dashboard, 'audit_page')
-    assert hasattr(dashboard, 'vault_page')
+
+    assert hasattr(dashboard, "router")
+    assert hasattr(dashboard, "audit_page")
