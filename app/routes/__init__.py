@@ -13,6 +13,7 @@ from app.routes.dashboard import router as dashboard_router
 from app.routes.dashboard_api import router as dashboard_api_router
 from app.routes.backup import router as backup_router
 from app.routes.connectors import router as connector_router
+from app.routes.connectors_page import router as connectors_page_router
 
 __all__ = [
     "health_router",
@@ -30,4 +31,5 @@ __all__ = [
     "dashboard_api_router",
     "backup_router",
     "connector_router",
+    "connectors_page_router",
 ]

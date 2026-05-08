@@ -21,7 +21,13 @@ def _hf(s):
 def escape_html(s):
     if s is None:
         return ""
-    return str(s).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
+    return (
+        str(s)
+        .replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace('"', "&quot;")
+    )
 
 
 def get_session_token(request: Request) -> str:
@@ -38,13 +44,22 @@ def require_auth(request: Request):
     token = get_session_token(request)
     if not token:
         raise HTTPException(status_code=302, headers={"Location": "/login"})
-    session = validate_session(token, inactivity_minutes=settings.INACTIVITY_TIMEOUT_MINUTES)
+    session = validate_session(
+        token, inactivity_minutes=settings.INACTIVITY_TIMEOUT_MINUTES
+    )
     if not session:
         raise HTTPException(status_code=302, headers={"Location": "/login"})
     return session
 
 
-def render_page(title: str, body: str, nav_active: str = "", extra_js: str = "", session: dict | None = None, status_code: int = 200) -> HTMLResponse:
+def render_page(
+    title: str,
+    body: str,
+    nav_active: str = "",
+    extra_js: str = "",
+    session: dict | None = None,
+    status_code: int = 200,
+) -> HTMLResponse:
     is_admin = bool(session and session.get("role") == "admin")
     nav_items = [
         ("/", "Overview"),
@@ -52,7 +67,7 @@ def render_page(title: str, body: str, nav_active: str = "", extra_js: str = "",
         ("/agents", "Agents"),
         ("/workspaces", "Workspaces"),
         ("/memory", "Memory"),
-        ("/vault", "Vault"),
+        ("/connectors", "Connectors"),
         ("/agent-setup", "Integration"),
         ("/activity", "Activity"),
         ("/settings", "Settings"),
@@ -63,7 +78,8 @@ def render_page(title: str, body: str, nav_active: str = "", extra_js: str = "",
         f'<a href="{href}" class="{"active" if nav_active == href else ""}"><span>{label}</span></a>'
         for href, label in nav_items
     )
-    return HTMLResponse(f"""<!DOCTYPE html>
+    return HTMLResponse(
+        f"""<!DOCTYPE html>
 <html>
 <head>
     <meta charset="UTF-8">
@@ -98,7 +114,9 @@ def render_page(title: str, body: str, nav_active: str = "", extra_js: str = "",
 <script src="/static/js/dashboard.js?v=20260506b"></script>
 {extra_js}
 </body>
-</html>""", status_code=status_code)
+</html>""",
+        status_code=status_code,
+    )
 
 
 def api_key_modal(id: str, title: str, body_content: str) -> str:
@@ -125,7 +143,9 @@ async def dashboard_home(request: Request, session: dict = Depends(require_auth)
 
     def count_rows(table: str, where: str = "1=1", params: tuple = ()) -> int:
         with get_db() as conn:
-            row = conn.execute(f"SELECT COUNT(*) AS count FROM {table} WHERE {where}", params).fetchone()
+            row = conn.execute(
+                f"SELECT COUNT(*) AS count FROM {table} WHERE {where}", params
+            ).fetchone()
             return int(row["count"] if row else 0)
 
     if is_admin:
@@ -134,25 +154,36 @@ async def dashboard_home(request: Request, session: dict = Depends(require_auth)
         agent_count = len([a for a in agents if a.get("is_active")])
         workspace_count = len([p for p in workspaces if p.get("is_active")])
         memory_count = count_rows("memory_records", "record_status = 'active'")
-        vault_count = count_rows("vault_entries")
+        connector_binding_count = count_rows("connector_bindings")
         recent_activity = activity_service.list_activities(limit=8)
-        attention = activity_service.list_activities(status="stale", limit=8) + activity_service.list_activities(status="blocked", limit=8)
+        attention = activity_service.list_activities(
+            status="stale", limit=8
+        ) + activity_service.list_activities(status="blocked", limit=8)
     else:
         agents = list_agents(owner_user_id=session["user_id"])
         workspaces = list_workspaces(owner_user_id=session["user_id"])
         agent_count = len([a for a in agents if a.get("is_active")])
         workspace_count = len([p for p in workspaces if p.get("is_active")])
-        memory_count = count_rows("memory_records", "scope = ? AND record_status = 'active'", (user_scope,))
-        vault_count = count_rows("vault_entries", "scope = ?", (user_scope,))
-        recent_activity = activity_service.list_activities(user_id=session["user_id"], limit=8)
-        attention = (
-            activity_service.list_activities(user_id=session["user_id"], status="stale", limit=8)
-            + activity_service.list_activities(user_id=session["user_id"], status="blocked", limit=8)
+        memory_count = count_rows(
+            "memory_records", "scope = ? AND record_status = 'active'", (user_scope,)
+        )
+        connector_binding_count = count_rows(
+            "connector_bindings", "scope = ?", (user_scope,)
+        )
+        recent_activity = activity_service.list_activities(
+            user_id=session["user_id"], limit=8
+        )
+        attention = activity_service.list_activities(
+            user_id=session["user_id"], status="stale", limit=8
+        ) + activity_service.list_activities(
+            user_id=session["user_id"], status="blocked", limit=8
         )
 
     active_task_count = count_rows(
         "agent_activity",
-        "status IN ('active', 'reassigned')" if is_admin else "user_id = ? AND status IN ('active', 'reassigned')",
+        "status IN ('active', 'reassigned')"
+        if is_admin
+        else "user_id = ? AND status IN ('active', 'reassigned')",
         () if is_admin else (session["user_id"],),
     )
     attention = attention[:8]
@@ -169,15 +200,15 @@ async def dashboard_home(request: Request, session: dict = Depends(require_auth)
       <a class="stat-card stat-link" href="/activity"><div class="value">{active_task_count}</div><div class="label">Open Activities</div></a>
       <a class="stat-card stat-link" href="/activity"><div class="value">{len(attention)}</div><div class="label">Stale / Blocked</div></a>
       <a class="stat-card stat-link" href="/memory"><div class="value">{memory_count}</div><div class="label">Memory Records</div></a>
-      <a class="stat-card stat-link" href="/vault"><div class="value">{vault_count}</div><div class="label">Credentials</div></a>
+      <a class="stat-card stat-link" href="/connectors"><div class="value">{connector_binding_count}</div><div class="label">Connector Bindings</div></a>
     </div>"""
 
     attention_html = ""
     if attention:
         attention_rows = "".join(
-            f"<tr><td>{a.get('task_description','')[:60]}</td>"
-            f"<td><span class='badge badge-{a.get('status','stale')}'>{a.get('status','')}</span></td>"
-            f"<td>{a.get('assigned_agent_id','')}</td>"
+            f"<tr><td>{a.get('task_description', '')[:60]}</td>"
+            f"<td><span class='badge badge-{a.get('status', 'stale')}'>{a.get('status', '')}</span></td>"
+            f"<td>{a.get('assigned_agent_id', '')}</td>"
             f"<td><a href='/activity'>Open</a></td></tr>"
             for a in attention
         )
@@ -187,17 +218,27 @@ async def dashboard_home(request: Request, session: dict = Depends(require_auth)
       <table><thead><tr><th>Task</th><th>Status</th><th>Agent</th><th></th></tr></thead><tbody>{attention_rows}</tbody></table>
     </div>"""
 
-    activity_rows = "".join(
-        f"<tr><td>{a.get('task_description','')[:50]}</td>"
-        f"<td><span class='badge badge-{a.get('status','active')}'>{a.get('status','')}</span></td>"
-        f"<td>{a.get('assigned_agent_id','')}</td>"
-        f"<td>{str(a.get('updated_at','') or a.get('started_at',''))[:16]}</td></tr>"
-        for a in recent_activity[:6]
-    ) if recent_activity else "<tr><td colspan=4 class=empty>No recent activity.</td></tr>"
+    activity_rows = (
+        "".join(
+            f"<tr><td>{a.get('task_description', '')[:50]}</td>"
+            f"<td><span class='badge badge-{a.get('status', 'active')}'>{a.get('status', '')}</span></td>"
+            f"<td>{a.get('assigned_agent_id', '')}</td>"
+            f"<td>{str(a.get('updated_at', '') or a.get('started_at', ''))[:16]}</td></tr>"
+            for a in recent_activity[:6]
+        )
+        if recent_activity
+        else "<tr><td colspan=4 class=empty>No recent activity.</td></tr>"
+    )
 
-    audit_link = '<a href="/audit" class="btn btn-sm btn-secondary">Audit Log</a>' if is_admin else ""
+    audit_link = (
+        '<a href="/audit" class="btn btn-sm btn-secondary">Audit Log</a>'
+        if is_admin
+        else ""
+    )
 
-    return render_page("Overview", f"""
+    return render_page(
+        "Overview",
+        f"""
     <div class="page-header"><h1>Overview</h1></div>
     {stat_cards}
     {attention_html}
@@ -211,14 +252,19 @@ async def dashboard_home(request: Request, session: dict = Depends(require_auth)
       </div>
       <table><thead><tr><th>Task</th><th>Status</th><th>Agent</th><th>Updated</th></tr></thead><tbody>{activity_rows}</tbody></table>
     </div>
-    """, "/", session=session)
+    """,
+        "/",
+        session=session,
+    )
 
 
 @router.get("/login")
 async def login_page(request: Request):
     user_count = count_users()
     if user_count == 0:
-        return render_page("Setup", """
+        return render_page(
+            "Setup",
+            """
     <div class="card">
       <h3>Welcome to Agent Core</h3>
       <p class="text-muted" style="margin-bottom:20px">Create your admin account to get started.</p>
@@ -248,8 +294,12 @@ async def login_page(request: Request):
       else { showToast(j.error.message || 'Error', 'danger'); }
     }
     </script>
-    """, "")
-    return render_page("Login", """
+    """,
+            "",
+        )
+    return render_page(
+        "Login",
+        """
     <div class="card" style="max-width:400px;margin:60px auto">
       <h3>Sign In</h3>
       <form id="login-form" onsubmit="submitLogin(event)">
@@ -280,12 +330,16 @@ async def login_page(request: Request):
       } else { showToast(j.error.message || 'Login failed', 'danger'); }
     }
     </script>
-    """, "")
+    """,
+        "",
+    )
 
 
 @router.get("/otp")
 async def otp_page(request: Request):
-    return render_page("OTP Verification", """
+    return render_page(
+        "OTP Verification",
+        """
     <div class="card" style="max-width:400px;margin:60px auto">
       <h3>Two-Factor Authentication</h3>
       <p class="text-muted" style="margin-bottom:16px">Enter the 6-digit code from your authenticator app, or paste one backup code.</p>
@@ -308,7 +362,9 @@ async def otp_page(request: Request):
       else { showToast(j.error.message || 'Invalid code', 'danger'); }
     }
     </script>
-    """, "")
+    """,
+        "",
+    )
 
 
 @router.get("/logout")
@@ -320,26 +376,36 @@ async def logout_page(request: Request):
 
 # ─── AGENTS ──────────────────────────────────────────────────────────────────
 
+
 @router.get("/agents")
 async def agents_page(request: Request, session: dict = Depends(require_auth)):
     from app.services import agent_service, workspace_service, audit_service
     from app.database import get_db
+
     is_admin = session.get("role") == "admin"
-    agents = agent_service.list_agents() if is_admin else agent_service.list_agents(owner_user_id=session["user_id"])
-    all_workspaces = workspace_service.list_workspaces() if is_admin else workspace_service.list_workspaces(owner_user_id=session["user_id"])
-    
+    agents = (
+        agent_service.list_agents()
+        if is_admin
+        else agent_service.list_agents(owner_user_id=session["user_id"])
+    )
+    all_workspaces = (
+        workspace_service.list_workspaces()
+        if is_admin
+        else workspace_service.list_workspaces(owner_user_id=session["user_id"])
+    )
+
     def build_scope_list(prefix):
         h = f'<div class="scope-selectors" id="{prefix}-scopes">'
         h += f'<label class="checkbox-label" data-scope-row="shared"><input type="checkbox" data-scope="shared"> <span>Shared workspace</span></label>'
         if all_workspaces:
-            h += '<h4>Workspaces</h4>'
+            h += "<h4>Workspaces</h4>"
             for p in all_workspaces:
                 h += f'<label class="checkbox-label" data-scope-row="workspace:{p["id"]}"><input type="checkbox" data-scope="workspace:{p["id"]}"> <span>Workspace: {p["name"]}</span></label>'
         if agents:
-            h += '<h4>Other Agent Private Workspaces</h4>'
+            h += "<h4>Other Agent Private Workspaces</h4>"
             for a in agents:
                 h += f'<label class="checkbox-label" data-scope-row="agent:{a["id"]}"><input type="checkbox" data-scope="agent:{a["id"]}"> <span>{a["display_name"]} ({a["id"]})</span></label>'
-        h += '</div>'
+        h += "</div>"
         return h
 
     ca_read_html = build_scope_list("ca-read")
@@ -348,7 +414,7 @@ async def agents_page(request: Request, session: dict = Depends(require_auth)):
     edit_write_html = build_scope_list("edit-write")
 
     def agent_row(a):
-        active = a.get('is_active')
+        active = a.get("is_active")
         status_badge = f"<span class='badge badge-{'active' if active else 'inactive'}'>{'active' if active else 'inactive'}</span>"
         read_scopes = agent_service.parse_scopes(a.get("read_scopes_json", "[]"))
         write_scopes = agent_service.parse_scopes(a.get("write_scopes_json", "[]"))
@@ -363,15 +429,15 @@ async def agents_page(request: Request, session: dict = Depends(require_auth)):
             toggle_btn = f"<button type='button' class='btn btn-sm btn-warning' onclick=\"deactivateAgent('{a['id']}')\">Deactivate</button>"
         else:
             toggle_btn = f"<button type='button' class='btn btn-sm btn-secondary' onclick=\"reactivateAgent('{a['id']}')\">Reactivate</button>"
-        owner_id = a.get('owner_user_id','')
-        default_user_id = a.get('default_user_id','') or owner_id
+        owner_id = a.get("owner_user_id", "")
+        default_user_id = a.get("default_user_id", "") or owner_id
         return (
             f"<tr>"
-            f"<td><strong>{a.get('display_name','')}</strong><br><code>{a['id']}</code>"
+            f"<td><strong>{a.get('display_name', '')}</strong><br><code>{a['id']}</code>"
             f"<div class='text-muted'>Owner: {owner_id} · Default user: {default_user_id}</div></td>"
             f"<td>{status_badge}</td>"
             f"<td>{access_summary}</td>"
-            f"<td>{a.get('created_at','')[:10]}</td>"
+            f"<td>{a.get('created_at', '')[:10]}</td>"
             f"<td><div class='actions-cell'>"
             f"<button type='button' class='btn btn-sm btn-secondary' onclick=\"editAgent('{a['id']}')\">Edit</button>"
             f"<a class='btn btn-sm btn-secondary' href='/agent-setup?agent_id={a['id']}'>Integration</a>"
@@ -524,7 +590,9 @@ async def agents_page(request: Request, session: dict = Depends(require_auth)):
     </script>"""
     js = js.replace("__IS_ADMIN__", str(is_admin).lower())
 
-    return render_page("Agents", f"""
+    return render_page(
+        "Agents",
+        f"""
     <div class="page-header"><h1>Agents</h1><div class="page-actions">
         <button class="btn" onclick="openModal('create-agent-modal')">+ Create Agent</button>
     </div></div>
@@ -627,32 +695,60 @@ async def agents_page(request: Request, session: dict = Depends(require_auth)):
         </div>
       </div>
     </div>
-    """, "/agents", js, session=session)
+    """,
+        "/agents",
+        js,
+        session=session,
+    )
 
 
 # ─── PROJECTS ────────────────────────────────────────────────────────────────
+
 
 @router.get("/workspaces")
 async def workspaces_page(request: Request, session: dict = Depends(require_auth)):
     import json
     from app.services import workspace_service, agent_service
-    workspaces = workspace_service.list_workspaces() if session.get("role") == "admin" else workspace_service.list_workspaces(owner_user_id=session["user_id"])
-    all_agents = agent_service.list_agents() if session.get("role") == "admin" else agent_service.list_agents(owner_user_id=session["user_id"])
+
+    workspaces = (
+        workspace_service.list_workspaces()
+        if session.get("role") == "admin"
+        else workspace_service.list_workspaces(owner_user_id=session["user_id"])
+    )
+    all_agents = (
+        agent_service.list_agents()
+        if session.get("role") == "admin"
+        else agent_service.list_agents(owner_user_id=session["user_id"])
+    )
 
     project_agent_access = {}
     for p in workspaces:
         pscope = f"workspace:{p['id']}"
-        read_agents = [a['id'] for a in all_agents if pscope in (json.loads(a.get('read_scopes_json','[]')) or [])]
-        write_agents = [a['id'] for a in all_agents if pscope in (json.loads(a.get('write_scopes_json','[]')) or [])]
-        project_agent_access[p['id']] = (read_agents, write_agents)
+        read_agents = [
+            a["id"]
+            for a in all_agents
+            if pscope in (json.loads(a.get("read_scopes_json", "[]")) or [])
+        ]
+        write_agents = [
+            a["id"]
+            for a in all_agents
+            if pscope in (json.loads(a.get("write_scopes_json", "[]")) or [])
+        ]
+        project_agent_access[p["id"]] = (read_agents, write_agents)
 
     def workspace_row(p):
-        read_tags = "".join(f"<span class='scope-tag' title='Read'>{a}</span>" for a in project_agent_access[p['id']][0])
-        write_tags = "".join(f"<span class='scope-tag scope-write' title='Write'>{a}</span>" for a in project_agent_access[p['id']][1])
+        read_tags = "".join(
+            f"<span class='scope-tag' title='Read'>{a}</span>"
+            for a in project_agent_access[p["id"]][0]
+        )
+        write_tags = "".join(
+            f"<span class='scope-tag scope-write' title='Write'>{a}</span>"
+            for a in project_agent_access[p["id"]][1]
+        )
         read_tags = read_tags or "<span class='text-muted'>none</span>"
         write_tags = write_tags or "<span class='text-muted'>none</span>"
-        is_active = p.get('is_active')
-        active_label = 'active' if is_active else 'inactive'
+        is_active = p.get("is_active")
+        active_label = "active" if is_active else "inactive"
         if is_active:
             toggle_btn = f"<button class='btn btn-sm btn-warning' onclick=\"deactivateProject('{p['id']}')\">Deactivate</button>"
         else:
@@ -660,14 +756,14 @@ async def workspaces_page(request: Request, session: dict = Depends(require_auth
         return (
             f"<tr>"
             f"<td><code>workspace:{p['id']}</code></td>"
-            f"<td>{p.get('name','')}</td>"
+            f"<td>{p.get('name', '')}</td>"
             f"<td><span class='badge badge-{active_label}'>{active_label}</span></td>"
-            f"<td>{p.get('owner_user_id','')}</td>"
+            f"<td>{p.get('owner_user_id', '')}</td>"
             f"<td class='agent-access-cell'>"
             f"<div class='agent-read-list'><span class='access-label'>Read</span>{read_tags}</div>"
             f"<div class='agent-write-list'><span class='access-label'>Write</span>{write_tags}</div>"
             f"</td>"
-            f"<td>{p.get('created_at','')[:10]}</td>"
+            f"<td>{p.get('created_at', '')[:10]}</td>"
             f"<td><div class='actions-cell'>"
             f"<button type='button' class='btn btn-sm btn-secondary' onclick=\"editProject('{p['id']}')\">Edit</button>"
             f"{toggle_btn}"
@@ -677,7 +773,9 @@ async def workspaces_page(request: Request, session: dict = Depends(require_auth
 
     rows = "".join(workspace_row(p) for p in workspaces)
 
-    agent_options = "".join(f"<option value=\"{a['id']}\">{a['id']}</option>" for a in all_agents)
+    agent_options = "".join(
+        f'<option value="{a["id"]}">{a["id"]}</option>' for a in all_agents
+    )
 
     js = """
     <script>
@@ -727,7 +825,9 @@ async def workspaces_page(request: Request, session: dict = Depends(require_auth
     }
     </script>"""
 
-    return render_page("Workspaces", f"""
+    return render_page(
+        "Workspaces",
+        f"""
     <div class="page-header"><h1>Workspaces</h1><div class="page-actions">
         <button class="btn" onclick="openModal('create-workspace-modal')">+ Create Workspace</button>
     </div></div>
@@ -784,7 +884,8 @@ async def workspaces_page(request: Request, session: dict = Depends(require_auth
         </form>
       </div>
     </div>
-    """ + """
+    """
+        + """
     <script>
     async function createProject(e) {
       e.preventDefault();
@@ -801,54 +902,77 @@ async def workspaces_page(request: Request, session: dict = Depends(require_auth
         refreshProjects();
       } else { showToast(j.error.message || 'Failed', 'danger'); }
     }
-    </script>""", "/workspaces", js, session=session)
+    </script>""",
+        "/workspaces",
+        js,
+        session=session,
+    )
 
 
 # ─── USERS ───────────────────────────────────────────────────────────────────
 
+
 @router.get("/users")
 async def users_page(request: Request, session: dict = Depends(require_auth)):
     from app.services.auth_service import list_users
+
     if session.get("role") != "admin":
-        return render_page("Admin Required", """
+        return render_page(
+            "Admin Required",
+            """
     <div class="page-header"><h1>Admin Access Required</h1></div>
     <div class="card">
       <p class="text-muted">Users are managed by administrators.</p>
       <a href="/" class="btn btn-secondary">Back to Overview</a>
     </div>
-    """, "/", session=session, status_code=403)
+    """,
+            "/",
+            session=session,
+            status_code=403,
+        )
 
     users = list_users()
     current_user_id = session["user_id"]
 
     def user_row(u):
-        otp = "<span class='badge badge-active'>enrolled</span>" if u.get("otp_enrolled") else "<span class='badge badge-inactive'>none</span>"
+        otp = (
+            "<span class='badge badge-active'>enrolled</span>"
+            if u.get("otp_enrolled")
+            else "<span class='badge badge-inactive'>none</span>"
+        )
         is_self = u["id"] == current_user_id
-        user_payload = escape_html(json.dumps({
-            "id": u["id"],
-            "email": u.get("email", ""),
-            "display_name": u.get("display_name", ""),
-            "role": u.get("role", "user"),
-        }))
+        user_payload = escape_html(
+            json.dumps(
+                {
+                    "id": u["id"],
+                    "email": u.get("email", ""),
+                    "display_name": u.get("display_name", ""),
+                    "role": u.get("role", "user"),
+                }
+            )
+        )
         delete_action = (
             "<span class='text-muted' style='font-size:0.8rem'>current session</span>"
-            if is_self else
-            f"<button type='button' class='btn btn-sm btn-danger' onclick=\"deleteUser('{u['id']}', '{escape_html(u['display_name'])}')\">Delete</button>"
+            if is_self
+            else f"<button type='button' class='btn btn-sm btn-danger' onclick=\"deleteUser('{u['id']}', '{escape_html(u['display_name'])}')\">Delete</button>"
         )
         actions = f"<div class='actions-cell'><button type='button' class='btn btn-sm btn-secondary' data-user='{user_payload}' onclick=\"editUser(this)\">Edit</button>{delete_action}</div>"
         return (
             f"<tr>"
-            f"<td>{escape_html(u.get('display_name',''))}</td>"
+            f"<td>{escape_html(u.get('display_name', ''))}</td>"
             f"<td><code>{u['id']}</code></td>"
-            f"<td>{escape_html(u.get('email',''))}</td>"
-            f"<td><span class='badge badge-{'active' if u.get('role') == 'admin' else 'inactive'}'>{u.get('role','user')}</span></td>"
+            f"<td>{escape_html(u.get('email', ''))}</td>"
+            f"<td><span class='badge badge-{'active' if u.get('role') == 'admin' else 'inactive'}'>{u.get('role', 'user')}</span></td>"
             f"<td>{otp}</td>"
-            f"<td>{u.get('created_at','')[:10]}</td>"
+            f"<td>{u.get('created_at', '')[:10]}</td>"
             f"<td>{actions}</td>"
             f"</tr>"
         )
 
-    rows = "".join(user_row(u) for u in users) or "<tr><td colspan=7 class=empty>No users.</td></tr>"
+    rows = (
+        "".join(user_row(u) for u in users)
+        or "<tr><td colspan=7 class=empty>No users.</td></tr>"
+    )
 
     js = """
     <script>
@@ -896,7 +1020,9 @@ async def users_page(request: Request, session: dict = Depends(require_auth)):
     }
     </script>"""
 
-    return render_page("Users", f"""
+    return render_page(
+        "Users",
+        f"""
     <div class="page-header"><h1>Users</h1><div class="page-actions">
       <button class="btn" onclick="openModal('create-user-modal')">+ Add User</button>
     </div></div>
@@ -942,320 +1068,15 @@ async def users_page(request: Request, session: dict = Depends(require_auth)):
         </form>
       </div>
     </div>
-    """, "/users", js, session=session)
-
-
-# ─── VAULT ───────────────────────────────────────────────────────────────────
-
-@router.get("/vault")
-async def vault_page(request: Request, session: dict = Depends(require_auth)):
-    from app.services import vault_service
-    from app.services.agent_service import list_agents
-    from app.services import workspace_service
-
-    ctx = build_user_context(session)
-    enforcer = ScopeEnforcer(ctx.read_scopes, ctx.write_scopes, ctx.agent_id, is_admin=ctx.is_admin, active_workspace_ids=ctx.active_workspace_ids)
-    entries = [
-        e for e in (vault_service.list_vault_entries(limit=500) or [])
-        if enforcer.can_read(e.get("scope", ""))
-    ]
-    agents = list_agents() if session.get("role") == "admin" else list_agents(owner_user_id=session["user_id"])
-    workspaces = workspace_service.list_workspaces() if session.get("role") == "admin" else workspace_service.list_workspaces(owner_user_id=session["user_id"])
-
-    agent_options = "".join(
-        f"<option value=\"agent:{a['id']}\">Agent: {escape_html(a.get('display_name') or a['id'])} (agent:{a['id']})</option>"
-        for a in agents
+    """,
+        "/users",
+        js,
+        session=session,
     )
-    project_options = "".join(
-        f"<option value=\"workspace:{p['id']}\">Workspace: {escape_html(p.get('name') or p['id'])} (workspace:{p['id']})</option>"
-        for p in workspaces
-    )
-    user_scope = f"user:{session['user_id']}"
-    all_scopes = sorted(set([e.get("scope","") for e in entries] + [user_scope, "shared"]))
-    category_options = [
-        ("api", "API Key / Token"),
-        ("password", "Password"),
-        ("url", "URL / Endpoint"),
-        ("config", "Config / Text"),
-        ("other", "Other"),
-    ]
-    category_labels = dict(category_options)
-    category_filter_options = "".join(
-        f"<option value=\"{value}\">{label}</option>"
-        for value, label in category_options
-    )
-    category_select_options = "".join(
-        f"<option value=\"{value}\">{label}</option>"
-        for value, label in category_options
-    )
-
-    scope_groups = {}
-    for e in entries:
-        scope = e.get("scope","")
-        if scope not in scope_groups:
-            scope_groups[scope] = []
-        scope_groups[scope].append(e)
-
-    groups_html = ""
-    for scope in sorted(scope_groups.keys()):
-        group_entries = scope_groups[scope]
-        rows = "".join(
-            f"<tr data-category=\"{escape_html(e.get('value_type','other') or 'other')}\">"
-            f"<td>{e.get('name','')}</td>"
-            f"<td><code>{e.get('reference_name','')}</code> "
-            f"<button class='copy-btn' onclick=\"copyRef('{e['reference_name']}', this)\">Copy</button></td>"
-            f"<td>{escape_html(category_labels.get(e.get('value_type',''), e.get('value_type','') or 'Other'))}</td>"
-            f"<td>{e.get('expires_at','')[:10] if e.get('expires_at') else '-'}</td>"
-            f"<td><div class='actions-cell'>"
-            f"<button type='button' class='btn btn-sm btn-secondary' onclick=\"editVault('{e['id']}')\">Edit</button>"
-            f"<button type='button' class='btn btn-sm btn-secondary' onclick=\"revealVault('{e['id']}')\">Reveal</button>"
-            f"<button type='button' class='btn btn-sm btn-danger' onclick=\"deleteVault('{e['id']}')\">Delete</button>"
-            f"</div></td></tr>"
-            for e in group_entries
-        )
-        groups_html += f"""
-        <div class="vault-scope-group">
-        <div class="section-title">{scope}</div>
-	      <table><thead><tr><th>Name</th><th>Reference</th><th>Category</th><th>Expires</th><th class="actions-cell">Actions</th></tr></thead>
-        <tbody>{rows}</tbody></table>
-        </div>"""
-
-    js = """
-    <script>
-    async function refreshVault() { location.reload(); }
-    async function deleteVault(id) {
-      if (!confirm('Delete this credential? This cannot be undone.')) return;
-      const j = await apiFetch('/api/vault/entries/' + id, { method: 'DELETE' });
-      if (j.ok) { 
-        showToast('Deleted', 'success'); 
-        refreshVault(); 
-      } else { 
-        showToast(j.error?.message || 'Failed to delete credential', 'danger'); 
-      }
-    }
-    async function editVault(id) {
-      const j = await apiFetch('/api/vault/entries/' + id);
-      if (!j.ok) { showToast(j.error.message || 'Error', 'danger'); return; }
-      const e = j.data.entry;
-      document.getElementById('ve-id').value = id;
-      document.getElementById('ve-scope').textContent = e.scope || '';
-      document.getElementById('ve-ref').textContent = e.reference_name || '';
-      document.getElementById('ve-created-by').textContent = e.created_by || '-';
-      document.getElementById('ve-name').value = e.name || '';
-      document.getElementById('ve-label').value = e.label || '';
-      document.getElementById('ve-value-type').value = e.value_type || 'other';
-      document.getElementById('ve-expires-at').value = e.expires_at ? e.expires_at.substring(0, 16) : '';
-      document.getElementById('ve-value').value = '';
-      openModal('edit-vault-modal');
-    }
-    async function submitEditVault(e) {
-      e.preventDefault();
-      const id = document.getElementById('ve-id').value;
-      const body = {
-        name: document.getElementById('ve-name').value,
-        label: document.getElementById('ve-label').value || null,
-        value_type: document.getElementById('ve-value-type').value || null,
-        expires_at: document.getElementById('ve-expires-at').value || null,
-      };
-      const value = document.getElementById('ve-value').value;
-      if (value) body.value = value;
-      const j = await apiFetch('/api/vault/entries/' + id, { method: 'PUT', body: JSON.stringify(body) });
-      if (j.ok) { showToast('Updated'); closeModal('edit-vault-modal'); refreshVault(); }
-      else { showToast(j.error.message || 'Failed', 'danger'); }
-    }
-    async function revealVault(id) {
-      const code = prompt('Enter OTP or backup code to reveal credential:');
-      if (!code) return;
-      const j = await apiFetch('/api/vault/entries/' + id + '/reveal', {
-        method: 'POST', body: JSON.stringify({ otp_code: code })
-      });
-      if (j.ok) {
-        const value = j.data.value || '';
-        document.getElementById('reveal-value').innerHTML =
-          '<div class="api-key-display"><code>' + escapeHtml(value) + '</code></div>' +
-          '<button class="copy-btn" onclick="copyToClipboard(' + JSON.stringify(value) + ', this)">Copy value</button>';
-        openModal('reveal-vault-modal');
-      } else { showToast(j.error.message || 'Failed (check OTP)', 'danger'); }
-    }
-    function copyRef(ref, btn) {
-      copyToClipboard(ref, btn);
-    }
-    function filterVaultByCategory() {
-      const selected = document.getElementById('vault-category-filter').value;
-      document.querySelectorAll('#vault-entries tbody tr').forEach(row => {
-        row.style.display = (!selected || row.dataset.category === selected) ? '' : 'none';
-      });
-      document.querySelectorAll('.vault-scope-group').forEach(group => {
-        const visibleRows = Array.from(group.querySelectorAll('tbody tr')).some(row => row.style.display !== 'none');
-        group.style.display = visibleRows ? '' : 'none';
-      });
-    }
-    function escapeHtml(s) {
-      return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-    }
-    async function createVault(e) {
-      e.preventDefault();
-      const body = {
-        scope: document.getElementById('vault-scope').value,
-        name: document.getElementById('vault-name').value,
-        label: document.getElementById('vault-label').value || '',
-        value: document.getElementById('vault-value').value,
-        value_type: document.getElementById('vault-value-type').value,
-        expires_at: document.getElementById('vault-expires').value || null,
-      };
-      const j = await apiFetch('/api/vault/entries', { method: 'POST', body: JSON.stringify(body) });
-      if (j.ok) {
-        closeModal('create-vault-modal');
-        document.getElementById('create-vault-form').reset();
-        const ref = j.data.entry.reference_name || '';
-        document.getElementById('vault-created-ref').innerHTML =
-          'Credential created. Reference: <code>' + escapeHtml(ref) + '</code> ' +
-          '<button class="copy-btn" onclick="copyToClipboard(' + JSON.stringify(ref) + ', this)">Copy</button>';
-        openModal('vault-created-modal');
-      } else { showToast(j.error.message || 'Failed', 'danger'); }
-    }
-    </script>"""
-
-    return render_page("Vault", f"""
-    <div class="page-header"><h1>Vault</h1><div class="page-actions">
-        <button class="btn" onclick="openModal('create-vault-modal')">+ Add Credential</button>
-    </div></div>
-    <div id="vault-onpage-ref" style="margin-bottom:16px"></div>
-    <div class="card">
-      <div class="section-header">
-        <h3>Stored Credentials</h3>
-        <div class="section-actions">
-          <select id="vault-category-filter" onchange="filterVaultByCategory()" aria-label="Filter by category">
-            <option value="">All categories</option>
-            {category_filter_options}
-          </select>
-        </div>
-      </div>
-      <div id="vault-entries">
-        {groups_html or '<div class="empty">No credentials stored yet.</div>'}
-      </div>
-    </div>
-
-    <!-- Create Vault Modal -->
-    <div class="modal-overlay" id="create-vault-modal" style="display:none">
-      <div class="modal">
-        <h3>Add Credential</h3>
-        <form id="create-vault-form" onsubmit="createVault(event)">
-          <div class="form-group">
-	            <label>Scope *</label>
-	            <select id="vault-scope" required>
-	              <option value="">Select scope...</option>
-	              <option value="{user_scope}">Personal user credentials ({user_scope})</option>
-	              {project_options}
-	              {agent_options}
-	              <option value="shared">Shared system credentials (shared)</option>
-	            </select>
-	            <p class="form-hint">Personal user credentials can be used by agents that have your user scope. Workspace credentials use <code>workspace:&lt;id&gt;</code> scopes and are best for team/workspace context. Agent credentials are private to one agent. Shared is a broad system scope for non-personal credentials and should be used sparingly.</p>
-	          </div>
-          <div class="form-group">
-            <label>Name *</label>
-            <input type="text" id="vault-name" placeholder="e.g. github-token" required>
-          </div>
-          <div class="form-group">
-            <label>Label</label>
-            <input type="text" id="vault-label" placeholder="e.g. GitHub Personal Access Token">
-          </div>
-          <div class="form-group">
-            <label>Value *</label>
-            <textarea id="vault-value" rows="2" required></textarea>
-          </div>
-          <div class="form-row">
-            <div class="form-group">
-	              <label>Category</label>
-	              <select id="vault-value-type">
-	                {category_select_options}
-	              </select>
-	              <p class="form-hint">Used for sorting and filtering only. Scope controls access.</p>
-	            </div>
-          </div>
-          <div class="form-group">
-            <label>Expires At</label>
-            <input type="datetime-local" id="vault-expires">
-          </div>
-          <div class="modal-footer">
-            <button type="button" class="btn btn-secondary" onclick="closeModal('create-vault-modal')">Cancel</button>
-            <button type="submit" class="btn">Store</button>
-          </div>
-        </form>
-      </div>
-    </div>
-
-    <!-- Edit Vault Modal -->
-    <div class="modal-overlay" id="edit-vault-modal" style="display:none">
-      <div class="modal">
-        <h3>Edit Credential</h3>
-        <form id="edit-vault-form" onsubmit="submitEditVault(event)">
-          <input type="hidden" id="ve-id">
-          <div class="form-row">
-            <div class="form-group"><label>Scope</label><code id="ve-scope"></code></div>
-            <div class="form-group"><label>Reference</label><code id="ve-ref"></code></div>
-          </div>
-          <div class="form-group">
-            <label>Name</label>
-            <input type="text" id="ve-name">
-          </div>
-          <div class="form-group">
-            <label>Label</label>
-            <input type="text" id="ve-label">
-          </div>
-          <div class="form-row">
-            <div class="form-group">
-	              <label>Category</label>
-	              <select id="ve-value-type">
-	                {category_select_options}
-	              </select>
-	            </div>
-          </div>
-          <div class="form-group">
-            <label>Expires At</label>
-            <input type="datetime-local" id="ve-expires-at">
-          </div>
-          <div class="form-group">
-            <label>Replace Value</label>
-            <textarea id="ve-value" rows="2" placeholder="Leave blank to keep the current encrypted value"></textarea>
-            <p class="form-hint">The stored secret is never displayed here. Use Reveal with OTP only when you need to inspect it.</p>
-          </div>
-          <div class="form-group"><label>Created By</label><span id="ve-created-by" class="text-muted"></span></div>
-          <div class="modal-footer">
-            <button type="button" class="btn btn-secondary" onclick="closeModal('edit-vault-modal')">Cancel</button>
-            <button type="submit" class="btn">Save</button>
-          </div>
-        </form>
-      </div>
-    </div>
-
-    <!-- Reveal Modal -->
-    <div class="modal-overlay" id="reveal-vault-modal" style="display:none">
-      <div class="modal">
-        <h3>Credential Value</h3>
-        <div class="alert alert-warning">This value is sensitive. Do not share it.</div>
-        <div id="reveal-value"></div>
-        <div class="modal-footer">
-          <button class="btn btn-secondary" onclick="closeModal('reveal-vault-modal')">Close</button>
-        </div>
-      </div>
-    </div>
-
-    <!-- Created confirmation -->
-    <div class="modal-overlay" id="vault-created-modal" style="display:none">
-      <div class="modal">
-        <h3>Credential Stored</h3>
-        <div id="vault-created-ref"></div>
-        <p class="text-muted" style="margin-top:8px">The raw value will not be shown again. Use Reveal with OTP if needed.</p>
-        <div class="modal-footer">
-          <button class="btn" onclick="closeModal('vault-created-modal'); refreshVault();">Done</button>
-        </div>
-      </div>
-    </div>
-    """, "/vault", js, session=session)
 
 
 # ─── MEMORY ──────────────────────────────────────────────────────────────────
+
 
 @router.get("/memory")
 async def memory_page(request: Request, session: dict = Depends(require_auth)):
@@ -1265,15 +1086,23 @@ async def memory_page(request: Request, session: dict = Depends(require_auth)):
     from app.database import get_db
 
     is_admin = session.get("role") == "admin"
-    agents = list_agents() if session.get("role") == "admin" else list_agents(owner_user_id=session["user_id"])
+    agents = (
+        list_agents()
+        if session.get("role") == "admin"
+        else list_agents(owner_user_id=session["user_id"])
+    )
     agent_options = "".join(
-        f"<option value=\"agent:{a['id']}\">Agent: {escape_html(a.get('display_name') or a['id'])} (agent:{a['id']})</option>"
+        f'<option value="agent:{a["id"]}">Agent: {escape_html(a.get("display_name") or a["id"])} (agent:{a["id"]})</option>'
         for a in agents
     )
 
-    workspaces = workspace_service.list_workspaces() if session.get("role") == "admin" else workspace_service.list_workspaces(owner_user_id=session["user_id"])
+    workspaces = (
+        workspace_service.list_workspaces()
+        if session.get("role") == "admin"
+        else workspace_service.list_workspaces(owner_user_id=session["user_id"])
+    )
     project_options = "".join(
-        f"<option value=\"workspace:{p['id']}\">Workspace: {escape_html(p.get('name') or p['id'])} (workspace:{p['id']})</option>"
+        f'<option value="workspace:{p["id"]}">Workspace: {escape_html(p.get("name") or p["id"])} (workspace:{p["id"]})</option>'
         for p in workspaces
     )
     user_scope = f"user:{session['user_id']}"
@@ -1299,7 +1128,12 @@ async def memory_page(request: Request, session: dict = Depends(require_auth)):
 
         records = []
         for scope in visible_scopes:
-            records.extend(memory_service.get_memory_by_scope(scope=scope, limit=200, record_status=record_status) or [])
+            records.extend(
+                memory_service.get_memory_by_scope(
+                    scope=scope, limit=200, record_status=record_status
+                )
+                or []
+            )
         records.sort(key=lambda r: r.get("created_at", ""), reverse=True)
         return records[:200]
 
@@ -1308,11 +1142,11 @@ async def memory_page(request: Request, session: dict = Depends(require_auth)):
 
     def active_row(r):
         return (
-            f"<tr><td><span class='badge badge-{r.get('memory_class','')}'>{r.get('memory_class','')}</span></td>"
-            f"<td>{escape_html(r.get('content','')[:80])}</td>"
-            f"<td><code>{r.get('scope','')}</code></td>"
-            f"<td>{r.get('domain','') or ''}</td>"
-            f"<td>{r.get('confidence',0.5):.1f}</td>"
+            f"<tr><td><span class='badge badge-{r.get('memory_class', '')}'>{r.get('memory_class', '')}</span></td>"
+            f"<td>{escape_html(r.get('content', '')[:80])}</td>"
+            f"<td><code>{r.get('scope', '')}</code></td>"
+            f"<td>{r.get('domain', '') or ''}</td>"
+            f"<td>{r.get('confidence', 0.5):.1f}</td>"
             f"<td><div class='actions-cell'>"
             f"<button type='button' class='btn btn-sm btn-secondary' onclick=\"viewMemory('{r['id']}')\">Detail</button>"
             f"<button type='button' class='btn btn-sm btn-warning' onclick=\"retractRecord('{r['id']}')\">Retract</button>"
@@ -1322,21 +1156,25 @@ async def memory_page(request: Request, session: dict = Depends(require_auth)):
 
     def retracted_row(r):
         return (
-            f"<tr style='opacity:0.65'><td><span class='badge badge-inactive'>{r.get('memory_class','')}</span></td>"
-            f"<td>{escape_html(r.get('content','')[:80])}</td>"
-            f"<td><code>{r.get('scope','')}</code></td>"
-            f"<td>{r.get('domain','') or ''}</td>"
-            f"<td>{r.get('confidence',0.5):.1f}</td>"
+            f"<tr style='opacity:0.65'><td><span class='badge badge-inactive'>{r.get('memory_class', '')}</span></td>"
+            f"<td>{escape_html(r.get('content', '')[:80])}</td>"
+            f"<td><code>{r.get('scope', '')}</code></td>"
+            f"<td>{r.get('domain', '') or ''}</td>"
+            f"<td>{r.get('confidence', 0.5):.1f}</td>"
             f"<td><div class='actions-cell'>"
             f"<button type='button' class='btn btn-sm btn-secondary' onclick=\"restoreRecord('{r['id']}')\">Restore</button>"
             f"<button type='button' class='btn btn-sm btn-danger' onclick=\"deleteRecord('{r['id']}')\" title='Permanently delete'>Delete</button>"
             f"</div></td></tr>"
         )
 
-    records_rows = "".join(active_row(r) for r in active_records) or "<tr><td colspan=6 class=empty>No active records.</td></tr>"
+    records_rows = (
+        "".join(active_row(r) for r in active_records)
+        or "<tr><td colspan=6 class=empty>No active records.</td></tr>"
+    )
     retracted_rows = "".join(retracted_row(r) for r in retracted_records)
 
-    js = """
+    js = (
+        """
     <script>
     async function refreshMemory() { location.reload(); }
     async function retractRecord(id) {
@@ -1416,7 +1254,9 @@ async def memory_page(request: Request, session: dict = Depends(require_auth)):
       const body = {
 	        content: document.getElementById('mem-content').value,
 	        memory_class: document.getElementById('mem-write-class').value,
-	        scope: document.getElementById('mem-write-scope').value || '""" + user_scope + """',
+	        scope: document.getElementById('mem-write-scope').value || '"""
+        + user_scope
+        + """',
 	        domain: document.getElementById('mem-domain').value || null,
 	        topic: document.getElementById('mem-topic').value || null,
 	        confidence: parseFloat(document.getElementById('mem-confidence').value) || 0.5,
@@ -1452,8 +1292,12 @@ async def memory_page(request: Request, session: dict = Depends(require_auth)):
       f.style.display = f.style.display === 'none' ? 'block' : 'none';
     }
     </script>"""
+    )
 
-    return render_page("Memory", _hf(f"""
+    return render_page(
+        "Memory",
+        _hf(
+            f"""
     <div class="page-header"><h1>Memory</h1><div class="page-actions">
         <button class="btn" onclick="openModal('write-memory-modal')">+ Write Memory</button>
         <button class="btn btn-secondary" onclick="toggleFilters()">Search</button>
@@ -1498,14 +1342,20 @@ async def memory_page(request: Request, session: dict = Depends(require_auth)):
     </div>
 
     <!-- Retracted Records -->
-    """ + (f"""
+    """
+            + (
+                f"""
     <div class="card" style="border-left:4px solid var(--text-muted)">
       <h3 style="color:var(--text-muted)">Retracted Records <span class="text-muted" style="font-weight:normal;font-size:0.8rem">({len(retracted_records)})</span></h3>
       <p class="text-muted" style="font-size:0.85rem;margin-bottom:8px">These records are hidden from search. Restore to make them active again, or permanently delete.</p>
       <table><thead><tr><th>Class</th><th>Content</th><th>Scope</th><th>Domain</th><th>Confidence</th><th>Actions</th></tr></thead>
       <tbody>{retracted_rows or "<tr><td colspan=6 class=empty>No retracted records.</td></tr>"}</tbody></table>
     </div>
-    """ if retracted_records else "") + f"""
+    """
+                if retracted_records
+                else ""
+            )
+            + f"""
 
     <!-- Write Memory Modal -->
     <div class="modal-overlay" id="write-memory-modal" style="display:none">
@@ -1601,10 +1451,16 @@ async def memory_page(request: Request, session: dict = Depends(require_auth)):
         </div>
       </div>
     </div>
-    """), "/memory", js, session=session)
+    """
+        ),
+        "/memory",
+        js,
+        session=session,
+    )
 
 
 # ─── ACTIVITY ────────────────────────────────────────────────────────────────
+
 
 @router.get("/activity")
 async def activity_page(request: Request, session: dict = Depends(require_auth)):
@@ -1614,47 +1470,66 @@ async def activity_page(request: Request, session: dict = Depends(require_auth))
 
     activity_service.mark_stale_activities()
     is_admin = session.get("role") == "admin"
-    activities = activity_service.list_activities(
-        user_id=None if is_admin else session["user_id"],
-        limit=100,
-    ) or []
-    all_agents = list_agents() if is_admin else list_agents(owner_user_id=session["user_id"])
-    agent_options = "".join(f"<option value=\"{a['id']}\">{a.get('display_name', a['id'])}</option>" for a in all_agents)
-    workspaces = workspace_service.list_workspaces() if is_admin else workspace_service.list_workspaces(owner_user_id=session["user_id"])
+    activities = (
+        activity_service.list_activities(
+            user_id=None if is_admin else session["user_id"],
+            limit=100,
+        )
+        or []
+    )
+    all_agents = (
+        list_agents() if is_admin else list_agents(owner_user_id=session["user_id"])
+    )
+    agent_options = "".join(
+        f'<option value="{a["id"]}">{a.get("display_name", a["id"])}</option>'
+        for a in all_agents
+    )
+    workspaces = (
+        workspace_service.list_workspaces()
+        if is_admin
+        else workspace_service.list_workspaces(owner_user_id=session["user_id"])
+    )
     user_scope = f"user:{session['user_id']}"
     activity_scope_options = (
-        f"<option value=\"{user_scope}\">Personal user memory ({user_scope})</option>"
+        f'<option value="{user_scope}">Personal user memory ({user_scope})</option>'
         + "".join(
-            f"<option value=\"workspace:{p['id']}\">Workspace: {escape_html(p.get('name') or p['id'])} (workspace:{p['id']})</option>"
+            f'<option value="workspace:{p["id"]}">Workspace: {escape_html(p.get("name") or p["id"])} (workspace:{p["id"]})</option>'
             for p in workspaces
         )
         + "".join(
-            f"<option value=\"agent:{a['id']}\">Agent private: {escape_html(a.get('display_name') or a['id'])} (agent:{a['id']})</option>"
+            f'<option value="agent:{a["id"]}">Agent private: {escape_html(a.get("display_name") or a["id"])} (agent:{a["id"]})</option>'
             for a in all_agents
         )
     )
     # For reassign modal, we want the same options
     reassign_options = agent_options
 
-    status_filters = ["active", "stale", "reassigned", "completed", "blocked", "cancelled"]
+    status_filters = [
+        "active",
+        "stale",
+        "reassigned",
+        "completed",
+        "blocked",
+        "cancelled",
+    ]
     status_tabs = "".join(
-        f"<button class='btn btn-sm {'btn' if i==0 else 'btn-secondary'} status-filter' data-status='{s}' onclick='filterActivity(\"{s}\",this)'>{s.title()}</button>"
+        f"<button class='btn btn-sm {'btn' if i == 0 else 'btn-secondary'} status-filter' data-status='{s}' onclick='filterActivity(\"{s}\",this)'>{s.title()}</button>"
         for i, s in enumerate(status_filters)
     )
 
     rows = "".join(
-        f"<tr class='activity-row' data-status='{a.get('status','')}'>"
-        f"<td><code>{a.get('id','')[:12]}</code></td>"
-        f"<td>{a.get('task_description','')[:60]}</td>"
-        f"<td><span class='badge badge-{a.get('status','active')}'>{a.get('status','')}</span></td>"
-        f"<td>{a.get('assigned_agent_id','')}</td>"
-        f"<td>{str(a.get('updated_at',''))[:16]}</td>"
+        f"<tr class='activity-row' data-status='{a.get('status', '')}'>"
+        f"<td><code>{a.get('id', '')[:12]}</code></td>"
+        f"<td>{a.get('task_description', '')[:60]}</td>"
+        f"<td><span class='badge badge-{a.get('status', 'active')}'>{a.get('status', '')}</span></td>"
+        f"<td>{a.get('assigned_agent_id', '')}</td>"
+        f"<td>{str(a.get('updated_at', ''))[:16]}</td>"
         f"<td><div class='actions-cell'>"
         f"<button type='button' class='btn btn-sm btn-secondary' onclick=\"createHandoff('{a['id']}')\">Briefing</button>"
         f"<button type='button' class='btn btn-sm btn-secondary' onclick=\"reassignActivity('{a['id']}')\" title='Reassign'>Reassign</button>"
-        f"<button type='button' class='btn btn-sm btn-secondary' onclick=\"updateActivity('{a['id']}','active')\" {'disabled' if a.get('status') not in ('stale','blocked','reassigned') else ''} title='Reactivate'>Start</button>"
-        f"<button type='button' class='btn btn-sm btn-secondary' onclick=\"updateActivity('{a['id']}','completed')\" {'disabled' if a.get('status') not in ('active','stale','blocked','reassigned') else ''} title='Complete'>Done</button>"
-        f"<button type='button' class='btn btn-sm btn-danger' onclick=\"cancelActivity('{a['id']}')\" {'disabled' if a.get('status') not in ('active','stale','blocked','reassigned') else ''} title='Cancel'>Cancel</button>"
+        f"<button type='button' class='btn btn-sm btn-secondary' onclick=\"updateActivity('{a['id']}','active')\" {'disabled' if a.get('status') not in ('stale', 'blocked', 'reassigned') else ''} title='Reactivate'>Start</button>"
+        f"<button type='button' class='btn btn-sm btn-secondary' onclick=\"updateActivity('{a['id']}','completed')\" {'disabled' if a.get('status') not in ('active', 'stale', 'blocked', 'reassigned') else ''} title='Complete'>Done</button>"
+        f"<button type='button' class='btn btn-sm btn-danger' onclick=\"cancelActivity('{a['id']}')\" {'disabled' if a.get('status') not in ('active', 'stale', 'blocked', 'reassigned') else ''} title='Cancel'>Cancel</button>"
         f"</div></td></tr>"
         for a in activities
     )
@@ -1729,7 +1604,9 @@ async def activity_page(request: Request, session: dict = Depends(require_auth))
     }
     </script>"""
 
-    return render_page("Activity", f"""
+    return render_page(
+        "Activity",
+        f"""
     <div class="page-header"><h1>Activity</h1><div class="page-actions">
         <button class="btn" onclick="openModal('create-activity-modal')">+ New Activity</button>
     </div></div>
@@ -1805,22 +1682,34 @@ async def activity_page(request: Request, session: dict = Depends(require_auth))
         </div>
       </div>
     </div>
-    """, "/activity", js, session=session)
+    """,
+        "/activity",
+        js,
+        session=session,
+    )
 
 
 # ─── AUDIT ────────────────────────────────────────────────────────────────────
 
+
 @router.get("/audit")
 async def audit_page(request: Request, session: dict = Depends(require_auth)):
     from app.services import audit_service
+
     if session.get("role") != "admin":
-        return render_page("Admin Required", """
+        return render_page(
+            "Admin Required",
+            """
     <div class="page-header"><h1>Admin Access Required</h1></div>
     <div class="card">
       <p class="text-muted">The audit log is available to administrators only.</p>
       <a href="/" class="btn btn-secondary">Back to Overview</a>
     </div>
-    """, "/", session=session, status_code=403)
+    """,
+            "/",
+            session=session,
+            status_code=403,
+        )
 
     page = int(request.query_params.get("page", 1))
     limit = 50
@@ -1832,28 +1721,35 @@ async def audit_page(request: Request, session: dict = Depends(require_auth)):
     result_filter = request.query_params.get("result", "")
 
     from app.services.audit_service import ACTOR_TYPES, RESULT_TYPES, AUDIT_ACTIONS
-    all_events = audit_service.query_events(
-        actor_type=actor_filter or None,
-        action=action_filter or None,
-        resource_type=resource_filter or None,
-        result=result_filter or None,
-        limit=limit,
-        offset=offset,
-    ) or []
+
+    all_events = (
+        audit_service.query_events(
+            actor_type=actor_filter or None,
+            action=action_filter or None,
+            resource_type=resource_filter or None,
+            result=result_filter or None,
+            limit=limit,
+            offset=offset,
+        )
+        or []
+    )
     total = len(all_events)
 
     rows = "".join(
-        f"<tr><td>{e.get('timestamp','')[:19]}</td>"
-        f"<td><span class='badge badge-secondary'>{e.get('actor_type','')}</span></td>"
-        f"<td><code>{e.get('action','')}</code></td>"
-        f"<td>{e.get('resource_type','') or '-'}</td>"
-        f"<td><span class='badge badge-{'active' if e.get('result','')=='success' else 'cancelled'}'>{e.get('result','')}</span></td>"
-        f"<td class=mono>{e.get('ip_address','') or '-'}</td></tr>"
+        f"<tr><td>{e.get('timestamp', '')[:19]}</td>"
+        f"<td><span class='badge badge-secondary'>{e.get('actor_type', '')}</span></td>"
+        f"<td><code>{e.get('action', '')}</code></td>"
+        f"<td>{e.get('resource_type', '') or '-'}</td>"
+        f"<td><span class='badge badge-{'active' if e.get('result', '') == 'success' else 'cancelled'}'>{e.get('result', '')}</span></td>"
+        f"<td class=mono>{e.get('ip_address', '') or '-'}</td></tr>"
         for e in all_events
     )
 
     def build_options(items, selected):
-        return "".join(f"<option value='{i}' {'selected' if i==selected else ''}>{i}</option>" for i in items)
+        return "".join(
+            f"<option value='{i}' {'selected' if i == selected else ''}>{i}</option>"
+            for i in items
+        )
 
     actor_options = build_options(ACTOR_TYPES, actor_filter)
     action_options = build_options(AUDIT_ACTIONS, action_filter)
@@ -1895,7 +1791,9 @@ async def audit_page(request: Request, session: dict = Depends(require_auth)):
     }
     </script>"""
 
-    return render_page("Audit Log", f"""
+    return render_page(
+        "Audit Log",
+        f"""
     <div class="page-header"><h1>Audit Log</h1><div class="page-actions">
         <button class="btn btn-secondary" onclick="exportAuditCsv()">Export CSV</button>
     </div></div>
@@ -1912,11 +1810,11 @@ async def audit_page(request: Request, session: dict = Depends(require_auth)):
         </select>
         <select id="audit-resource" style="width:120px">
           <option value="">Any resource</option>
-          <option value="agent" {'selected' if resource_filter=='agent' else ''}>agent</option>
-          <option value="workspace" {'selected' if resource_filter=='workspace' else ''}>workspace</option>
-          <option value="memory" {'selected' if resource_filter=='memory' else ''}>memory</option>
-          <option value="vault" {'selected' if resource_filter=='vault' else ''}>vault</option>
-          <option value="activity" {'selected' if resource_filter=='activity' else ''}>activity</option>
+          <option value="agent" {"selected" if resource_filter == "agent" else ""}>agent</option>
+          <option value="workspace" {"selected" if resource_filter == "workspace" else ""}>workspace</option>
+          <option value="memory" {"selected" if resource_filter == "memory" else ""}>memory</option>
+          <option value="vault" {"selected" if resource_filter == "vault" else ""}>vault</option>
+          <option value="activity" {"selected" if resource_filter == "activity" else ""}>activity</option>
         </select>
         <select id="audit-result" style="width:120px">
           <option value="">Any result</option>
@@ -1928,18 +1826,25 @@ async def audit_page(request: Request, session: dict = Depends(require_auth)):
       <table><thead><tr><th>Time</th><th>Actor Type</th><th>Action</th><th>Resource</th><th>Result</th><th>IP</th></tr></thead>
       <tbody>{rows or "<tr><td colspan=6 class=empty>No events yet.</td></tr>"}</tbody></table>
       <div class="pagination" style="margin-top:12px;display:flex;gap:8px;align-items:center">
-        <a href="?page={prev_page}{f'&actor_type={actor_filter}' if actor_filter else ''}{f'&action={action_filter}' if action_filter else ''}{f'&resource_type={resource_filter}' if resource_filter else ''}{f'&result={result_filter}' if result_filter else ''}" class="btn btn-sm btn-secondary">Prev</a>
+        <a href="?page={prev_page}{f"&actor_type={actor_filter}" if actor_filter else ""}{f"&action={action_filter}" if action_filter else ""}{f"&resource_type={resource_filter}" if resource_filter else ""}{f"&result={result_filter}" if result_filter else ""}" class="btn btn-sm btn-secondary">Prev</a>
         <span>{page_info}</span>
-        <a href="?page={next_page}{f'&actor_type={actor_filter}' if actor_filter else ''}{f'&action={action_filter}' if action_filter else ''}{f'&resource_type={resource_filter}' if resource_filter else ''}{f'&result={result_filter}' if result_filter else ''}" class="btn btn-sm btn-secondary">Next</a>
+        <a href="?page={next_page}{f"&actor_type={actor_filter}" if actor_filter else ""}{f"&action={action_filter}" if action_filter else ""}{f"&resource_type={resource_filter}" if resource_filter else ""}{f"&result={result_filter}" if result_filter else ""}" class="btn btn-sm btn-secondary">Next</a>
       </div>
     </div>
-    """, "/audit", js, session=session)
+    """,
+        "/audit",
+        js,
+        session=session,
+    )
 
 
 # ─── SETTINGS ─────────────────────────────────────────────────────────────────
 
+
 @router.post("/api/dashboard/system-settings")
-async def update_dashboard_system_settings(request: Request, session: dict = Depends(require_admin)):
+async def update_dashboard_system_settings(
+    request: Request, session: dict = Depends(require_admin)
+):
     from app.database import get_db
     from app.services import audit_service
     from app.routes.auth import get_client_ip
@@ -1951,11 +1856,21 @@ async def update_dashboard_system_settings(request: Request, session: dict = Dep
     try:
         retention_days = int(retention_raw)
     except ValueError:
-        return error_response("INVALID_RETENTION", "Scratchpad retention must be a whole number of days", 400)
+        return error_response(
+            "INVALID_RETENTION",
+            "Scratchpad retention must be a whole number of days",
+            400,
+        )
     if retention_days < 1 or retention_days > 365:
-        return error_response("INVALID_RETENTION", "Scratchpad retention must be between 1 and 365 days", 400)
+        return error_response(
+            "INVALID_RETENTION",
+            "Scratchpad retention must be between 1 and 365 days",
+            400,
+        )
     if solo_raw not in ("true", "false"):
-        return error_response("INVALID_SOLO_MODE", "Solo mode must be true or false", 400)
+        return error_response(
+            "INVALID_SOLO_MODE", "Solo mode must be true or false", 400
+        )
 
     settings_to_save = {
         "scratchpad_retention_days": str(retention_days),
@@ -1994,19 +1909,23 @@ async def settings_page(request: Request, session: dict = Depends(require_auth))
 
     def get_system_setting(key, default):
         with get_db() as conn:
-            row = conn.execute("SELECT value FROM system_settings WHERE key = ?", (key,)).fetchone()
+            row = conn.execute(
+                "SELECT value FROM system_settings WHERE key = ?", (key,)
+            ).fetchone()
             return row["value"] if row else default
 
     scratchpad_retention_days = get_system_setting("scratchpad_retention_days", "7")
-    solo_mode_enabled = get_system_setting("solo_mode_enabled", "true").lower() == "true"
+    solo_mode_enabled = (
+        get_system_setting("solo_mode_enabled", "true").lower() == "true"
+    )
 
     account_html = f"""
     <div class="two-col">
       <div class="card">
         <h3>Account</h3>
-        <p><strong>Display Name:</strong> {user.get('display_name','')}</p>
-        <p><strong>Email:</strong> {user.get('email','')}</p>
-        <p><strong>Role:</strong> {session.get('role','user')}</p>
+        <p><strong>Display Name:</strong> {user.get("display_name", "")}</p>
+        <p><strong>Email:</strong> {user.get("email", "")}</p>
+        <p><strong>Role:</strong> {session.get("role", "user")}</p>
       </div>
       <div class="card">
         <h3>Security</h3>
@@ -2284,7 +2203,9 @@ async def settings_page(request: Request, session: dict = Depends(require_auth))
     }}
     </script>"""
 
-    return render_page("Settings", f"""
+    return render_page(
+        "Settings",
+        f"""
     <div class="page-header"><h1>Settings</h1></div>
     {account_html}
     {system_settings_html}
@@ -2292,13 +2213,20 @@ async def settings_page(request: Request, session: dict = Depends(require_auth))
     {broker_html}
     {backup_html}
     {admin_modals}
-    """, "/settings", js, session=session)
+    """,
+        "/settings",
+        js,
+        session=session,
+    )
 
 
 # ─── SETTINGS PASSWORD ──────────────────────────────────────────────────────────
 
+
 @router.get("/settings/password")
-async def settings_password_page(request: Request, session: dict = Depends(require_auth)):
+async def settings_password_page(
+    request: Request, session: dict = Depends(require_auth)
+):
     js = """
     <script>
     async function submitPassword(e) {
@@ -2320,7 +2248,9 @@ async def settings_password_page(request: Request, session: dict = Depends(requi
       }
     }
     </script>"""
-    return render_page("Change Password", """
+    return render_page(
+        "Change Password",
+        """
     <div class="page-header"><h1>Change Password</h1></div>
     <div class="card" style="max-width:500px">
       <h3>Update Your Password</h3>
@@ -2340,14 +2270,20 @@ async def settings_password_page(request: Request, session: dict = Depends(requi
         <button type="submit" class="btn">Update Password</button>
       </form>
     </div>
-    """, "/settings", js, session=session)
+    """,
+        "/settings",
+        js,
+        session=session,
+    )
 
 
 # ─── SETTINGS OTP ───────────────────────────────────────────────────────────────
 
+
 @router.get("/settings/otp")
 async def settings_otp_page(request: Request, session: dict = Depends(require_auth)):
     from app.services.auth_service import is_otp_enrolled
+
     enrolled = is_otp_enrolled(session["user_id"])
 
     if enrolled:
@@ -2446,18 +2382,27 @@ async def settings_otp_page(request: Request, session: dict = Depends(require_au
     """
     js = setup_js + js
 
-    return render_page("Manage OTP", f"""
+    return render_page(
+        "Manage OTP",
+        f"""
     <div class="page-header"><h1>Two-Factor Authentication</h1></div>
     <div class="card" style="max-width:600px">
       {body_html}
     </div>
-    """, "/settings", js, session=session)
+    """,
+        "/settings",
+        js,
+        session=session,
+    )
 
 
 # ─── SETTINGS BACKUP CODES ────────────────────────────────────────────────────
 
+
 @router.get("/settings/backup-codes")
-async def settings_backup_codes_page(request: Request, session: dict = Depends(require_auth)):
+async def settings_backup_codes_page(
+    request: Request, session: dict = Depends(require_auth)
+):
     from app.services.auth_service import is_otp_enrolled
 
     enrolled = is_otp_enrolled(session["user_id"])
@@ -2483,7 +2428,9 @@ async def settings_backup_codes_page(request: Request, session: dict = Depends(r
     }}
     </script>"""
 
-    return render_page("Backup Codes", f"""
+    return render_page(
+        "Backup Codes",
+        f"""
     <div class="page-header"><h1>Backup Codes</h1></div>
     <div class="card" style="max-width:600px">
       <h3>Recovery Codes</h3>
@@ -2491,10 +2438,15 @@ async def settings_backup_codes_page(request: Request, session: dict = Depends(r
       {"<div class='alert alert-warning' style='margin-top:12px'>You must enroll OTP before you can regenerate backup codes.</div>" if not enrolled else ""}
       {codes_html}
     </div>
-    """, "/settings", js, session=session)
+    """,
+        "/settings",
+        js,
+        session=session,
+    )
 
 
 # ─── INTEGRATIONS ─────────────────────────────────────────────────────────────
+
 
 @router.get("/integrations")
 async def integrations_page(request: Request, session: dict = Depends(require_auth)):
@@ -2543,7 +2495,11 @@ async def apply_recommended_access(
     if not is_admin and agent.get("owner_user_id") != current_user_id:
         return error_response("FORBIDDEN", "Access denied", 403)
     if not _agent_user_matches(agent, body.user_id):
-        return error_response("AGENT_USER_MISMATCH", "Agents are tied to one owner/default user. Create a separate agent for this user and share workspace access through workspace scopes.", 400)
+        return error_response(
+            "AGENT_USER_MISMATCH",
+            "Agents are tied to one owner/default user. Create a separate agent for this user and share workspace access through workspace scopes.",
+            400,
+        )
 
     agent_scope = f"agent:{body.agent_id}"
     workspace_scope = f"workspace:{body.workspace_id}"
@@ -2553,6 +2509,7 @@ async def apply_recommended_access(
     current_write = agent.get("write_scopes_json", "[]")
 
     from app.services.agent_service import parse_scopes
+
     read_scopes = parse_scopes(current_read) if current_read else []
     write_scopes = parse_scopes(current_write) if current_write else []
 
@@ -2575,6 +2532,7 @@ async def apply_recommended_access(
     )
 
     from app.services import audit_service
+
     audit_service.write_event(
         actor_type="user",
         actor_id=session["user_id"],
@@ -2591,11 +2549,13 @@ async def apply_recommended_access(
         },
     )
 
-    return success_response({
-        "message": "Access updated",
-        "read_scopes": read_scopes,
-        "write_scopes": write_scopes,
-    })
+    return success_response(
+        {
+            "message": "Access updated",
+            "read_scopes": read_scopes,
+            "write_scopes": write_scopes,
+        }
+    )
 
 
 @router.post("/api/agent-setup/verify")
@@ -2635,9 +2595,14 @@ async def verify_agent_setup(
     if not is_admin and agent.get("owner_user_id") != current_user_id:
         return error_response("FORBIDDEN", "Access denied", 403)
     if not _agent_user_matches(agent, body.user_id):
-        return error_response("AGENT_USER_MISMATCH", "Agents are tied to one owner/default user. Create a separate agent for this user and share workspace access through workspace scopes.", 400)
+        return error_response(
+            "AGENT_USER_MISMATCH",
+            "Agents are tied to one owner/default user. Create a separate agent for this user and share workspace access through workspace scopes.",
+            400,
+        )
 
     from app.services.agent_service import parse_scopes
+
     read_scopes = parse_scopes(agent.get("read_scopes_json", "[]"))
     write_scopes = parse_scopes(agent.get("write_scopes_json", "[]"))
     workspace_ids = {
@@ -2675,29 +2640,83 @@ async def verify_agent_setup(
                 timeout=5.0,
             )
         if health_r.status_code == 200:
-            checks.append({"check": "api_connectivity", "status": "ok", "message": "Agent Core API reachable"})
+            checks.append(
+                {
+                    "check": "api_connectivity",
+                    "status": "ok",
+                    "message": "Agent Core API reachable",
+                }
+            )
         else:
-            checks.append({"check": "api_connectivity", "status": "error", "message": f"Agent Core API returned {health_r.status_code}"})
+            checks.append(
+                {
+                    "check": "api_connectivity",
+                    "status": "error",
+                    "message": f"Agent Core API returned {health_r.status_code}",
+                }
+            )
             all_ok = False
 
         if manifest_r.status_code in (200, 401, 403):
-            checks.append({"check": "mcp_connectivity", "status": "ok", "message": "MCP endpoint reachable"})
+            checks.append(
+                {
+                    "check": "mcp_connectivity",
+                    "status": "ok",
+                    "message": "MCP endpoint reachable",
+                }
+            )
         else:
-            checks.append({"check": "mcp_connectivity", "status": "error", "message": f"MCP endpoint returned {manifest_r.status_code}"})
+            checks.append(
+                {
+                    "check": "mcp_connectivity",
+                    "status": "error",
+                    "message": f"MCP endpoint returned {manifest_r.status_code}",
+                }
+            )
             all_ok = False
     except Exception as e:
-        checks.append({"check": "api_connectivity", "status": "error", "message": f"Agent Core API unreachable ({type(e).__name__})"})
-        checks.append({"check": "mcp_connectivity", "status": "error", "message": f"MCP endpoint unreachable ({type(e).__name__})"})
+        checks.append(
+            {
+                "check": "api_connectivity",
+                "status": "error",
+                "message": f"Agent Core API unreachable ({type(e).__name__})",
+            }
+        )
+        checks.append(
+            {
+                "check": "mcp_connectivity",
+                "status": "error",
+                "message": f"MCP endpoint unreachable ({type(e).__name__})",
+            }
+        )
         all_ok = False
 
     if enforcer.can_read(workspace_scope):
-        checks.append({"check": "workspace_read", "status": "ok", "message": f"Read access to {workspace_scope}"})
+        checks.append(
+            {
+                "check": "workspace_read",
+                "status": "ok",
+                "message": f"Read access to {workspace_scope}",
+            }
+        )
     else:
-        checks.append({"check": "workspace_read", "status": "error", "message": f"No read access to {workspace_scope}"})
+        checks.append(
+            {
+                "check": "workspace_read",
+                "status": "error",
+                "message": f"No read access to {workspace_scope}",
+            }
+        )
         all_ok = False
 
     if enforcer.can_write(workspace_scope):
-        checks.append({"check": "workspace_write", "status": "ok", "message": f"Write access to {workspace_scope}"})
+        checks.append(
+            {
+                "check": "workspace_write",
+                "status": "ok",
+                "message": f"Write access to {workspace_scope}",
+            }
+        )
         if body.write_test_memory:
             record, _ = _write_test_memory(
                 scope=workspace_scope,
@@ -2705,30 +2724,92 @@ async def verify_agent_setup(
                 memory_class="fact",
             )
             if record:
-                checks.append({"check": "memory_write", "status": "ok", "message": f"Verified write to {workspace_scope}", "record_id": record["id"]})
+                checks.append(
+                    {
+                        "check": "memory_write",
+                        "status": "ok",
+                        "message": f"Verified write to {workspace_scope}",
+                        "record_id": record["id"],
+                    }
+                )
             else:
-                checks.append({"check": "memory_write", "status": "error", "message": f"Failed to write to {workspace_scope}"})
+                checks.append(
+                    {
+                        "check": "memory_write",
+                        "status": "error",
+                        "message": f"Failed to write to {workspace_scope}",
+                    }
+                )
                 all_ok = False
         else:
-            checks.append({"check": "memory_write", "status": "skipped", "message": "Test memory write skipped"})
+            checks.append(
+                {
+                    "check": "memory_write",
+                    "status": "skipped",
+                    "message": "Test memory write skipped",
+                }
+            )
     else:
-        checks.append({"check": "workspace_write", "status": "error", "message": f"No write access to {workspace_scope}"})
-        checks.append({"check": "memory_write", "status": "blocked", "message": "Cannot test write without workspace write access"})
+        checks.append(
+            {
+                "check": "workspace_write",
+                "status": "error",
+                "message": f"No write access to {workspace_scope}",
+            }
+        )
+        checks.append(
+            {
+                "check": "memory_write",
+                "status": "blocked",
+                "message": "Cannot test write without workspace write access",
+            }
+        )
         all_ok = False
 
     if enforcer.can_read(user_scope):
-        checks.append({"check": "user_read", "status": "ok", "message": f"Read access to {user_scope}"})
+        checks.append(
+            {
+                "check": "user_read",
+                "status": "ok",
+                "message": f"Read access to {user_scope}",
+            }
+        )
     elif is_admin or agent.get("owner_user_id") == current_user_id:
-        checks.append({"check": "user_read", "status": "warning", "message": f"No read access to {user_scope} (optional)"})
+        checks.append(
+            {
+                "check": "user_read",
+                "status": "warning",
+                "message": f"No read access to {user_scope} (optional)",
+            }
+        )
     else:
-        checks.append({"check": "user_read", "status": "warning", "message": f"No read access to {user_scope} (optional)"})
+        checks.append(
+            {
+                "check": "user_read",
+                "status": "warning",
+                "message": f"No read access to {user_scope} (optional)",
+            }
+        )
 
     if enforcer.can_read(agent_scope) and enforcer.can_write(agent_scope):
-        checks.append({"check": "agent_scope", "status": "ok", "message": f"Private scope {agent_scope} available"})
+        checks.append(
+            {
+                "check": "agent_scope",
+                "status": "ok",
+                "message": f"Private scope {agent_scope} available",
+            }
+        )
     else:
-        checks.append({"check": "agent_scope", "status": "warning", "message": f"Private scope {agent_scope} incomplete or missing"})
+        checks.append(
+            {
+                "check": "agent_scope",
+                "status": "warning",
+                "message": f"Private scope {agent_scope} incomplete or missing",
+            }
+        )
 
     from app.services import audit_service
+
     audit_service.write_event(
         actor_type="user",
         actor_id=session["user_id"],
@@ -2743,15 +2824,18 @@ async def verify_agent_setup(
         },
     )
 
-    return success_response({
-        "ok": all_ok,
-        "checks": checks,
-    })
+    return success_response(
+        {
+            "ok": all_ok,
+            "checks": checks,
+        }
+    )
 
 
 def _write_test_memory(scope, content, memory_class):
     try:
         from app.services import memory_service
+
         record, _ = memory_service.write_memory(
             content=content,
             memory_class=memory_class,
@@ -2825,7 +2909,12 @@ def _agent_setup_access_model(
     )
     checks = []
 
-    checks.append({"label": "Agent active", "status": "ok" if agent.get("is_active") else "blocked"})
+    checks.append(
+        {
+            "label": "Agent active",
+            "status": "ok" if agent.get("is_active") else "blocked",
+        }
+    )
     if workspace:
         if workspace.get("is_active"):
             checks.append({"label": "Workspace active", "status": "ok"})
@@ -2840,20 +2929,31 @@ def _agent_setup_access_model(
             checks.append({"label": "Workspace read-only access", "status": "warning"})
         else:
             checks.append({"label": "No workspace access", "status": "blocked"})
-            checks.append({"label": "Recommended: add workspace scope to agent", "status": "warning"})
+            checks.append(
+                {
+                    "label": "Recommended: add workspace scope to agent",
+                    "status": "warning",
+                }
+            )
     else:
         checks.append({"label": "No workspace selected", "status": "info"})
 
     can_read_user = enforcer.can_read(user_scope)
     can_write_user = enforcer.can_write(user_scope)
     if can_read_user and can_write_user:
-        checks.append({"label": "User preference read/write access", "status": "warning"})
-        checks.append({"label": "Warning: user-scope write access granted", "status": "warning"})
+        checks.append(
+            {"label": "User preference read/write access", "status": "warning"}
+        )
+        checks.append(
+            {"label": "Warning: user-scope write access granted", "status": "warning"}
+        )
     elif can_read_user:
         checks.append({"label": "User preference read access", "status": "ok"})
     else:
         checks.append({"label": "No user preference access", "status": "warning"})
-        checks.append({"label": "Recommended: add user scope to agent", "status": "warning"})
+        checks.append(
+            {"label": "Recommended: add user scope to agent", "status": "warning"}
+        )
 
     if enforcer.can_read(agent_scope) and enforcer.can_write(agent_scope):
         checks.append({"label": "Agent private scope", "status": "ok"})
@@ -2872,7 +2972,12 @@ def _agent_setup_access_model(
     else:
         checks.append({"label": "Activity tracking (limited)", "status": "warning"})
 
-    checks.append({"label": "Scope model: global agent scopes, not per-workspace", "status": "info"})
+    checks.append(
+        {
+            "label": "Scope model: global agent scopes, not per-workspace",
+            "status": "info",
+        }
+    )
     recommended_read = read_scopes + [agent_scope, user_scope]
     recommended_write = write_scopes + [agent_scope]
     if workspace_scope:
@@ -2927,11 +3032,17 @@ async def preview_agent_setup(
             return error_response("FORBIDDEN", "Access denied", 403)
 
     agents = list_agents() if is_admin else list_agents(owner_user_id=current_user_id)
-    agent = next((a for a in agents if a["id"] == body.agent_id and a.get("is_active")), None)
+    agent = next(
+        (a for a in agents if a["id"] == body.agent_id and a.get("is_active")), None
+    )
     if not agent:
         return error_response("NOT_FOUND", "Agent not found", 404)
     if not _agent_user_matches(agent, body.user_id):
-        return error_response("AGENT_USER_MISMATCH", "Agents are tied to one owner/default user. Create a separate agent for this user and share workspace access through workspace scopes.", 400)
+        return error_response(
+            "AGENT_USER_MISMATCH",
+            "Agents are tied to one owner/default user. Create a separate agent for this user and share workspace access through workspace scopes.",
+            400,
+        )
 
     access_checks, recommended = _agent_setup_access_model(
         agent=agent,
@@ -2952,12 +3063,16 @@ async def preview_agent_setup(
         )
         outputs[output_type] = output
 
-    return success_response({
-        "recommended_scopes": recommended,
-        "access_checks": access_checks,
-        "outputs": outputs,
-        "selected_output": outputs.get(body.output_type, outputs.get("instructions", "")),
-    })
+    return success_response(
+        {
+            "recommended_scopes": recommended,
+            "access_checks": access_checks,
+            "outputs": outputs,
+            "selected_output": outputs.get(
+                body.output_type, outputs.get("instructions", "")
+            ),
+        }
+    )
 
 
 @router.post("/api/agent-setup/generate-connection")
@@ -3004,15 +3119,23 @@ async def generate_agent_connection(
     if not agent:
         return error_response("NOT_FOUND", "Agent not found", 404)
     if not agent.get("is_active"):
-        return error_response("AGENT_INACTIVE", "Cannot generate config for inactive agent", 400)
+        return error_response(
+            "AGENT_INACTIVE", "Cannot generate config for inactive agent", 400
+        )
     if not is_admin and agent.get("owner_user_id") != current_user_id:
         return error_response("FORBIDDEN", "Access denied", 403)
     if not _agent_user_matches(agent, body.user_id):
-        return error_response("AGENT_USER_MISMATCH", "Agents are tied to one owner/default user. Create a separate agent for this user and share workspace access through workspace scopes.", 400)
+        return error_response(
+            "AGENT_USER_MISMATCH",
+            "Agents are tied to one owner/default user. Create a separate agent for this user and share workspace access through workspace scopes.",
+            400,
+        )
 
     api_key = agent_service.rotate_agent_key(agent["id"])
     if not api_key:
-        return error_response("AGENT_INACTIVE", "Cannot rotate key for inactive agent", 400)
+        return error_response(
+            "AGENT_INACTIVE", "Cannot rotate key for inactive agent", 400
+        )
 
     output_label, output = _build_agent_setup_output(
         user=user,
@@ -3039,16 +3162,25 @@ async def generate_agent_connection(
         },
     )
 
-    filename = next((f for v, _l, f in _agent_setup_output_options(body.target) if v == body.output_type), "agent-core-output.txt")
-    return success_response({
-        "agent_id": agent["id"],
-        "output_type": body.output_type,
-        "output_label": output_label,
-        "filename": filename,
-        "output": output,
-        "api_key": api_key,
-        "warning": "This key is shown once. Generating again rotates the agent key and invalidates the previous key.",
-    })
+    filename = next(
+        (
+            f
+            for v, _l, f in _agent_setup_output_options(body.target)
+            if v == body.output_type
+        ),
+        "agent-core-output.txt",
+    )
+    return success_response(
+        {
+            "agent_id": agent["id"],
+            "output_type": body.output_type,
+            "output_label": output_label,
+            "filename": filename,
+            "output": output,
+            "api_key": api_key,
+            "warning": "This key is shown once. Generating again rotates the agent key and invalidates the previous key.",
+        }
+    )
 
 
 @router.get("/agent-setup")
@@ -3073,15 +3205,24 @@ async def agent_setup_page(
     users = []
     with get_db() as conn:
         if is_admin:
-            rows = conn.execute("SELECT id, email, display_name FROM users ORDER BY display_name").fetchall()
+            rows = conn.execute(
+                "SELECT id, email, display_name FROM users ORDER BY display_name"
+            ).fetchall()
         else:
             rows = conn.execute(
                 "SELECT id, email, display_name FROM users WHERE id = ?",
                 (current_user_id,),
             ).fetchall()
-    users = [{"id": r["id"], "email": r["email"], "display_name": r["display_name"]} for r in rows]
+    users = [
+        {"id": r["id"], "email": r["email"], "display_name": r["display_name"]}
+        for r in rows
+    ]
 
-    workspaces = workspace_service.list_workspaces() if is_admin else workspace_service.list_workspaces(owner_user_id=current_user_id)
+    workspaces = (
+        workspace_service.list_workspaces()
+        if is_admin
+        else workspace_service.list_workspaces(owner_user_id=current_user_id)
+    )
     project_options = "".join(
         f'<option value="{p["id"]}" {"selected" if p["id"] == workspace_id else ""}>{escape_html(p["name"])}</option>'
         for p in workspaces
@@ -3099,7 +3240,9 @@ async def agent_setup_page(
         for u in users
     )
 
-    output_options = [(v, label) for v, label, _filename in _agent_setup_output_options(target)]
+    output_options = [
+        (v, label) for v, label, _filename in _agent_setup_output_options(target)
+    ]
 
     access_checks = []
     generated_output = ""
@@ -3109,7 +3252,11 @@ async def agent_setup_page(
 
     if agent_id:
         agent = visible_agents.get(agent_id)
-        workspace = next((p for p in workspaces if p["id"] == workspace_id), None) if workspace_id else None
+        workspace = (
+            next((p for p in workspaces if p["id"] == workspace_id), None)
+            if workspace_id
+            else None
+        )
         user = next((u for u in users if u["id"] == user_id), None)
 
         if agent and agent.get("is_active"):
@@ -3120,7 +3267,9 @@ async def agent_setup_page(
             access_checks.append({"label": "Agent not found", "status": "blocked"})
 
         if not workspace_id:
-            access_checks.append({"label": "Workspace optional for this output", "status": "info"})
+            access_checks.append(
+                {"label": "Workspace optional for this output", "status": "info"}
+            )
         elif workspace and workspace.get("is_active"):
             access_checks.append({"label": "Workspace active", "status": "ok"})
         elif workspace:
@@ -3151,8 +3300,18 @@ async def agent_setup_page(
     if access_checks:
         checks_html = "<div class='access-checks'>"
         for check in access_checks:
-            cls = {"ok": "check-ok", "warning": "check-warn", "blocked": "check-blocked", "info": "check-info"}[check["status"]]
-            icon = {"ok": "&#10003;", "warning": "&#9888;", "blocked": "&#10007;", "info": "&#8505;"}[check["status"]]
+            cls = {
+                "ok": "check-ok",
+                "warning": "check-warn",
+                "blocked": "check-blocked",
+                "info": "check-info",
+            }[check["status"]]
+            icon = {
+                "ok": "&#10003;",
+                "warning": "&#9888;",
+                "blocked": "&#10007;",
+                "info": "&#8505;",
+            }[check["status"]]
             checks_html += f"<div class='{cls}'><span class='check-icon'>{icon}</span>{escape_html(check['label'])}</div>"
         checks_html += "</div>"
         if any(c["status"] == "warning" for c in access_checks):
@@ -3161,18 +3320,34 @@ async def agent_setup_page(
         agent_scope = f"agent:{agent_id}"
         workspace_scope = f"workspace:{workspace_id}" if workspace_id else ""
         user_scope = f"user:{user_id}"
-        current_read = parse_scopes(agent.get("read_scopes_json", "[]")) if agent else []
-        current_write = parse_scopes(agent.get("write_scopes_json", "[]")) if agent else []
+        current_read = (
+            parse_scopes(agent.get("read_scopes_json", "[]")) if agent else []
+        )
+        current_write = (
+            parse_scopes(agent.get("write_scopes_json", "[]")) if agent else []
+        )
         rec_read_default = current_read + [agent_scope, user_scope]
         rec_write_default = current_write + [agent_scope]
         if workspace_scope:
             rec_read_default.append(workspace_scope)
             rec_write_default.append(workspace_scope)
-        rec_read = recommended_scopes["read"] if recommended_scopes is not None else list(set(rec_read_default))
-        rec_write = recommended_scopes["write"] if recommended_scopes is not None else list(set(rec_write_default))
+        rec_read = (
+            recommended_scopes["read"]
+            if recommended_scopes is not None
+            else list(set(rec_read_default))
+        )
+        rec_write = (
+            recommended_scopes["write"]
+            if recommended_scopes is not None
+            else list(set(rec_write_default))
+        )
 
-        rec_read_display = ", ".join(f"<code>{s}</code>" for s in sorted(rec_read) if s not in current_read)
-        rec_write_display = ", ".join(f"<code>{s}</code>" for s in sorted(rec_write) if s not in current_write)
+        rec_read_display = ", ".join(
+            f"<code>{s}</code>" for s in sorted(rec_read) if s not in current_read
+        )
+        rec_write_display = ", ".join(
+            f"<code>{s}</code>" for s in sorted(rec_write) if s not in current_write
+        )
 
         if rec_read_display or rec_write_display:
             recommended_html = f"""
@@ -3208,19 +3383,31 @@ async def agent_setup_page(
         "agent_id": agent_id,
     }
     from urllib.parse import urlencode
+
     for value, label, _filename in _agent_setup_output_options(target):
         params = dict(current_params)
         params["output_type"] = value
         active = "active" if value == output_type else ""
         output_tabs += f'<a class="setup-tab {active}" href="/agent-setup?{urlencode(params)}">{escape_html(label)}</a>\n'
-    filename = next((f for v, _l, f in _agent_setup_output_options(target) if v == output_type), "agent-core-output.txt")
+    filename = next(
+        (f for v, _l, f in _agent_setup_output_options(target) if v == output_type),
+        "agent-core-output.txt",
+    )
 
     if generated_output:
-        output_display = f"<pre class='output-block'>{escape_html(generated_output)}</pre>"
+        output_display = (
+            f"<pre class='output-block'>{escape_html(generated_output)}</pre>"
+        )
         copy_btn = "<button type='button' class='btn btn-sm btn-secondary' onclick=\"copyGeneratedOutput(this)\">Copy</button>"
         download_btn = f"<button type='button' class='btn btn-sm btn-secondary' onclick=\"downloadCurrentOutput('{escape_html(filename)}')\">Download</button>"
-        regenerate_btn = "<button type='submit' class='btn btn-sm btn-secondary'>Regenerate</button>"
-        connection_label = "Generate One-Time Key + MCP Config" if output_type == "mcp_json" else "Generate One-Time Key + Environment Variables"
+        regenerate_btn = (
+            "<button type='submit' class='btn btn-sm btn-secondary'>Regenerate</button>"
+        )
+        connection_label = (
+            "Generate One-Time Key + MCP Config"
+            if output_type == "mcp_json"
+            else "Generate One-Time Key + Environment Variables"
+        )
         connection_btn = (
             f"<button type='button' class='btn btn-sm btn-warning' id='generate-connection-btn' data-label='{escape_html(connection_label)}' onclick='generateConnectionConfig()'>{escape_html(connection_label)}</button>"
             if output_type in ("env", "mcp_json")
@@ -3247,9 +3434,19 @@ async def agent_setup_page(
       </div>
     """
 
-    access_check_section = f'<div class="form-section"><h2>Access Check</h2>{checks_html}</div>' if checks_html else ""
-    destination_section = f'<div class="form-section"><h2>Destination</h2><p>{destination_guidance}</p></div>' if destination_guidance else ""
-    output_label_html = f"<div class='output-label'>{output_label}</div>" if output_label else ""
+    access_check_section = (
+        f'<div class="form-section"><h2>Access Check</h2>{checks_html}</div>'
+        if checks_html
+        else ""
+    )
+    destination_section = (
+        f'<div class="form-section"><h2>Destination</h2><p>{destination_guidance}</p></div>'
+        if destination_guidance
+        else ""
+    )
+    output_label_html = (
+        f"<div class='output-label'>{output_label}</div>" if output_label else ""
+    )
 
     body = f"""
     <div class="page-header setup-page-header">
@@ -3316,7 +3513,9 @@ async def agent_setup_page(
     </div>
     """
 
-    return render_page("Integrations", body, "/agent-setup", _agent_setup_extra_js(), session=session)
+    return render_page(
+        "Integrations", body, "/agent-setup", _agent_setup_extra_js(), session=session
+    )
 
 
 def _agent_setup_extra_js():
@@ -3526,20 +3725,49 @@ def _build_agent_setup_output(
     agent_scope = f"agent:{agent['id']}"
     agent_display = agent.get("display_name", agent["id"])
     user_display = user.get("display_name", user.get("email", user["id"]))
-    workspace_name = workspace.get("name", workspace["id"]) if workspace else "No workspace selected"
+    workspace_name = (
+        workspace.get("name", workspace["id"]) if workspace else "No workspace selected"
+    )
 
     if output_type == "instructions":
         label = "Instructions"
-        content = _build_user_instructions(target, base_url, user_scope, workspace_scope, agent_scope, agent_display, user_display, workspace_name)
+        content = _build_user_instructions(
+            target,
+            base_url,
+            user_scope,
+            workspace_scope,
+            agent_scope,
+            agent_display,
+            user_display,
+            workspace_name,
+        )
     elif output_type == "session":
         label = "Session Prompt"
-        content = _build_session_prompt(target, base_url, user_scope, workspace_scope, agent_scope, agent_display, user_display, workspace_name)
+        content = _build_session_prompt(
+            target,
+            base_url,
+            user_scope,
+            workspace_scope,
+            agent_scope,
+            agent_display,
+            user_display,
+            workspace_name,
+        )
     elif output_type == "claude_md":
         label = "CLAUDE.md — paste into workspace repository root"
-        content = _build_claude_md(base_url, user_scope, workspace_scope, agent_scope, agent_display, workspace_name)
+        content = _build_claude_md(
+            base_url,
+            user_scope,
+            workspace_scope,
+            agent_scope,
+            agent_display,
+            workspace_name,
+        )
     elif output_type == "agents_md":
         label = "AGENTS.md — paste into workspace repository root"
-        content = _build_agents_md(base_url, user_scope, workspace_scope, agent_scope, workspace_name)
+        content = _build_agents_md(
+            base_url, user_scope, workspace_scope, agent_scope, workspace_name
+        )
     elif output_type == "mcp_json":
         label = "MCP Config"
         content = _build_mcp_json(base_url, api_key)
@@ -3551,7 +3779,9 @@ def _build_agent_setup_output(
         content = _build_windsurf_mcp_json(base_url, api_key)
     elif output_type == "env":
         label = "Environment Variables"
-        content = _build_env_vars(base_url, agent["id"], user_scope, workspace_scope, api_key)
+        content = _build_env_vars(
+            base_url, agent["id"], user_scope, workspace_scope, api_key
+        )
     else:
         label = "Verification Prompt"
         content = _build_verification_prompt(default_scope)
@@ -3559,12 +3789,25 @@ def _build_agent_setup_output(
     return label, content
 
 
-def _build_instructions(target, base_url, user_scope, workspace_scope, agent_scope, agent_display, user_display, workspace_name):
+def _build_instructions(
+    target,
+    base_url,
+    user_scope,
+    workspace_scope,
+    agent_scope,
+    agent_display,
+    user_display,
+    workspace_name,
+):
     scope_guide = ""
     tool_tips = ""
     default_scope = workspace_scope or user_scope
     workspace_scope_label = workspace_scope or "No workspace scope selected"
-    workspace_context_line = f"- Use `{workspace_scope}` for workspace facts, decisions, implementation notes, bugs, and architecture." if workspace_scope else f"- No workspace selected. Use `{user_scope}` for user-level context and `{agent_scope}` for private scratch context."
+    workspace_context_line = (
+        f"- Use `{workspace_scope}` for workspace facts, decisions, implementation notes, bugs, and architecture."
+        if workspace_scope
+        else f"- No workspace selected. Use `{user_scope}` for user-level context and `{agent_scope}` for private scratch context."
+    )
     if target == "claude_code":
         scope_guide = f"{workspace_context_line}\n- Use `{user_scope}` only for stable preferences or personal working context.\n- Use `{agent_scope}` only for private scratch context."
         tool_tips = f"""## Claude Code Tips
@@ -3652,7 +3895,16 @@ Do not commit API keys to workspace files.
 """
 
 
-def _build_user_instructions(target, base_url, user_scope, workspace_scope, agent_scope, agent_display, user_display, workspace_name):
+def _build_user_instructions(
+    target,
+    base_url,
+    user_scope,
+    workspace_scope,
+    agent_scope,
+    agent_display,
+    user_display,
+    workspace_name,
+):
     workspace_line = (
         f"This setup is workspace-aware. Generated prompts use `{workspace_scope}` for workspace memory."
         if workspace_scope
@@ -3698,7 +3950,16 @@ Use the full prefixed scope names exactly as shown. Do not use plain workspace I
 """
 
 
-def _build_session_prompt(target, base_url, user_scope, workspace_scope, agent_scope, agent_display, user_display, workspace_name):
+def _build_session_prompt(
+    target,
+    base_url,
+    user_scope,
+    workspace_scope,
+    agent_scope,
+    agent_display,
+    user_display,
+    workspace_name,
+):
     default_scope = workspace_scope or user_scope
     tool_line = {
         "claude_code": "You are Claude Code.",
@@ -3722,12 +3983,15 @@ Start by confirming you can reach Agent Core at {base_url}/mcp, then search `{de
 """
 
 
-def _build_claude_md(base_url, user_scope, workspace_scope, agent_scope, agent_display, workspace_name):
-    default_scope = workspace_scope or "the authenticated/default user scope from your Agent Core connection"
-    workspace_scope_label = workspace_scope or "No workspace scope selected"
-    private_scope_guidance = (
-        "Use your authenticated Agent Core private scope, usually `agent:<your-agent-id>`, only for tool-specific scratch context."
+def _build_claude_md(
+    base_url, user_scope, workspace_scope, agent_scope, agent_display, workspace_name
+):
+    default_scope = (
+        workspace_scope
+        or "the authenticated/default user scope from your Agent Core connection"
     )
+    workspace_scope_label = workspace_scope or "No workspace scope selected"
+    private_scope_guidance = "Use your authenticated Agent Core private scope, usually `agent:<your-agent-id>`, only for tool-specific scratch context."
     return f"""# Agent Core Workspace Context
 
 You are working on the {workspace_name} workspace.
@@ -3785,8 +4049,13 @@ Send `activity_update` heartbeats every 1–2 minutes while working on a task.
 """
 
 
-def _build_agents_md(base_url, user_scope, workspace_scope, agent_scope, workspace_name):
-    default_scope = workspace_scope or "the authenticated/default user scope from your Agent Core connection"
+def _build_agents_md(
+    base_url, user_scope, workspace_scope, agent_scope, workspace_name
+):
+    default_scope = (
+        workspace_scope
+        or "the authenticated/default user scope from your Agent Core connection"
+    )
     workspace_scope_label = workspace_scope or "No workspace scope selected"
     return f"""# Agent Core Workspace Context
 
@@ -3836,28 +4105,34 @@ def _connection_key_value(api_key=None):
 def _build_mcp_json(base_url, api_key=None):
     key = _connection_key_value(api_key)
     codex_auth = f'http_headers = {{ Authorization = "Bearer {key}" }}'
-    generic_json = json.dumps({
-        "mcpServers": {
-            "agent-core": {
-                "url": f"{base_url}/mcp",
-                "headers": {
-                    "Authorization": f"Bearer {key}",
+    generic_json = json.dumps(
+        {
+            "mcpServers": {
+                "agent-core": {
+                    "url": f"{base_url}/mcp",
+                    "headers": {
+                        "Authorization": f"Bearer {key}",
+                    },
                 },
             },
         },
-    }, indent=2)
-    opencode_json = json.dumps({
-        "mcp": {
-            "agent-core": {
-                "type": "remote",
-                "url": f"{base_url}/mcp",
-                "enabled": True,
-                "headers": {
-                    "Authorization": f"Bearer {key}",
+        indent=2,
+    )
+    opencode_json = json.dumps(
+        {
+            "mcp": {
+                "agent-core": {
+                    "type": "remote",
+                    "url": f"{base_url}/mcp",
+                    "enabled": True,
+                    "headers": {
+                        "Authorization": f"Bearer {key}",
+                    },
                 },
             },
         },
-    }, indent=2)
+        indent=2,
+    )
     return f"""# Codex CLI: add this to ~/.codex/config.toml
 [mcp_servers.agent-core]
 url = "{base_url}/mcp"

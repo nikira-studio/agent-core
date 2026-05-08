@@ -128,6 +128,7 @@ def create_app() -> FastAPI:
     app.include_router(briefings_router, tags=["briefings"])
     app.include_router(mcp_router, tags=["mcp"])
     app.include_router(connector_router, tags=["connector_bindings"])
+    app.include_router(connectors_page_router, tags=["connectors_page"])
     app.include_router(dashboard_api_router, tags=["dashboard_api"])
     app.include_router(backup_router, tags=["backup"])
     app.include_router(dashboard_router, prefix="", tags=["dashboard"])

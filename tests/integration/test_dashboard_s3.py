@@ -4,6 +4,7 @@ import pytest
 @pytest.fixture
 def admin_client(test_client, clean_db):
     from app.services.auth_service import create_user, create_session
+
     create_user("admin", "admin@test.local", "testpassword123", "Admin", "admin")
     session = create_session("admin", channel="dashboard")
     test_client.cookies.set("session_token", session["session_id"])
@@ -13,6 +14,7 @@ def admin_client(test_client, clean_db):
 @pytest.fixture
 def user_client(test_client, clean_db):
     from app.services.auth_service import create_user, create_session
+
     create_user("admin", "admin@test.local", "testpassword123", "Admin", "admin")
     create_user("user1", "user1@test.local", "testpassword123", "User One", "user")
     session = create_session("user1", channel="dashboard")
@@ -28,7 +30,7 @@ class TestMemoryPage:
     def test_memory_detail_modal_present(self, admin_client):
         r = admin_client.get("/memory")
         assert 'id="memory-detail-modal"' in r.text
-        assert 'viewMemory' in r.text
+        assert "viewMemory" in r.text
 
     def test_memory_write_modal_present(self, admin_client):
         r = admin_client.get("/memory")
@@ -36,41 +38,12 @@ class TestMemoryPage:
 
     def test_memory_detail_button_in_table(self, admin_client):
         r = admin_client.get("/memory")
-        assert 'Detail' in r.text
+        assert "Detail" in r.text
 
     def test_memory_supersession_chain_section(self, admin_client):
         r = admin_client.get("/memory")
-        assert 'mem-detail-chain' in r.text
-        assert 'showChain' in r.text
-
-
-class TestVaultPage:
-    def test_vault_page_loads(self, admin_client):
-        r = admin_client.get("/vault")
-        assert r.status_code == 200
-
-    def test_vault_detail_action_removed_in_favor_of_edit(self, admin_client):
-        r = admin_client.get("/vault")
-        assert 'id="vault-detail-modal"' not in r.text
-        assert 'viewVault' not in r.text
-
-    def test_vault_edit_modal_present(self, admin_client):
-        r = admin_client.get("/vault")
-        assert 'id="edit-vault-modal"' in r.text
-        assert 'editVault' in r.text
-
-    def test_vault_reveal_modal_present(self, admin_client):
-        r = admin_client.get("/vault")
-        assert 'id="reveal-vault-modal"' in r.text
-
-    def test_vault_page_has_edit_not_duplicate_detail(self, admin_client):
-        r = admin_client.get("/vault")
-        assert 'Edit' in r.text
-        assert 'Detail' not in r.text
-
-    def test_vault_create_modal_present(self, admin_client):
-        r = admin_client.get("/vault")
-        assert 'id="create-vault-modal"' in r.text
+        assert "mem-detail-chain" in r.text
+        assert "showChain" in r.text
 
 
 class TestAgentsPage:
@@ -87,33 +60,33 @@ class TestAgentsPage:
 
         create_agent("owneragent", "Owner Agent", "admin")
         r = admin_client.get("/agents")
-        assert 'Owner:' in r.text
+        assert "Owner:" in r.text
 
     def test_agents_table_shows_default_user_metadata(self, admin_client):
         from app.services.agent_service import create_agent
 
         create_agent("defaultagent", "Default Agent", "admin")
         r = admin_client.get("/agents")
-        assert 'Default user:' in r.text
+        assert "Default user:" in r.text
 
     def test_agents_table_shows_access_summary_not_dead_scope_field(self, admin_client):
         r = admin_client.get("/agents")
-        assert '<th>Access</th>' in r.text
-        assert '<th>Scope</th>' not in r.text
+        assert "<th>Access</th>" in r.text
+        assert "<th>Scope</th>" not in r.text
         assert "a.get('scope'" not in r.text
 
     def test_agents_page_uses_task_based_access_copy(self, admin_client):
         r = admin_client.get("/agents")
-        assert 'Scope Guide' not in r.text
-        assert 'Agent Access' in r.text
-        assert 'Can Read From' in r.text
-        assert 'Can Write To' in r.text
-        assert 'private workspace' in r.text
+        assert "Scope Guide" not in r.text
+        assert "Agent Access" in r.text
+        assert "Can Read From" in r.text
+        assert "Can Write To" in r.text
+        assert "private workspace" in r.text
 
     def test_agents_edit_modal_shows_owner_and_default_user(self, admin_client):
         r = admin_client.get("/agents")
-        assert 'edit-owner' in r.text
-        assert 'edit-default-user' in r.text
+        assert "edit-owner" in r.text
+        assert "edit-default-user" in r.text
 
     def test_agents_create_handler_uses_scope_checkboxes(self, admin_client):
         r = admin_client.get("/agents")
@@ -124,7 +97,10 @@ class TestAgentsPage:
         assert "Failed to create agent" in r.text
         assert "errorBox.textContent = message" in r.text
         assert "function normalizeAgentId" in r.text
-        assert "const agentId = normalizeAgentId(document.getElementById('ca-id').value)" in r.text
+        assert (
+            "const agentId = normalizeAgentId(document.getElementById('ca-id').value)"
+            in r.text
+        )
         assert "const privateScope = 'agent:' + agentId" in r.text
 
     def test_agents_edit_hides_and_preserves_own_scope(self, admin_client):
@@ -135,7 +111,9 @@ class TestAgentsPage:
         assert "body.read_scopes.push(ownScope)" in r.text
         assert "body.write_scopes.push(ownScope)" in r.text
 
-    def test_non_admin_agent_page_uses_projects_for_collaboration_not_user_scope_assignment(self, user_client):
+    def test_non_admin_agent_page_uses_projects_for_collaboration_not_user_scope_assignment(
+        self, user_client
+    ):
         r = user_client.get("/agents")
         assert r.status_code == 200
         assert 'data-scope="user:user1"' not in r.text
@@ -180,8 +158,8 @@ class TestWorkspacesPage:
 
     def test_projects_table_has_agents_column(self, admin_client):
         r = admin_client.get("/workspaces")
-        assert '<th>Agents (Read/Write)</th>' in r.text
-        assert 'Grant agent read or write access from Agents -> Edit.' in r.text
+        assert "<th>Agents (Read/Write)</th>" in r.text
+        assert "Grant agent read or write access from Agents -> Edit." in r.text
 
     def test_projects_agent_access_display(self, admin_client):
         from app.services.workspace_service import create_workspace
@@ -197,10 +175,10 @@ class TestWorkspacesPage:
         )
 
         r = admin_client.get("/workspaces")
-        assert 'projectagent' in r.text
-        assert 'agent-access-cell' in r.text
-        assert 'access-label' in r.text
-        assert 'scope-write' in r.text
+        assert "projectagent" in r.text
+        assert "agent-access-cell" in r.text
+        assert "access-label" in r.text
+        assert "scope-write" in r.text
 
 
 class TestActivityPage:
@@ -210,17 +188,17 @@ class TestActivityPage:
 
     def test_activity_filter_bar_present(self, admin_client):
         r = admin_client.get("/activity")
-        assert 'status-filter' in r.text
-        assert 'filterActivity' in r.text
+        assert "status-filter" in r.text
+        assert "filterActivity" in r.text
 
     def test_activity_reassign_modal_present(self, admin_client):
         r = admin_client.get("/activity")
         assert 'id="reassign-modal"' in r.text
-        assert 'reassignActivity' in r.text
+        assert "reassignActivity" in r.text
 
     def test_activity_reassign_button_in_table(self, admin_client):
         r = admin_client.get("/activity")
-        assert 'Reassign' in r.text
+        assert "Reassign" in r.text
 
     def test_activity_create_sends_assigned_agent_id(self, admin_client):
         r = admin_client.get("/activity")
@@ -230,16 +208,16 @@ class TestActivityPage:
 
     def test_memory_page_clarifies_scope_and_confidence(self, admin_client):
         r = admin_client.get("/memory")
-        assert 'Personal user memory' in r.text
-        assert 'Personal user memory (user:admin)' in r.text
-        assert '{user_scope' not in r.text
-        assert '{user_scope_label' not in r.text
-        assert 'mem-search-domain' in r.text
-        assert 'mem-search-topic' in r.text
-        assert 'mem-min-confidence' in r.text
-        assert 'Search uses scope permissions first' in r.text
-        assert 'Optional exact-match search filter' in r.text
-        assert '<th>Confidence</th>' in r.text
+        assert "Personal user memory" in r.text
+        assert "Personal user memory (user:admin)" in r.text
+        assert "{user_scope" not in r.text
+        assert "{user_scope_label" not in r.text
+        assert "mem-search-domain" in r.text
+        assert "mem-search-topic" in r.text
+        assert "mem-min-confidence" in r.text
+        assert "Search uses scope permissions first" in r.text
+        assert "Optional exact-match search filter" in r.text
+        assert "<th>Confidence</th>" in r.text
 
     def test_memory_page_only_offers_workflow_backed_classes(self, admin_client):
         r = admin_client.get("/memory")
@@ -250,7 +228,7 @@ class TestActivityPage:
         assert 'value="profile"' not in r.text
         assert 'value="opinion"' not in r.text
         assert 'value="belief"' not in r.text
-        assert 'can be pruned by maintenance' in r.text
+        assert "can be pruned by maintenance" in r.text
 
     def test_activity_reassign_uses_recovery_endpoint(self, admin_client):
         r = admin_client.get("/activity")
@@ -265,22 +243,22 @@ class TestAuditPage:
 
     def test_audit_filter_bar_present(self, admin_client):
         r = admin_client.get("/audit")
-        assert 'audit-actor-type' in r.text
-        assert 'audit-action' in r.text
-        assert 'audit-resource' in r.text
-        assert 'audit-result' in r.text
+        assert "audit-actor-type" in r.text
+        assert "audit-action" in r.text
+        assert "audit-resource" in r.text
+        assert "audit-result" in r.text
 
     def test_audit_export_csv_button_present(self, admin_client):
         r = admin_client.get("/audit")
-        assert 'exportAuditCsv' in r.text
-        assert 'Export CSV' in r.text
-        assert '/api/dashboard/audit/export' in r.text
+        assert "exportAuditCsv" in r.text
+        assert "Export CSV" in r.text
+        assert "/api/dashboard/audit/export" in r.text
 
     def test_audit_pagination_present(self, admin_client):
         r = admin_client.get("/audit")
-        assert 'pagination' in r.text
-        assert 'Prev' in r.text
-        assert 'Next' in r.text
+        assert "pagination" in r.text
+        assert "Prev" in r.text
+        assert "Next" in r.text
 
     def test_audit_page_requires_admin(self, user_client):
         r = user_client.get("/audit")
@@ -300,7 +278,9 @@ class TestAuditPage:
             resource_type="vault_entry",
             result="success",
         )
-        r = admin_client.get("/api/dashboard/audit/export?action=vault_entry_created&result=success")
+        r = admin_client.get(
+            "/api/dashboard/audit/export?action=vault_entry_created&result=success"
+        )
         assert r.status_code == 200
         assert r.headers["content-type"].startswith("text/csv")
         assert "vault_entry_created" in r.text
@@ -328,43 +308,20 @@ class TestAuditPage:
         assert "<code>memory_write</code>" not in r.text
 
 
-class TestVaultEditModal:
-    def test_vault_edit_shows_scope_and_reference(self, admin_client):
-        r = admin_client.get("/vault")
-        assert 've-scope' in r.text
-        assert 've-ref' in r.text
-
-    def test_vault_edit_can_replace_value_without_revealing_current_value(self, admin_client):
-        r = admin_client.get("/vault")
-        assert 've-value' in r.text
-        assert 'Leave blank to keep the current encrypted value' in r.text
-
-    def test_vault_scope_copy_explains_user_project_agent_and_shared(self, admin_client):
-        r = admin_client.get("/vault")
-        assert 'Personal user credentials' in r.text
-        assert 'Workspace credentials' in r.text
-        assert 'Agent credentials' in r.text
-        assert 'Shared is a broad system scope' in r.text
-
-    def test_vault_edit_shows_created_by(self, admin_client):
-        r = admin_client.get("/vault")
-        assert 've-created-by' in r.text
-
-
 class TestMemoryDetailModal:
     def test_memory_detail_shows_content(self, admin_client):
         r = admin_client.get("/memory")
-        assert 'mem-detail-content' in r.text
+        assert "mem-detail-content" in r.text
 
     def test_memory_detail_shows_scope(self, admin_client):
         r = admin_client.get("/memory")
-        assert 'mem-detail-scope' in r.text
+        assert "mem-detail-scope" in r.text
 
     def test_memory_detail_shows_confidence(self, admin_client):
         r = admin_client.get("/memory")
-        assert 'mem-detail-confidence' in r.text
+        assert "mem-detail-confidence" in r.text
 
     def test_memory_detail_shows_supersession_info(self, admin_client):
         r = admin_client.get("/memory")
-        assert 'mem-detail-supersede' in r.text
-        assert 'mem-chain-content' in r.text
+        assert "mem-detail-supersede" in r.text
+        assert "mem-chain-content" in r.text

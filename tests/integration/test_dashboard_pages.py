@@ -13,7 +13,15 @@ def authenticated_client(test_client, clean_db):
 
 
 def test_dashboard_pages_load_with_static_assets(authenticated_client):
-    pages_to_check = ["/", "/memory", "/vault", "/activity", "/agents", "/workspaces", "/settings"]
+    pages_to_check = [
+        "/",
+        "/memory",
+        "/connectors",
+        "/activity",
+        "/agents",
+        "/workspaces",
+        "/settings",
+    ]
 
     for page in pages_to_check:
         r = authenticated_client.get(page)
@@ -21,7 +29,9 @@ def test_dashboard_pages_load_with_static_assets(authenticated_client):
         html = r.text
         assert 'href="/static/css/dashboard.css' in html, f"{page} missing CSS link"
         assert 'src="/static/js/dashboard.js' in html, f"{page} missing JS link"
-        assert 'href="/static/img/favicon/favicon.ico"' in html, f"{page} missing favicon link"
+        assert 'href="/static/img/favicon/favicon.ico"' in html, (
+            f"{page} missing favicon link"
+        )
         assert 'src="/static/img/logo.png"' in html, f"{page} missing logo"
 
 
@@ -74,7 +84,7 @@ def test_dashboard_nav_order_and_admin_audit_placement(authenticated_client):
         '<a href="/agents" class=""><span>Agents</span></a>',
         '<a href="/workspaces" class=""><span>Workspaces</span></a>',
         '<a href="/memory" class=""><span>Memory</span></a>',
-        '<a href="/vault" class=""><span>Vault</span></a>',
+        '<a href="/connectors" class=""><span>Connectors</span></a>',
         '<a href="/agent-setup" class=""><span>Integration</span></a>',
         '<a href="/activity" class=""><span>Activity</span></a>',
         '<a href="/settings" class=""><span>Settings</span></a>',
@@ -90,4 +100,6 @@ def test_dashboard_no_inline_styles_in_render_page(authenticated_client):
     assert r.status_code == 200
     html = r.text
     assert "<style>" not in html, "Inline <style> tag found - CSS should be external"
-    assert "<script>" not in html or "</script>" in html, "Inline scripts should be external"
+    assert "<script>" not in html or "</script>" in html, (
+        "Inline scripts should be external"
+    )
