@@ -60,6 +60,17 @@ def clean_db(test_db_path):
         settings.DATA_PATH = _original_settings.pop("DATA_PATH")
 
 
+@pytest.fixture(autouse=True)
+def reset_runtime_state():
+    from app.security.rate_limiter import RateLimiter, ConcurrentSearchGuard
+
+    RateLimiter.reset()
+    ConcurrentSearchGuard.reset()
+    yield
+    RateLimiter.reset()
+    ConcurrentSearchGuard.reset()
+
+
 @pytest.fixture(scope="function")
 def test_client(clean_db):
     from fastapi.testclient import TestClient

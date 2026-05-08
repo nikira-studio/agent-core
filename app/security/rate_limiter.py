@@ -85,6 +85,11 @@ class RateLimiter:
                 "reset": bucket.reset_at,
             }
 
+    @classmethod
+    def reset(cls) -> None:
+        with cls._lock:
+            cls._buckets.clear()
+
 
 class ConcurrentSearchGuard:
     _lock = threading.Lock()
@@ -111,6 +116,11 @@ class ConcurrentSearchGuard:
     def get_active(cls, agent_id: str) -> int:
         with cls._lock:
             return cls._active.get(agent_id, 0)
+
+    @classmethod
+    def reset(cls) -> None:
+        with cls._lock:
+            cls._active.clear()
 
 
 RL = RateLimiter
