@@ -15,11 +15,30 @@ class RequestContext:
 
 
 def build_user_context(session: dict) -> RequestContext:
+    from app.services import workspace_service
+    from app.services import connector_service
+
+    user_id = session["user_id"]
+    workspaces = workspace_service.list_workspaces(
+        owner_user_id=user_id, is_active=True
+    )
+    active_workspace_ids = frozenset(w["id"] for w in workspaces)
+    workspace_scopes = [f"workspace:{w['id']}" for w in workspaces]
+
+    all_bindings = connector_service.list_bindings(scope=None, include_all_scopes=True)
+    binding_workspace_ids = frozenset(
+        b["scope"].split(":", 1)[1]
+        for b in all_bindings
+        if b.get("scope", "").startswith("workspace:")
+    )
+    all_active_workspace_ids = active_workspace_ids | binding_workspace_ids
+
     return RequestContext(
         actor_type="user",
-        actor_id=session["user_id"],
-        user_id=session["user_id"],
+        actor_id=user_id,
+        user_id=user_id,
         is_admin=session.get("role") == "admin",
-        read_scopes=[f"user:{session['user_id']}"],
-        write_scopes=[f"user:{session['user_id']}"],
+        read_scopes=[f"user:{user_id}"] + workspace_scopes,
+        write_scopes=[f"user:{user_id}"] + workspace_scopes,
+        active_workspace_ids=all_active_workspace_ids,
     )

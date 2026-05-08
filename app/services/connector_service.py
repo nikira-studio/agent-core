@@ -65,11 +65,12 @@ def list_bindings(
     scope: Optional[str] = None,
     connector_type_id: Optional[str] = None,
     enabled: Optional[bool] = None,
+    include_all_scopes: bool = False,
 ) -> list[dict]:
     with get_db() as conn:
         query = "SELECT cb.*, ct.display_name as connector_display_name FROM connector_bindings cb JOIN connector_types ct ON cb.connector_type_id = ct.id WHERE 1=1"
         params = []
-        if scope:
+        if not include_all_scopes and scope:
             query += " AND cb.scope = ?"
             params.append(scope)
         if connector_type_id:

@@ -3,8 +3,9 @@ import re
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse, Response
 
-from app.security.dependencies import get_current_agent
-from app.security.scope_enforcer import ScopeEnforcer, build_agent_context
+from app.security.dependencies import get_request_context
+from app.security.scope_enforcer import ScopeEnforcer
+from app.security.context import RequestContext
 from app.security.response_helpers import success_response, error_response
 from app.security.pii_detector import contains_pii
 from app.services import (
@@ -283,14 +284,14 @@ def _retrieval_is_degraded(status: dict) -> bool:
 
 
 @router.get("/mcp")
-async def get_mcp_manifest(agent: dict = Depends(get_current_agent)):
+async def get_mcp_manifest(ctx: RequestContext = Depends(get_request_context)):
     return JSONResponse(content=MANIFEST)
 
 
 @router.post("/mcp")
 async def handle_mcp_tool(
     request: Request,
-    agent: dict = Depends(get_current_agent),
+    ctx: RequestContext = Depends(get_request_context),
 ):
     try:
         body = await request.json()
@@ -298,12 +299,12 @@ async def handle_mcp_tool(
         return _mcp_error("INVALID_REQUEST", "Request body must be valid JSON", 400)
 
     if _is_jsonrpc_request(body):
-        return await _handle_mcp_jsonrpc(body, request, agent)
+        return await _handle_mcp_jsonrpc(body, request, ctx)
 
-    return await _handle_custom_mcp_tool(body, agent)
+    return await _handle_custom_mcp_tool(body, ctx)
 
 
-async def _handle_mcp_jsonrpc(body: dict, request: Request, agent: dict):
+async def _handle_mcp_jsonrpc(body: dict, request: Request, ctx: RequestContext):
     request_id = body.get("id")
     method = body.get("method")
 
@@ -339,7 +340,7 @@ async def _handle_mcp_jsonrpc(body: dict, request: Request, agent: dict):
             return _jsonrpc_error(request_id, -32602, "Tool name is required")
 
         custom_response = await _handle_custom_mcp_tool(
-            {"tool": tool_name, "params": arguments}, agent
+            {"tool": tool_name, "params": arguments}, ctx
         )
         payload = _mcp_tool_result_from_custom_response(custom_response)
         is_error = custom_response.status_code >= 400 or not payload.get("ok", False)
@@ -359,8 +360,7 @@ async def _handle_mcp_jsonrpc(body: dict, request: Request, agent: dict):
     return _jsonrpc_error(request_id, -32601, f"Method not found: {method}")
 
 
-async def _handle_custom_mcp_tool(body: dict, agent: dict):
-    ctx = build_agent_context(agent)
+async def _handle_custom_mcp_tool(body: dict, ctx: RequestContext):
     enforcer = ScopeEnforcer(
         ctx.read_scopes,
         ctx.write_scopes,
