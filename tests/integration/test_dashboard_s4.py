@@ -37,13 +37,14 @@ def test_integrations_page_is_agent_setup_workflow(admin_client):
     assert r.status_code == 200
     html = r.text
     assert "<h1>Integrations</h1>" in html
-    assert "Generate user setup steps" in html
+    assert "Generate setup instructions, environment variables, MCP config, and AI-facing prompts for connecting tools to Agent Core." in html
     assert 'action="/agent-setup#generated-output"' in html
     assert 'id="user_id"' in html
     assert 'id="workspace_id"' in html
     assert 'id="agent_id"' in html
     assert 'id="target"' not in html
     assert "setup-tabs" in html
+    assert "Current tool preset:" in html
     assert "CLAUDE.md" in html
     assert "AGENTS.md" in html
 

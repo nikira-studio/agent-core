@@ -292,6 +292,77 @@ class TestConnectorRunEndToEnd:
         assert "SUPERSECRET123TOKEN" not in response_text
         assert "ghp_faketoken" not in response_text
 
+    def test_run_read_repo_success_with_mock(self, test_client, admin_token):
+        from unittest.mock import patch
+
+        vault_r = test_client.post(
+            "/api/vault/entries",
+            headers={"Authorization": f"Bearer {admin_token}"},
+            json={
+                "scope": "workspace:test",
+                "name": "gh-success",
+                "value": "ghp_testtoken",
+            },
+        )
+        vault_entry = vault_r.json()["data"]["entry"]
+
+        binding_r = test_client.post(
+            "/api/connector-bindings",
+            headers={"Authorization": f"Bearer {admin_token}"},
+            json={
+                "connector_type_id": "github",
+                "name": "gh-success-binding",
+                "scope": "workspace:test",
+                "credential_id": vault_entry["id"],
+            },
+        )
+        binding = binding_r.json()["data"]["binding"]
+
+        mock_response = {
+            "full_name": "test/repo",
+            "description": "A test repository",
+            "stargazers_count": 42,
+            "forks_count": 10,
+            "language": "Python",
+            "open_issues_count": 5,
+            "created_at": "2024-01-01T00:00:00Z",
+            "pushed_at": "2024-06-01T00:00:00Z",
+        }
+
+        with patch(
+            "app.connectors.github.GitHubConnector._do",
+            return_value=(200, mock_response),
+        ):
+            r = test_client.post(
+                "/mcp",
+                headers={"Authorization": f"Bearer {admin_token}"},
+                json={
+                    "tool": "connectors_run",
+                    "params": {
+                        "binding_id": binding["id"],
+                        "action": "read_repo",
+                        "params": {"owner": "test", "repo": "repo"},
+                    },
+                },
+            )
+
+        assert r.status_code == 200
+        result = r.json()
+        assert result["ok"] is True
+        assert result["data"]["success"] is True
+        assert result["data"]["repo"]["full_name"] == "test/repo"
+        assert result["data"]["repo"]["stars"] == 42
+        assert result["data"]["repo"]["language"] == "Python"
+
+        from app.services import connector_service
+
+        executions = connector_service.list_executions(binding["id"])
+        assert len(executions) >= 1
+        success_execs = [e for e in executions if e["result_status"] == "success"]
+        assert len(success_execs) >= 1
+        last_exec = success_execs[0]
+        assert last_exec["action"] == "read_repo"
+
 
 class TestConnectorScopeEnforcement:
     def test_agent_cannot_run_binding_outside_read_scopes(
