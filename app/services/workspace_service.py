@@ -45,7 +45,9 @@ def get_workspace_by_id(workspace_id: str) -> Optional[dict]:
         return dict(row) if row else None
 
 
-def list_workspaces(owner_user_id: Optional[str] = None, is_active: Optional[bool] = None) -> list[dict]:
+def list_workspaces(
+    owner_user_id: Optional[str] = None, is_active: Optional[bool] = None
+) -> list[dict]:
     with get_db() as conn:
         query = "SELECT id, name, description, owner_user_id, is_active, created_at FROM workspaces WHERE 1=1"
         params = []
@@ -62,8 +64,22 @@ def list_workspaces(owner_user_id: Optional[str] = None, is_active: Optional[boo
         return [dict(row) for row in cursor.fetchall()]
 
 
+def get_workspace_ids_with_bindings() -> frozenset[str]:
+    with get_db() as conn:
+        rows = conn.execute(
+            "SELECT DISTINCT scope FROM connector_bindings WHERE scope LIKE 'workspace:%'",
+        ).fetchall()
+        return frozenset(
+            scope.split(":", 1)[1]
+            for row in rows
+            if (scope := row["scope"]).startswith("workspace:")
+        )
+
+
 def get_active_workspace_ids(workspace_ids: Iterable[str]) -> frozenset[str]:
-    normalized_ids = [normalize_id(workspace_id) for workspace_id in workspace_ids if workspace_id]
+    normalized_ids = [
+        normalize_id(workspace_id) for workspace_id in workspace_ids if workspace_id
+    ]
     if not normalized_ids:
         return frozenset()
 

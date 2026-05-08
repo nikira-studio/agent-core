@@ -3,7 +3,7 @@ import re
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse, Response
 
-from app.security.dependencies import get_request_context
+from app.security.dependencies import get_request_context, get_mcp_request_context
 from app.security.scope_enforcer import ScopeEnforcer
 from app.security.context import RequestContext
 from app.security.response_helpers import success_response, error_response
@@ -284,14 +284,14 @@ def _retrieval_is_degraded(status: dict) -> bool:
 
 
 @router.get("/mcp")
-async def get_mcp_manifest(ctx: RequestContext = Depends(get_request_context)):
+async def get_mcp_manifest(ctx: RequestContext = Depends(get_mcp_request_context)):
     return JSONResponse(content=MANIFEST)
 
 
 @router.post("/mcp")
 async def handle_mcp_tool(
     request: Request,
-    ctx: RequestContext = Depends(get_request_context),
+    ctx: RequestContext = Depends(get_mcp_request_context),
 ):
     try:
         body = await request.json()
