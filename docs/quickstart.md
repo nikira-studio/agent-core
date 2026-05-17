@@ -138,8 +138,6 @@ You should see:
 
 If you get a `401`, you're using the wrong key — make sure it's the agent API key, not your dashboard password. A connection error means Agent Core isn't running on port 3500.
 
-For connector bindings that need to talk to a trusted internal service on your own network, use the binding `config_json` fields instead of changing the imported spec. Common examples are `base_url` to point an OpenAPI binding at a local deployment and `auth_mode: "none"` when the published spec says auth is required but the local service does not actually enforce it. Agent Core only accepts those internal targets when you explicitly allow the hostname with `AGENT_CORE_ALLOWED_INTERNAL_HOSTS` in the deployment environment.
-
 After the MCP connection is working, run the generated **Verification Prompt** in the connected agent. That prompt writes a workspace memory record, reads it back, checks credential and connector visibility, and updates activity so you can confirm the full end-to-end setup from the agent side.
 
 ---
@@ -176,7 +174,7 @@ The search automatically covers everything the agent has read access to — you 
 
 ## Step 7: Store a Credential
 
-Credentials are managed from the **Connectors** page. A credential is the encrypted secret itself: an API key, token, password, URL, or config value. A connector binding is separate — it tells Agent Core how to use a stored credential with an imported OpenAPI API or the built-in Generic HTTP fallback.
+Credentials are managed from the **Connectors** page. A credential is the encrypted secret itself: an API key, token, password, URL, or config value. A connector binding is separate — it tells Agent Core how to use a stored credential with a connector type: an imported OpenAPI spec, a registered native MCP server, or the built-in Generic HTTP fallback.
 
 From the dashboard:
 

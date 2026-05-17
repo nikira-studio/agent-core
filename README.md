@@ -12,13 +12,11 @@ If you use AI coding agents — Claude Code, Cursor, Codex, or anything else —
 
 Agent Core fixes that. It’s a small service you run on your own machine. Your agents connect to it to read and write memory, resolve credentials, and call external services while you keep the control surface local and explicit.
 
-![Agent Core explainer](docs/images/explainer.png)
-
 ---
 
 ## What It Looks Like
 
-This is the dashboard snapshot you get after setup. It’s the quickest way to see that the local capability layer is up, connected, and ready for agents to use.
+The dashboard gives you a central view of your connected agents, active memory, stored credentials, and connector bindings. After setup, it’s the quickest way to confirm the service is running and your agents have what they need.
 
 ![Agent Core overview](docs/images/agent-overview.png)
 
@@ -46,7 +44,7 @@ The **Connectors** page is where you manage stored credentials and connector bin
 
 A credential is the encrypted secret itself: a GitHub PAT, API key, URL, password, or other value. A connector binding is how Agent Core uses one stored credential with a connector type such as an imported OpenAPI API, a native MCP server registration, or the built-in Generic HTTP escape hatch.
 
-For trusted internal services on your own network, keep the default SSRF guard in place and opt in at deployment time with `AGENT_CORE_ALLOWED_INTERNAL_HOSTS`. Then bind the imported spec with `config_json.base_url` and, when appropriate, `config_json.auth_mode: "none"` so Agent Core can talk to the internal deployment without requiring a dummy credential or weakening the global URL checks.
+Agent Core can also connect to trusted internal services on your own network without weakening global URL checks. See [Configuration](docs/configuration.md) for details on `AGENT_CORE_ALLOWED_INTERNAL_HOSTS` and binding overrides.
 
 You store a credential entry in Agent Core once. You can edit its name, label, and type later. If you leave the replacement secret field blank while editing, Agent Core keeps the existing encrypted value; if you enter a new value, it overwrites the stored secret.
 
@@ -68,7 +66,7 @@ At runtime:  Broker injects the token locally, or the connector executor uses it
 
 ### Shared Context Across Tools and People
 
-Working with a team, or switching between Claude Code and Cursor on the same project? Create a workspace, grant each agent access to it, and they'll share context automatically. When one agent makes a decision or discovers something important, the others can find it.
+Working with a team, or switching between Claude Code and Cursor on the same project? Create a workspace and grant each agent access to it. When one agent writes a decision or discovers something important to the shared workspace scope, any other agent connected to that workspace can search for it with `memory_search` at the start of their next session. Nothing transfers automatically — agents actively write and read — but that makes the handoff explicit and reliable rather than magic.
 
 ![Agent Core agents](docs/images/agent-workspace.png)
 
@@ -76,7 +74,7 @@ Working with a team, or switching between Claude Code and Cursor on the same pro
 
 ## Activity and Handoffs
 
-This is the work-tracking layer. It shows what’s in progress, what’s stale, and what needs attention next so another agent can pick up from there cleanly.
+The activity dashboard lists active agent tasks, flags sessions that have gone stale (no heartbeat for more than the configured threshold), and surfaces pending handoffs with options to reassign or generate a briefing. When an agent picks up stale work, it can pull a briefing that includes the prior task description, recent decisions, and relevant memory from the workspace scope.
 
 ![Agent Core activity](docs/images/agent-activity.png)
 
