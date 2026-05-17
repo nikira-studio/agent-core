@@ -10,13 +10,66 @@ If you use AI coding agents — Claude Code, Cursor, Codex, or anything else —
 - You juggle API keys and tokens across tools, pasting them into configs and hoping nothing leaks
 - Two agents working on the same project have no idea what the other one has done
 
-Agent Core fixes that. It’s a small service you run on your own machine. Your agents connect to it to read and write memory, resolve credentials, and call external services while you keep the control surface local and explicit.
+Agent Core fixes that. It's a small service you run on your own machine. Your agents connect to it to read and write memory, resolve credentials, and call external services while you keep the control surface local and explicit.
+
+![Agent Core explainer](docs/images/explainer.png)
+
+---
+
+## What Agent Core Is For
+
+Agent Core is a local capability and memory layer for agents.
+
+It is good at:
+
+- keeping durable memory in one place
+- controlling access to credentials and external services
+- exposing server-side connectors as agent tools, including imported OpenAPI specs and native MCP servers
+- showing what agents are doing right now
+
+It is not trying to be:
+
+- a full agent operating system
+- a scheduler that runs the work for you
+- a replacement for the agent itself
+
+## What You Install
+
+A fresh install gives you a local control layer that agents can actually use:
+
+- a shared place to keep durable memory
+- a way to manage credentials without exposing raw secrets
+- a connector and service catalog that agents can call through MCP
+- visibility into which agents are active and what they're doing
+- a clean dashboard for setup, oversight, and handoffs
+
+---
+
+## How It Works
+
+Agent Core is a local HTTP server. It speaks REST and MCP (Model Context Protocol), so anything that can make an HTTP request can talk to it. Agents authenticate with an API key and use tools like `memory_search`, `memory_write`, `credential_get`, and the connector discovery/execution tools.
+
+Everything — memory, credentials, and configuration — lives on your disk. The only intentional outbound call in the UI is the public API directory browser for connector imports; operational data still stays local unless you explicitly run a connector against an external service.
+
+```
+┌──────────────┐     MCP or REST     ┌──────────────────┐
+│  Claude Code │ ──────────────────► │                  │
+│  Cursor      │ ──────────────────► │   Agent Core     │
+│  Codex       │ ──────────────────► │   localhost:3500 │
+│  any agent   │ ──────────────────► │                  │
+└──────────────┘                     └──────────────────┘
+                                              │
+                                 ┌────────────┴─────────────┐
+                                 │  SQLite + encrypted      │
+                                 │  credentials on disk     │
+                                 └──────────────────────────┘
+```
 
 ---
 
 ## What It Looks Like
 
-The dashboard gives you a central view of your connected agents, active memory, stored credentials, and connector bindings. After setup, it’s the quickest way to confirm the service is running and your agents have what they need.
+The dashboard gives you a central view of your connected agents, active memory, stored credentials, and connector bindings. After setup, it's the quickest way to confirm the service is running and your agents have what they need.
 
 ![Agent Core overview](docs/images/agent-overview.png)
 
@@ -35,6 +88,8 @@ Codex searches:     memory_search("database decision") → gets that record back
 ```
 
 Memory is scoped. Agents only see what they're allowed to: their own private agent scope, shared project context, or your personal preferences. Nothing bleeds across unless you want it to.
+
+> Without semantic search configured, exact keywords matter more than fuzzy phrasing — `memory_search("authentication")` won't match a record that says "login logic". Use terms that match what was actually written. See [Requirements](#requirements) for how to enable semantic search.
 
 ![Agent Core memory](docs/images/agent-memory.png)
 
@@ -76,56 +131,17 @@ Working with a team, or switching between Claude Code and Cursor on the same pro
 
 The activity dashboard lists active agent tasks, flags sessions that have gone stale (no heartbeat for more than the configured threshold), and surfaces pending handoffs with options to reassign or generate a briefing. When an agent picks up stale work, it can pull a briefing that includes the prior task description, recent decisions, and relevant memory from the workspace scope.
 
+Activity tracking is self-reported — there is no automatic detection of agent work. A working agent must call `activity_update` at the start of a task and periodically as a heartbeat; without that, nothing appears in the dashboard and no briefing can be generated. The MCP tools that drive this are `activity_update` (register and heartbeat the current task), `activity_list` (find stale or in-progress work), and `get_briefing` (pull the handoff context before starting). An incoming agent typically does this at the top of a session:
+
+```
+activity_list  → find what's stale or pending
+get_briefing   → pull the prior task description, decisions, and workspace memory
+memory_search  → fill in any gaps with a targeted query
+```
+
+Nothing in this flow is automatic — agents participate explicitly, which means the handoff trail is auditable and the context is always intentional.
+
 ![Agent Core activity](docs/images/agent-activity.png)
-
-## What You Install
-
-Agent Core is not just an API or a single-purpose tool. A fresh install gives you a local control layer that agents can actually use:
-
-- a shared place to keep durable memory
-- a way to manage credentials without exposing raw secrets
-- a connector and service catalog that agents can call through MCP
-- visibility into which agents are active and what they’re doing
-- a clean dashboard for setup, oversight, and handoffs
-
-## What Agent Core Is For
-
-Agent Core is a local capability and memory layer for agents.
-
-It is good at:
-
-- keeping durable memory in one place
-- controlling access to credentials and external services
-- exposing server-side connectors as agent tools, including imported OpenAPI specs and native MCP servers
-- showing what agents are doing right now
-
-It is not trying to be:
-
-- a full agent operating system
-- a scheduler that runs the work for you
-- a replacement for the agent itself
-
----
-
-## How It Works
-
-Agent Core is a local HTTP server. It speaks REST and MCP (Model Context Protocol), so anything that can make an HTTP request can talk to it. Agents authenticate with an API key and use tools like `memory_search`, `memory_write`, `credential_get`, and the connector discovery/execution tools.
-
-Everything — memory, credentials, and configuration — lives on your disk. The only intentional outbound call in the UI is the public API directory browser for connector imports; operational data still stays local unless you explicitly run a connector against an external service.
-
-```
-┌──────────────┐     MCP or REST     ┌──────────────────┐
-│  Claude Code │ ──────────────────► │                  │
-│  Cursor      │ ──────────────────► │   Agent Core     │
-│  Codex       │ ──────────────────► │   localhost:3500 │
-│  any agent   │ ──────────────────► │                  │
-└──────────────┘                     └──────────────────┘
-                                              │
-                                 ┌────────────┴─────────────┐
-                                 │  SQLite + encrypted      │
-                                 │  credentials on disk     │
-                                 └──────────────────────────┘
-```
 
 ---
 
