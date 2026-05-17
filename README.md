@@ -12,6 +12,8 @@ If you use AI coding agents — Claude Code, Cursor, Codex, or anything else —
 
 Agent Core fixes that. It’s a small service you run on your own machine. Your agents connect to it to read and write memory, resolve credentials, and call external services while you keep the control surface local and explicit.
 
+![Agent Core explainer](docs/images/explainer.png)
+
 ---
 
 ## What It Looks Like
