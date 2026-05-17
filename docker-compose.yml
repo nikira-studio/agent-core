@@ -1,0 +1,33 @@
+# Agent Core - Docker Compose Configuration
+#
+# DO NOT commit your actual docker-compose.yml with secrets to version control.
+# All settings here are for your local/hosted environment.
+#
+# Runtime:
+#   The Dockerfile uses Python 3.11. Local development should use Python 3.11
+#   too, or run `python3.11 -m compileall app tests` before rebuilding.
+
+services:
+  agent-core:
+    container_name: agent-core
+    build: .
+    ports:
+      - "3500:3500"
+    networks:
+      - nexus_network
+    volumes:
+      - /srv/docker-data/core:/data
+    environment:
+      - AGENT_CORE_DATA_PATH=/data
+      # Generate encryption key automatically on first start
+      # IMPORTANT: Once set, changing this will make existing credential entries unreadable
+      - AGENT_CORE_ENCRYPTION_KEY=auto
+      - AGENT_CORE_ALLOWED_INTERNAL_HOSTS=firecrawl
+      # For production, set a fixed key instead:
+      # - AGENT_CORE_ENCRYPTION_KEY=your-32-byte-fernet-key-here
+    restart: unless-stopped
+
+networks:
+  nexus_network:
+    name: nexus_network
+    external: true
