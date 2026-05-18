@@ -1,3 +1,5 @@
+import urllib.parse
+
 from fastapi import APIRouter, Depends, Request
 from app.security.context import build_user_context
 from app.security.scope_enforcer import ScopeEnforcer
@@ -185,6 +187,32 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
     ct_cards = ""
     for ct in connector_types:
         supported_actions = ct.get("supported_actions", [])
+        operations_meta = {}
+        try:
+            operations_meta = json.loads(ct.get("operations_json") or "{}")
+        except Exception:
+            operations_meta = {}
+        operations = operations_meta.get("operations") or []
+        servers = operations_meta.get("servers") or []
+        op_count = len(operations) or len(supported_actions)
+        top_tags = []
+        tag_counts = {}
+        for op in operations:
+            for tag in op.get("tags") or []:
+                tag_counts[tag] = tag_counts.get(tag, 0) + 1
+        for tag, _count in sorted(tag_counts.items(), key=lambda kv: (-kv[1], kv[0]))[:3]:
+            top_tags.append(tag)
+        base_server = ""
+        if servers:
+            raw_server = servers[0]
+            try:
+                parsed_server = urllib.parse.urlparse(raw_server)
+                if parsed_server.netloc:
+                    base_server = parsed_server.netloc
+                else:
+                    base_server = raw_server.replace("https://", "").replace("http://", "").rstrip("/")
+            except Exception:
+                base_server = str(raw_server)
         actions = "".join(
             f'<span class="badge">{escape_html(a)}</span>'
             for a in supported_actions[:8]
@@ -207,6 +235,20 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
             if provider_type == "openapi" and ct.get("operations_json")
             else ""
         )
+        op_badge = (
+            f'<span class="badge badge-stale">Ops: {op_count}</span>'
+            if op_count
+            else ""
+        )
+        base_badge = (
+            f'<span class="badge badge-info">Base: {escape_html(base_server)}</span>'
+            if base_server
+            else ""
+        )
+        tag_badges = "".join(
+            f'<span class="badge badge-stale">Tag: {escape_html(tag)}</span>'
+            for tag in top_tags
+        )
         action_count = len(supported_actions)
         view_actions_btn = (
             f'<button type="button" class="btn btn-sm btn-secondary" onclick=\'viewActions("{ct["id"]}", "{escape_html(ct["display_name"])}", {action_count})\'>View Actions</button>'
@@ -226,6 +268,9 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
             <span class='badge badge-stale'>Auth: {escape_html(ct.get("auth_type", ""))}</span>
             {origin_badge}
             {spec_badge}
+            {op_badge}
+            {base_badge}
+            {tag_badges}
             {actions}
             {extra_badge}
           </div>
@@ -247,7 +292,7 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
       </div>
       <div class="page-actions">
         <a class="btn btn-secondary" href="/connectors/directory">Browse API Directory</a>
-        <button class="btn btn-secondary" onclick="openModal('import-spec-modal')">+ Import API Spec</button>
+        <button class="btn btn-secondary" onclick="resetImportPreview();openModal('import-spec-modal')">+ Import API Spec</button>
         <button class="btn btn-secondary" onclick="openModal('import-mcp-modal')">+ Import MCP Server</button>
         <button class="btn" onclick="openModal('create-binding-modal')">+ New Binding</button>
       </div>
@@ -494,12 +539,14 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
             <label>Display Name (optional)</label>
             <input type="text" id="import-spec-name" placeholder="e.g. Example REST API">
           </div>
+          <div id="import-spec-preview" class="card" style="display:none;margin:12px 0 0 0"></div>
           <div class="form-hint">
             <strong>Where do I find OpenAPI specs?</strong><br>
             Many APIs publish their spec at <code>/openapi.json</code> or <code>/swagger.json</code>.<br>
             Search <a href="https://apis.guru" target="_blank">apis.guru</a> for 2000+ specs, or <a href="/connectors/help">read the guide</a>.
           </div>
-          <button type="submit" class="btn btn-primary">Import API</button>
+          <button type="button" class="btn btn-secondary" onclick="previewSpec(event)">Preview Spec</button>
+          <button type="submit" class="btn btn-primary" id="import-spec-import-btn" disabled>Import API</button>
           <button type="button" class="btn btn-secondary" onclick="closeModal('import-spec-modal')">Cancel</button>
         </form>
       </div>
@@ -786,19 +833,100 @@ function openNewBinding(typeId) {
   openModal('create-binding-modal');
 }
 
+let importSpecPreviewState = null;
+
+function resetImportPreview() {
+  importSpecPreviewState = null;
+  const preview = document.getElementById('import-spec-preview');
+  const importBtn = document.getElementById('import-spec-import-btn');
+  if (preview) {
+    preview.style.display = 'none';
+    preview.innerHTML = '';
+  }
+  if (importBtn) {
+    importBtn.disabled = true;
+  }
+}
+
 function handleSpecFile(e) {
   const file = e.target.files[0];
   if (!file) return;
   const reader = new FileReader();
   reader.onload = function(ev) {
     document.getElementById('import-spec-json').value = ev.target.result;
+    resetImportPreview();
     showToast('File loaded', 'success');
   };
   reader.readAsText(file);
 }
 
+['import-spec-url', 'import-spec-json', 'import-spec-name'].forEach(function(id) {
+  const el = document.getElementById(id);
+  if (el) {
+    el.addEventListener('input', resetImportPreview);
+    el.addEventListener('change', resetImportPreview);
+  }
+});
+
+async function previewSpec(e) {
+  if (e) e.preventDefault();
+  const url = document.getElementById('import-spec-url').value.trim();
+  const specJson = document.getElementById('import-spec-json').value.trim();
+  const displayName = document.getElementById('import-spec-name').value.trim();
+
+  if (!url && !specJson) {
+    showToast('Provide a URL or paste/upload a spec', 'danger');
+    return;
+  }
+
+  const body = {};
+  if (url) body.url = url;
+  if (specJson) body.spec_json = specJson;
+  if (displayName) body.display_name = displayName;
+
+  const j = await apiFetch('/api/connector-types/preview', { method: 'POST', body: JSON.stringify(body) });
+  if (!j.ok) {
+    showToast(j.error?.message || 'Preview failed', 'danger');
+    return;
+  }
+
+  const preview = j.data.preview || {};
+  importSpecPreviewState = preview;
+  const previewEl = document.getElementById('import-spec-preview');
+  const importBtn = document.getElementById('import-spec-import-btn');
+  if (previewEl) {
+    const servers = (preview.servers || []).slice(0, 3).map(escapeHtml).join('<br>');
+    const warnings = (preview.warnings || []).map(function(w) {
+      return '<li>' + escapeHtml(w) + '</li>';
+    }).join('');
+    const actions = (preview.supported_actions || []).slice(0, 8).map(function(a) {
+      return '<span class="badge" style="margin:0 6px 6px 0;display:inline-block">' + escapeHtml(a) + '</span>';
+    }).join('');
+    previewEl.innerHTML =
+      '<h4 style="margin-top:0">Preview</h4>' +
+      '<table style="width:100%">' +
+        '<tr><td style="padding:4px 8px 4px 0;color:var(--muted)">Name</td><td>' + escapeHtml(preview.display_name || preview.connector_type_id || 'API') + '</td></tr>' +
+        '<tr><td style="padding:4px 8px 4px 0;color:var(--muted)">Connector ID</td><td><code>' + escapeHtml(preview.connector_type_id || '-') + '</code></td></tr>' +
+        '<tr><td style="padding:4px 8px 4px 0;color:var(--muted)">Auth</td><td>' + escapeHtml(preview.auth_type || 'none') + '</td></tr>' +
+        '<tr><td style="padding:4px 8px 4px 0;color:var(--muted)">Servers</td><td style="word-break:break-word">' + (servers || '<em>none</em>') + '</td></tr>' +
+        '<tr><td style="padding:4px 8px 4px 0;color:var(--muted)">Actions</td><td>' + escapeHtml(String(preview.operation_count || 0)) + '</td></tr>' +
+      '</table>' +
+      (actions ? '<div style="margin-top:10px">' + actions + '</div>' : '') +
+      (warnings ? '<div style="margin-top:10px"><strong>Warnings</strong><ul style="margin:6px 0 0 18px">' + warnings + '</ul></div>' : '');
+    previewEl.style.display = '';
+  }
+  if (importBtn) {
+    importBtn.disabled = false;
+  }
+  showToast('Preview ready', 'success');
+}
+
 async function importSpec(e) {
-  e.preventDefault();
+  if (e) e.preventDefault();
+  if (!importSpecPreviewState) {
+    showToast('Preview the spec before importing', 'danger');
+    return;
+  }
   const url = document.getElementById('import-spec-url').value.trim();
   const specJson = document.getElementById('import-spec-json').value.trim();
   const displayName = document.getElementById('import-spec-name').value.trim();
@@ -824,6 +952,7 @@ async function importSpec(e) {
   showToast('Imported ' + (ct.display_name || 'API') + ' (' + actionCount + ' actions)', 'success');
   closeModal('import-spec-modal');
   document.getElementById('import-spec-form').reset();
+  resetImportPreview();
   location.reload();
 }
 
@@ -1038,7 +1167,7 @@ async def connectors_directory_page(
       <h1>API Directory</h1>
         <div class="page-actions">
         <a class="btn btn-secondary" href="/connectors">&larr; Back to Connectors</a>
-        <button class="btn btn-secondary" onclick="openModal('import-spec-modal')">+ Import API Spec</button>
+        <button class="btn btn-secondary" onclick="resetImportPreview();openModal('import-spec-modal')">+ Import API Spec</button>
         <button class="btn btn-secondary" onclick="openModal('directory-import-mcp-modal')">+ Import MCP Server</button>
       </div>
     </div>
@@ -1070,8 +1199,10 @@ async def connectors_directory_page(
           <label>Display Name (optional)</label>
           <input type="text" id="import-spec-name" />
         </div>
+        <div id="import-spec-preview" class="card" style="display:none;margin:12px 0 0 0"></div>
         <div class="modal-actions">
-          <button class="btn" onclick="importSpec(event)">Import</button>
+          <button class="btn btn-secondary" type="button" onclick="previewSpec(event)">Preview Spec</button>
+          <button class="btn" id="import-spec-import-btn" type="button" onclick="importSpec(event)" disabled>Import</button>
           <button class="btn btn-secondary" onclick="closeModal('import-spec-modal')">Cancel</button>
           <a href="/connectors/help" target="_blank" class="help-link">Where do I find specs?</a>
         </div>
@@ -1164,9 +1295,11 @@ async def connectors_directory_page(
       }
 
       const cards = entries.map(function(e) {
-        const btn = e.installed
-          ? '<button type="button" class="btn btn-sm btn-secondary" disabled>Already imported</button>'
-          : '<button type="button" class="btn btn-sm btn-primary" onclick="importFromDirectory(&apos;' + escapeHtml(e.id) + '&apos;)">Import</button>';
+        const btn = e.variant_count > 1
+          ? '<button type="button" class="btn btn-sm btn-primary" onclick="showDirectoryDetail(&apos;' + escapeHtml(e.id) + '&apos;)">View Variants</button>'
+          : (e.installed
+            ? '<button type="button" class="btn btn-sm btn-secondary" disabled>Already imported</button>'
+            : '<button type="button" class="btn btn-sm btn-primary" onclick="importFromDirectory(&apos;' + escapeHtml(e.id) + '&apos;)">Import</button>');
         return '<div class="connector-type-card">' +
           '<div class="connector-type-head"><div>' +
           '<div class="connector-type-name"><a href="#" onclick="event.preventDefault();showDirectoryDetail(&apos;' + escapeHtml(e.id) + '&apos;)" style="color:var(--text);text-decoration:none">' + escapeHtml(e.display_name) + '</a></div>' +
@@ -1175,7 +1308,7 @@ async def connectors_directory_page(
           '<div class="connector-type-meta">' +
           '<span class="badge badge-stale">' + escapeHtml(e.category || '') + '</span> ' +
           (e.provider ? '<span class="badge badge-info">' + escapeHtml(e.provider) + '</span>' : '') +
-          (e.variant_count > 1 ? ' <span class="badge badge-ok">+' + (e.variant_count - 1) + ' variants</span>' : '') +
+          (e.variant_count > 1 ? ' <span class="badge badge-ok">' + e.variant_count + ' variants</span>' : '') +
           '</div>' +
           '<div class="connector-type-footer">' + btn + '</div>' +
           '</div>';
@@ -1221,7 +1354,20 @@ async def connectors_directory_page(
       const desc = entry.description || 'No description available.';
       const cats = (entry.categories || [entry.category]).filter(Boolean).map(function(c) { return '<span class="badge badge-stale">' + escapeHtml(c) + '</span>'; }).join(' ');
       const provider = entry.provider ? '<span class="badge badge-info">' + escapeHtml(entry.provider) + '</span>' : '';
-      const variants = entry.variant_count > 1 ? '<span class="badge badge-ok">+' + (entry.variant_count - 1) + ' variants (GHES, GHEC, etc.)</span>' : '';
+      const variants = entry.variant_count > 1 ? '<span class="badge badge-ok">' + entry.variant_count + ' variants (GHES, GHEC, etc.)</span>' : '';
+      const variantRows = (entry.variants || []).map(function(v) {
+        const installed = v.installed ? '<span class="badge badge-stale">Imported</span>' : '';
+        const importBtn = v.installed
+          ? '<button class="btn btn-sm btn-secondary" disabled>Already imported</button>'
+          : '<button class="btn btn-sm btn-primary" onclick="startDirectoryImport(&apos;' + escapeHtml(v.id) + '&apos;, &apos;' + escapeHtml(v.spec_url) + '&apos;, &apos;' + escapeHtml(v.display_name) + '&apos;)">Import</button>';
+        return '<tr>' +
+          '<td><code>' + escapeHtml(v.id) + '</code></td>' +
+          '<td>' + escapeHtml(v.version || '-') + '</td>' +
+          '<td style="word-break:break-all">' + escapeHtml(v.spec_url || '-') + '</td>' +
+          '<td>' + installed + '</td>' +
+          '<td>' + importBtn + '</td>' +
+        '</tr>';
+      }).join('');
 
       el.innerHTML =
         '<div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">' +
@@ -1237,14 +1383,33 @@ async def connectors_directory_page(
           (entry.origin_url ? '<tr><td style="color:var(--muted);padding:4px 8px 4px 0;white-space:nowrap">Spec source</td><td><a href="' + escapeHtml(entry.origin_url) + '" target="_blank" rel="noopener">' + escapeHtml(entry.origin_url.substring(0, 80)) + '</a></td></tr>' : '') +
           '<tr><td style="color:var(--muted);padding:4px 8px 4px 0;white-space:nowrap">Spec URL</td><td style="word-break:break-all">' + escapeHtml(entry.spec_url) + '</td></tr>' +
         '</table>';
+      if (entry.variant_count > 1) {
+        el.innerHTML +=
+          '<h4 style="margin:16px 0 8px">Variants</h4>' +
+          '<table style="width:100%;font-size:0.9em">' +
+            '<thead><tr><th>Variant</th><th>Version</th><th>Spec URL</th><th>Status</th><th class="actions-cell">Actions</th></tr></thead>' +
+            '<tbody>' + variantRows + '</tbody>' +
+          '</table>';
+      }
 
       const actions = document.getElementById('dir-detail-actions');
       if (entry.installed) {
         actions.innerHTML = '<button class="btn btn-secondary" disabled>Already imported</button> <button class="btn btn-secondary" onclick="closeModal(&apos;dir-detail-modal&apos;)">Close</button>';
       } else {
-        actions.innerHTML = '<button class="btn" onclick="closeModal(&apos;dir-detail-modal&apos;);importFromDirectory(&apos;' + escapeHtml(entryId) + '&apos;)">Import</button> <button class="btn btn-secondary" onclick="closeModal(&apos;dir-detail-modal&apos;)">Close</button>';
+        actions.innerHTML = entry.variant_count > 1
+          ? '<button class="btn btn-secondary" onclick="closeModal(&apos;dir-detail-modal&apos;)">Close</button>'
+          : '<button class="btn" onclick="closeModal(&apos;dir-detail-modal&apos;);startDirectoryImport(&apos;' + escapeHtml(entry.id) + '&apos;, &apos;' + escapeHtml(entry.spec_url) + '&apos;, &apos;' + escapeHtml(entry.display_name) + '&apos;)">Import</button> <button class="btn btn-secondary" onclick="closeModal(&apos;dir-detail-modal&apos;)">Close</button>';
       }
       openModal('dir-detail-modal');
+    }
+
+    async function startDirectoryImport(entryId, specUrl, displayName) {
+      document.getElementById('import-spec-url').value = specUrl || '';
+      document.getElementById('import-spec-json').value = '';
+      document.getElementById('import-spec-name').value = displayName || entryId || '';
+      resetImportPreview();
+      openModal('import-spec-modal');
+      await previewSpec();
     }
 
     async function importFromDirectory(entryId) {
@@ -1259,17 +1424,103 @@ async def connectors_directory_page(
       }
       if (!entry) { showToast('API not found', 'danger'); return; }
 
-      document.getElementById('import-spec-url').value = entry.spec_url;
-      document.getElementById('import-spec-json').value = '';
-      document.getElementById('import-spec-name').value = entry.display_name;
+      startDirectoryImport(entry.id, entry.spec_url, entry.display_name);
+    }
 
-      showToast('Importing ' + entry.display_name + '...', 'success');
-      await importSpec(new Event('submit'));
-      loadDirectory();
+    let importSpecPreviewState = null;
+
+    function resetImportPreview() {
+      importSpecPreviewState = null;
+      const preview = document.getElementById('import-spec-preview');
+      const importBtn = document.getElementById('import-spec-import-btn');
+      if (preview) {
+        preview.style.display = 'none';
+        preview.innerHTML = '';
+      }
+      if (importBtn) {
+        importBtn.disabled = true;
+      }
+    }
+
+    function handleSpecFile(e) {
+      const file = e.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = function(ev) {
+        document.getElementById('import-spec-json').value = ev.target.result;
+        resetImportPreview();
+        showToast('File loaded', 'success');
+      };
+      reader.readAsText(file);
+    }
+
+    ['import-spec-url', 'import-spec-json', 'import-spec-name'].forEach(function(id) {
+      const el = document.getElementById(id);
+      if (el) {
+        el.addEventListener('input', resetImportPreview);
+        el.addEventListener('change', resetImportPreview);
+      }
+    });
+
+    async function previewSpec(e) {
+      if (e) e.preventDefault();
+      const url = document.getElementById('import-spec-url').value.trim();
+      const specJson = document.getElementById('import-spec-json').value.trim();
+      const displayName = document.getElementById('import-spec-name').value.trim();
+
+      if (!url && !specJson) {
+        showToast('Provide a URL or paste/upload a spec', 'danger');
+        return;
+      }
+
+      const body = {};
+      if (url) body.url = url;
+      if (specJson) body.spec_json = specJson;
+      if (displayName) body.display_name = displayName;
+
+      const j = await apiFetch('/api/connector-types/preview', { method: 'POST', body: JSON.stringify(body) });
+      if (!j.ok) {
+        showToast(j.error?.message || 'Preview failed', 'danger');
+        return;
+      }
+
+      const preview = j.data.preview || {};
+      importSpecPreviewState = preview;
+      const previewEl = document.getElementById('import-spec-preview');
+      const importBtn = document.getElementById('import-spec-import-btn');
+      if (previewEl) {
+        const servers = (preview.servers || []).slice(0, 3).map(escapeHtml).join('<br>');
+        const warnings = (preview.warnings || []).map(function(w) {
+          return '<li>' + escapeHtml(w) + '</li>';
+        }).join('');
+        const actions = (preview.supported_actions || []).slice(0, 8).map(function(a) {
+          return '<span class="badge" style="margin:0 6px 6px 0;display:inline-block">' + escapeHtml(a) + '</span>';
+        }).join('');
+        previewEl.innerHTML =
+          '<h4 style="margin-top:0">Preview</h4>' +
+          '<table style="width:100%">' +
+            '<tr><td style="padding:4px 8px 4px 0;color:var(--muted)">Name</td><td>' + escapeHtml(preview.display_name || preview.connector_type_id || 'API') + '</td></tr>' +
+            '<tr><td style="padding:4px 8px 4px 0;color:var(--muted)">Connector ID</td><td><code>' + escapeHtml(preview.connector_type_id || '-') + '</code></td></tr>' +
+            '<tr><td style="padding:4px 8px 4px 0;color:var(--muted)">Auth</td><td>' + escapeHtml(preview.auth_type || 'none') + '</td></tr>' +
+            '<tr><td style="padding:4px 8px 4px 0;color:var(--muted)">Servers</td><td style="word-break:break-word">' + (servers || '<em>none</em>') + '</td></tr>' +
+            '<tr><td style="padding:4px 8px 4px 0;color:var(--muted)">Actions</td><td>' + escapeHtml(String(preview.operation_count || 0)) + '</td></tr>' +
+          '</table>' +
+          (actions ? '<div style="margin-top:10px">' + actions + '</div>' : '') +
+          (warnings ? '<div style="margin-top:10px"><strong>Warnings</strong><ul style="margin:6px 0 0 18px">' + warnings + '</ul></div>' : '');
+        previewEl.style.display = '';
+      }
+      if (importBtn) {
+        importBtn.disabled = false;
+      }
+      showToast('Preview ready', 'success');
     }
 
     async function importSpec(e) {
       if (e) e.preventDefault();
+      if (!importSpecPreviewState) {
+        showToast('Preview the spec before importing', 'danger');
+        return;
+      }
       const url = document.getElementById('import-spec-url').value.trim();
       const specJson = document.getElementById('import-spec-json').value.trim();
       const displayName = document.getElementById('import-spec-name').value.trim();
@@ -1295,6 +1546,7 @@ async def connectors_directory_page(
       document.getElementById('import-spec-url').value = '';
       document.getElementById('import-spec-json').value = '';
       document.getElementById('import-spec-name').value = '';
+      resetImportPreview();
       loadDirectory();
     }
 

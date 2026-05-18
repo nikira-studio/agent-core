@@ -321,10 +321,11 @@ The connector type row stores provider metadata such as `endpoint_url`, `transpo
 | `GET` | `/api/connector-types` | Agent/session | List installed connector types |
 | `GET` | `/api/connector-types/{connector_type_id}/tools` | Agent/session | List actions for a connector type |
 | `PUT` | `/api/connector-types/{connector_type_id}/actions` | Admin | Update the disabled actions list for a connector type |
+| `POST` | `/api/connector-types/preview` | Admin | Parse an OpenAPI spec and return metadata without persisting |
 | `POST` | `/api/connector-types/import` | Admin | Import an OpenAPI spec from URL or pasted JSON/YAML |
 | `POST` | `/api/connector-types/import-mcp` | Admin | Register a native MCP server and discover its tools |
 | `POST` | `/api/connector-types/{connector_type_id}/refresh` | Admin | Refresh MCP discovery metadata and tool snapshot |
-| `GET` | `/api/connector-types/directory` | Agent/session | Browse the public API directory |
+| `GET` | `/api/connector-types/directory` | Agent/session | Browse the public API directory (grouped by provider, variants included) |
 
 Import:
 ```json

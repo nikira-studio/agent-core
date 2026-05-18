@@ -82,8 +82,8 @@ class TestAgentsPage:
         assert "Agent Access" in r.text
         assert "Can Read From" in r.text
         assert "Can Write To" in r.text
-        assert "private agent scope" in r.text
-        assert "Shared / global" in r.text
+        assert "Other users can use this scope" in r.text
+        assert "User <code>user:admin</code> (owner context)" in r.text
 
     def test_agents_edit_modal_shows_owner_and_default_user(self, admin_client):
         r = admin_client.get("/agents")
@@ -119,9 +119,9 @@ class TestAgentsPage:
     ):
         r = user_client.get("/agents")
         assert r.status_code == 200
-        assert 'data-scope="user:user1"' not in r.text
-        assert "required owner context" not in r.text
-        assert "enforceRequiredUserScope(containerId)" not in r.text
+        assert 'data-scope="user:user1"' in r.text
+        assert 'data-required-scope="true"' in r.text
+        assert "owner context" in r.text
         assert "Use workspaces as shared collaboration spaces" in r.text
 
     def test_non_admin_can_see_shared_agents_read_only(self, user_client):

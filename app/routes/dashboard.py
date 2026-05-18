@@ -798,7 +798,13 @@ async def agents_page(request: Request, session: dict = Depends(require_auth)):
 
     def build_scope_list(prefix):
         h = f'<div class="scope-selectors" id="{prefix}-scopes">'
-        h += '<label class="checkbox-label" data-scope-row="shared"><input type="checkbox" data-scope="shared"> <span>Shared / global</span></label>'
+        h += '<label class="checkbox-label" data-scope-row="shared"><input type="checkbox" data-scope="shared"> <span>Other users can use this scope</span></label>'
+        if prefix.endswith("read"):
+            h += (
+                f'<label class="checkbox-label" data-scope-row="user:{session["user_id"]}">'
+                f'<input type="checkbox" data-scope="user:{session["user_id"]}" checked disabled data-required-scope="true">'
+                f' <span>User <code>user:{session["user_id"]}</code> (owner context)</span></label>'
+            )
         if all_workspaces:
             h += "<h4>Workspaces</h4>"
             for p in all_workspaces:
@@ -871,6 +877,7 @@ async def agents_page(request: Request, session: dict = Depends(require_auth)):
     js = """
     <script>
     const IS_ADMIN = __IS_ADMIN__;
+    const CURRENT_USER_ID = __CURRENT_USER_ID__;
     let agentModalReadOnly = false;
     async function refreshAgents() { location.reload(); }
     async function deactivateAgent(id) {
@@ -972,11 +979,12 @@ async def agents_page(request: Request, session: dict = Depends(require_auth)):
         return (value || '').trim().toLowerCase();
       }
 
-    async function submitEditAgent(e) {
+      async function submitEditAgent(e) {
       e.preventDefault();
       if (agentModalReadOnly) return;
       const id = document.getElementById('edit-agent-id').textContent;
         const ownScope = 'agent:' + id;
+        const userScope = 'user:' + CURRENT_USER_ID;
         const body = {
           display_name: document.getElementById('edit-display-name').value,
           description: document.getElementById('edit-description').value,
@@ -985,6 +993,7 @@ async def agents_page(request: Request, session: dict = Depends(require_auth)):
         };
         body.read_scopes.push(ownScope);
         body.write_scopes.push(ownScope);
+        if (!body.read_scopes.includes(userScope)) body.read_scopes.push(userScope);
         const j = await apiFetch('/api/agents/' + id, { method: 'PUT', body: JSON.stringify(body) });
         if (j.ok) { showToast('Agent updated'); closeModal('edit-agent-modal'); refreshAgents(); }
         else { showToast(j.error.message || 'Failed', 'danger'); }
@@ -1007,8 +1016,10 @@ async def agents_page(request: Request, session: dict = Depends(require_auth)):
         };
         // Ensure private scope is added if not present (it's implicit in backend but good to show)
         const privateScope = 'agent:' + agentId;
+        const userScope = 'user:' + CURRENT_USER_ID;
         if (!body.read_scopes.includes(privateScope)) body.read_scopes.push(privateScope);
         if (!body.write_scopes.includes(privateScope)) body.write_scopes.push(privateScope);
+        if (!body.read_scopes.includes(userScope)) body.read_scopes.push(userScope);
 
         try {
           const j = await apiFetch('/api/agents', { method: 'POST', body: JSON.stringify(body) });
@@ -1039,6 +1050,7 @@ async def agents_page(request: Request, session: dict = Depends(require_auth)):
       }
     </script>"""
     js = js.replace("__IS_ADMIN__", str(is_admin).lower())
+    js = js.replace("__CURRENT_USER_ID__", json.dumps(session["user_id"]))
 
     return render_page(
         "Agents",
@@ -1048,7 +1060,7 @@ async def agents_page(request: Request, session: dict = Depends(require_auth)):
     </div></div>
     <div class="card">
       <h3>Agent Access</h3>
-      <p class="text-muted access-summary">Agents belong to one owner/default user. Shared/global agents are visible read-only to other users, while edit and key controls stay with the owner or an admin. Use workspaces as shared collaboration spaces; personal user scopes stay tied to the agent owner.</p>
+      <p class="text-muted access-summary">Agents belong to one owner/default user. The shared/global option grants other users access to the scope itself. Use workspaces as shared collaboration spaces; personal user scopes stay tied to the agent owner.</p>
     </div>
 
     <div class="card">
@@ -1078,12 +1090,12 @@ async def agents_page(request: Request, session: dict = Depends(require_auth)):
           <div class="form-group">
             <label>Can Read From</label>
             {ca_read_html}
-            <p class="form-hint">Leave blank unless this agent needs workspace, shared, or agent-private context outside its own private agent scope. Personal user scope access is limited to the owner/default user.</p>
+            <p class="form-hint">User context is automatic for the owner/default user. Use this area for workspace, shared/global, or other agent-private context outside the agent's own scope.</p>
           </div>
           <div class="form-group">
             <label>Can Write To</label>
             {ca_write_html}
-            <p class="form-hint">Grant write access only where the agent should be allowed to save new memory or credentials. Use workspace scopes for multi-user collaboration.</p>
+            <p class="form-hint">Grant write access only where the agent should be allowed to save new memory or credentials. Use workspace scopes for multi-user collaboration. User write is available only as an explicit advanced choice.</p>
           </div>
           <div id="create-agent-error" class="alert alert-danger" style="display:none"></div>
           <div class="modal-footer">
@@ -1347,7 +1359,7 @@ async def workspaces_page(request: Request, session: dict = Depends(require_auth
           '<div class="card" style="padding:12px;margin-bottom:12px">' +
             '<form data-workspace-collaborator-form="true" data-workspace-id="' + escapeHtml(workspaceId) + '">' +
               '<div class="form-row" style="display:grid;grid-template-columns:1.4fr .7fr .7fr auto;gap:8px;align-items:end">' +
-                '<div class="form-group" style="margin:0"><label>User ID</label><input type="text" name="user_id" required placeholder="e.g. brian"></div>' +
+                '<div class="form-group" style="margin:0"><label>User ID</label><input type="text" name="user_id" placeholder="e.g. brian"></div>' +
                 '<label class="checkbox-label" style="margin:0"><input type="checkbox" name="can_read" checked> Read</label>' +
                 '<label class="checkbox-label" style="margin:0"><input type="checkbox" name="can_write"> Write</label>' +
                 '<button type="submit" class="btn">Add</button>' +
@@ -1367,7 +1379,10 @@ async def workspaces_page(request: Request, session: dict = Depends(require_auth
       const form = e.target;
       const data = new FormData(form);
       const userId = (data.get('user_id') || '').toString().trim();
-      if (!userId) return false;
+      if (!userId) {
+        showToast('User ID is required to add a collaborator', 'danger');
+        return false;
+      }
       const body = {
         can_read: data.get('can_read') ? true : false,
         can_write: data.get('can_write') ? true : false,
@@ -3894,6 +3909,7 @@ def _agent_setup_output_options(target=None):
         ("env", "Environment Variables", "agent-core.env"),
         ("claude_md", "CLAUDE.md", "CLAUDE.md"),
         ("agents_md", "AGENTS.md", "AGENTS.md"),
+        ("assistants_md", "Assistants", "Assistants"),
         ("session", "Session Prompt", "agent-core-session-prompt.md"),
         ("verification", "Verification Prompt", "agent-core-verification.md"),
     ]
@@ -4381,10 +4397,12 @@ async def integrations_page(
             "Generate One-Time Key + MCP Config"
             if output_type == "mcp_json"
             else "Generate One-Time Key + Environment Variables"
+            if output_type == "env"
+            else "Generate One-Time Key + Assistants Prompt"
         )
         connection_btn = (
             f"<button type='button' class='btn btn-sm btn-warning' id='generate-connection-btn' data-label='{escape_html(connection_label)}' onclick='generateConnectionConfig()'>{escape_html(connection_label)}</button>"
-            if output_type in ("env", "mcp_json")
+            if output_type in ("env", "mcp_json", "assistants_md")
             else ""
         )
     else:
@@ -4503,6 +4521,49 @@ function getGeneratedOutputText() {
   return document.querySelector('.output-block')?.innerText || '';
 }
 
+function getIntegrationConnectionKeyStorageKey() {
+  const params = new URLSearchParams(window.location.search);
+  const userId = params.get('user_id') || document.getElementById('user_id')?.value || '';
+  const workspaceId = params.get('workspace_id') || document.getElementById('workspace_id')?.value || '';
+  const agentId = params.get('agent_id') || document.getElementById('agent_id')?.value || '';
+  const target = params.get('target') || 'generic_mcp';
+  return ['agent-core-connection-key', userId, workspaceId, agentId, target].join(':');
+}
+
+function getStoredIntegrationConnectionKey() {
+  try {
+    return sessionStorage.getItem(getIntegrationConnectionKeyStorageKey()) || '';
+  } catch (e) {
+    return '';
+  }
+}
+
+function setStoredIntegrationConnectionKey(key) {
+  try {
+    if (key) sessionStorage.setItem(getIntegrationConnectionKeyStorageKey(), key);
+  } catch (e) {}
+}
+
+function applyStoredIntegrationConnectionKey() {
+  const key = getStoredIntegrationConnectionKey();
+  if (!key) return;
+  const block = document.querySelector('.output-block');
+  if (!block) return;
+  const current = block.innerText || '';
+  if (!current.includes('<AGENT_CORE_API_KEY>') && !current.includes('{{AGENT_CORE_API_KEY}}')) return;
+  const updated = current
+    .replaceAll('<AGENT_CORE_API_KEY>', key)
+    .replaceAll('{{AGENT_CORE_API_KEY}}', key);
+  if (updated !== current) {
+    block.innerText = updated;
+    const warning = document.getElementById('connection-warning');
+    if (warning) {
+      warning.textContent = 'This page is using the last generated one-time key for the current context.';
+      warning.style.display = 'block';
+    }
+  }
+}
+
 function copyGeneratedOutput(btn) {
   copyToClipboard(getGeneratedOutputText(), btn);
 }
@@ -4597,6 +4658,7 @@ async function generateConnectionConfig() {
     });
     const j = await r.json();
     if (j.ok) {
+      setStoredIntegrationConnectionKey(j.data.api_key || '');
       const block = document.querySelector('.output-block');
       if (block) block.innerText = j.data.output || '';
       const label = document.querySelector('.output-label');
@@ -4615,6 +4677,8 @@ async function generateConnectionConfig() {
   btn.disabled = false;
   btn.textContent = btn.dataset.label || 'Generate One-Time Key + Config';
 }
+
+document.addEventListener('DOMContentLoaded', applyStoredIntegrationConnectionKey);
 
 </script>
 """
@@ -4677,6 +4741,11 @@ def _build_agent_setup_output(
         label = "AGENTS.md — paste into workspace repository root"
         content = _build_agents_md(
             base_url, user_scope, workspace_scope, agent_scope, workspace_name
+        )
+    elif output_type == "assistants_md":
+        label = "Assistants — paste into the assistant's onboarding or instruction field"
+        content = _build_assistants_md(
+            base_url, user_scope, workspace_scope, agent_scope, api_key=api_key
         )
     elif output_type == "mcp_json":
         label = "MCP Config"
@@ -4784,7 +4853,7 @@ You are connected to Agent Core.
 ## Getting Started
 
 1. Search memory in `{default_scope}` for relevant context before starting work. If the search returns little or nothing, retry with exact topic values, exact keywords from prior records, or a known record id. When embeddings are unavailable, broad conceptual queries can miss; exact tokens and known ids are more reliable. If this is a handoff, resume, or review of prior work, also inspect the recent activity trail and any generated briefing before making changes. Use `activity_list` and `briefing_list` when you need that trail from MCP.
-2. Search memory in `{user_scope}` for relevant user preferences.
+2. Search memory in `{user_scope}` for relevant user preferences and owner-context details when you have user-scope read access.
 3. Create or update an activity record when starting a meaningful task.
 4. Store durable decisions and handoff notes in `{default_scope}`.
 5. Use `credential_list` and `credential_get` to retrieve credential references — never ask for raw secrets.
@@ -4838,9 +4907,9 @@ def _build_user_instructions(
     workspace_name,
 ):
     workspace_line = (
-        f"This setup is workspace-aware. Generated prompts use `{workspace_scope}` for workspace memory."
+        f"This setup is workspace-aware. Generated prompts use `{workspace_scope}` for workspace facts, decisions, and shared collaboration."
         if workspace_scope
-        else f"No workspace is selected. Generated prompts use `{user_scope}` as the default shared context."
+        else f"No workspace is selected. Generated prompts use `{user_scope}` as read-only owner context and keep shared facts/decisions in the default shared scope."
     )
     return f"""# Agent Core Instructions
 
@@ -4850,7 +4919,7 @@ Use these steps to connect an AI tool to Agent Core for {user_display}.
 
 1. Generate `MCP Config` when you are ready to connect the tool to Agent Core. This is the normal connection step for MCP-capable tools.
 2. Generate `Environment Variables` only when your MCP config or launcher reads values from environment variables.
-3. Generate `CLAUDE.md` or `AGENTS.md` for reusable repository-level guidance shared by multiple agents.
+3. Generate `CLAUDE.md`, `AGENTS.md`, or `Assistants` guidance for reusable repository-level or agent-level instructions.
 4. Generate `Session Prompt` when you want one-time agent-specific instructions pasted into a chat/session.
 5. Generate `Verification Prompt` after setup and paste it into the connected agent to run the end-to-end verification flow.
 
@@ -4869,7 +4938,7 @@ The API key is the authoritative agent identity. Agent Core identifies requests 
 - MCP Config belongs in the MCP configuration location for the tool you are connecting. For Claude Code, run `claude mcp add` (CLI) or create `.mcp.json` in the repo root; for Codex CLI, that is `~/.codex/config.toml`; for OpenCode, add the OpenCode block under `mcp` in `~/.config/opencode/opencode.json`.
 - Environment variables belong in your shell profile, launcher, service environment, or tool-specific environment settings. They do not connect Agent Core by themselves.
 - Session Prompt is pasted into the first message or custom instructions for a single session. Use it to bootstrap behavior when no plugin or hook layer exists.
-- `CLAUDE.md` and `AGENTS.md` belong in the workspace/repository root when you want persistent per-repository behavior. These files are workspace-centric and can be shared by Codex, OpenCode, Claude Code, and other agents using their own MCP keys.
+- `CLAUDE.md` and `AGENTS.md` belong in the workspace/repository root when you want persistent per-repository behavior. `Assistants` guidance is for assistant-style agents that manage their own config. These files are workspace-centric and can be shared by Codex, OpenCode, Claude Code, and other agents using their own MCP keys.
 
 ## Selected Context
 
@@ -4909,7 +4978,7 @@ Use Agent Core MCP for durable workspace memory, handoffs, and workspace context
 Default memory scope for this setup is `{default_scope}`.
 Use your private scope `{agent_scope}` only for tool-specific scratch context.
 Use full prefixed scope names exactly as shown; do not use plain workspace IDs or agent IDs as memory scopes.
-Read `{user_scope}` for stable {user_display} preferences when relevant.
+Read `{user_scope}` for stable {user_display} preferences and other owner-context details when you have user-scope read access.
 Use credential references through Agent Core MCP; never request or print raw secrets.
 Activity records are operational task tracking, not durable memory. At the start of every non-trivial user task, immediately call `activity_update` with a concise `task_description`, `memory_scope` set to `{default_scope}`, and `status` set to `active`. While actively working, call `activity_update` again every 1-2 minutes as a heartbeat. Before your final response, call `activity_update` with `status: completed` when the task is complete, or `status: blocked` if you cannot proceed and need user input.
 If the session has to stop early or hits a token limit, leave the activity current and write durable decisions or handoff notes to memory so another agent can continue from the saved state.
@@ -4923,14 +4992,14 @@ At the start of a meaningful task:
 
 1. Start or refresh the activity record using `activity_update`.
 2. Search `{default_scope}` with 2-3 focused queries for relevant architecture, decisions, prior bugs, and current project state. If the search returns little or nothing, retry with exact topic values, exact keywords from prior records, or a known record id. When embeddings are unavailable, broad conceptual queries can miss; exact tokens and known ids are more reliable.
-3. Search `{user_scope}` only when user preferences or personal workflow may matter.
+3. Search `{user_scope}` only when you have user-scope read access and user preferences or personal workflow may matter.
 4. Use `memory_get` for a known record id; otherwise prefer `memory_search`.
 
 Write memory only when it will help a future session:
 
 - `decision` in `{default_scope}` for durable choices, tradeoffs, rejected options, and why they were chosen.
 - `fact` in `{default_scope}` for stable implementation facts, integration details, constraints, and verified behavior.
-- `preference` in `{user_scope}` for stable user preferences that apply beyond this one task.
+- `preference` in `{user_scope}` for stable user preferences when user-scope write access is available; otherwise keep preferences in `{default_scope}` and treat user scope as read-only owner context.
 - `scratchpad` in `{agent_scope}` for temporary private notes, or in `{default_scope}` only for short-lived workspace handoff notes.
 
 Do not write memory for routine progress, command output, facts already obvious from files, secrets, raw credentials, or noisy transient debugging notes. Use concise content, add domain/topic when useful for exact filtering, set confidence to match certainty, and set importance higher only for information likely to matter later.
@@ -4965,7 +5034,7 @@ The active Agent Core user and agent identities are determined by the MCP/API ke
 ## Memory Scopes
 
 Use `{default_scope}` for default memory in this setup.
-Read the authenticated/default user scope from your Agent Core connection only for stable personal preferences when relevant.
+Read the authenticated/default user scope from your Agent Core connection for stable personal preferences and owner-context details when you have user-scope read access.
 {private_scope_guidance}
 Use full prefixed scope names exactly as shown. Do not use plain workspace IDs like `{workspace_name}` or agent IDs like `{agent_display}` as memory scopes.
 
@@ -4975,14 +5044,14 @@ At the start of a meaningful task:
 
 1. Start or refresh the activity record using the Activity Tracking workflow below.
 2. Search `{default_scope}` with 2-3 focused queries for relevant architecture, decisions, prior bugs, and current project state. If the search returns little or nothing, retry with exact topic values, exact keywords from prior records, or a known record id. When embeddings are unavailable, broad conceptual queries can miss; exact tokens and known ids are more reliable.
-3. Search the authenticated/default user scope only when user preferences or personal workflow may matter.
+3. Search the authenticated/default user scope only when you have user-scope read access and user preferences or personal workflow may matter.
 4. Use `memory_get` for a known record id; otherwise prefer `memory_search`.
 
 Write memory only when it will help a future session:
 
 - `decision` in `{default_scope}` for durable choices, tradeoffs, rejected options, and why they were chosen.
 - `fact` in `{default_scope}` for stable implementation facts, integration details, constraints, and verified behavior.
-- `preference` in the authenticated/default user scope for stable user preferences that apply beyond this one task.
+- `preference` in the authenticated/default user scope for stable user preferences when user-scope write access is available; otherwise keep preferences in `{default_scope}` and treat user scope as read-only owner context.
 - `scratchpad` in the authenticated private agent scope for temporary private notes, or in `{default_scope}` only for short-lived workspace handoff notes.
 
 Do not write memory for routine progress, command output, facts already obvious from files, secrets, raw credentials, or noisy transient debugging notes.
@@ -5061,7 +5130,7 @@ The active Agent Core user and agent identities are determined by the MCP/API ke
 ## Memory Scope Guidance
 
 Default memory scope for this setup is `{default_scope}`.
-Read the authenticated/default user scope from your Agent Core connection for stable personal preferences when relevant.
+Read the authenticated/default user scope from your Agent Core connection for stable personal preferences and owner-context details when you have user-scope read access.
 Use your authenticated Agent Core private scope, usually `agent:<your-agent-id>`, for private scratch notes only.
 Use full prefixed scope names exactly as shown. Do not use plain workspace IDs or agent IDs as memory scopes.
 
@@ -5093,14 +5162,14 @@ At the start of a meaningful task:
 2. Start or refresh the activity record using the Activity Workflow above.
 3. Search `{default_scope}` with 2-3 focused queries for relevant architecture, decisions, prior bugs, and current project state. If the search returns little or nothing, retry with exact topic values, exact keywords from prior records, or a known record id. When embeddings are unavailable, broad conceptual queries can miss; exact tokens and known ids are more reliable.
 4. If this is a handoff, resume, or review of prior work, inspect the recent activity trail and any generated briefing before making changes.
-5. Search the authenticated/default user scope only when user preferences or personal workflow may matter.
+5. Search the authenticated/default user scope only when you have user-scope read access and user preferences or personal workflow may matter.
 6. Use `memory_get` for a known record id; otherwise prefer `memory_search`.
 
 Write memory only when it will help a future session:
 
 - `decision` in `{default_scope}` for durable choices, tradeoffs, rejected options, and why they were chosen.
 - `fact` in `{default_scope}` for stable implementation facts, integration details, constraints, and verified behavior.
-- `preference` in the authenticated/default user scope for stable user preferences that apply beyond this one task.
+- `preference` in the authenticated/default user scope for stable user preferences when user-scope write access is available; otherwise keep preferences in `{default_scope}` and treat user scope as read-only owner context.
 - `scratchpad` in the authenticated private agent scope for temporary private notes, or in `{default_scope}` only for short-lived workspace handoff notes.
 
 Do not write memory for routine progress, command output, facts already obvious from files, secrets, raw credentials, or noisy transient debugging notes.
@@ -5128,6 +5197,92 @@ This file is the manual fallback when the client has no lifecycle hook or plugin
 - For multi-agent collaboration, select a workspace and ensure each agent has read/write access to that workspace scope.
 - Use the MCP tools (`memory_search`, `memory_write`, `activity_update`, `credential_list`, `credential_get`, `connectors_*`) rather than raw API calls for better scope enforcement.
 - If Codex loses connectivity, run the verification prompt to verify the full end-to-end setup.
+"""
+
+
+def _build_assistants_md(base_url, user_scope, workspace_scope, agent_scope, api_key=None):
+    default_scope = (
+        workspace_scope
+        or "the authenticated/default user scope from your Agent Core connection"
+    )
+    connection_key = _connection_key_value(api_key)
+    workspace_context_line = (
+        f"- Workspace scope: `{workspace_scope}` (use this for shared collaboration in the selected workspace)."
+        if workspace_scope
+        else ""
+    )
+    return f"""# Agent Core Assistant Onboarding
+
+Use Agent Core as the durable backend for assistant-style agents that manage their own MCP configuration.
+
+## Agent Core
+
+- **Base URL:** {base_url}
+{workspace_context_line}
+
+## Connection Values
+
+- **MCP URL:** {base_url}/mcp
+- **Bearer token:** {connection_key}
+
+Use the one-time key button when you need a fresh bearer token. The generated output should use the value above directly.
+
+The active Agent Core user and agent identities are determined by the MCP/API key configured in your tool, not by this file. Do not add API keys to this file.
+
+## Memory Scope Guidance
+
+Default memory scope for this setup is `{default_scope}`.
+Read the authenticated/default user scope from your Agent Core connection for stable personal preferences and owner-context details when you have user-scope read access.
+Use your authenticated Agent Core private scope, usually `agent:<your-agent-id>`, for temporary private scratch notes only.
+Use full prefixed scope names exactly as shown. Do not use plain workspace IDs or agent IDs as memory scopes.
+If a workspace was selected in the Integrations page, include that workspace scope in shared context. Otherwise use the authenticated/default user scope.
+
+## Setup
+
+1. Add Agent Core as an MCP server using the connection values provided for this session.
+2. Update your own MCP configuration in the location your agent normally uses.
+3. Reload or restart the agent as supported.
+4. Verify that the Agent Core server is visible before doing any Agent Core work.
+
+## Operating Rules
+
+Activity records are operational task tracking, not durable memory.
+
+At the start of every meaningful task, call `activity_update` immediately with:
+
+- `task_description`: a concise description of the current task
+- `memory_scope`: `{default_scope}`
+- `status`: `active`
+
+While actively working, call `activity_update` again every 1-2 minutes as a heartbeat. Update `task_description` if the task changes materially.
+
+Before your final response, call `activity_update` with `status: completed` when the task is complete. Use `status: blocked` if you cannot proceed and need user input.
+
+At the start of a meaningful task:
+
+1. Search `{default_scope}` with focused queries for relevant architecture, decisions, prior bugs, and current project state. If the search returns little or nothing, retry with exact topic values, exact keywords from prior records, or a known record id. When embeddings are unavailable, exact tokens and known ids are more reliable.
+2. If this is a handoff, resume, or review of prior work, inspect `activity_list` and `briefing_list` before making changes.
+3. Use `memory_get` for a known record id; otherwise prefer `memory_search`.
+
+Write memory only when it will help a future session:
+
+- `decision` in `{default_scope}` for durable choices, tradeoffs, rejected options, and why they were chosen.
+- `fact` in `{default_scope}` for stable implementation facts, integration details, constraints, and verified behavior.
+- `preference` in the authenticated/default user scope for stable user preferences when user-scope write access is available; otherwise keep preferences in `{default_scope}` and treat user scope as read-only owner context.
+- `scratchpad` in the authenticated private agent scope for temporary private notes.
+
+Do not write memory for routine progress, command output, facts already obvious from files, secrets, raw credentials, or noisy transient debugging notes.
+
+When a task may require an external service, credential, API token, repository host, chat service, browser service, or Composio-style connector, check Agent Core before asking the user for setup details.
+
+1. Use `credential_list` to discover available credential references in authorized scopes.
+2. Use `credential_get` only when you need a specific `AC_SECRET_*` reference for a local tool or command. Never ask the user for raw secrets and never print raw secrets.
+3. Use `connectors_list` and `connectors_bindings_list` to discover server-side connector bindings available to this agent.
+4. Use `connectors_actions_list` before running an unfamiliar connector action.
+5. Use `connectors_bindings_test` when a binding may be stale or unverified.
+6. Use `connectors_run` when Agent Core should perform the external action server-side.
+
+Prefer connector bindings over local secret handling when both are available, because the raw credential stays inside Agent Core.
 """
 
 
@@ -5268,6 +5423,8 @@ def _get_destination_guidance(target, output_type):
         return "Save this as <code>CLAUDE.md</code> in the workspace repository root. It is workspace-centric; the configured MCP/API key determines the active Agent Core agent."
     elif output_type == "agents_md":
         return "Save this as <code>AGENTS.md</code> in the workspace repository root. It is workspace-centric and can be shared by multiple agents; the configured MCP/API key determines the active Agent Core agent."
+    elif output_type == "assistants_md":
+        return "Paste this into the assistant's own onboarding or instruction field. It is meant for assistant-style agents that manage their own MCP configuration. Use the one-time key button here when you want the prompt to include a fresh bearer token."
     elif output_type == "mcp_json":
         return "Use the section that matches your tool. For Claude Code, run the <code>claude mcp add</code> command or save the JSON as <code>.mcp.json</code> in your repo root. Antigravity uses the same MCP shape but expects <code>serverUrl</code> instead of <code>url</code>. The bearer key determines the active Agent Core agent."
     elif output_type == "env":

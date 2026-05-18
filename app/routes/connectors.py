@@ -443,6 +443,33 @@ _directory_lock = threading.Lock()
 _DIRECTORY_TTL = 3600
 
 
+def _group_directory_entries(raw_entries: list[dict]) -> list[dict]:
+    grouped = {}
+    order = []
+    for entry in raw_entries:
+        key = (entry.get("provider"), entry.get("display_name"))
+        if key not in grouped:
+            grouped[key] = []
+            order.append(key)
+        grouped[key].append(dict(entry))
+
+    entries = []
+    for key in order:
+        variants = grouped[key]
+        variants.sort(key=lambda e: (e.get("id") or "", e.get("version") or ""))
+        preferred = variants[0]
+        for variant in variants:
+            if ":" not in preferred.get("id", "") and ":" in variant.get("id", ""):
+                continue
+            if ":" in preferred.get("id", "") and ":" not in variant.get("id", ""):
+                preferred = variant
+        summary = dict(preferred)
+        summary["variant_count"] = len(variants)
+        summary["variants"] = variants
+        entries.append(summary)
+    return entries
+
+
 def _fetch_directory():
     import urllib.request
 
@@ -507,29 +534,7 @@ def _fetch_directory():
             }
         )
 
-    seen = {}
-    entries = []
-    for e in raw_entries:
-        key = (e["provider"], e["display_name"])
-        if key not in seen:
-            seen[key] = e
-            entries.append(e)
-        else:
-            existing = seen[key]
-            if ":" not in existing["id"] and ":" in e["id"]:
-                pass
-            elif ":" not in e["id"] and ":" in existing["id"]:
-                idx = entries.index(existing)
-                entries[idx] = e
-                seen[key] = e
-    variant_counts = {}
-    for e in raw_entries:
-        key = (e["provider"], e["display_name"])
-        variant_counts[key] = variant_counts.get(key, 0) + 1
-    for e in entries:
-        key = (e["provider"], e["display_name"])
-        total = variant_counts.get(key, 1)
-        e["variant_count"] = total
+    entries = _group_directory_entries(raw_entries)
 
     with _directory_lock:
         _directory_cache["data"] = entries
@@ -551,6 +556,8 @@ async def get_directory(
 
     for e in entries:
         e["installed"] = e["id"] in installed_ids
+        for v in e.get("variants") or []:
+            v["installed"] = v["id"] in installed_ids
 
     if q:
         ql = q.lower()
@@ -654,6 +661,46 @@ async def import_spec(
         },
         status_code=201,
     )
+
+
+@connector_types_router.post("/preview")
+async def preview_spec(
+    body: ImportSpecRequest,
+    ctx: RequestContext = Depends(get_request_context),
+):
+    if not ctx.is_admin:
+        return error_response("FORBIDDEN", "Admin access required to preview specs", 403)
+
+    if not body.url and not body.spec_json:
+        return error_response(
+            "INVALID_REQUEST", "Provide either 'url' or 'spec_json'", 400
+        )
+
+    try:
+        if body.url:
+            result = openapi_service.import_spec(
+                body.url, display_name=body.display_name, is_url=True
+            )
+        else:
+            result = openapi_service.import_spec(
+                body.spec_json, display_name=body.display_name, is_url=False
+            )
+    except ValueError as e:
+        return error_response("PREVIEW_FAILED", str(e), 400)
+    except Exception as e:
+        return error_response("PREVIEW_FAILED", f"Unexpected error: {e}", 500)
+
+    preview = {
+        "connector_type_id": result["connector_type_id"],
+        "display_name": result["display_name"],
+        "description": result["description"],
+        "auth_type": result["auth_type"],
+        "servers": result["servers"],
+        "warnings": result.get("warnings", []),
+        "operation_count": result["operation_count"],
+        "supported_actions": result["supported_actions"],
+    }
+    return success_response({"preview": preview})
 
 
 @connector_types_router.post("/import-mcp")

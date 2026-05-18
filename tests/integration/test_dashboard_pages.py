@@ -80,6 +80,7 @@ def test_connectors_page_surfaces_credentials_workflow(authenticated_client):
     html = r.text
     assert "New Credential" in html
     assert "Import MCP Server" in html
+    assert "Preview Spec" in html
     assert "create-credential-form" in html
     assert "edit-credential-form" in html
     assert "Leave blank to keep current value" in html
@@ -87,6 +88,8 @@ def test_connectors_page_surfaces_credentials_workflow(authenticated_client):
     assert "/api/credentials/entries" in html
     assert "Create new credential" in html
     assert "Use stored credential" in html
+    assert "import-spec-preview" in html
+    assert "import-spec-import-btn" in html
 
 
 def test_connectors_directory_page_surfaces_mcp_import(authenticated_client):
@@ -95,6 +98,9 @@ def test_connectors_directory_page_surfaces_mcp_import(authenticated_client):
     html = r.text
     assert "Import MCP Server" in html
     assert "import-mcp-modal" in html
+    assert "Preview Spec" in html
+    assert "import-spec-preview" in html
+    assert "import-spec-import-btn" in html
 
 
 def test_dashboard_nav_order_and_admin_audit_placement(authenticated_client):

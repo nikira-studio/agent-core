@@ -3,6 +3,7 @@ import json
 from app.connectors.openapi_executor import OpenApiExecutor
 from app.connectors.generic_http import GenericHttpConnector
 from app.services.openapi_service import import_spec, generate_tools
+from app.routes.connectors import _group_directory_entries
 from app.security.url_validation import validate_public_url
 
 
@@ -139,6 +140,141 @@ def test_generate_tools_includes_auth_and_input_summary():
     assert tool["auth_summary"] == "bearer via Authorization"
     assert "Auth: bearer via Authorization" in tool["description"]
     assert "optional: per_page, page" in tool["description"]
+
+
+def test_generate_tools_preserves_operation_ids():
+    operations_json = json.dumps(
+        {
+            "auth_schemes": [],
+            "operations": [
+                {
+                    "operation_id": "items_list",
+                    "method": "GET",
+                    "path": "/items",
+                    "summary": "List items",
+                    "description": "",
+                    "parameters": [],
+                    "request_body": None,
+                    "tags": ["items"],
+                },
+                {
+                    "operation_id": "items_get",
+                    "method": "GET",
+                    "path": "/items/{item_id}",
+                    "summary": "Get item",
+                    "description": "",
+                    "parameters": [],
+                    "request_body": None,
+                    "tags": ["items"],
+                },
+            ],
+        }
+    )
+
+    result = generate_tools(
+        connector_type_id="example_api",
+        operations_json=operations_json,
+        limit=10,
+    )
+
+    assert [tool["action"] for tool in result["tools"]] == [
+        "items_list",
+        "items_get",
+    ]
+    assert [tool["name"] for tool in result["tools"]] == [
+        "example_api_items_list",
+        "example_api_items_get",
+    ]
+
+
+def test_group_directory_entries_preserves_variants():
+    raw_entries = [
+        {
+            "id": "github.com:api.github.com",
+            "display_name": "GitHub v3 REST API",
+            "provider": "github.com",
+            "version": "1.1.4",
+            "spec_url": "https://api.apis.guru/v2/specs/github.com/api.github.com/1.1.4/openapi.json",
+        },
+        {
+            "id": "github.com",
+            "display_name": "GitHub v3 REST API",
+            "provider": "github.com",
+            "version": "1.1.4",
+            "spec_url": "https://api.apis.guru/v2/specs/github.com/1.1.4/openapi.json",
+        },
+        {
+            "id": "github.com:ghec",
+            "display_name": "GitHub v3 REST API",
+            "provider": "github.com",
+            "version": "1.1.4",
+            "spec_url": "https://api.apis.guru/v2/specs/github.com/ghec/1.1.4/openapi.json",
+        },
+    ]
+
+    grouped = _group_directory_entries(raw_entries)
+
+    assert len(grouped) == 1
+    group = grouped[0]
+    assert group["variant_count"] == 3
+    assert [v["id"] for v in group["variants"]] == [
+        "github.com",
+        "github.com:api.github.com",
+        "github.com:ghec",
+    ]
+
+
+def test_get_directory_marks_grouped_variants_installed(monkeypatch):
+    import asyncio
+    from types import SimpleNamespace
+
+    from app.routes import connectors
+    from app.services import connector_service
+
+    monkeypatch.setattr(
+        connectors,
+        "_fetch_directory",
+        lambda: [
+            {
+                "id": "github.com",
+                "display_name": "GitHub v3 REST API",
+                "provider": "github.com",
+                "version": "1.1.4",
+                "spec_url": "https://api.apis.guru/v2/specs/github.com/1.1.4/openapi.json",
+                "variant_count": 2,
+                "variants": [
+                    {
+                        "id": "github.com",
+                        "display_name": "GitHub v3 REST API",
+                        "provider": "github.com",
+                        "version": "1.1.4",
+                        "spec_url": "https://api.apis.guru/v2/specs/github.com/1.1.4/openapi.json",
+                    },
+                    {
+                        "id": "github.com:ghec",
+                        "display_name": "GitHub v3 REST API",
+                        "provider": "github.com",
+                        "version": "1.1.4",
+                        "spec_url": "https://api.apis.guru/v2/specs/github.com/ghec/1.1.4/openapi.json",
+                    },
+                ],
+            }
+        ],
+    )
+    monkeypatch.setattr(
+        connector_service,
+        "list_connector_types",
+        lambda include_inactive=False: [{"id": "github.com:ghec"}],
+    )
+
+    from app.routes.connectors import get_directory
+
+    response = asyncio.run(get_directory(ctx=SimpleNamespace(is_admin=True)))
+    result = json.loads(response.body.decode())
+    group = result["data"]["entries"][0]
+    assert group["installed"] is False
+    assert group["variants"][0]["installed"] is False
+    assert group["variants"][1]["installed"] is True
 
 
 def test_import_spec_rejects_private_server_url():

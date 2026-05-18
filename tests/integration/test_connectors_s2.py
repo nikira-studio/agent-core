@@ -214,6 +214,39 @@ class TestConnectorMCPTools:
         assert result["ok"] is True
         assert result["data"]["actions"] == ["scrape", "crawl"]
 
+    def test_preview_openapi_spec_returns_summary_without_persisting(self, test_client, admin_token, monkeypatch):
+        from app.services import connector_service
+        from app.services import openapi_service
+
+        monkeypatch.setattr(openapi_service, "validate_public_url", lambda url: None)
+
+        spec = {
+            "openapi": "3.0.0",
+            "info": {"title": "Preview API", "version": "1.0.0"},
+            "servers": [{"url": "https://api.example.com"}],
+            "paths": {
+                "/items": {
+                    "get": {
+                        "operationId": "items_list",
+                        "summary": "List items",
+                        "tags": ["items"],
+                    }
+                }
+            },
+        }
+
+        r = test_client.post(
+            "/api/connector-types/preview",
+            headers={"Authorization": f"Bearer {admin_token}"},
+            json={"spec_json": json.dumps(spec), "display_name": "Preview API"},
+        )
+        assert r.status_code == 200, r.json()
+        data = r.json()["data"]["preview"]
+        assert data["display_name"] == "Preview API"
+        assert data["operation_count"] == 1
+        assert data["supported_actions"] == ["items_list"]
+        assert connector_service.get_connector_type("preview-api") is None
+
     def test_import_mcp_server_rejects_private_urls(self, test_client, admin_token):
         r = test_client.post(
             "/api/connector-types/import-mcp",

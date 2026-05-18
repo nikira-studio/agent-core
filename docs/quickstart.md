@@ -95,7 +95,7 @@ curl -X POST http://localhost:3500/api/agents \
 
 The `read_scopes` and `write_scopes` control what this agent can see and write. By default, an agent can only write to its own private scope (`agent:<id>`). You can also give it access to shared context or a specific workspace — useful if you have multiple agents collaborating on the same project.
 
-Agents that include `Shared / global` are visible read-only to other authenticated users in the Agents page, but editing, key rotation, and delete controls stay with the owner or an admin.
+Agents with the **Other users can use this scope** option enabled are visible read-only to other authenticated users in the Agents page, but editing, key rotation, and delete controls stay with the owner or an admin.
 
 ---
 

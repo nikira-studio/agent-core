@@ -85,6 +85,17 @@ For memory writes, `slot_key` can make a preference deterministic by keeping one
 
 If one agent needs to hand work to another, write the durable state into the shared workspace scope and generate or link a briefing. If you are reviewing prior work, use `memory_search`, `activity_list`, and `briefing_list` together before changing anything. The private `agent:<id>` scope is only for scratch notes for that specific agent and should not be treated as the handoff channel.
 
+### Scope Model
+
+Agent Core uses a small set of scope types with different purposes:
+
+- `agent:<id>` is the agent's private scope for scratch notes and agent-local state.
+- `user:<id>` is the authenticated owner's personal scope. In the current UI, creator user read is automatic so agents can see owner-level preferences and user-scoped bindings, while user write remains an explicit advanced choice.
+- `workspace:<id>` is the normal collaboration scope for shared project work and handoffs.
+- `shared` / `global` is a cross-user shared access path, not just a visibility toggle.
+
+When you generate reusable instructions, keep those distinctions in mind. For assistant-style agents, use the authenticated/default user scope when no workspace is selected, and include a workspace scope only when the user explicitly chose one. Treat user scope as read-only owner context unless user-scope write access is explicitly enabled; otherwise keep facts and decisions in the default shared scope, meaning the workspace scope when one is selected or the owner context when no workspace is selected.
+
 ## Connector Setup in Agent Core
 
 Use **OpenAPI import** when the service already publishes a REST spec. Use **Import MCP Server** when the service is a native MCP server and you want Agent Core to keep the capability catalog, credentials, scopes, execution history, and audit trail in one place.
@@ -93,8 +104,12 @@ Use **OpenAPI import** when the service already publishes a REST spec. Use **Imp
 
 - Go to `/connectors`
 - Click `+ Import API Spec`
-- Paste or upload the OpenAPI document
+- Paste a URL, upload a file, or paste the JSON/YAML directly
+- Click **Preview Spec** — this shows the connector name, auth type, base server URL, operation count, and any warnings before anything is saved
+- Click **Import API** to commit the import
 - Create a binding to a stored credential
+
+When browsing the **API Directory**, specs with multiple variants (such as GitHub, which publishes separate specs for api.github.com, GHES, and GHEC) show a **View Variants** button instead of a direct Import. Open it, review the variants, and import the one that matches your deployment.
 
 For internal deployments, the binding can override the target server with `config_json.base_url`. If the imported spec declares auth but the local service does not use it, set `config_json.auth_mode` to `none` so Agent Core does not require or inject a credential for that binding.
 
@@ -269,6 +284,83 @@ Restart Cursor after saving.
 
 ---
 
+### Assistants
+
+Use this section for assistant-style agents that manage their own MCP configuration. The agent should update its own config, reload or restart as supported, and verify Agent Core before doing work. Treat user scope as read-only owner context unless the agent is explicitly granted user-scope write access; otherwise keep preferences in the default shared scope and keep facts and decisions in workspace scope when a workspace is selected.
+If you want a fresh bearer token for the generated prompt, use the one-time key button for this output the same way you would for MCP config or environment variables.
+If a workspace is selected in the Integrations page, the generated prompt includes a workspace scope line. Otherwise it stays workspace-free and uses the authenticated/default user scope as the shared context.
+
+```text
+You are onboarding to Agent Core.
+
+Agent Core is a local capability layer for:
+- shared memory
+- activity tracking
+- handoffs and briefings
+- credential references
+- connector discovery and execution
+
+Agent Core repository: https://github.com/nikira-studio/agent-core
+
+Connection values:
+- MCP URL: <AGENT_CORE_MCP_URL>
+- Bearer token: <AGENT_CORE_API_KEY>
+
+Task:
+1. Use the connection values above to add Agent Core as an MCP server in your own configuration.
+2. Verify the connection.
+3. Use Agent Core tools as your durable shared backend.
+4. Do not treat chat history as durable memory.
+
+Setup instructions:
+- Update your own MCP configuration using the connection values above.
+- Register Agent Core under the appropriate MCP server entry for this tool.
+- Write the final config using the connection values above.
+- If the server already exists in config, update it rather than creating duplicates.
+- After saving config, reload MCP or restart the agent as supported.
+- Verify that the Agent Core server is visible before doing any Agent Core work.
+- If the MCP server cannot be configured or verified, stop and ask for the missing value instead of guessing.
+
+Scope guidance:
+- Use the authenticated/default user scope as read-only owner context when you have user-scope read access.
+- If user-scope write access is explicitly available, you may store stable user preferences there; otherwise keep preferences in the default shared scope, which means the workspace scope when selected or owner context when no workspace is selected.
+- If a workspace was selected in the Integrations page, include that workspace scope for facts, decisions, and shared collaboration context.
+- Use the agent's private scope only for temporary scratch notes.
+
+When writing the config, use the MCP URL and bearer token from the connection values section above. Do not duplicate them elsewhere in the prompt.
+
+Expected Agent Core tools:
+- `memory_search`, `memory_get`, `memory_write`, `memory_retract`
+- `activity_update`, `activity_get`, `activity_list`
+- `briefing_list`, `get_briefing`
+- `credential_list`, `credential_get`
+- `connectors_list`, `connectors_bindings_list`, `connectors_actions_list`, `connectors_bindings_test`, `connectors_run`
+
+Operating rules:
+- Start meaningful tasks with `activity_update` using `status: active`, a concise `task_description`, and the default shared scope.
+- Refresh activity while actively working.
+- Before making changes, search memory with `memory_search`.
+- For handoffs or reviews, use `activity_list` and `briefing_list` first.
+- Write durable facts and decisions to Agent Core memory with `memory_write`.
+- Use `memory_retract` only when a record should no longer be active.
+- Never store raw secrets in memory; use `credential_get` for `AC_SECRET_*` references instead.
+- Use `credential_list` first when credentials may be needed.
+- Use `connectors_list` and `connectors_bindings_list` to discover connectors.
+- Use `connectors_actions_list` before unfamiliar connectors.
+- Use `connectors_run` for server-side external actions.
+- Use the workspace scope when available; otherwise use the authenticated/default user scope.
+- Use full prefixed scope names exactly as provided by Agent Core. Do not invent scope names.
+
+Behavioral goals:
+- Treat Agent Core as the durable system of record.
+- Treat chat history as temporary.
+- Keep connector and credential usage minimal and intentional.
+
+If the Agent Core MCP server cannot be added or verified, do not proceed with Agent Core-dependent work.
+```
+
+---
+
 ### Other MCP Hosts
 
 Every MCP-compatible tool needs the same two things: the endpoint URL and the `Authorization` header. The JSON structure above works for any client that supports the `type: http` transport. Key names may vary slightly — check that tool's docs for where to put it.
@@ -309,6 +401,7 @@ The Integrations page generates the canonical setup text and downloadable files.
 | Environment Variables | `.env`-style variable snippet (`agent-core.env`) |
 | CLAUDE.md | Repo-level instructions for Claude Code to paste into `CLAUDE.md` |
 | AGENTS.md | Equivalent instructions for Codex or other `AGENTS.md`-aware tools |
+| Assistants | Reusable onboarding instructions for assistant-style agents that update their own MCP config |
 | Session Prompt | A startup prompt the agent can run at the beginning of each session |
 | Verification Prompt | A one-time prompt that confirms the full end-to-end connection is working |
 
