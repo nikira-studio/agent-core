@@ -192,6 +192,7 @@ Write:
   "valid_from": null,
   "valid_to": null,
   "last_confirmed_at": null,
+  "expires_at": null,
   "supersedes_id": null
 }
 ```
@@ -200,6 +201,7 @@ Optional memory metadata:
 
 - `slot_key` is for preference records when you want one active value per slot. A new preference with the same `scope + slot_key` supersedes the previous active one.
 - `valid_from`, `valid_to`, and `last_confirmed_at` are freshness hints. They are optional and help retrieval prefer current records when present.
+- `expires_at` is an ISO datetime after which the record is excluded from search results and swept on the next maintenance run. Useful for time-bounded facts or temporary scratchpad context.
 - `provenance` is server-generated on write and records who wrote the memory and from which channel; clients do not supply it directly.
 
 Search:
@@ -421,15 +423,16 @@ The broker credential authenticates the request. The `agent_id` must come from t
 
 ## Activity
 
-| Method | Path | Description |
-| --- | --- | --- |
-| `POST` | `/api/activity` | Create an activity record |
-| `GET` | `/api/activity` | List visible activities |
-| `GET` | `/api/activity/{activity_id}` | Get activity |
-| `PUT` | `/api/activity/{activity_id}` | Update status or metadata |
-| `POST` | `/api/activity/{activity_id}/heartbeat` | Refresh heartbeat timestamp |
-| `DELETE` | `/api/activity/{activity_id}` | Cancel activity |
-| `POST` | `/api/activity/{activity_id}/recovery` | Reassign stale activity and generate briefing |
+| Method | Path | Auth | Description |
+| --- | --- | --- | --- |
+| `POST` | `/api/activity` | Agent/session | Create an activity record |
+| `GET` | `/api/activity` | Agent/session | List visible activities |
+| `POST` | `/api/activity/pickup` | Agent | Claim the next active work item assigned to this agent in authorized scopes |
+| `GET` | `/api/activity/{activity_id}` | Agent/session | Get activity |
+| `PUT` | `/api/activity/{activity_id}` | Agent/session | Update status or metadata |
+| `POST` | `/api/activity/{activity_id}/heartbeat` | Agent/session | Refresh heartbeat timestamp |
+| `DELETE` | `/api/activity/{activity_id}` | Agent/session | Cancel activity |
+| `POST` | `/api/activity/{activity_id}/recovery` | Admin | Reassign stale activity and generate briefing |
 
 Create:
 ```json
@@ -443,6 +446,34 @@ Create:
 **Valid statuses:** `active`, `stale`, `completed`, `blocked`, `cancelled`
 
 Only the owning agent or an admin can update, heartbeat, cancel, or reassign an activity.
+
+### Activity Pickup
+
+`POST /api/activity/pickup` requires agent authentication. It finds the oldest `active` activity where `assigned_agent_id` matches the calling agent and `memory_scope` is within the agent's authorized read scopes, then heartbeats it to signal the claim.
+
+Response when work is found:
+```json
+{
+  "ok": true,
+  "data": {
+    "activity": { "id": "...", "task_description": "...", "assigned_agent_id": "...", ... },
+    "message": null
+  }
+}
+```
+
+Response when nothing is waiting:
+```json
+{
+  "ok": true,
+  "data": {
+    "activity": null,
+    "message": "No assigned work found for this agent in authorized scopes"
+  }
+}
+```
+
+The pickup is workspace-aware: an agent configured with `workspace:proj-a` in its read scopes will only claim activities whose `memory_scope` is `workspace:proj-a`. It will never see activities assigned to a different agent or scoped to a workspace it cannot read. Activity records are a mailroom-style handoff board, not orchestration: they store work, status, and ownership, but the agent runtime still has to explicitly check for and claim work.
 
 ---
 
@@ -505,6 +536,7 @@ Dispatch:
 | `activity_update` | Create or update an activity record |
 | `activity_get` | Get an activity record |
 | `activity_list` | List activities visible to the current caller |
+| `activity_pickup` | Claim the next active work item assigned to this agent in authorized scopes |
 | `get_briefing` | Fetch a handoff briefing |
 | `briefing_list` | List briefings visible to the current caller |
 | `connectors_list` | List available connector types |
@@ -529,11 +561,46 @@ Session authentication required. Global overview and audit routes require admin.
 | `GET` | `/api/dashboard/audit/export` | Export audit log as CSV (admin only) |
 | `GET` | `/api/dashboard/activity` | Activity list |
 | `GET` | `/api/dashboard/activity/summary` | Activity summary |
+| `POST` | `/api/dashboard/prune` | Manual prune/archive of audit or activity rows (admin only) |
 | `POST` | `/api/dashboard/system-settings` | Update system settings (admin only) |
 | `POST` | `/api/dashboard/vector-settings` | Update vector search settings (admin only) |
 | `POST` | `/api/dashboard/vector-settings/test` | Test the vector search endpoint (admin only) |
 | `GET` | `/api/dashboard/vector-settings/models` | List available vector models from the configured endpoint (admin only) |
 | `POST` | `/api/dashboard/broker/rotate` | Rotate broker credential (admin only) |
+
+---
+
+## Events
+
+Session authentication required (cookie-based only; agent tokens are not accepted on this endpoint).
+
+| Method | Path | Description |
+| --- | --- | --- |
+| `GET` | `/api/events` | Open a live SSE stream for dashboard events |
+
+The events endpoint returns a persistent `text/event-stream` response. Each message is a named SSE event with a JSON payload:
+
+```
+event: activity_created
+data: {"type": "activity_created", "timestamp": "2026-05-18T12:34:56.789Z", "data": {...}}
+```
+
+**Emitted event types:**
+
+| Event | Trigger |
+| --- | --- |
+| `activity_created` | A new activity record is created |
+| `activity_updated` | An activity status or metadata is updated |
+| `activity_heartbeat` | An agent sends a heartbeat for an activity |
+| `activity_cancelled` | An activity is cancelled |
+| `activity_recovered` | A stale activity is reassigned or recovered |
+| `connector_executed` | A connector binding action completes |
+
+The `connector_executed` payload includes `binding_id`, `binding_name`, `scope`, `connector_type_id`, `connector_type_name`, `action`, `success`, `duration_ms`, `status`, and `error_message`.
+
+The stream sends an SSE comment (`: heartbeat`) every 15 seconds to keep the connection alive through proxies. The browser's built-in `EventSource` API reconnects automatically on disconnect; Agent Core's dashboard client uses exponential backoff (1 s → 2 s → … → 30 s max).
+
+This endpoint is used internally by the dashboard to push live updates to the overview stat cards, activity table, and connector execution indicator without polling.
 
 ---
 
@@ -573,6 +640,306 @@ curl -X POST http://localhost:3500/api/backup/restore \
 ```
 
 Use `mode=merge` to add records from the backup without overwriting existing records. Existing records (by primary key) are preserved.
+
+---
+
+## Webhooks
+
+The Webhooks section covers two independent features:
+
+- **Inbound receiver** — external systems push work commands into Agent Core
+- **Outbound notifications** — Agent Core pushes event notifications to external endpoints
+
+---
+
+## Inbound Webhooks
+
+Allows external systems (n8n, Zapier, custom scripts) to create and manage activities in Agent Core by sending authenticated HTTP POST commands.
+
+| Method | Path | Auth | Description |
+| --- | --- | --- | --- |
+| `GET` | `/api/webhooks/inbound/key/status` | Admin | Check whether an inbound key exists |
+| `POST` | `/api/webhooks/inbound/key` | Admin | Generate the first inbound key |
+| `POST` | `/api/webhooks/inbound/key/rotate` | Admin | Rotate the inbound key |
+| `POST` | `/api/webhooks/inbound` | Inbound key | Submit an inbound command |
+
+### Authentication
+
+Every inbound request must include the inbound key in a dedicated header:
+
+```http
+X-Agent-Core-Inbound-Key: ac_inbound_<token>
+```
+
+The key is installation-wide (one key at a time). Generate it once via the dashboard or API; it is shown once and then hashed. Rotation immediately invalidates the previous key.
+
+### Generate key
+
+```http
+POST /api/webhooks/inbound/key
+Authorization: Bearer <admin-session>
+```
+
+Response (201):
+
+```json
+{
+  "ok": true,
+  "data": {
+    "key": "ac_inbound_<token>",
+    "note": "Store this key — it will not be shown again."
+  }
+}
+```
+
+Returns 409 if a key already exists. Use the rotate endpoint to replace it.
+
+### Rotate key
+
+```http
+POST /api/webhooks/inbound/key/rotate
+Authorization: Bearer <admin-session>
+```
+
+Response (200): same shape as generate. The previous key is immediately deactivated.
+
+### Submit a command
+
+```http
+POST /api/webhooks/inbound
+X-Agent-Core-Inbound-Key: ac_inbound_<token>
+Content-Type: application/json
+
+{
+  "event_type": "activity.create",
+  "assigned_agent_id": "codex",
+  "task_description": "Review webhook implementation",
+  "memory_scope": "workspace:agent-core",
+  "workspace": "workspace:agent-core"
+}
+```
+
+### Supported event types
+
+Commands use dot notation and imperative form to distinguish them from outbound notifications.
+
+| Event type | Required fields | Optional fields |
+| --- | --- | --- |
+| `activity.create` | `assigned_agent_id` | `task_description`, `memory_scope`, `workspace` |
+| `activity.assign` | `activity_id`, `assigned_agent_id` | `memory_scope` |
+| `activity.update` | `activity_id` + at least one of: `status`, `task_description`, `memory_scope` | |
+| `activity.cancel` | `activity_id` | `reason` |
+| `activity.note` | `activity_id`, `note` | |
+
+#### activity.create
+
+Creates a new activity record. `assigned_agent_id` is used as both `agent_id` and `assigned_agent_id`. If `workspace` is supplied, Agent Core stores it as optional metadata on the activity record.
+
+```json
+{
+  "event_type": "activity.create",
+  "assigned_agent_id": "codex",
+  "task_description": "Review webhook implementation",
+  "memory_scope": "workspace:agent-core"
+}
+```
+
+Response:
+
+```json
+{"ok": true, "data": {"activity_id": "abc123", "status": "active"}}
+```
+
+#### activity.assign
+
+Reassigns an existing activity to a different agent.
+
+```json
+{
+  "event_type": "activity.assign",
+  "activity_id": "abc123",
+  "assigned_agent_id": "opus"
+}
+```
+
+#### activity.update
+
+Updates status or description of an existing activity.
+
+```json
+{
+  "event_type": "activity.update",
+  "activity_id": "abc123",
+  "status": "completed",
+  "task_description": "Reviewed and approved"
+}
+```
+
+#### activity.cancel
+
+Cancels an existing activity.
+
+```json
+{
+  "event_type": "activity.cancel",
+  "activity_id": "abc123",
+  "reason": "superseded by new ticket"
+}
+```
+
+#### activity.note
+
+Appends a note to the activity's audit trail. Does not modify the activity record itself.
+
+```json
+{
+  "event_type": "activity.note",
+  "activity_id": "abc123",
+  "note": "Handoff complete. Reviewed PR #42 and left inline comments."
+}
+```
+
+### Error responses
+
+| Status | Code | Meaning |
+| --- | --- | --- |
+| 401 | `UNAUTHORIZED` | Missing or invalid inbound key |
+| 400 | `INVALID_PAYLOAD` | Unknown event type or missing required field |
+
+---
+
+## Outbound Webhooks
+
+Admin-only. Manage outbound webhook registrations and view delivery history.
+
+| Method | Path | Auth | Description |
+| --- | --- | --- | --- |
+| `POST` | `/api/webhooks` | Admin | Register a new webhook |
+| `GET` | `/api/webhooks` | Admin | List all webhook registrations |
+| `GET` | `/api/webhooks/{id}` | Admin | Get a single webhook registration |
+| `PUT` | `/api/webhooks/{id}` | Admin | Update a webhook (name, url, secret, events, enabled) |
+| `DELETE` | `/api/webhooks/{id}` | Admin | Delete a webhook and its delivery log |
+| `POST` | `/api/webhooks/{id}/test` | Admin | Send a synthetic test delivery |
+| `GET` | `/api/webhooks/{id}/deliveries` | Admin | List recent delivery attempts |
+
+### Create webhook
+
+```http
+POST /api/webhooks
+Authorization: Bearer <admin-session>
+Content-Type: application/json
+
+{
+  "name": "n8n Activity Alerts",
+  "url": "https://n8n.example.com/webhook/agent-core",
+  "secret": "your-hmac-secret",
+  "event_types": ["activity_cancelled", "activity_updated"]
+}
+```
+
+Response:
+
+```json
+{
+  "ok": true,
+  "data": {
+    "webhook": {
+      "id": "abc123",
+      "name": "n8n Activity Alerts",
+      "url": "https://n8n.example.com/webhook/agent-core",
+      "event_types": ["activity_cancelled", "activity_updated"],
+      "enabled": true,
+      "created_by": "admin",
+      "created_at": "2026-05-18T10:00:00+00:00",
+      "updated_at": "2026-05-18T10:00:00+00:00"
+    }
+  }
+}
+```
+
+The secret is write-only. It is never returned in list or get responses.
+
+### Supported event types
+
+`activity_created`, `activity_updated`, `activity_heartbeat`, `activity_cancelled`, `activity_recovered`, `connector_executed`
+
+### Delivery payload
+
+Every delivery is a signed HTTP POST. The envelope is the same for all event types:
+
+```json
+{
+  "event_type": "activity_cancelled",
+  "timestamp": "2026-05-18T10:30:00.000000+00:00",
+  "data": { ... }
+}
+```
+
+**Activity event `data` fields** (`activity_created`, `activity_updated`, `activity_heartbeat`, `activity_cancelled`, `activity_recovered`):
+
+```json
+{
+  "activity_id": "abc123",
+  "task_description": "Refactor auth middleware",
+  "agent_id": "my-agent",
+  "assigned_agent_id": "my-agent",
+  "user_id": "admin",
+  "memory_scope": "workspace:my-project",
+  "status": "cancelled",
+  "started_at": "2026-05-18T09:00:00+00:00",
+  "updated_at": "2026-05-18T10:30:00+00:00",
+  "heartbeat_at": "2026-05-18T10:25:00+00:00",
+  "ended_at": "2026-05-18T10:30:00+00:00",
+  "previous_status": "active"
+}
+```
+
+`previous_status` is present on `activity_updated` and `activity_cancelled`. `recovery_action` and `result` are present on `activity_recovered`.
+
+**Connector event `data` fields** (`connector_executed`):
+
+```json
+{
+  "binding_id": "bind123",
+  "binding_name": "GitHub Actions",
+  "scope": "workspace:my-project",
+  "connector_type_id": "github",
+  "connector_type_name": "GitHub",
+  "action": "list_repos",
+  "success": true,
+  "duration_ms": 312,
+  "status": "success",
+  "error_message": null
+}
+```
+
+`error_message` is non-null on failure.
+
+Signature header: `X-Agent-Core-Signature: sha256=<hex>` (HMAC-SHA256 of raw body with webhook secret).
+
+### Test delivery
+
+```http
+POST /api/webhooks/{id}/test
+Authorization: Bearer <admin-session>
+```
+
+Sends a synthetic payload to the registered URL with `event_type: "test"`. The payload is not a replay of any prior delivery.
+
+Response:
+
+```json
+{"ok": true, "data": {"ok": true, "http_status": 200}}
+```
+
+### Delivery log
+
+```http
+GET /api/webhooks/{id}/deliveries?limit=50
+Authorization: Bearer <admin-session>
+```
+
+Returns an array of delivery attempts, ordered newest first. Each entry includes `status` (`success` or `failure`), `http_status`, `event_type`, and `error_message` if applicable.
 
 ---
 

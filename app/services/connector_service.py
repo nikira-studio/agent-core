@@ -1,9 +1,14 @@
 import json
+import logging
+import random
 import secrets
+import time
 from typing import Optional
 from app.database import get_db
 from app.models.enums import normalize_id
 from app.services import mcp_provider_service
+
+logger = logging.getLogger(__name__)
 
 
 def list_connector_types(include_inactive: bool = False) -> list[dict]:
@@ -249,6 +254,27 @@ def delete_binding(binding_id: str) -> bool:
         return cursor.rowcount > 0
 
 
+_NON_TRANSIENT_CODES = frozenset({
+    "NOT_FOUND", "DISABLED", "INVALID_ACTION", "NO_CREDENTIAL",
+    "RATE_LIMITED", "INVALID_CONFIGURATION", "SCOPE_DENIED",
+})
+
+
+def _is_transient_result(result: dict) -> bool:
+    if result.get("success"):
+        return False
+    error_code = result.get("error_code") or ""
+    if error_code in _NON_TRANSIENT_CODES:
+        return False
+    status = result.get("status")
+    if isinstance(status, int):
+        return status == 429 or status >= 500
+    if error_code == "EXECUTION_ERROR":
+        msg = (result.get("error") or "").lower()
+        return "timeout" in msg or "connection" in msg or "unavailable" in msg
+    return False
+
+
 def _check_rate_limit(binding: dict) -> Optional[str]:
     config = None
     if binding.get("rate_limit_config_json"):
@@ -479,9 +505,6 @@ def test_binding(binding_id: str) -> dict:
                 return {"success": False, "error": str(e), "error_code": "TEST_FAILED"}
         return {"success": False, "error": "No handler for this connector type", "error_code": "NO_HANDLER"}
 
-    if connector_type.get("auth_type") != "none" and not credential:
-        return {"success": False, "error": "No credential linked to this binding"}
-
     rate_error = _check_rate_limit(binding)
     if rate_error:
         return {"success": False, "error": rate_error}
@@ -587,61 +610,86 @@ def execute_binding_action(binding_id: str, action: str, params: Optional[dict] 
             "error_code": "RATE_LIMITED",
         }
 
-    provider_type = connector_type.get("provider_type") or "openapi"
-    try:
-        if provider_type == "mcp":
-            from app.services import mcp_provider_service
+    max_retries = 0
+    retry_base_delay = 1.0
+    if binding.get("rate_limit_config_json"):
+        try:
+            rc = json.loads(binding["rate_limit_config_json"])
+            max_retries = max(0, int(rc.get("max_retries", 0)))
+            retry_base_delay = max(0.1, int(rc.get("retry_delay_ms", 1000)) / 1000.0)
+        except (json.JSONDecodeError, ValueError, TypeError):
+            pass
 
-            endpoint_url = connector_type.get("endpoint_url")
-            if not endpoint_url:
+    provider_type = connector_type.get("provider_type") or "openapi"
+
+    def _run_once() -> dict:
+        try:
+            if provider_type == "mcp":
+                from app.services import mcp_provider_service as _mcp
+
+                endpoint_url = connector_type.get("endpoint_url")
+                if not endpoint_url:
+                    return {
+                        "success": False,
+                        "error": "MCP connector has no endpoint_url",
+                        "error_code": "INVALID_CONFIGURATION",
+                    }
+                result = _mcp.execute_mcp_tool(
+                    endpoint_url=endpoint_url,
+                    action=action,
+                    params=params or {},
+                    credential=credential,
+                    config_json=binding.get("config_json"),
+                    transport_type=connector_type.get("transport_type") or "streamable_http",
+                )
                 return {
-                    "success": False,
-                    "error": "MCP connector has no endpoint_url",
-                    "error_code": "INVALID_CONFIGURATION",
+                    "success": result.success,
+                    "body": result.body,
+                    "error": result.error,
+                    "error_code": result.error_code,
+                    "status": result.status,
+                    "transport": result.transport,
                 }
 
-            result = mcp_provider_service.execute_mcp_tool(
-                endpoint_url=endpoint_url,
+            executor = _resolve_executor(connector_type)
+            if not executor:
+                return {
+                    "success": False,
+                    "error": "Connector handler not found",
+                    "error_code": "NOT_FOUND",
+                }
+            executor_config = _build_executor_config(binding, connector_type)
+            return executor.execute(
                 action=action,
                 params=params or {},
                 credential=credential,
-                config_json=binding.get("config_json"),
-                transport_type=connector_type.get("transport_type") or "streamable_http",
+                config_json=executor_config,
             )
-            return {
-                "success": result.success,
-                "body": result.body,
-                "error": result.error,
-                "error_code": result.error_code,
-                "status": result.status,
-                "transport": result.transport,
-            }
-
-        executor = _resolve_executor(connector_type)
-        if not executor:
+        except Exception as e:
             return {
                 "success": False,
-                "error": "Connector handler not found",
-                "error_code": "NOT_FOUND",
+                "error": str(e),
+                "error_code": "EXECUTION_ERROR",
             }
-        executor_config = _build_executor_config(binding, connector_type)
-        result = executor.execute(
-            action=action,
-            params=params or {},
-            credential=credential,
-            config_json=executor_config,
+
+    result = _run_once()
+    for attempt in range(1, max_retries + 1):
+        if not _is_transient_result(result):
+            break
+        delay = min(retry_base_delay * (2 ** (attempt - 1)) + random.uniform(0, 0.5), 30.0)
+        logger.info(
+            "Connector retry %d/%d for binding %s after transient failure (delay %.2fs): %s",
+            attempt, max_retries, binding_id, delay, result.get("error"),
         )
-        return result
-    except Exception as e:
-        return {
-            "success": False,
-            "error": str(e),
-            "error_code": "EXECUTION_ERROR",
-        }
+        time.sleep(delay)
+        result = _run_once()
+
+    return result
 
 
 def execute_binding_action_with_logging(binding_id: str, action: str, params: Optional[dict] = None) -> dict:
-    import time
+    from app.services.event_stream_service import event_hub
+    from app.services import webhook_service
 
     start = time.time()
     result = execute_binding_action(binding_id, action, params)
@@ -657,6 +705,22 @@ def execute_binding_action_with_logging(binding_id: str, action: str, params: Op
         error_message=result.get("error") if not result.get("success") else None,
         duration_ms=duration_ms,
     )
+    binding = get_binding(binding_id) or {}
+    connector_type = get_connector_type(binding.get("connector_type_id", "")) if binding.get("connector_type_id") else None
+    _event_data = {
+        "binding_id": binding_id,
+        "binding_name": binding.get("name"),
+        "scope": binding.get("scope"),
+        "connector_type_id": binding.get("connector_type_id"),
+        "connector_type_name": connector_type.get("display_name") if connector_type else None,
+        "action": action,
+        "success": result.get("success"),
+        "duration_ms": duration_ms,
+        "status": result.get("error_code") or ("success" if result.get("success") else "failure"),
+        "error_message": result.get("error") if not result.get("success") else None,
+    }
+    event_hub.publish("connector_executed", _event_data)
+    webhook_service.dispatch_event("connector_executed", _event_data)
     return result
 
 

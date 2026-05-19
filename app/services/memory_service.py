@@ -24,7 +24,7 @@ FTS5_SPECIAL = re.compile(r'[()^:*?"\'-]|--(.*?)$')
 MEMORY_RECORD_COLUMNS = (
     "id, content, memory_class, scope, domain, topic, confidence, importance, "
     "source_kind, event_time, created_at, record_status, superseded_by_id, "
-    "supersedes_id, provenance_json, slot_key, valid_from, valid_to, last_confirmed_at"
+    "supersedes_id, provenance_json, slot_key, valid_from, valid_to, last_confirmed_at, expires_at"
 )
 
 
@@ -136,6 +136,7 @@ def write_memory(
     valid_from: Optional[str] = None,
     valid_to: Optional[str] = None,
     last_confirmed_at: Optional[str] = None,
+    expires_at: Optional[str] = None,
     allow_pii_shared: bool = False,
 ) -> tuple[dict, str | None]:
     if memory_class not in MEMORY_CLASSES:
@@ -155,6 +156,7 @@ def write_memory(
     normalized_last_confirmed_at = _normalize_optional_timestamp(
         last_confirmed_at, "last_confirmed_at"
     )
+    normalized_expires_at = _normalize_optional_timestamp(expires_at, "expires_at")
     if normalized_valid_from and normalized_valid_to:
         if parse_utc_datetime(normalized_valid_to) < parse_utc_datetime(
             normalized_valid_from
@@ -202,8 +204,8 @@ def write_memory(
             INSERT INTO memory_records
             (id, content, memory_class, scope, domain, topic, confidence, importance,
              source_kind, event_time, created_at, record_status, supersedes_id,
-             provenance_json, slot_key, valid_from, valid_to, last_confirmed_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?)
+             provenance_json, slot_key, valid_from, valid_to, last_confirmed_at, expires_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 record_id,
@@ -223,6 +225,7 @@ def write_memory(
                 normalized_valid_from,
                 normalized_valid_to,
                 normalized_last_confirmed_at,
+                normalized_expires_at,
             ),
         )
         conn.commit()
@@ -259,6 +262,7 @@ def write_memory(
             "valid_from": normalized_valid_from,
             "valid_to": normalized_valid_to,
             "last_confirmed_at": normalized_last_confirmed_at,
+            "expires_at": normalized_expires_at,
         }, None
 
 
@@ -294,6 +298,10 @@ def restore_memory(record_id: str) -> bool:
 
 def delete_memory_hard(record_id: str) -> bool:
     with get_db() as conn:
+        conn.execute(
+            "DELETE FROM memory_embeddings WHERE record_id = ?",
+            (record_id,),
+        )
         cursor = conn.execute("DELETE FROM memory_records WHERE id = ?", (record_id,))
         conn.commit()
         return cursor.rowcount > 0
@@ -313,7 +321,7 @@ def search_memory(
 ) -> tuple[list[dict], str]:
     sanitized = _sanitize_fts_query(query)
 
-    status_filter = ""
+    status_filter = " AND (mr.expires_at IS NULL OR datetime(mr.expires_at) > datetime('now'))"
     if not include_retracted:
         status_filter += " AND mr.record_status != 'retracted'"
     if not include_superseded:
@@ -453,12 +461,13 @@ def get_memory_by_scope(
 ) -> list[dict]:
     normalized_scope = _normalize_scope(scope)
     status_sql = " AND record_status = ?" if record_status else ""
+    expires_sql = " AND (expires_at IS NULL OR datetime(expires_at) > datetime('now'))"
     with get_db() as conn:
         rows = conn.execute(
             f"""
             SELECT {MEMORY_RECORD_COLUMNS}
             FROM memory_records
-            WHERE scope = ?{status_sql}
+            WHERE scope = ?{status_sql}{expires_sql}
             ORDER BY created_at DESC
             LIMIT ? OFFSET ?
             """,
@@ -481,13 +490,14 @@ def get_memory_by_scopes(
         return []
     placeholders = ",".join(["?" for _ in scopes])
     status_sql = " AND record_status = ?" if record_status else ""
+    expires_sql = " AND (expires_at IS NULL OR datetime(expires_at) > datetime('now'))"
     params: list = list(scopes) + ([record_status] if record_status else []) + [limit, offset]
     with get_db() as conn:
         rows = conn.execute(
             f"""
             SELECT {MEMORY_RECORD_COLUMNS}
             FROM memory_records
-            WHERE scope IN ({placeholders}){status_sql}
+            WHERE scope IN ({placeholders}){status_sql}{expires_sql}
             ORDER BY created_at DESC
             LIMIT ? OFFSET ?
             """,

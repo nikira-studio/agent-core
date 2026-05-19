@@ -52,6 +52,7 @@ htmlcov/
 
 # Claude Code internal files (worktrees, session data)
 .claude/
+.claude.json
 
 # Personal docker-compose overrides (use docker-compose.example.yml as a base)
 docker-compose.yml
@@ -66,6 +67,7 @@ temp.txt
 plan.md
 fixes.md
 roadmap.md
+docker-compose.yml
 
 # Generated credentials
 credential.key

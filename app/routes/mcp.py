@@ -79,6 +79,7 @@ MANIFEST = {
                     "valid_from": {"type": "string"},
                     "valid_to": {"type": "string"},
                     "last_confirmed_at": {"type": "string"},
+                    "expires_at": {"type": "string", "description": "ISO datetime after which this record is excluded from search results and swept on next maintenance run"},
                 },
                 "required": ["content", "memory_class", "scope"],
             },
@@ -151,6 +152,14 @@ MANIFEST = {
                     "limit": {"type": "integer", "default": 50},
                     "offset": {"type": "integer", "default": 0},
                 },
+            },
+        },
+        {
+            "name": "activity_pickup",
+            "description": "Claim the next active work item assigned to this agent in authorized scopes. Call this at startup or when idle to discover work a human has assigned. Returns the claimed activity or null when no work is waiting.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {},
             },
         },
         {
@@ -619,6 +628,7 @@ async def _handle_custom_mcp_tool(body: dict, ctx: RequestContext):
                 valid_from=params.get("valid_from"),
                 valid_to=params.get("valid_to"),
                 last_confirmed_at=params.get("last_confirmed_at"),
+                expires_at=params.get("expires_at"),
             )
         except ValueError as e:
             return _mcp_error("INVALID_INPUT", str(e), 400)
@@ -836,6 +846,29 @@ async def _handle_custom_mcp_tool(body: dict, ctx: RequestContext):
             content={
                 "ok": True,
                 "data": {"activities": activities, "count": len(activities)},
+            }
+        )
+
+    elif tool == "activity_pickup":
+        authorized_scopes = enforcer.filter_readable_scopes(ctx.read_scopes)
+        activity = activity_service.claim_next_activity(ctx.agent_id, authorized_scopes)
+        if activity:
+            audit_service.write_event(
+                actor_type=ctx.actor_type,
+                actor_id=ctx.actor_id,
+                action="activity_pickup",
+                resource_type="activity",
+                resource_id=activity["id"],
+                result="success",
+                details=_activity_audit_details(activity, action="pickup"),
+            )
+        return JSONResponse(
+            content={
+                "ok": True,
+                "data": {
+                    "activity": activity,
+                    "message": None if activity else "No assigned work found for this agent in authorized scopes",
+                },
             }
         )
 

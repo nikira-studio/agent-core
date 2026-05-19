@@ -33,12 +33,14 @@ AUDIT_ACTIONS = (
     "memory_delete",
     "retrieval_degraded",
     "activity_update",
+    "activity_pickup",
     "activity_heartbeat",
     "activity_ambiguous_update",
     "activity_recovery",
     "activity_reassigned",
     "activity_cancelled",
     "activity_resumed",
+    "activity_pruned",
     "briefing_generated",
     "handoff_created",
     "backup_export",
@@ -52,7 +54,9 @@ AUDIT_ACTIONS = (
     "workspace_updated",
     "workspace_collaborator_upserted",
     "workspace_collaborator_removed",
+    "audit_pruned",
     "scratchpad_pruned",
+    "memory_ttl_swept",
     "password_change",
     "otp_enrolled",
     "otp_disabled",
@@ -70,6 +74,15 @@ AUDIT_ACTIONS = (
     "connector_type_actions_updated",
     "connector_type_deleted",
     "connector_action_executed",
+    "webhook_created",
+    "webhook_updated",
+    "webhook_deleted",
+    "webhook_test_delivery",
+    "inbound_key_generated",
+    "inbound_key_rotated",
+    "inbound_webhook_received",
+    "inbound_webhook_rejected",
+    "inbound_webhook_note",
 )
 
 
@@ -147,6 +160,39 @@ def _sanitize_details(details: dict[str, Any]) -> dict[str, Any]:
         else:
             sanitized[key] = _sanitize_value(value)
     return sanitized
+
+
+def count_events(
+    actor_type: Optional[str] = None,
+    actor_id: Optional[str] = None,
+    action: Optional[str] = None,
+    resource_type: Optional[str] = None,
+    result: Optional[str] = None,
+) -> int:
+    conditions = []
+    params = []
+    if actor_type:
+        conditions.append("actor_type = ?")
+        params.append(actor_type)
+    if actor_id:
+        conditions.append("actor_id = ?")
+        params.append(actor_id)
+    if action:
+        conditions.append("action = ?")
+        params.append(action)
+    if resource_type:
+        conditions.append("resource_type = ?")
+        params.append(resource_type)
+    if result:
+        conditions.append("result = ?")
+        params.append(result)
+
+    where_clause = " AND ".join(conditions) if conditions else "1=1"
+    with get_db() as conn:
+        row = conn.execute(
+            f"SELECT COUNT(*) FROM audit_log WHERE {where_clause}", params
+        ).fetchone()
+        return row[0] if row else 0
 
 
 def query_events(

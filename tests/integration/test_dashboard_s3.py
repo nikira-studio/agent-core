@@ -42,9 +42,8 @@ class TestMemoryPage:
 
     def test_memory_supersession_chain_section(self, admin_client):
         r = admin_client.get("/memory")
-        assert "mem-detail-chain" in r.text
-        assert "Memory History" in r.text
-        assert "Show Memory History" in r.text
+        assert "mem-chain-content" in r.text
+        assert "Version History" in r.text
 
 
 class TestAgentsPage:
@@ -204,8 +203,8 @@ class TestActivityPage:
 
     def test_activity_filter_bar_present(self, admin_client):
         r = admin_client.get("/activity")
-        assert "status-filter" in r.text
-        assert "filterActivity" in r.text
+        assert "filter-bar" in r.text
+        assert "status=" in r.text
 
     def test_activity_reassign_modal_present(self, admin_client):
         r = admin_client.get("/activity")
@@ -221,8 +220,8 @@ class TestActivityPage:
     def test_activity_create_sends_assigned_agent_id(self, admin_client):
         r = admin_client.get("/activity")
         assert "assigned_agent_id: agentId" in r.text
-        assert "Advanced options" in r.text
-        assert "Use agent private scope (recommended)" in r.text
+        assert "Workspace / Scope" in r.text
+        assert "Agent private scope" in r.text
 
     def test_activity_coordination_snapshot_mentions_ownership(self, admin_client):
         r = admin_client.get("/activity")
@@ -277,7 +276,7 @@ class TestAuditPage:
         assert "audit-resource" in r.text
         assert "audit-result" in r.text
         assert "Audit Snapshot" in r.text
-        assert "Events on Page" in r.text
+        assert "Total Events" in r.text
 
     def test_audit_export_csv_button_present(self, admin_client):
         r = admin_client.get("/audit")

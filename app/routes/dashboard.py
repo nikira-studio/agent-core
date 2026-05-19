@@ -2,6 +2,7 @@ from fastapi import APIRouter, Request, Depends, HTTPException
 from fastapi.responses import HTMLResponse
 import httpx
 import json
+from datetime import datetime, timezone
 from collections import Counter
 from urllib.parse import urlparse
 from pydantic import BaseModel
@@ -88,13 +89,14 @@ def render_page(
         ("/integrations", "Integrations"),
         ("/activity", "Activity"),
         ("/audit", "Audit"),
+        ("/webhooks", "Webhooks"),
         ("/settings", "Settings"),
     ]
     if not is_admin:
         nav_items = [
             (href, label)
             for href, label in nav_items
-            if href not in {"/users", "/audit"}
+            if href not in {"/users", "/audit", "/webhooks"}
         ]
     nav_html = "\n".join(
         f'<a href="{href}" class="{"active" if nav_active == href else ""}"><span>{label}</span></a>'
@@ -142,6 +144,7 @@ def render_page(
   </div>
 </div>
 <script src="/static/js/dashboard.js?v=20260515d"></script>
+<script src="/static/js/events.js?v=20260518a"></script>
 {extra_js}
 </body>
 </html>""",
@@ -162,6 +165,62 @@ def api_key_modal(id: str, title: str, body_content: str) -> str:
 class DashboardSearchRequest(BaseModel):
     query: str
     limit: int = 5
+
+
+class ManualPruneRequest(BaseModel):
+    resource_type: str
+    before_date: str
+
+
+def _parse_manual_prune_cutoff(before_date: str) -> tuple[str, str]:
+    raw = str(before_date or "").strip().replace("Z", "+00:00")
+    if not raw:
+        raise ValueError("before_date is required")
+    if len(raw) == 10 and "T" not in raw:
+        raw = raw + "T00:00:00+00:00"
+    dt = datetime.fromisoformat(raw)
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    dt = dt.astimezone(timezone.utc)
+    return dt.isoformat(), dt.strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _build_pagination(page: int, total_pages: int, extra_qs: str = "") -> str:
+    """Render a pagination control: Prev, numbered pages with ellipsis, Next."""
+    sep = "&amp;" if extra_qs else ""
+    qs = f"{sep}{extra_qs}" if extra_qs else ""
+
+    def page_url(p: int) -> str:
+        return f"?page={p}{qs}"
+
+    prev_cls = "btn btn-sm btn-secondary" + (" disabled" if page <= 1 else "")
+    next_cls = "btn btn-sm btn-secondary" + (" disabled" if page >= total_pages else "")
+    prev_href = page_url(max(1, page - 1))
+    next_href = page_url(min(total_pages, page + 1))
+
+    # Build the set of page numbers to show: always first, last, and window around current
+    show = set()
+    show.add(1)
+    show.add(total_pages)
+    for p in range(max(1, page - 2), min(total_pages, page + 2) + 1):
+        show.add(p)
+
+    nums_html = ""
+    prev_shown = 0
+    for p in sorted(show):
+        if prev_shown and p - prev_shown > 1:
+            nums_html += "<span style='padding:0 4px;color:var(--text-muted)'>…</span>"
+        active_style = "background:var(--accent-color);color:#fff;" if p == page else ""
+        nums_html += f"<a href='{page_url(p)}' class='btn btn-sm btn-secondary' style='min-width:32px;{active_style}'>{p}</a>"
+        prev_shown = p
+
+    return (
+        f"<div class='pagination' style='margin-top:12px;display:flex;gap:6px;align-items:center;flex-wrap:wrap'>"
+        f"<a href='{prev_href}' class='{prev_cls}'>&#8592; Prev</a>"
+        f"{nums_html}"
+        f"<a href='{next_href}' class='{next_cls}'>Next &#8594;</a>"
+        f"</div>"
+    )
 
 
 def _flatten_text(value) -> list[str]:
@@ -484,8 +543,9 @@ async def dashboard_home(request: Request, session: dict = Depends(require_auth)
         () if is_admin else (session["user_id"],),
     )
     connector_type_count = len(connector_types)
-    disabled_action_count = sum(
-        len(ct.get("disabled_actions") or []) for ct in connector_types
+    enabled_action_count = sum(
+        max(len(ct.get("supported_actions") or []) - len(ct.get("disabled_actions") or []), 0)
+        for ct in connector_types
     )
     attention = attention[:8]
     users_card = ""
@@ -498,8 +558,8 @@ async def dashboard_home(request: Request, session: dict = Depends(require_auth)
       {users_card}
       <a class="stat-card stat-link" href="/agents"><div class="value">{agent_count}</div><div class="label">Active Agents</div></a>
       <a class="stat-card stat-link" href="/workspaces"><div class="value">{workspace_count}</div><div class="label">Active Workspaces</div></a>
-      <a class="stat-card stat-link" href="/activity"><div class="value">{active_task_count}</div><div class="label">Open Activities</div></a>
-      <a class="stat-card stat-link" href="/activity"><div class="value">{len(attention)}</div><div class="label">Stale / Blocked</div></a>
+      <a class="stat-card stat-link" href="/activity" id="stat-open-activities"><div class="value">{active_task_count}</div><div class="label">Open Activities</div></a>
+      <a class="stat-card stat-link" href="/activity" id="stat-stale-blocked"><div class="value">{len(attention)}</div><div class="label">Stale / Blocked</div></a>
       <a class="stat-card stat-link" href="/memory"><div class="value">{memory_count}</div><div class="label">Memory Records</div></a>
     </div>"""
 
@@ -512,7 +572,7 @@ async def dashboard_home(request: Request, session: dict = Depends(require_auth)
       <div class="stat-grid">
         <a class="stat-card stat-link" href="/connectors"><div class="value">{connector_type_count}</div><div class="label">Connector Types</div></a>
         <a class="stat-card stat-link" href="/connectors"><div class="value">{enabled_connector_binding_count}</div><div class="label">Enabled Bindings</div></a>
-        <a class="stat-card stat-link" href="/connectors"><div class="value">{disabled_action_count}</div><div class="label">Disabled Actions</div></a>
+        <a class="stat-card stat-link" href="/connectors"><div class="value">{enabled_action_count}</div><div class="label">Enabled Actions</div></a>
         <a class="stat-card stat-link" href="/connectors"><div class="value">{connector_execution_count}</div><div class="label">Connector Executions</div></a>
       </div>
     </div>"""
@@ -589,9 +649,35 @@ async def dashboard_home(request: Request, session: dict = Depends(require_auth)
           {audit_link}
         </div>
       </div>
-      <table><thead><tr><th>Task</th><th>Status</th><th>Agent</th><th>Updated</th></tr></thead><tbody>{activity_rows}</tbody></table>
+      <table><thead><tr><th>Task</th><th>Status</th><th>Agent</th><th>Updated</th></tr></thead><tbody id="overview-activity-tbody">{activity_rows}</tbody></table>
     </div>
     <script>
+    window.onAgentCoreEvent = async function(event) {{
+      if (!(event.type || '').startsWith('activity_')) return;
+      var j = await apiFetch('/api/dashboard/activity/summary');
+      if (!j.ok) return;
+      var data = j.data || {{}};
+      var openEl = document.getElementById('stat-open-activities');
+      if (openEl) openEl.querySelector('.value').textContent = data.active_count || 0;
+      var staleEl = document.getElementById('stat-stale-blocked');
+      if (staleEl) staleEl.querySelector('.value').textContent = data.stale_count || 0;
+      var tbody = document.getElementById('overview-activity-tbody');
+      if (!tbody) return;
+      var recent = (data.recent || []).slice(0, 6);
+      if (!recent.length) {{
+        tbody.innerHTML = '<tr><td colspan="4" class="empty">No recent activity.</td></tr>';
+        return;
+      }}
+      tbody.innerHTML = recent.map(function(a) {{
+        var ts = (a.updated_at || a.started_at || '').substring(0, 16);
+        return '<tr>' +
+          '<td><div class="text-truncate" title="' + escapeHtml(a.task_description || '') + '">' + escapeHtml(a.task_description || '') + '</div></td>' +
+          '<td><span class="badge badge-' + escapeHtml(a.status || '') + '">' + escapeHtml(a.status || '') + '</span></td>' +
+          '<td>' + escapeHtml(a.assigned_agent_id || '') + '</td>' +
+          '<td>' + escapeHtml(ts) + '</td>' +
+        '</tr>';
+      }}).join('');
+    }};
     async function runDashboardSearch(e) {{
       if (e) e.preventDefault();
       const input = document.getElementById('dashboard-search-query');
@@ -672,15 +758,15 @@ async def login_page(request: Request):
       <form id="setup-form" onsubmit="submitSetup(event)">
         <div class="form-group">
           <label>Email</label>
-          <input type="email" name="email" required>
+          <input type="email" name="email" autocomplete="email" required>
         </div>
         <div class="form-group">
           <label>Display Name</label>
-          <input type="text" name="display_name" required>
+          <input type="text" name="display_name" autocomplete="name" required>
         </div>
         <div class="form-group">
           <label>Password</label>
-          <input type="password" name="password" minlength="8" required>
+          <input type="password" name="password" minlength="8" autocomplete="new-password" required>
         </div>
         <button type="submit" class="btn">Create Account</button>
       </form>
@@ -707,11 +793,11 @@ async def login_page(request: Request):
       <form id="login-form" onsubmit="submitLogin(event)">
         <div class="form-group">
           <label>Email</label>
-          <input type="email" name="email" required>
+          <input type="email" name="email" autocomplete="email" required>
         </div>
         <div class="form-group">
           <label>Password</label>
-          <input type="password" name="password" required>
+          <input type="password" name="password" autocomplete="current-password" required>
         </div>
         <button type="submit" class="btn">Login</button>
       </form>
@@ -1359,7 +1445,7 @@ async def workspaces_page(request: Request, session: dict = Depends(require_auth
           '<div class="card" style="padding:12px;margin-bottom:12px">' +
             '<form data-workspace-collaborator-form="true" data-workspace-id="' + escapeHtml(workspaceId) + '">' +
               '<div class="form-row" style="display:grid;grid-template-columns:1.4fr .7fr .7fr auto;gap:8px;align-items:end">' +
-                '<div class="form-group" style="margin:0"><label>User ID</label><input type="text" name="user_id" placeholder="e.g. brian"></div>' +
+                '<div class="form-group" style="margin:0"><label>User ID</label><input type="text" name="user_id" placeholder="e.g. brian" autocomplete="off"></div>' +
                 '<label class="checkbox-label" style="margin:0"><input type="checkbox" name="can_read" checked> Read</label>' +
                 '<label class="checkbox-label" style="margin:0"><input type="checkbox" name="can_write"> Write</label>' +
                 '<button type="submit" class="btn">Add</button>' +
@@ -1823,11 +1909,11 @@ async def users_page(request: Request, session: dict = Depends(require_auth)):
       <div class="modal">
         <h3>Add User</h3>
         <form id="create-user-form" onsubmit="createUser(event)">
-          <div class="form-group"><label>Display Name</label><input type="text" name="display_name" required></div>
-          <div class="form-group"><label>Email</label><input type="email" name="email" required></div>
+          <div class="form-group"><label>Display Name</label><input type="text" name="display_name" autocomplete="name" required></div>
+          <div class="form-group"><label>Email</label><input type="email" name="email" autocomplete="email" required></div>
           <div class="form-row">
             <div class="form-group"><label>Role</label><select name="role"><option value="user">User</option><option value="admin">Admin</option></select></div>
-            <div class="form-group"><label>Initial Password</label><input type="password" name="password" minlength="8" required></div>
+            <div class="form-group"><label>Initial Password</label><input type="password" name="password" minlength="8" autocomplete="new-password" required></div>
           </div>
           <p class="form-hint">Users can change their password after signing in. Admin role grants full dashboard access.</p>
           <div class="modal-footer">
@@ -1842,11 +1928,11 @@ async def users_page(request: Request, session: dict = Depends(require_auth)):
         <h3>Edit User</h3>
         <form id="edit-user-form" onsubmit="submitEditUser(event)">
           <input type="hidden" id="eu-id">
-          <div class="form-group"><label>Display Name</label><input type="text" id="eu-display-name" required></div>
-          <div class="form-group"><label>Email</label><input type="email" id="eu-email" required></div>
+          <div class="form-group"><label>Display Name</label><input type="text" id="eu-display-name" autocomplete="name" required></div>
+          <div class="form-group"><label>Email</label><input type="email" id="eu-email" autocomplete="email" required></div>
           <div class="form-row">
             <div class="form-group"><label>Role</label><select id="eu-role"><option value="user">User</option><option value="admin">Admin</option></select></div>
-            <div class="form-group"><label>New Password</label><input type="password" id="eu-password" minlength="8" placeholder="Leave unchanged"></div>
+            <div class="form-group"><label>New Password</label><input type="password" id="eu-password" minlength="8" autocomplete="new-password" placeholder="Leave unchanged"></div>
           </div>
           <div class="modal-footer">
             <button type="button" class="btn btn-secondary" onclick="closeModal('edit-user-modal')">Cancel</button>
@@ -1896,6 +1982,18 @@ async def memory_page(request: Request, session: dict = Depends(require_auth)):
     user_scope_label = f"Personal user memory ({user_scope})"
 
     visible_scopes = [user_scope] + [f"workspace:{p['id']}" for p in workspaces]
+    enforcer = ScopeEnforcer(
+        [user_scope] + [f"workspace:{p['id']}" for p in workspaces],
+        [user_scope] + [f"workspace:{p['id']}" for p in workspaces],
+        session["user_id"],
+        is_admin=is_admin,
+        active_workspace_ids=frozenset(
+            p["id"] for p in workspaces if workspace_service.can_user_read_workspace(session["user_id"], p["id"])
+        ),
+    )
+
+    def can_modify_record(record: dict) -> bool:
+        return is_admin or enforcer.can_write(record.get("scope") or "")
 
     def list_visible_memory(record_status):
         if is_admin:
@@ -1928,6 +2026,12 @@ async def memory_page(request: Request, session: dict = Depends(require_auth)):
     retracted_records = list_visible_memory("retracted")
 
     def active_row(r):
+        modify_buttons = (
+            f"<button type='button' class='btn btn-sm btn-warning' onclick=\"retractRecord('{r['id']}')\">Retract</button>"
+            f"<button type='button' class='btn btn-sm btn-danger icon-delete-btn' onclick=\"deleteRecord('{r['id']}')\" title='Permanently delete' aria-label='Permanently delete'>{get_icon('delete')}</button>"
+            if can_modify_record(r)
+            else "<span class='text-muted'>Read only</span>"
+        )
         return (
             f"<tr><td><span class='badge badge-{r.get('memory_class', '')}'>{r.get('memory_class', '')}</span></td>"
             f"<td>{escape_html(r.get('content', '')[:80])}</td>"
@@ -1936,12 +2040,17 @@ async def memory_page(request: Request, session: dict = Depends(require_auth)):
             f"<td>{r.get('confidence', 0.5):.1f}</td>"
             f"<td><div class='actions-cell'>"
             f"<button type='button' class='btn btn-sm btn-secondary' onclick=\"viewMemory('{r['id']}')\">Detail</button>"
-            f"<button type='button' class='btn btn-sm btn-warning' onclick=\"retractRecord('{r['id']}')\">Retract</button>"
-            f"<button type='button' class='btn btn-sm btn-danger icon-delete-btn' onclick=\"deleteRecord('{r['id']}')\" title='Permanently delete' aria-label='Permanently delete'>{get_icon('delete')}</button>"
+            f"{modify_buttons}"
             f"</div></td></tr>"
         )
 
     def retracted_row(r):
+        modify_buttons = (
+            f"<button type='button' class='btn btn-sm btn-secondary' onclick=\"restoreRecord('{r['id']}')\">Restore</button>"
+            f"<button type='button' class='btn btn-sm btn-danger icon-delete-btn' onclick=\"deleteRecord('{r['id']}')\" title='Permanently delete' aria-label='Permanently delete'>{get_icon('delete')}</button>"
+            if can_modify_record(r)
+            else "<span class='text-muted'>Read only</span>"
+        )
         return (
             f"<tr style='opacity:0.65'><td><span class='badge badge-inactive'>{r.get('memory_class', '')}</span></td>"
             f"<td>{escape_html(r.get('content', '')[:80])}</td>"
@@ -1949,8 +2058,7 @@ async def memory_page(request: Request, session: dict = Depends(require_auth)):
             f"<td>{r.get('domain', '') or ''}</td>"
             f"<td>{r.get('confidence', 0.5):.1f}</td>"
             f"<td><div class='actions-cell'>"
-            f"<button type='button' class='btn btn-sm btn-secondary' onclick=\"restoreRecord('{r['id']}')\">Restore</button>"
-            f"<button type='button' class='btn btn-sm btn-danger icon-delete-btn' onclick=\"deleteRecord('{r['id']}')\" title='Permanently delete' aria-label='Permanently delete'>{get_icon('delete')}</button>"
+            f"{modify_buttons}"
             f"</div></td></tr>"
         )
 
@@ -2023,22 +2131,22 @@ async def memory_page(request: Request, session: dict = Depends(require_auth)):
         supersedeEl.style.display = 'none';
       }
       document.getElementById('mem-detail-id').value = id;
+      // Reset history before loading fresh chain for this record
+      const chainEl = document.getElementById('mem-chain-content');
+      chainEl.innerHTML = '<span class="text-muted">Loading...</span>';
       openModal('memory-detail-modal');
+      _loadChain(id, chainEl);
     }
-    async function showChain() {
-      const id = document.getElementById('mem-detail-id')?.value || '';
-      if (!id) return;
+    async function _loadChain(id, el) {
       const j = await apiFetch('/api/memory/' + id + '/chain');
-      if (!j.ok) { showToast('Failed to load chain', 'danger'); return; }
+      if (!j.ok) { el.innerHTML = '<span class="text-muted">Could not load history.</span>'; return; }
       const chain = j.data.chain || [];
-      const el = document.getElementById('mem-chain-content');
       if (!chain.length) {
-        el.innerHTML = '<div class="text-muted">No history yet. This record has not been replaced by a newer version.</div>';
-        document.getElementById('mem-detail-chain').style.display = 'block';
+        el.innerHTML = '<div class="text-muted">No previous versions.</div>';
         return;
       }
       el.innerHTML = chain.map((r, i) => {
-        const edge = i > 0 ? '<div class="text-muted" style="font-size:0.8rem;margin-bottom:2px">&lt;- earlier version</div>' : '';
+        const edge = i > 0 ? '<div class="text-muted" style="font-size:0.8rem;margin-bottom:2px">&larr; earlier version</div>' : '';
         const tag = i === chain.length - 1 ? 'Current' : 'Earlier';
         const metadataParts = [];
         if (r.domain) metadataParts.push(r.domain);
@@ -2056,7 +2164,6 @@ async def memory_page(request: Request, session: dict = Depends(require_auth)):
           '<div style="font-size:0.9rem;line-height:1.35">' + escapeHtml(r.content || '') + '</div>' +
           '</div>';
       }).join('');
-      document.getElementById('mem-detail-chain').style.display = 'block';
     }
     async function doSearch() {
       const query = document.getElementById('mem-query').value;
@@ -2234,12 +2341,12 @@ async def memory_page(request: Request, session: dict = Depends(require_auth)):
             <div class="form-row" style="margin-top:10px">
               <div class="form-group">
                 <label>Domain</label>
-                <input type="text" id="mem-domain" placeholder="e.g. coding">
+                <input type="text" id="mem-domain" placeholder="e.g. coding" autocomplete="off">
                 <p class="form-hint">Optional tag for searches and filtering.</p>
               </div>
               <div class="form-group">
                 <label>Topic</label>
-                <input type="text" id="mem-topic" placeholder="e.g. style">
+                <input type="text" id="mem-topic" placeholder="e.g. style" autocomplete="off">
                 <p class="form-hint">Optional tag for searches and filtering.</p>
               </div>
             </div>
@@ -2258,7 +2365,7 @@ async def memory_page(request: Request, session: dict = Depends(require_auth)):
             <div class="form-row">
               <div class="form-group">
                 <label>Preference Slot Key</label>
-                <input type="text" id="mem-slot-key" placeholder="e.g. style">
+                <input type="text" id="mem-slot-key" placeholder="e.g. style" autocomplete="off">
                 <p class="form-hint">Optional. Use for preferences when you want one active value per slot.</p>
               </div>
               <div class="form-group">
@@ -2323,13 +2430,12 @@ async def memory_page(request: Request, session: dict = Depends(require_auth)):
         </div>
         <input type="hidden" id="mem-detail-id" value="">
         <div id="mem-detail-supersede" class="alert alert-warning" style="display:none"></div>
-        <div id="mem-detail-chain" style="display:none">
-          <h4 style="margin-top:12px">Memory History</h4>
-          <p class="text-muted" style="margin:4px 0 10px;font-size:0.85rem">Shows the current record and any earlier versions it replaced.</p>
-          <div id="mem-chain-content" class="text-muted" style="font-size:0.85rem;max-height:220px;overflow:auto"></div>
+        <div>
+          <h4 style="margin-top:12px">Version History</h4>
+          <p class="text-muted" style="margin:4px 0 10px;font-size:0.85rem">Current record and any earlier versions it replaced.</p>
+          <div id="mem-chain-content" style="font-size:0.85rem;max-height:220px;overflow:auto"></div>
         </div>
         <div class="modal-footer">
-          <button class="btn btn-sm btn-secondary" onclick="showChain()">Show Memory History</button>
           <button class="btn btn-secondary" onclick="closeModal('memory-detail-modal')">Close</button>
         </div>
       </div>
@@ -2353,10 +2459,26 @@ async def activity_page(request: Request, session: dict = Depends(require_auth))
 
     activity_service.mark_stale_activities()
     is_admin = session.get("role") == "admin"
+
+    page = max(1, int(request.query_params.get("page", 1)))
+    status_filter = request.query_params.get("status", "")
+    limit = 50
+    scope_user_id = None if is_admin else session["user_id"]
+
+    total_activities = activity_service.count_activities(
+        user_id=scope_user_id,
+        status=status_filter or None,
+    )
+    total_pages = max(1, (total_activities + limit - 1) // limit)
+    page = min(page, total_pages)
+    offset = (page - 1) * limit
+
     activities = (
         activity_service.list_activities(
-            user_id=None if is_admin else session["user_id"],
-            limit=100,
+            user_id=scope_user_id,
+            status=status_filter or None,
+            limit=limit,
+            offset=offset,
         )
         or []
     )
@@ -2414,9 +2536,26 @@ async def activity_page(request: Request, session: dict = Depends(require_auth))
         "blocked",
         "cancelled",
     ]
-    status_tabs = "".join(
-        f"<button class='btn btn-sm {'btn' if i == 0 else 'btn-secondary'} status-filter' data-status='{s}' onclick='filterActivity(\"{s}\",this)'>{s.title()}</button>"
-        for i, s in enumerate(status_filters)
+
+    def _status_tab(s):
+        active = s == (status_filter or "")
+        cls = "btn btn-sm" + ("" if active else " btn-secondary")
+        return f"<a href='?page=1&amp;status={s}' class='{cls}'>{s.title()}</a>"
+
+    all_tab_cls = "btn btn-sm" + ("" if not status_filter else " btn-secondary")
+    status_tabs = f"<a href='?page=1' class='{all_tab_cls}'>All</a>" + "".join(
+        _status_tab(s) for s in status_filters
+    )
+
+    act_extra_qs = f"status={status_filter}" if status_filter else ""
+    activity_pagination_html = _build_pagination(page, total_pages, act_extra_qs)
+    page_start_act = offset + 1 if total_activities else 0
+    page_end_act = offset + len(activities)
+    activity_page_info = f"Page {page} of {total_pages} &nbsp;·&nbsp; Showing {page_start_act}–{page_end_act} of {total_activities}"
+    activity_prune_button = (
+        '<button class="btn btn-secondary" onclick="openPruneModal(\'activity\', \'Prune Activity History\')">Prune History</button>'
+        if is_admin
+        else ""
     )
 
     rows = "".join(
@@ -2440,7 +2579,23 @@ async def activity_page(request: Request, session: dict = Depends(require_auth))
 
     js = """
     <script>
-    async function refreshActivity() { location.reload(); }
+    async function refreshActivity() {
+      const params = new URLSearchParams(window.location.search);
+      window.location.href = '/activity?' + params.toString();
+    }
+    window.onAgentCoreEvent = function(event) {
+      if (!(event.type || '').startsWith('activity_')) return;
+      var existing = document.getElementById('activity-live-banner');
+      if (existing) return;
+      var banner = document.createElement('div');
+      banner.id = 'activity-live-banner';
+      banner.className = 'alert';
+      banner.style.cssText = 'margin:0 0 12px;display:flex;align-items:center;gap:10px';
+      banner.innerHTML = '<span>Activity updated in the background.</span>' +
+        '<button class="btn btn-sm btn-secondary" onclick="location.reload()">Refresh</button>';
+      var table = document.querySelector('.activity-table');
+      if (table && table.parentNode) table.parentNode.insertBefore(banner, table);
+    };
     async function updateActivity(id, status) {
       const j = await apiFetch('/api/activity/' + id, { method: 'PUT', body: JSON.stringify({ status }) });
       if (j.ok) { showToast('Updated'); refreshActivity(); }
@@ -2451,6 +2606,32 @@ async def activity_page(request: Request, session: dict = Depends(require_auth))
       const j = await apiFetch('/api/activity/' + id, { method: 'DELETE' });
       if (j.ok) { showToast('Cancelled'); refreshActivity(); }
       else { showToast(j.error.message || 'Failed', 'danger'); }
+    }
+    function openPruneModal(resourceType, title) {
+      document.getElementById('prune-resource-type').value = resourceType;
+      document.getElementById('prune-modal-title').textContent = title;
+      document.getElementById('prune-before-date').value = '';
+      document.getElementById('prune-result').innerHTML = '';
+      openModal('prune-modal');
+    }
+    async function submitPrune(e) {
+      e.preventDefault();
+      const resourceType = document.getElementById('prune-resource-type').value;
+      const beforeDate = document.getElementById('prune-before-date').value;
+      if (!beforeDate) { showToast('Pick a cutoff date', 'warning'); return; }
+      if (!confirm('Permanently prune ' + resourceType + ' data older than ' + beforeDate + '?')) return;
+      const j = await apiFetch('/api/dashboard/prune', {
+        method: 'POST',
+        body: JSON.stringify({ resource_type: resourceType, before_date: beforeDate })
+      });
+      if (j.ok) {
+        document.getElementById('prune-result').innerHTML =
+          '<div class="alert alert-success">Deleted <code>' + j.data.deleted_count + '</code> ' + resourceType + ' records older than <code>' + beforeDate + '</code>.</div>';
+        showToast('Prune complete');
+        refreshActivity();
+      } else {
+        showToast(j.error?.message || 'Prune failed', 'danger');
+      }
     }
     async function createHandoff(id) {
       const j = await apiFetch('/api/briefings/handoff', { method: 'POST', body: JSON.stringify({ activity_id: id }) });
@@ -2511,15 +2692,6 @@ async def activity_page(request: Request, session: dict = Depends(require_auth))
       if (j.ok) { showToast('Reassigned'); closeModal('reassign-modal'); refreshActivity(); }
       else { showToast(j.error.message || 'Failed', 'danger'); }
     }
-    function filterActivity(status, btn) {
-      document.querySelectorAll('.status-filter').forEach(b => b.classList.remove('btn'));
-      document.querySelectorAll('.status-filter').forEach(b => b.classList.add('btn-secondary'));
-      btn.classList.remove('btn-secondary');
-      btn.classList.add('btn');
-      document.querySelectorAll('.activity-row').forEach(row => {
-        row.style.display = (status === 'all' || row.dataset.status === status) ? '' : 'none';
-      });
-    }
     function copyGeneratedOutput(btn) {
       copyToClipboard(document.querySelector('#ig-output pre').textContent, btn);
     }
@@ -2533,11 +2705,12 @@ async def activity_page(request: Request, session: dict = Depends(require_auth))
         "Activity",
         f"""
     <div class="page-header"><h1>Activity</h1><div class="page-actions">
-        <button class="btn" onclick="openModal('create-activity-modal')">+ New Activity</button>
+        <button class="btn" onclick="openModal('create-activity-modal')">+ Assign Work</button>
+        {activity_prune_button}
     </div></div>
     <div class="card">
       <h3>Tasks</h3>
-      <p class="text-muted" style="font-size:0.85rem;margin-bottom:8px">Activities track current work, handoff briefings, and stale tasks. Keep the task description short; the default memory scope is the selected agent's private scope. Use reassign and briefing when work needs to move between agents, users, or workspaces.</p>
+      <p class="text-muted" style="font-size:0.85rem;margin-bottom:8px">Assign work to agents and track progress. An agent session calls <code>activity_pickup</code> at startup or when idle to claim tasks assigned to it in its configured workspace. Use reassign and briefing when work needs to move between agents.</p>
       <div class="card" style="margin-bottom:12px;padding:14px">
         <div class="section-header" style="margin-bottom:8px">
           <h3>Coordination Snapshot</h3>
@@ -2553,47 +2726,45 @@ async def activity_page(request: Request, session: dict = Depends(require_auth))
         <div>{coordination_summary or "<span class='text-muted'>No open work items yet.</span>"}</div>
       </div>
       <div class="filter-bar" style="margin-bottom:12px">
-        <button class='btn btn-sm status-filter' data-status='all' onclick='filterActivity("all",this)'>All</button>
         {status_tabs}
       </div>
       <div style="overflow-x:auto">
       <table class="activity-table"><thead><tr><th class="activity-id-cell">ID</th><th class="activity-task-cell">Task</th><th class="activity-scope-cell">Scope</th><th class="activity-status-cell">Status</th><th class="activity-agent-cell">Agent</th><th class="activity-handoff-cell">Handoff From</th><th class="activity-updated-cell">Updated</th><th class="activity-actions-header">Actions</th></tr></thead>
       <tbody>{rows or "<tr><td colspan=8 class=empty>No activities yet.</td></tr>"}</tbody></table>
       </div>
+      <div style="margin-top:8px;font-size:0.85rem;color:var(--text-muted)">{activity_page_info}</div>
+      {activity_pagination_html}
     </div>
 
     <!-- Create Activity Modal -->
     <div class="modal-overlay" id="create-activity-modal" style="display:none">
       <div class="modal">
-        <h3>New Activity</h3>
+        <h3>Assign Work to Agent</h3>
         <form id="create-activity-form" onsubmit="doCreateActivity(event)">
           <div class="form-group">
-            <label>Assigned Agent *</label>
+            <label>Assign To *</label>
             <select id="act-agent" required>
               <option value="">Select agent...</option>
               {agent_options}
             </select>
-            <p class="form-hint">This agent will own the activity and receive heartbeats.</p>
+            <p class="form-hint">The agent session that should pick up this task.</p>
           </div>
           <div class="form-group">
-            <label>Task Description *</label>
+            <label>Task *</label>
             <textarea id="act-task" rows="3" required placeholder="What should the agent do?"></textarea>
             <p class="form-hint">Write the task the same way you would hand it to a person.</p>
           </div>
-          <details style="margin-top:4px">
-            <summary class="text-muted" style="cursor:pointer">Advanced options</summary>
-            <div class="form-group" style="margin-top:10px">
-              <label>Memory Scope</label>
-              <select id="act-memory-scope">
-                <option value="">Use agent private scope (recommended)</option>
-                {activity_scope_options}
-              </select>
-              <p class="form-hint">Leave this on the default unless you want the activity to write into a workspace or personal user scope instead.</p>
-            </div>
-          </details>
+          <div class="form-group">
+            <label>Workspace / Scope</label>
+            <select id="act-memory-scope">
+              <option value="">Agent private scope (agent only, no workspace)</option>
+              {activity_scope_options}
+            </select>
+            <p class="form-hint">The agent picks up work that matches its authorized scopes. Set this to a workspace if the agent is configured with workspace access — the agent session will only claim tasks in scopes it can read.</p>
+          </div>
           <div class="modal-footer">
             <button type="button" class="btn btn-secondary" onclick="closeModal('create-activity-modal')">Cancel</button>
-            <button type="submit" class="btn">Create</button>
+            <button type="submit" class="btn">Assign</button>
           </div>
         </form>
       </div>
@@ -2616,6 +2787,25 @@ async def activity_page(request: Request, session: dict = Depends(require_auth))
           <button type="button" class="btn btn-secondary" onclick="closeModal('reassign-modal')">Cancel</button>
           <button type="button" class="btn" onclick="doReassign()">Reassign</button>
         </div>
+      </div>
+    </div>
+
+    <div class="modal-overlay" id="prune-modal" style="display:none">
+      <div class="modal">
+        <h3 id="prune-modal-title">Prune Data</h3>
+        <form id="prune-form" onsubmit="submitPrune(event)">
+          <input type="hidden" id="prune-resource-type" value="">
+          <div class="form-group">
+            <label>Delete records older than *</label>
+            <input type="date" id="prune-before-date" required>
+            <p class="form-hint">This is a manual maintenance action. It only deletes terminal activity records older than the selected date; active tasks are left alone.</p>
+          </div>
+          <div id="prune-result" style="margin-top:8px"></div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" onclick="closeModal('prune-modal')">Cancel</button>
+            <button type="submit" class="btn btn-danger">Prune</button>
+          </div>
+        </form>
       </div>
     </div>
 
@@ -2658,7 +2848,7 @@ async def audit_page(request: Request, session: dict = Depends(require_auth)):
             status_code=403,
         )
 
-    page = int(request.query_params.get("page", 1))
+    page = max(1, int(request.query_params.get("page", 1)))
     limit = 50
     offset = (page - 1) * limit
 
@@ -2668,6 +2858,16 @@ async def audit_page(request: Request, session: dict = Depends(require_auth)):
     result_filter = request.query_params.get("result", "")
 
     from app.services.audit_service import ACTOR_TYPES, RESULT_TYPES, AUDIT_ACTIONS
+
+    total_events = audit_service.count_events(
+        actor_type=actor_filter or None,
+        action=action_filter or None,
+        resource_type=resource_filter or None,
+        result=result_filter or None,
+    )
+    total_pages = max(1, (total_events + limit - 1) // limit)
+    page = min(page, total_pages)
+    offset = (page - 1) * limit
 
     all_events = (
         audit_service.query_events(
@@ -2680,11 +2880,13 @@ async def audit_page(request: Request, session: dict = Depends(require_auth)):
         )
         or []
     )
-    total_events = len(all_events)
+    page_event_count = len(all_events)
     success_count = sum(1 for e in all_events if e.get("result") == "success")
     failure_count = sum(1 for e in all_events if e.get("result") == "failure")
     blocked_count = sum(1 for e in all_events if e.get("result") == "blocked")
     events_with_details = sum(1 for e in all_events if e.get("details_json"))
+    page_start = offset + 1 if total_events else 0
+    page_end = offset + page_event_count
     actor_counts = Counter(e.get("actor_type") or "unknown" for e in all_events)
     action_counts = Counter(e.get("action") or "unknown" for e in all_events)
     resource_counts = Counter(
@@ -2751,9 +2953,18 @@ async def audit_page(request: Request, session: dict = Depends(require_auth)):
     action_options = build_options(AUDIT_ACTIONS, action_filter)
     result_options = build_options(RESULT_TYPES, result_filter)
 
-    prev_page = page - 1 if page > 1 else 1
-    next_page = page + 1
-    page_info = f"Page {page}"
+    audit_extra_qs = "&amp;".join(
+        f"{k}={v}"
+        for k, v in [
+            ("actor_type", actor_filter),
+            ("action", action_filter),
+            ("resource_type", resource_filter),
+            ("result", result_filter),
+        ]
+        if v
+    )
+    pagination_html = _build_pagination(page, total_pages, audit_extra_qs)
+    page_info = f"Page {page} of {total_pages} &nbsp;·&nbsp; Showing {page_start}–{page_end} of {total_events}"
 
     js = """
     <script>
@@ -2785,6 +2996,32 @@ async def audit_page(request: Request, session: dict = Depends(require_auth)):
     function clearAuditFilters() {
       window.location.search = '';
     }
+    function openPruneModal(resourceType, title) {
+      document.getElementById('prune-resource-type').value = resourceType;
+      document.getElementById('prune-modal-title').textContent = title;
+      document.getElementById('prune-before-date').value = '';
+      document.getElementById('prune-result').innerHTML = '';
+      openModal('prune-modal');
+    }
+    async function submitPrune(e) {
+      e.preventDefault();
+      const resourceType = document.getElementById('prune-resource-type').value;
+      const beforeDate = document.getElementById('prune-before-date').value;
+      if (!beforeDate) { showToast('Pick a cutoff date', 'warning'); return; }
+      if (!confirm('Permanently prune ' + resourceType + ' data older than ' + beforeDate + '?')) return;
+      const j = await apiFetch('/api/dashboard/prune', {
+        method: 'POST',
+        body: JSON.stringify({ resource_type: resourceType, before_date: beforeDate })
+      });
+      if (j.ok) {
+        document.getElementById('prune-result').innerHTML =
+          '<div class="alert alert-success">Deleted <code>' + j.data.deleted_count + '</code> ' + resourceType + ' records older than <code>' + beforeDate + '</code>.</div>';
+        showToast('Prune complete');
+        location.reload();
+      } else {
+        showToast(j.error?.message || 'Prune failed', 'danger');
+      }
+    }
     </script>"""
 
     return render_page(
@@ -2792,6 +3029,7 @@ async def audit_page(request: Request, session: dict = Depends(require_auth)):
         f"""
     <div class="page-header"><h1>Audit Log</h1><div class="page-actions">
         <button class="btn btn-secondary" onclick="exportAuditCsv()">Export CSV</button>
+        <button class="btn btn-danger" onclick="openPruneModal('audit','Prune Audit Log')">Prune Log</button>
     </div></div>
     <div class="card">
       <h3>Events</h3>
@@ -2801,7 +3039,7 @@ async def audit_page(request: Request, session: dict = Depends(require_auth)):
           <div class="section-note">A quick read on how much is happening and what kinds of events are being written.</div>
         </div>
         <div class="stat-grid" style="margin-bottom:10px">
-          <div class="stat-card"><div class="value">{total_events}</div><div class="label">Events on Page</div></div>
+          <div class="stat-card"><div class="value">{total_events}</div><div class="label">Total Events</div></div>
           <div class="stat-card"><div class="value">{success_count}</div><div class="label">Success</div></div>
           <div class="stat-card"><div class="value">{failure_count}</div><div class="label">Failure</div></div>
           <div class="stat-card"><div class="value">{blocked_count}</div><div class="label">Blocked</div></div>
@@ -2842,10 +3080,26 @@ async def audit_page(request: Request, session: dict = Depends(require_auth)):
       <table class="audit-table"><thead><tr><th class="audit-time-cell">Time</th><th class="audit-actor-cell">Actor Type</th><th class="audit-action-cell">Action</th><th class="audit-resource-cell">Resource</th><th class="audit-resource-id-cell">Resource ID</th><th class="audit-result-cell">Result</th><th>Details</th><th class="audit-ip-cell">IP</th></tr></thead>
       <tbody>{rows or "<tr><td colspan=8 class=empty>No events yet.</td></tr>"}</tbody></table>
       </div>
-      <div class="pagination" style="margin-top:12px;display:flex;gap:8px;align-items:center">
-        <a href="?page={prev_page}{f"&actor_type={actor_filter}" if actor_filter else ""}{f"&action={action_filter}" if action_filter else ""}{f"&resource_type={resource_filter}" if resource_filter else ""}{f"&result={result_filter}" if result_filter else ""}" class="btn btn-sm btn-secondary">Prev</a>
-        <span>{page_info}</span>
-        <a href="?page={next_page}{f"&actor_type={actor_filter}" if actor_filter else ""}{f"&action={action_filter}" if action_filter else ""}{f"&resource_type={resource_filter}" if resource_filter else ""}{f"&result={result_filter}" if result_filter else ""}" class="btn btn-sm btn-secondary">Next</a>
+      <div style="margin-top:8px;font-size:0.85rem;color:var(--text-muted)">{page_info}</div>
+      {pagination_html}
+    </div>
+
+    <div class="modal-overlay" id="prune-modal" style="display:none">
+      <div class="modal">
+        <h3 id="prune-modal-title">Prune Data</h3>
+        <form id="prune-form" onsubmit="submitPrune(event)">
+          <input type="hidden" id="prune-resource-type" value="">
+          <div class="form-group">
+            <label>Delete records older than *</label>
+            <input type="date" id="prune-before-date" required>
+            <p class="form-hint">This permanently deletes audit rows older than the selected date. Use export first if you need a copy.</p>
+          </div>
+          <div id="prune-result" style="margin-top:8px"></div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" onclick="closeModal('prune-modal')">Cancel</button>
+            <button type="submit" class="btn btn-danger">Prune</button>
+          </div>
+        </form>
       </div>
     </div>
     """,
@@ -2915,6 +3169,76 @@ async def update_dashboard_system_settings(
         ip_address=get_client_ip(request),
     )
     return success_response({"settings": settings_to_save})
+
+
+@router.post("/api/dashboard/prune")
+async def prune_dashboard_data(
+    body: ManualPruneRequest,
+    request: Request,
+    session: dict = Depends(require_admin),
+):
+    from app.database import get_db
+    from app.services import audit_service
+    from app.routes.auth import get_client_ip
+
+    resource_type = body.resource_type.strip().lower()
+    if resource_type not in {"audit", "activity"}:
+        return error_response(
+            "INVALID_RESOURCE",
+            "resource_type must be either 'audit' or 'activity'",
+            400,
+        )
+
+    try:
+        cutoff_iso, cutoff_sql = _parse_manual_prune_cutoff(body.before_date)
+    except ValueError:
+        return error_response(
+            "INVALID_DATE",
+            "before_date must be a valid ISO date or datetime",
+            400,
+        )
+
+    deleted = 0
+    with get_db() as conn:
+        if resource_type == "audit":
+            cursor = conn.execute(
+                "DELETE FROM audit_log WHERE timestamp < ?",
+                (cutoff_sql,),
+            )
+            deleted = cursor.rowcount
+        else:
+            cursor = conn.execute(
+                """
+                DELETE FROM agent_activity
+                WHERE status IN ('completed', 'cancelled', 'blocked')
+                  AND COALESCE(ended_at, updated_at, started_at) < ?
+                """,
+                (cutoff_iso,),
+            )
+            deleted = cursor.rowcount
+        conn.commit()
+
+    action = "audit_pruned" if resource_type == "audit" else "activity_pruned"
+    audit_service.write_event(
+        actor_type="user",
+        actor_id=session["user_id"],
+        action=action,
+        resource_type=resource_type,
+        result="success",
+        details={
+            "before_date": body.before_date,
+            "cutoff": cutoff_iso,
+            "deleted_count": deleted,
+        },
+        ip_address=get_client_ip(request),
+    )
+    return success_response(
+        {
+            "resource_type": resource_type,
+            "before_date": body.before_date,
+            "deleted_count": deleted,
+        }
+    )
 
 
 @router.post("/api/dashboard/vector-settings")
@@ -3139,7 +3463,7 @@ async def settings_page(request: Request, session: dict = Depends(require_auth))
         <button class="btn btn-secondary" onclick="openModal('restore-modal')">Restore from Backup</button>
         <button class="btn btn-secondary" onclick="runMaintenance()">Run Maintenance</button>
       </div>
-      <p class="form-hint">Maintenance marks stale activities using <code>AGENT_CORE_STALE_THRESHOLD_MINUTES</code> and deletes active scratchpad memories older than the retention setting below. This does not touch credentials or connector bindings.</p>
+      <p class="form-hint">Maintenance marks stale activities using <code>AGENT_CORE_STALE_THRESHOLD_MINUTES</code> and deletes transient scratchpad memories older than the retention setting below. This does not touch credentials or connector bindings.</p>
       <div id="backup-result" style="margin-top:12px"></div>
       <hr class=divider>
       <h4 class="section-title">Startup Checks</h4>
@@ -3178,9 +3502,9 @@ async def settings_page(request: Request, session: dict = Depends(require_auth))
       <h3>System Behavior</h3>
       <form id="system-settings-form" onsubmit="saveSystemSettings(event)">
         <div class="form-group">
-          <label>Scratchpad Retention</label>
+          <label>Transient Memory Retention</label>
           <input type="number" id="scratchpad-retention-days" min="1" max="365" value="{escape_html(scratchpad_retention_days)}" style="width:120px">
-          <p class="form-hint">Used by Run Maintenance. Active scratchpad memories older than this many days are permanently deleted.</p>
+          <p class="form-hint">Used by Run Maintenance. Transient scratchpad memories older than this many days are permanently deleted.</p>
         </div>
         <label class="checkbox-label">
           <input type="checkbox" id="solo-mode-enabled" {solo_checked}>
@@ -3609,15 +3933,15 @@ async def settings_password_page(
       <form id="password-form" onsubmit="submitPassword(event)">
         <div class="form-group">
           <label>Current Password</label>
-          <input type="password" id="current-password" required>
+          <input type="password" id="current-password" autocomplete="current-password" required>
         </div>
         <div class="form-group">
           <label>New Password</label>
-          <input type="password" id="new-password" minlength="8" required>
+          <input type="password" id="new-password" minlength="8" autocomplete="new-password" required>
         </div>
         <div class="form-group">
           <label>Confirm New Password</label>
-          <input type="password" id="confirm-password" minlength="8" required>
+          <input type="password" id="confirm-password" minlength="8" autocomplete="new-password" required>
         </div>
         <div class="modal-footer" style="justify-content:flex-start;gap:8px;padding-left:0;padding-right:0">
           <button type="submit" class="btn">Update Password</button>
@@ -4852,12 +5176,13 @@ You are connected to Agent Core.
 
 ## Getting Started
 
-1. Search memory in `{default_scope}` for relevant context before starting work. If the search returns little or nothing, retry with exact topic values, exact keywords from prior records, or a known record id. When embeddings are unavailable, broad conceptual queries can miss; exact tokens and known ids are more reliable. If this is a handoff, resume, or review of prior work, also inspect the recent activity trail and any generated briefing before making changes. Use `activity_list` and `briefing_list` when you need that trail from MCP.
-2. Search memory in `{user_scope}` for relevant user preferences and owner-context details when you have user-scope read access.
-3. Create or update an activity record when starting a meaningful task.
-4. Store durable decisions and handoff notes in `{default_scope}`.
-5. Use `credential_list` and `credential_get` to retrieve credential references — never ask for raw secrets.
-6. Use connector tools to discover and run available server-side connector bindings before asking the user to wire an external service manually.
+1. Call `activity_pickup` at startup or when idle to check for work a human has assigned to you in this workspace. If it returns an activity, that is your current task — read it, start working, and send heartbeats. If it returns null, there is no assigned work and you can proceed with whatever the user is asking.
+2. Search memory in `{default_scope}` for relevant context before starting work. If the search returns little or nothing, retry with exact topic values, exact keywords from prior records, or a known record id. When embeddings are unavailable, broad conceptual queries can miss; exact tokens and known ids are more reliable. If this is a handoff, resume, or review of prior work, also inspect the recent activity trail and any generated briefing before making changes. Use `activity_list` and `briefing_list` when you need that trail from MCP.
+3. Search memory in `{user_scope}` for relevant user preferences and owner-context details when you have user-scope read access.
+4. Create or update an activity record when starting a meaningful task.
+5. Store durable decisions and handoff notes in `{default_scope}`.
+6. Use `credential_list` and `credential_get` to retrieve credential references — never ask for raw secrets.
+7. Use connector tools to discover and run available server-side connector bindings before asking the user to wire an external service manually.
 
 ## Memory Write Rules
 
@@ -5454,3 +5779,352 @@ def _build_verification_prompt(user_scope, workspace_scope):
 
 Use the full prefixed scope name exactly as shown. Do not use a plain workspace ID as a memory scope.
 """
+
+
+# ─── WEBHOOKS ─────────────────────────────────────────────────────────────────
+
+
+@router.get("/webhooks")
+async def webhooks_page(request: Request, session: dict = Depends(require_auth)):
+    from app.services import webhook_service as wh_svc
+
+    if session.get("role") != "admin":
+        return render_page(
+            "Admin Required",
+            """
+<div class="page-header"><h1>Admin Access Required</h1></div>
+<div class="card"><p>Webhook management is restricted to administrators.</p>
+<a href="/" class="btn">Back to Overview</a></div>""",
+            nav_active="/webhooks",
+            session=session,
+            status_code=403,
+        )
+
+    from app.services import inbound_webhook_service as inbound_svc
+
+    webhooks = wh_svc.list_webhooks()
+    event_types = wh_svc.WEBHOOK_EVENT_TYPES
+
+    base_url = str(request.base_url).rstrip("/")
+    inbound_url = f"{base_url}/api/webhooks/inbound"
+    inbound_key_row = inbound_svc.get_active_key_row()
+    inbound_has_key = inbound_key_row is not None
+    inbound_key_created = inbound_key_row["created_at"][:19] if inbound_key_row else ""
+    inbound_key_rotated = inbound_key_row["rotated_at"][:19] if (inbound_key_row and inbound_key_row.get("rotated_at")) else ""
+
+    event_type_options = "".join(
+        f'<label class="checkbox-label"><input type="checkbox" name="event_types" value="{e}"> {e}</label>'
+        for e in event_types
+    )
+
+    rows = ""
+    for wh in webhooks:
+        enabled_badge = (
+            "<span class='badge badge-active'>enabled</span>"
+            if wh["enabled"]
+            else "<span class='badge badge-stale'>disabled</span>"
+        )
+        events_str = ", ".join(f"<code>{e}</code>" for e in wh["event_types"]) or "—"
+        wh_id = wh["id"]
+        wh_name_js = escape_html(wh["name"]).replace("'", "\\'")
+        rows += (
+            "<tr>"
+            f"<td><strong>{escape_html(wh['name'])}</strong></td>"
+            f"<td><code class='url-cell'>{escape_html(wh['url'])}</code></td>"
+            f"<td>{events_str}</td>"
+            f"<td>{enabled_badge}</td>"
+            "<td>"
+            f"<button class='btn btn-sm' onclick=\"openEditWebhook('{wh_id}')\">Edit</button> "
+            f"<button class='btn btn-sm btn-secondary' onclick=\"testWebhook('{wh_id}')\">Test</button> "
+            f"<button class='btn btn-sm btn-secondary' onclick=\"viewDeliveries('{wh_id}', '{wh_name_js}')\">Deliveries</button> "
+            f"<button class='btn btn-sm' style='background:var(--danger-color)' onclick=\"deleteWebhook('{wh_id}', '{wh_name_js}')\">Delete</button>"
+            "</td>"
+            "</tr>"
+        )
+
+    if not rows:
+        rows = "<tr><td colspan='5' style='text-align:center;color:var(--text-muted)'>No webhooks registered yet.</td></tr>"
+
+    inbound_key_status_html = (
+        f"<span class='badge badge-active'>Active</span> &nbsp;Generated {inbound_key_created}"
+        + (f" &nbsp;· Last rotated {inbound_key_rotated}" if inbound_key_rotated else "")
+        if inbound_has_key else "<span class='badge badge-stale'>No key</span>"
+    )
+    inbound_key_btn = (
+        "<button class='btn btn-sm btn-secondary' onclick='rotateInboundKey()'>Rotate Key</button>"
+        if inbound_has_key else
+        "<button class='btn btn-sm' onclick='generateInboundKey()'>Generate Key</button>"
+    )
+
+    body = f"""
+<div class="page-header">
+  <h1>Webhooks</h1>
+  <button class="btn" onclick="document.getElementById('create-webhook-modal').style.display='flex'">+ New Webhook</button>
+</div>
+
+<!-- Inbound section -->
+<div class="card" style="margin-bottom:1.5rem">
+  <h3 style="margin-top:0">Inbound Receiver</h3>
+  <p>External systems (n8n, Zapier, custom scripts) can push work commands into Agent Core using the inbound webhook endpoint. Authenticate requests with the <code>X-Agent-Core-Inbound-Key</code> header.</p>
+  <div style="margin-bottom:1rem">
+    <label style="display:block;margin-bottom:0.35rem;font-weight:600">Inbound URL</label>
+    <div style="display:flex;gap:0.5rem;align-items:center">
+      <code id="inbound-url" style="flex:1;padding:0.5rem;background:var(--bg-secondary);border-radius:4px;word-break:break-all">{escape_html(inbound_url)}</code>
+      <button class="btn btn-sm btn-secondary" onclick="copyInboundUrl()">Copy URL</button>
+    </div>
+  </div>
+  <div style="display:flex;align-items:center;gap:1rem;flex-wrap:wrap">
+    <span><strong>Key status:</strong> {inbound_key_status_html}</span>
+    {inbound_key_btn}
+  </div>
+  <div id="inbound-key-reveal" style="display:none;margin-top:1rem;padding:0.75rem;background:var(--bg-secondary);border-radius:4px;border-left:3px solid var(--warning-color)">
+    <strong>New key (shown once):</strong>
+    <code id="inbound-key-value" style="display:block;word-break:break-all;margin:0.35rem 0"></code>
+    <button class="btn btn-sm btn-secondary" onclick="copyInboundKey()">Copy Key</button>
+    <p style="margin:0.5rem 0 0;color:var(--text-muted);font-size:0.85em">Store this key now. It will not be shown again.</p>
+  </div>
+  <p style="margin-bottom:0;margin-top:1rem;color:var(--text-muted);font-size:0.85em">
+    Supported commands: <code>activity.create</code>, <code>activity.assign</code>, <code>activity.update</code>, <code>activity.cancel</code>, <code>activity.note</code>
+  </p>
+</div>
+
+<!-- Outbound section -->
+<h2 style="margin-bottom:0.75rem">Outbound Notifications</h2>
+<div class="card" style="margin-bottom:1.5rem">
+  <p>Outbound webhook notifications let external systems react to Agent Core events. Each registered endpoint receives a signed HTTP POST when a subscribed event occurs. Webhooks are admin-only and fire-and-log — no retries, no orchestration.</p>
+  <p><strong>Signing:</strong> Every delivery includes <code>X-Agent-Core-Signature: sha256=&lt;hex&gt;</code> so receivers can verify authenticity using HMAC-SHA256 with the stored secret.</p>
+</div>
+<div class="card">
+  <table class="data-table">
+    <thead><tr>
+      <th>Name</th><th>URL</th><th>Events</th><th>Status</th><th>Actions</th>
+    </tr></thead>
+    <tbody id="webhooks-table-body">{rows}</tbody>
+  </table>
+</div>
+
+<!-- Create webhook modal -->
+<div class="modal-overlay" id="create-webhook-modal" style="display:none">
+  <div class="modal">
+    <h3>New Webhook</h3>
+    <div id="create-webhook-error" class="error-box" style="display:none"></div>
+    <label>Name
+      <input type="text" id="wh-name" placeholder="e.g. n8n Activity Alerts">
+    </label>
+    <label>URL
+      <input type="text" id="wh-url" placeholder="https://your-endpoint.example.com/hook">
+    </label>
+    <label>Secret <span style="color:var(--text-muted);font-size:0.85em">(used for HMAC-SHA256 signature)</span>
+      <input type="password" id="wh-secret" placeholder="Enter a strong secret">
+    </label>
+    <label>Subscribe to events</label>
+    <div class="checkbox-group" id="wh-event-types">
+      {event_type_options}
+    </div>
+    <div class="modal-actions">
+      <button class="btn" onclick="createWebhook()">Create</button>
+      <button class="btn btn-secondary" onclick="document.getElementById('create-webhook-modal').style.display='none'">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<!-- Edit webhook modal -->
+<div class="modal-overlay" id="edit-webhook-modal" style="display:none">
+  <div class="modal">
+    <h3>Edit Webhook</h3>
+    <div id="edit-webhook-error" class="error-box" style="display:none"></div>
+    <input type="hidden" id="edit-webhook-id">
+    <label>Name
+      <input type="text" id="edit-wh-name">
+    </label>
+    <label>URL
+      <input type="text" id="edit-wh-url">
+    </label>
+    <label>New Secret <span style="color:var(--text-muted);font-size:0.85em">(leave blank to keep existing)</span>
+      <input type="password" id="edit-wh-secret" placeholder="Leave blank to keep current secret">
+    </label>
+    <label>Subscribe to events</label>
+    <div class="checkbox-group" id="edit-wh-event-types">
+      {event_type_options.replace('name="event_types"', 'name="edit_event_types"').replace('id="', 'id="edit-')}
+    </div>
+    <label class="checkbox-label" style="margin-top:0.75rem">
+      <input type="checkbox" id="edit-wh-enabled"> Enabled
+    </label>
+    <div class="modal-actions">
+      <button class="btn" onclick="submitEditWebhook()">Save</button>
+      <button class="btn btn-secondary" onclick="document.getElementById('edit-webhook-modal').style.display='none'">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<!-- Deliveries modal -->
+<div class="modal-overlay" id="deliveries-modal" style="display:none">
+  <div class="modal" style="max-width:700px">
+    <h3 id="deliveries-modal-title">Recent Deliveries</h3>
+    <div id="deliveries-content" style="max-height:420px;overflow-y:auto"></div>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" onclick="document.getElementById('deliveries-modal').style.display='none'">Close</button>
+    </div>
+  </div>
+</div>
+"""
+
+    js = """
+<script>
+function copyInboundUrl() {
+  const url = document.getElementById('inbound-url').textContent.trim();
+  navigator.clipboard.writeText(url).then(() => alert('Inbound URL copied.'));
+}
+
+function copyInboundKey() {
+  const key = document.getElementById('inbound-key-value').textContent.trim();
+  navigator.clipboard.writeText(key).then(() => alert('Key copied.'));
+}
+
+async function generateInboundKey() {
+  if (!confirm('Generate an inbound key? The key will be shown once.')) return;
+  const r = await fetch('/api/webhooks/inbound/key', {method: 'POST'});
+  const data = await r.json();
+  if (!data.ok) { alert('Failed: ' + (data.error?.message || 'unknown')); return; }
+  document.getElementById('inbound-key-value').textContent = data.data.key;
+  document.getElementById('inbound-key-reveal').style.display = 'block';
+  location.reload = () => {};  // suppress auto-reload so user can copy
+}
+
+async function rotateInboundKey() {
+  if (!confirm('Rotate the inbound key? The previous key will stop working immediately.')) return;
+  const r = await fetch('/api/webhooks/inbound/key/rotate', {method: 'POST'});
+  const data = await r.json();
+  if (!data.ok) { alert('Failed: ' + (data.error?.message || 'unknown')); return; }
+  document.getElementById('inbound-key-value').textContent = data.data.key;
+  document.getElementById('inbound-key-reveal').style.display = 'block';
+  location.reload = () => {};
+}
+
+async function createWebhook() {
+  const name = document.getElementById('wh-name').value.trim();
+  const url = document.getElementById('wh-url').value.trim();
+  const secret = document.getElementById('wh-secret').value;
+  const errorBox = document.getElementById('create-webhook-error');
+  errorBox.style.display = 'none';
+  const eventTypes = Array.from(
+    document.querySelectorAll('#wh-event-types input[type=checkbox]:checked')
+  ).map(cb => cb.value);
+  if (!name || !url || !secret || eventTypes.length === 0) {
+    errorBox.textContent = 'Name, URL, secret, and at least one event type are required.';
+    errorBox.style.display = 'block';
+    return;
+  }
+  const r = await fetch('/api/webhooks', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({name, url, secret, event_types: eventTypes}),
+  });
+  const data = await r.json();
+  if (!data.ok) {
+    errorBox.textContent = data.error?.message || 'Failed to create webhook';
+    errorBox.style.display = 'block';
+    return;
+  }
+  document.getElementById('create-webhook-modal').style.display = 'none';
+  location.reload();
+}
+
+function openEditWebhook(id) {
+  fetch('/api/webhooks/' + id)
+    .then(r => r.json())
+    .then(data => {
+      if (!data.ok) return;
+      const wh = data.data.webhook;
+      document.getElementById('edit-webhook-id').value = wh.id;
+      document.getElementById('edit-wh-name').value = wh.name;
+      document.getElementById('edit-wh-url').value = wh.url;
+      document.getElementById('edit-wh-secret').value = '';
+      document.getElementById('edit-wh-enabled').checked = wh.enabled;
+      document.querySelectorAll('#edit-wh-event-types input[type=checkbox]').forEach(cb => {
+        cb.checked = wh.event_types.includes(cb.value);
+      });
+      document.getElementById('edit-webhook-error').style.display = 'none';
+      document.getElementById('edit-webhook-modal').style.display = 'flex';
+    });
+}
+
+async function submitEditWebhook() {
+  const id = document.getElementById('edit-webhook-id').value;
+  const body = {
+    name: document.getElementById('edit-wh-name').value.trim(),
+    url: document.getElementById('edit-wh-url').value.trim(),
+    enabled: document.getElementById('edit-wh-enabled').checked,
+    event_types: Array.from(
+      document.querySelectorAll('#edit-wh-event-types input[type=checkbox]:checked')
+    ).map(cb => cb.value),
+  };
+  const secret = document.getElementById('edit-wh-secret').value;
+  if (secret) body.secret = secret;
+  const errorBox = document.getElementById('edit-webhook-error');
+  errorBox.style.display = 'none';
+  const r = await fetch('/api/webhooks/' + id, {
+    method: 'PUT',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(body),
+  });
+  const data = await r.json();
+  if (!data.ok) {
+    errorBox.textContent = data.error?.message || 'Update failed';
+    errorBox.style.display = 'block';
+    return;
+  }
+  document.getElementById('edit-webhook-modal').style.display = 'none';
+  location.reload();
+}
+
+async function deleteWebhook(id, name) {
+  if (!confirm('Delete webhook "' + name + '"? This cannot be undone.')) return;
+  const r = await fetch('/api/webhooks/' + id, {method: 'DELETE'});
+  const data = await r.json();
+  if (data.ok) location.reload();
+  else alert('Delete failed: ' + (data.error?.message || 'unknown error'));
+}
+
+async function testWebhook(id) {
+  const r = await fetch('/api/webhooks/' + id + '/test', {method: 'POST'});
+  const data = await r.json();
+  if (data.data?.ok) {
+    alert('Test delivery sent. HTTP ' + (data.data.http_status || '—'));
+  } else {
+    alert('Test delivery failed: ' + (data.data?.error || data.error?.message || 'unknown'));
+  }
+}
+
+function viewDeliveries(id, name) {
+  document.getElementById('deliveries-modal-title').textContent = 'Recent Deliveries — ' + name;
+  document.getElementById('deliveries-content').innerHTML = '<p style="color:var(--text-muted)">Loading...</p>';
+  document.getElementById('deliveries-modal').style.display = 'flex';
+  fetch('/api/webhooks/' + id + '/deliveries?limit=30')
+    .then(r => r.json())
+    .then(data => {
+      if (!data.ok || !data.data.deliveries.length) {
+        document.getElementById('deliveries-content').innerHTML = '<p style="color:var(--text-muted)">No deliveries recorded yet.</p>';
+        return;
+      }
+      const rows = data.data.deliveries.map(d => {
+        const badge = d.status === 'success'
+          ? "<span class='badge badge-active'>success</span>"
+          : "<span class='badge badge-stale'>failure</span>";
+        const detail = d.error_message ? `<br><small style='color:var(--text-muted)'>${d.error_message}</small>` : '';
+        return `<tr><td>${d.delivered_at?.slice(0,19) || '—'}</td><td><code>${d.event_type}</code></td><td>${badge} ${d.http_status ? 'HTTP ' + d.http_status : ''}${detail}</td></tr>`;
+      }).join('');
+      document.getElementById('deliveries-content').innerHTML =
+        '<table class="data-table"><thead><tr><th>Time</th><th>Event</th><th>Result</th></tr></thead><tbody>' + rows + '</tbody></table>';
+    });
+}
+</script>
+"""
+
+    return render_page(
+        "Webhooks",
+        body,
+        nav_active="/webhooks",
+        extra_js=js,
+        session=session,
+    )

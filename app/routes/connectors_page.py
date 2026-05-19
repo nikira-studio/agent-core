@@ -32,10 +32,6 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
     visible_binding_count = len(visible_bindings)
     enabled_binding_count = len([b for b in visible_bindings if b.get("enabled")])
     failed_binding_count = len([b for b in visible_bindings if b.get("last_error")])
-    disabled_action_count = sum(
-        len(ct.get("disabled_actions") or []) for ct in connector_types
-    )
-
     with get_db() as conn:
         execution_rows = conn.execute(
             """
@@ -101,7 +97,7 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
           <td>{escape_html(e.get("name", ""))}</td>
           <td><code>{escape_html(e.get("scope", ""))}</code></td>
           <td><code>{escape_html(e.get("reference_name", ""))}</code></td>
-          <td>
+          <td class='actions-cell'>
             <button type='button' class='btn btn-sm btn-secondary' onclick='editCredential("{e["id"]}")'>Edit</button>
             <button type='button' class='btn btn-sm btn-danger icon-delete-btn' onclick='deleteCredential("{e["id"]}")' title='Delete credential' aria-label='Delete credential'>{get_icon('delete')}</button>
           </td>
@@ -123,6 +119,7 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
         ct = next(
             (c for c in connector_types if c["id"] == b["connector_type_id"]), None
         )
+        text_style = "text-decoration:line-through;opacity:0.62;" if not b.get("enabled") else ""
         if b.get("enabled") and not b.get("last_error"):
             status_cls = "status-ok"
             status_text = "Enabled" if b.get("enabled") else "Disabled"
@@ -137,11 +134,11 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
             status_text = f"OK ({b['last_tested_at'][:10]})"
         bindings_rows += f"""
         <tr data-binding-id="{b["id"]}">
-          <td>{escape_html(b.get("name", ""))}</td>
-          <td>{escape_html(ct.get("display_name", "") if ct else b.get("connector_type_id", ""))}</td>
-          <td><code>{escape_html(b.get("scope", ""))}</code></td>
-          <td class="{status_cls}">{escape_html(status_text)}</td>
-          <td>
+          <td style="{text_style}">{escape_html(b.get("name", ""))}</td>
+          <td style="{text_style}">{escape_html(ct.get("display_name", "") if ct else b.get("connector_type_id", ""))}</td>
+          <td style="{text_style}"><code>{escape_html(b.get("scope", ""))}</code></td>
+          <td class="{status_cls}" style="{text_style}">{escape_html(status_text)}</td>
+          <td class='actions-cell'>
             <button type='button' class='btn btn-sm btn-secondary' onclick='editBinding("{b["id"]}")'>Edit</button>
             <button type='button' class='btn btn-sm btn-secondary' onclick='viewExecutions("{b["id"]}")'>History</button>
             <button type='button' class='btn btn-sm btn-secondary' onclick='testBinding("{b["id"]}")'>Test</button>
@@ -187,6 +184,7 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
     ct_cards = ""
     for ct in connector_types:
         supported_actions = ct.get("supported_actions", [])
+        disabled_actions = ct.get("disabled_actions") or []
         operations_meta = {}
         try:
             operations_meta = json.loads(ct.get("operations_json") or "{}")
@@ -250,6 +248,7 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
             for tag in top_tags
         )
         action_count = len(supported_actions)
+        enabled_action_count = max(action_count - len([a for a in disabled_actions if a in supported_actions]), 0)
         view_actions_btn = (
             f'<button type="button" class="btn btn-sm btn-secondary" onclick=\'viewActions("{ct["id"]}", "{escape_html(ct["display_name"])}", {action_count})\'>View Actions</button>'
             if action_count
@@ -262,7 +261,7 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
               <div class='connector-type-name'>{escape_html(ct["display_name"])}</div>
               <div class='connector-type-desc'>{escape_html(ct.get("description", "") or "No description")}</div>
             </div>
-            <div class='connector-type-count'>{binding_counts.get(ct["id"], 0)} binding(s)</div>
+            <div class='connector-type-count'>{binding_counts.get(ct["id"], 0)} binding(s){f' - {enabled_action_count}/{action_count} Actions' if action_count else ''}</div>
           </div>
           <div class='connector-type-meta'>
             <span class='badge badge-stale'>Auth: {escape_html(ct.get("auth_type", ""))}</span>
@@ -303,7 +302,7 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
       <a class="stat-card stat-link" href="#bindings"><div class="value">{visible_binding_count}</div><div class="label">Visible Bindings</div></a>
       <a class="stat-card stat-link" href="#bindings"><div class="value">{enabled_binding_count}</div><div class="label">Enabled Bindings</div></a>
       <a class="stat-card stat-link" href="#executions"><div class="value">{failed_binding_count}</div><div class="label">Bindings with Errors</div></a>
-      <a class="stat-card stat-link" href="#service-catalog"><div class="value">{disabled_action_count}</div><div class="label">Disabled Actions</div></a>
+      <a class="stat-card stat-link" href="#service-catalog"><div class="value">{sum(len(ct.get("supported_actions") or []) - len(ct.get("disabled_actions") or []) for ct in connector_types)}</div><div class="label">Enabled Actions</div></a>
     </div>
 
     <div class="card">
@@ -359,11 +358,11 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
         <form id="create-credential-form" onsubmit="createCredential(event)">
           <div class="form-group">
             <label>Name *</label>
-            <input type="text" id="credential-name" placeholder="e.g. service-token" required>
+            <input type="text" id="credential-name" placeholder="e.g. service-token" autocomplete="off" required>
           </div>
           <div class="form-group">
             <label>Label</label>
-            <input type="text" id="credential-label" placeholder="e.g. Service token">
+            <input type="text" id="credential-label" placeholder="e.g. Service token" autocomplete="off">
           </div>
           <div class="form-group">
             <label>Scope *</label>
@@ -390,15 +389,15 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
           <input type="hidden" id="edit-credential-id">
           <div class="form-group">
             <label>Name *</label>
-            <input type="text" id="edit-credential-name" required>
+            <input type="text" id="edit-credential-name" autocomplete="off" required>
           </div>
           <div class="form-group">
             <label>Label</label>
-            <input type="text" id="edit-credential-label">
+            <input type="text" id="edit-credential-label" autocomplete="off">
           </div>
           <div class="form-group">
             <label>Scope</label>
-            <input type="text" id="edit-credential-scope" disabled>
+            <input type="text" id="edit-credential-scope" autocomplete="off" disabled>
           </div>
           <div class="form-group">
             <label>Replace Secret Value</label>
@@ -424,7 +423,7 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
           </div>
           <div class="form-group">
             <label>Name *</label>
-            <input type="text" id="binding-name" placeholder="e.g. Workspace API" required>
+            <input type="text" id="binding-name" placeholder="e.g. Workspace API" autocomplete="off" required>
           </div>
           <div class="form-group">
             <label>Scope *</label>
@@ -449,7 +448,7 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
           <div id="binding-new-credential-fields" style="display:none">
             <div class="form-group">
               <label>Credential Name *</label>
-              <input type="text" id="binding-new-credential-name" placeholder="e.g. service-token">
+              <input type="text" id="binding-new-credential-name" placeholder="e.g. service-token" autocomplete="off">
             </div>
             <div class="form-group">
               <label>Secret Value *</label>
@@ -484,7 +483,7 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
           <input type="hidden" id="edit-binding-id">
           <div class="form-group">
             <label>Name</label>
-            <input type="text" id="edit-binding-name">
+            <input type="text" id="edit-binding-name" autocomplete="off">
           </div>
           <div class="form-group">
             <label>Scope</label>
@@ -537,7 +536,7 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
           </div>
           <div class="form-group">
             <label>Display Name (optional)</label>
-            <input type="text" id="import-spec-name" placeholder="e.g. Example REST API">
+            <input type="text" id="import-spec-name" placeholder="e.g. Example REST API" autocomplete="off">
           </div>
           <div id="import-spec-preview" class="card" style="display:none;margin:12px 0 0 0"></div>
           <div class="form-hint">
@@ -546,7 +545,7 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
             Search <a href="https://apis.guru" target="_blank">apis.guru</a> for 2000+ specs, or <a href="/connectors/help">read the guide</a>.
           </div>
           <button type="button" class="btn btn-secondary" onclick="previewSpec(event)">Preview Spec</button>
-          <button type="submit" class="btn btn-primary" id="import-spec-import-btn" disabled>Import API</button>
+          <button type="submit" class="btn btn-primary" id="import-spec-import-btn" disabled>Create</button>
           <button type="button" class="btn btn-secondary" onclick="closeModal('import-spec-modal')">Cancel</button>
         </form>
       </div>
@@ -563,7 +562,7 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
           </div>
           <div class="form-group">
             <label>Display Name (optional)</label>
-            <input type="text" id="import-mcp-name" placeholder="e.g. Firecrawl MCP">
+            <input type="text" id="import-mcp-name" placeholder="e.g. Firecrawl MCP" autocomplete="off">
           </div>
           <div class="form-group">
             <label>Transport</label>
@@ -886,7 +885,7 @@ async function previewSpec(e) {
 
   const j = await apiFetch('/api/connector-types/preview', { method: 'POST', body: JSON.stringify(body) });
   if (!j.ok) {
-    showToast(j.error?.message || 'Preview failed', 'danger');
+    showToast(j.error?.message || 'Validation failed', 'danger');
     return;
   }
 
@@ -918,13 +917,18 @@ async function previewSpec(e) {
   if (importBtn) {
     importBtn.disabled = false;
   }
-  showToast('Preview ready', 'success');
+  const previewName = preview.display_name || preview.connector_type_id || 'API';
+  const previewCount = preview.operation_count != null ? preview.operation_count : 0;
+  if (previewEl && previewEl.scrollIntoView) {
+    previewEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+  showToast('Validated ' + previewName + ' (' + previewCount + ' actions)', 'success');
 }
 
 async function importSpec(e) {
   if (e) e.preventDefault();
   if (!importSpecPreviewState) {
-    showToast('Preview the spec before importing', 'danger');
+    showToast('Validate the spec before creating it', 'danger');
     return;
   }
   const url = document.getElementById('import-spec-url').value.trim();
@@ -990,7 +994,11 @@ let actionsState = { ctId: null, offset: 0, all: [] };
 
 async function viewActions(ctId, displayName, totalCount) {
   actionsState = { ctId: ctId, offset: 0, all: [] };
-  document.getElementById('view-actions-title').textContent = displayName + ' \u2014 ' + totalCount + ' Actions';
+  const title = document.getElementById('view-actions-title');
+  if (title) {
+    title.dataset.baseTitle = displayName + ' \u2014 ' + totalCount + ' Actions';
+    title.textContent = title.dataset.baseTitle;
+  }
   document.getElementById('view-actions-filter').value = '';
   document.getElementById('view-actions-content').innerHTML = '<em>Loading...</em>';
   openModal('view-actions-modal');
@@ -1004,6 +1012,12 @@ async function loadActionsBatch(ctId, totalCount) {
     return;
   }
   actionsState.all = j.data.tools || [];
+  const enabledCount = actionsState.all.filter(function(t) { return t.enabled; }).length;
+  const title = document.getElementById('view-actions-title');
+  if (title) {
+    const baseTitle = title.dataset.baseTitle || title.textContent;
+    title.textContent = baseTitle + ' (' + enabledCount + ' enabled)';
+  }
   renderActions();
 }
 
@@ -1080,6 +1094,21 @@ async function saveActionSettings() {
     showToast(j.error?.message || 'Failed to save actions', 'danger');
   }
 }
+
+window.onAgentCoreEvent = function(event) {
+  if (event.type !== 'connector_executed') return;
+  var header = document.querySelector('#executions .section-header h3');
+  if (!header || document.getElementById('executions-live-dot')) return;
+  var dot = document.createElement('span');
+  dot.id = 'executions-live-dot';
+  dot.title = 'New execution recorded';
+  dot.style.cssText = 'display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--accent,#4f8ef7);margin-left:8px;vertical-align:middle';
+  header.appendChild(dot);
+  setTimeout(function() {
+    var el = document.getElementById('executions-live-dot');
+    if (el) el.remove();
+  }, 4000);
+};
 
 </script>"""
 
@@ -1202,7 +1231,7 @@ async def connectors_directory_page(
         <div id="import-spec-preview" class="card" style="display:none;margin:12px 0 0 0"></div>
         <div class="modal-actions">
           <button class="btn btn-secondary" type="button" onclick="previewSpec(event)">Preview Spec</button>
-          <button class="btn" id="import-spec-import-btn" type="button" onclick="importSpec(event)" disabled>Import</button>
+          <button class="btn" id="import-spec-import-btn" type="button" onclick="importSpec(event)" disabled>Create</button>
           <button class="btn btn-secondary" onclick="closeModal('import-spec-modal')">Cancel</button>
           <a href="/connectors/help" target="_blank" class="help-link">Where do I find specs?</a>
         </div>
@@ -1219,7 +1248,7 @@ async def connectors_directory_page(
           </div>
           <div class="form-group">
             <label>Display Name (optional)</label>
-            <input type="text" id="directory-import-mcp-name" placeholder="e.g. Firecrawl MCP" />
+            <input type="text" id="directory-import-mcp-name" placeholder="e.g. Firecrawl MCP" autocomplete="off" />
           </div>
           <div class="form-group">
             <label>Transport</label>
@@ -1408,8 +1437,8 @@ async def connectors_directory_page(
       document.getElementById('import-spec-json').value = '';
       document.getElementById('import-spec-name').value = displayName || entryId || '';
       resetImportPreview();
+      closeModal('dir-detail-modal');
       openModal('import-spec-modal');
-      await previewSpec();
     }
 
     async function importFromDirectory(entryId) {
@@ -1480,7 +1509,7 @@ async def connectors_directory_page(
 
       const j = await apiFetch('/api/connector-types/preview', { method: 'POST', body: JSON.stringify(body) });
       if (!j.ok) {
-        showToast(j.error?.message || 'Preview failed', 'danger');
+        showToast(j.error?.message || 'Validation failed', 'danger');
         return;
       }
 
@@ -1512,13 +1541,18 @@ async def connectors_directory_page(
       if (importBtn) {
         importBtn.disabled = false;
       }
-      showToast('Preview ready', 'success');
+      const previewName = preview.display_name || preview.connector_type_id || 'API';
+      const previewCount = preview.operation_count != null ? preview.operation_count : 0;
+      if (previewEl && previewEl.scrollIntoView) {
+        previewEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }
+      showToast('Validated ' + previewName + ' (' + previewCount + ' actions)', 'success');
     }
 
     async function importSpec(e) {
       if (e) e.preventDefault();
       if (!importSpecPreviewState) {
-        showToast('Preview the spec before importing', 'danger');
+        showToast('Validate the spec before creating it', 'danger');
         return;
       }
       const url = document.getElementById('import-spec-url').value.trim();
@@ -1542,7 +1576,7 @@ async def connectors_directory_page(
       }
 
       closeModal('import-spec-modal');
-      showToast('Imported ' + (j.data.connector_type?.display_name || 'spec') + ' (' + j.data.operation_count + ' actions)', 'success');
+      showToast('Created ' + (j.data.connector_type?.display_name || 'spec') + ' (' + j.data.operation_count + ' actions)', 'success');
       document.getElementById('import-spec-url').value = '';
       document.getElementById('import-spec-json').value = '';
       document.getElementById('import-spec-name').value = '';

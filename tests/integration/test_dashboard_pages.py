@@ -132,3 +132,25 @@ def test_dashboard_no_inline_styles_in_render_page(authenticated_client):
     assert "<script>" not in html or "</script>" in html, (
         "Inline scripts should be external"
     )
+
+
+def test_workspace_edit_modal_has_collaborator_panel_and_separate_save_form(authenticated_client):
+    r = authenticated_client.get("/workspaces")
+    assert r.status_code == 200
+    html = r.text
+
+    # Edit modal and its save form exist
+    assert "edit-workspace-modal" in html
+    assert "edit-workspace-form" in html
+    assert "submitEditProject" in html
+
+    # Collaborator panel container is present inside the modal
+    assert "ep-collaborators" in html
+
+    # Collaborator add/remove actions are separate from the main workspace save
+    assert "data-workspace-collaborator-form" in html
+    assert "data-workspace-collaborator-remove" in html
+
+    # Workspace save does not trigger collaborator actions
+    assert "submitEditProject" in html
+    assert html.index("submitEditProject") != html.index("data-workspace-collaborator-form")

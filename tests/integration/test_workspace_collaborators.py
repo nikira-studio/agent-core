@@ -118,6 +118,53 @@ def test_workspace_collaborator_revocation_blocks_agent_runtime_access(test_clie
     assert not can_user_write_workspace("collab2", "revocationproject")
 
 
+def test_non_owner_collaborator_cannot_manage_collaborators(test_client, admin_token):
+    create_user("owner4", "owner4@test.local", "testpassword123", "Owner4", "user")
+    create_user("collab4", "collab4@test.local", "testpassword123", "Collab4", "user")
+    owner_token = create_session("owner4")["session_id"]
+    collab_token = create_session("collab4")["session_id"]
+
+    test_client.post(
+        "/api/workspaces",
+        headers={"Authorization": f"Bearer {owner_token}"},
+        json={"id": "managedproject", "name": "Managed Project"},
+    )
+    test_client.put(
+        "/api/workspaces/managedproject/collaborators/collab4",
+        headers={"Authorization": f"Bearer {owner_token}"},
+        json={"can_read": True, "can_write": False},
+    )
+
+    # collaborator can view the workspace
+    r = test_client.get(
+        "/api/workspaces/managedproject",
+        headers={"Authorization": f"Bearer {collab_token}"},
+    )
+    assert r.status_code == 200
+
+    # collaborator cannot list collaborators (triggers the UI 403 branch)
+    r = test_client.get(
+        "/api/workspaces/managedproject/collaborators",
+        headers={"Authorization": f"Bearer {collab_token}"},
+    )
+    assert r.status_code == 403
+
+    # collaborator cannot add another collaborator
+    r = test_client.put(
+        "/api/workspaces/managedproject/collaborators/someuser",
+        headers={"Authorization": f"Bearer {collab_token}"},
+        json={"can_read": True, "can_write": False},
+    )
+    assert r.status_code == 403
+
+    # collaborator cannot remove a collaborator
+    r = test_client.delete(
+        "/api/workspaces/managedproject/collaborators/collab4",
+        headers={"Authorization": f"Bearer {collab_token}"},
+    )
+    assert r.status_code == 403
+
+
 def test_workspace_collaborator_listing_includes_owner_row(test_client, admin_token):
     create_user("owner3", "owner3@test.local", "testpassword123", "Owner3", "user")
     owner_token = create_session("owner3")["session_id"]

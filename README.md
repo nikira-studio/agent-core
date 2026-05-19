@@ -131,15 +131,18 @@ Working with a team, or switching between Claude Code and Cursor on the same pro
 
 The activity dashboard lists active agent tasks, flags sessions that have gone stale (no heartbeat for more than the configured threshold), and surfaces pending handoffs with options to reassign or generate a briefing. When an agent picks up stale work, it can pull a briefing that includes the prior task description, recent decisions, and relevant memory from the workspace scope.
 
-Activity tracking is self-reported — there is no automatic detection of agent work. A working agent must call `activity_update` at the start of a task and periodically as a heartbeat; without that, nothing appears in the dashboard and no briefing can be generated. The MCP tools that drive this are `activity_update` (register and heartbeat the current task), `activity_list` (find stale or in-progress work), and `get_briefing` (pull the handoff context before starting). An incoming agent typically does this at the top of a session:
+Activity tracking is self-reported — there is no automatic detection of agent work. A working agent must call `activity_update` at the start of a task and periodically as a heartbeat; without that, nothing appears in the dashboard and no briefing can be generated.
+
+You can assign work to an agent directly from the dashboard (**Activity → Assign Work**). The agent session discovers that work on the next pickup check:
 
 ```
-activity_list  → find what's stale or pending
-get_briefing   → pull the prior task description, decisions, and workspace memory
-memory_search  → fill in any gaps with a targeted query
+activity_pickup  → check for work a human assigned to this agent in this workspace
+activity_list    → find what's stale or pending (for reviews and handoffs)
+get_briefing     → pull the prior task description, decisions, and workspace memory
+memory_search    → fill in any gaps with a targeted query
 ```
 
-Nothing in this flow is automatic — agents participate explicitly, which means the handoff trail is auditable and the context is always intentional.
+`activity_pickup` returns the next assigned task, or `null` if nothing is waiting. It is an explicit pull — agents check when they start or when idle, not on a schedule. Nothing in this flow is automatic, which means the handoff trail is auditable and the context is always intentional.
 
 ![Agent Core activity](docs/images/agent-activity.png)
 

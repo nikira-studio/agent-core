@@ -317,6 +317,47 @@ def test_memory_retract_accepts_json_body_and_uses_correct_error_code(test_clien
     assert r2.json()["error"]["code"] == "ALREADY_RETRACTED"
 
 
+def test_memory_delete_removes_embedding_rows(test_client, admin_token):
+    write_r = test_client.post(
+        "/api/memory/write",
+        headers={"Authorization": f"Bearer {admin_token}"},
+        json={
+            "content": "Delete with embedding test",
+            "memory_class": "fact",
+            "scope": "user:admin",
+        },
+    )
+    assert write_r.status_code == 201, write_r.text
+    record_id = write_r.json()["data"]["record"]["id"]
+
+    from app.database import get_db
+
+    with get_db() as conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO memory_embeddings (record_id, vector, model) VALUES (?, ?, ?)",
+            (record_id, b"12345678", "test-model"),
+        )
+        conn.commit()
+
+    delete_r = test_client.delete(
+        f"/api/memory/{record_id}",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert delete_r.status_code == 200, delete_r.text
+    assert delete_r.json()["ok"] is True
+
+    with get_db() as conn:
+        record = conn.execute(
+            "SELECT id FROM memory_records WHERE id = ?", (record_id,)
+        ).fetchone()
+        embedding = conn.execute(
+            "SELECT record_id FROM memory_embeddings WHERE record_id = ?",
+            (record_id,),
+        ).fetchone()
+    assert record is None
+    assert embedding is None
+
+
 def test_pii_gate_blocks_shared_scope(test_client, agent_token):
     r = test_client.post(
         "/api/memory/write",

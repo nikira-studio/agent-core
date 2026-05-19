@@ -781,4 +781,33 @@ def run_scheduled_maintenance() -> dict:
             details={"deleted_count": pruned, "retention_days": retention_days},
         )
 
-    return {"stale_activities_marked": stale_count, "scratchpad_pruned": pruned}
+    # Sweep expired memory records (opt-in via expires_at field)
+    ttl_deleted = 0
+    with get_db() as conn:
+        expired_rows = conn.execute(
+            "SELECT id FROM memory_records WHERE expires_at IS NOT NULL AND datetime(expires_at) < datetime('now')"
+        ).fetchall()
+        expired_ids = [row["id"] for row in expired_rows]
+        if expired_ids:
+            placeholders = ",".join("?" for _ in expired_ids)
+            conn.execute(
+                f"DELETE FROM memory_embeddings WHERE record_id IN ({placeholders})",
+                expired_ids,
+            )
+            cursor = conn.execute(
+                f"DELETE FROM memory_records WHERE id IN ({placeholders})",
+                expired_ids,
+            )
+            ttl_deleted = cursor.rowcount
+        conn.commit()
+
+    if ttl_deleted > 0:
+        audit_service.write_event(
+            actor_type="system",
+            actor_id="maintenance",
+            action="memory_ttl_swept",
+            result="success",
+            details={"deleted_count": ttl_deleted},
+        )
+
+    return {"stale_activities_marked": stale_count, "scratchpad_pruned": pruned, "ttl_swept": ttl_deleted}

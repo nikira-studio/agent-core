@@ -3,6 +3,8 @@ from pydantic import BaseModel
 from typing import Optional
 
 from app.services import activity_service, audit_service, briefing_service
+from app.services.event_stream_service import event_hub
+from app.services import webhook_service
 from app.security.dependencies import get_request_context
 from app.security.context import RequestContext
 from app.security.scope_enforcer import ScopeEnforcer
@@ -50,6 +52,24 @@ def _activity_audit_details(activity: dict, **extra) -> dict:
         details["assigned_agent_id"] = assigned_agent_id
     details.update({k: v for k, v in extra.items() if v is not None})
     return details
+
+
+def _activity_event_data(activity: dict, **extra) -> dict:
+    event_data = {
+        "activity_id": activity.get("id"),
+        "task_description": activity.get("task_description"),
+        "agent_id": activity.get("agent_id"),
+        "assigned_agent_id": activity.get("assigned_agent_id"),
+        "user_id": activity.get("user_id"),
+        "memory_scope": activity.get("memory_scope"),
+        "status": activity.get("status"),
+        "started_at": activity.get("started_at"),
+        "updated_at": activity.get("updated_at"),
+        "heartbeat_at": activity.get("heartbeat_at"),
+        "ended_at": activity.get("ended_at"),
+    }
+    event_data.update({k: v for k, v in extra.items() if v is not None})
+    return event_data
 
 
 @router.post("")
@@ -100,8 +120,48 @@ async def create_activity(
             action="create",
         ),
     )
+    _event_data = _activity_event_data(activity)
+    event_hub.publish("activity_created", _event_data)
+    webhook_service.dispatch_event("activity_created", _event_data)
 
     return success_response({"activity": activity}, status_code=201)
+
+
+@router.post("/pickup")
+async def pickup_activity(
+    ctx: RequestContext = Depends(get_request_context),
+):
+    if not ctx.agent_id:
+        return error_response("AGENT_REQUIRED", "Pickup requires an agent context", 400)
+
+    enforcer = ScopeEnforcer(
+        ctx.read_scopes,
+        ctx.write_scopes,
+        ctx.agent_id,
+        is_admin=ctx.is_admin,
+        active_workspace_ids=ctx.active_workspace_ids,
+    )
+    authorized_scopes = enforcer.filter_readable_scopes(ctx.read_scopes)
+
+    activity = activity_service.claim_next_activity(ctx.agent_id, authorized_scopes)
+
+    if activity:
+        audit_service.write_event(
+            actor_type=ctx.actor_type,
+            actor_id=ctx.actor_id,
+            action="activity_pickup",
+            resource_type="activity",
+            resource_id=activity["id"],
+            result="success",
+            details=_activity_audit_details(activity, action="pickup"),
+        )
+
+    return success_response(
+        {
+            "activity": activity,
+            "message": None if activity else "No assigned work found for this agent in authorized scopes",
+        }
+    )
 
 
 @router.get("/{activity_id}")
@@ -150,6 +210,7 @@ async def update_activity(
     if not success:
         return error_response("UPDATE_FAILED", "Activity update failed", 500)
 
+    updated = activity_service.get_activity(activity_id) or activity
     audit_service.write_event(
         actor_type=ctx.actor_type,
         actor_id=ctx.actor_id,
@@ -158,14 +219,17 @@ async def update_activity(
         resource_id=activity_id,
         result="success",
         details=_activity_audit_details(
-            activity_service.get_activity(activity_id) or activity,
+            updated,
             previous_status=activity["status"],
             new_status=body.status or activity["status"],
             action="update",
         ),
     )
+    _event_data = _activity_event_data(updated, previous_status=activity["status"])
+    event_hub.publish("activity_updated", _event_data)
+    webhook_service.dispatch_event("activity_updated", _event_data)
 
-    return success_response({"activity": activity_service.get_activity(activity_id)})
+    return success_response({"activity": updated})
 
 
 @router.post("/{activity_id}/heartbeat")
@@ -202,6 +266,9 @@ async def heartbeat_activity(
             current_status=activity["status"],
         ),
     )
+    _event_data = _activity_event_data(activity)
+    event_hub.publish("activity_heartbeat", _event_data)
+    webhook_service.dispatch_event("activity_heartbeat", _event_data)
 
     return success_response({"activity": activity_service.get_activity(activity_id)})
 
@@ -284,6 +351,10 @@ async def cancel_activity(
             previous_status=activity["status"],
         ),
     )
+    updated = activity_service.get_activity(activity_id) or activity
+    _event_data = _activity_event_data(updated, previous_status=activity.get("status"))
+    event_hub.publish("activity_cancelled", _event_data)
+    webhook_service.dispatch_event("activity_cancelled", _event_data)
 
     return success_response({"message": "Activity cancelled"})
 
@@ -388,5 +459,9 @@ async def recover_activity(
         result="success",
         details={"action": body.action, "result": result_data},
     )
+    recovered = activity_service.get_activity(activity_id) or activity
+    _event_data = _activity_event_data(recovered, recovery_action=body.action, result=result_data)
+    event_hub.publish("activity_recovered", _event_data)
+    webhook_service.dispatch_event("activity_recovered", _event_data)
 
     return success_response(result_data)

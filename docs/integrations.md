@@ -71,6 +71,7 @@ Once connected, these tools are available in any session:
 | `activity_update` | Create or update an activity record (for tracking active work) |
 | `activity_get` | Get the status of an activity |
 | `activity_list` | List activities visible to the current agent or user |
+| `activity_pickup` | Claim the next active work item a human assigned to this agent in authorized scopes |
 | `get_briefing` | Pull a handoff briefing when taking over from another agent |
 | `briefing_list` | List generated briefings visible to the current agent or user |
 | `connectors_list` | List available connector types |
@@ -226,6 +227,7 @@ The **Integrations** page generates a full `CLAUDE.md` snippet tailored to your 
 
 You are connected to Agent Core at http://localhost:3500.
 
+- At startup or when idle, call `activity_pickup` to check for work a human has assigned to you. If it returns an activity, that is your current task. If it returns null, proceed with whatever the user is asking.
 - Search memory at the start of each session: `memory_search` with a natural language query. If a broad query returns little or nothing, retry with exact topic values, exact words from prior records, or a known record id. When embeddings are unavailable, exact tokens and known ids are more reliable than conceptual searches.
 - Store decisions, preferences, and facts: `memory_write`
 - For credentials: use `credential_get` to retrieve an AC_SECRET_* reference — never ask the user for raw API keys
@@ -331,12 +333,13 @@ When writing the config, use the MCP URL and bearer token from the connection va
 
 Expected Agent Core tools:
 - `memory_search`, `memory_get`, `memory_write`, `memory_retract`
-- `activity_update`, `activity_get`, `activity_list`
+- `activity_pickup`, `activity_update`, `activity_get`, `activity_list`
 - `briefing_list`, `get_briefing`
 - `credential_list`, `credential_get`
 - `connectors_list`, `connectors_bindings_list`, `connectors_actions_list`, `connectors_bindings_test`, `connectors_run`
 
 Operating rules:
+- At startup or when idle, call `activity_pickup` to check for work a human has assigned to you in this workspace. If it returns an activity, that is your current task — read it and start working. Only call pickup once per session start; do not loop infinitely claiming new tasks on your own.
 - Start meaningful tasks with `activity_update` using `status: active`, a concise `task_description`, and the default shared scope.
 - Refresh activity while actively working.
 - Before making changes, search memory with `memory_search`.
@@ -475,15 +478,17 @@ Think of Agent Core less like an orchestrator and more like a building of servic
 - **Memory** is the shared reference room.
 - **Credentials** are the secured service keys.
 - **Connectors** are the service counters agents can walk up to.
-- **Activity** is the live status board.
+- **Activity** is the live status board and handoff mailroom.
 
-Agents decide when to use a service. Agent Core makes the service available, enforces scope, and logs what happened.
+Agents decide when to use a service. Agent Core makes the service available, enforces scope, and logs what happened. It does not schedule work for them.
 
 ---
 
 ## Activity Tracking
 
-Agents can report what they're working on so you can see live status in the dashboard. This is especially useful when multiple agents are working in parallel.
+Agents can report what they're working on so you can see live status in the dashboard. This is especially useful when multiple agents are working in parallel, or when one agent leaves work for another agent in the same workspace.
+
+The dashboard receives activity updates in real time over a server-sent event stream (`GET /api/events`). When an agent creates, updates, cancels, or heartbeats an activity, the overview stat cards (Open Activities, Stale / Blocked) and the recent activity table refresh automatically without any page reload. The activity page shows a "refresh" banner when new events arrive. Connector execution completions also surface as a brief indicator on the Connectors page. No polling is required — the browser opens one persistent connection per session and reconnects automatically on disconnect.
 
 ```bash
 # Create an activity when you start a task
@@ -502,6 +507,51 @@ curl -X POST http://localhost:3500/api/activity/<activity-id>/heartbeat \
 
 If an agent misses heartbeats for more than `AGENT_CORE_STALE_THRESHOLD_MINUTES` (default: 5 minutes), its activity is automatically marked `stale`. The dashboard surfaces these with options to resume, reassign to another agent, generate a briefing, or cancel.
 
+If you want another agent to pick up the work, tell that agent to check for assigned work in its current workspace. The pickup step is explicit and deliberate: Agent Core stores the work record and the agent claims it when it checks.
+
+## Assigning Work to Agents
+
+A human can assign a task to a specific agent from the **Activity** page in the dashboard (click **+ Assign Work**). The form asks for the target agent, the task description, and the workspace scope. The activity is created immediately; the agent session discovers it on the next pickup check.
+
+### The pickup convention
+
+Agent sessions do not wake up automatically. The pickup is an explicit pull:
+
+1. The human creates an activity in the dashboard, assigns it to an agent, and sets the workspace scope.
+2. The agent session calls `activity_pickup` at startup or when idle.
+3. If a matching activity exists (same `assigned_agent_id`, same readable workspace scope), it is returned and heartbeated.
+4. The agent reads the task, starts working, and sends heartbeats via `activity_update`.
+5. When done, the agent marks the activity `completed` or `blocked`.
+
+**Pickup is workspace-aware.** An agent session only sees activities whose `memory_scope` is within its authorized read scopes. An agent configured for `workspace:project-a` cannot claim a task scoped to `workspace:project-b`, and it cannot claim tasks assigned to a different agent.
+
+**Pickup does not recurse.** The agent should call pickup once per session start (or when explicitly asked to check for work). It should not loop infinitely calling pickup and claiming new tasks on its own — that would make it an orchestrator, which is out of scope for v1.
+
+### How to trigger pickup
+
+Via MCP:
+```
+Call activity_pickup with no parameters.
+If it returns an activity, that is your assigned task. Read the task_description and start working.
+If it returns null, there is no assigned work waiting.
+```
+
+Via REST:
+```bash
+curl -X POST http://localhost:3500/api/activity/pickup \
+  -H "Authorization: Bearer <agent-api-key>"
+```
+
+### Workspace-scoped assignment example
+
+1. Create a workspace `project-a` in Agent Core.
+2. Create an agent `build-agent` with `workspace:project-a` in its read and write scopes.
+3. In the dashboard, assign a task to `build-agent` and set the scope to `workspace:project-a`.
+4. In the `build-agent` session, call `activity_pickup`. It returns the task.
+5. A session for a different agent (or the same agent but with a different workspace) gets `null` — it cannot see or claim the task.
+
+---
+
 ## Takeover Workflow
 
 If one agent runs out of tokens, hits a weekly limit, or otherwise needs to stop before finishing, the next agent can continue from Agent Core state instead of starting blind.
@@ -513,9 +563,9 @@ The practical flow is:
 3. When work stops, the next agent reads the latest activity, relevant memory, and any generated briefing.
 4. If an activity is stale or being handed off intentionally, generate a briefing with `/api/briefings/handoff` or `get_briefing`. Briefings are handoff artifacts created on demand, not something the system scheduler produces automatically.
 
-This isn't automatic orchestration — it's a durable handoff trail. A different agent picks up where the last one stopped, with full context, instead of starting blind.
+This isn't automatic orchestration — it's a durable handoff trail and mailroom. A different agent picks up where the last one stopped, with full context, instead of starting blind.
 
-If work needs to cross users or workspaces, make that explicit in the activity scope and briefing trail. If a broad memory search returns nothing, retry with exact topic values, specific words from prior records, or a known record ID — conceptual queries can miss when embeddings aren't available.
+If work needs to cross users or workspaces, make that explicit in the activity scope and briefing trail. The safest pattern is: leave the task in the correct workspace, have the receiving agent check for assigned work in that workspace, then claim it. If a broad memory search returns nothing, retry with exact topic values, specific words from prior records, or a known record ID — conceptual queries can miss when embeddings aren't available.
 
 ---
 
@@ -537,6 +587,184 @@ The briefing includes the current task description, recent decisions, key facts,
 ## REST Integration
 
 If your tool doesn't support MCP, every feature is also available through REST using the same agent API key.
+
+---
+
+## Webhooks
+
+Agent Core has two webhook features that work in opposite directions:
+
+| Direction | What it does |
+| --- | --- |
+| **Inbound receiver** | External systems push work commands *into* Agent Core (`POST /api/webhooks/inbound`) |
+| **Outbound notifications** | Agent Core pushes event notifications *out* to external endpoints (per-registered URL) |
+
+Both are managed from the **Webhooks** page in the dashboard (admin-only).
+
+---
+
+## Inbound Webhook Receiver
+
+External systems (n8n, Zapier, custom scripts, CI pipelines) can create and manage activities in Agent Core without using MCP by sending authenticated HTTP commands to the inbound endpoint.
+
+### Setup
+
+1. In the dashboard, go to **Webhooks** → **Inbound Receiver** and click **Generate Key**.
+2. Copy the key — it is shown once, then hashed.
+3. Use the inbound URL shown (`/api/webhooks/inbound`) and pass the key in the `X-Agent-Core-Inbound-Key` header.
+
+```http
+POST http://localhost:3500/api/webhooks/inbound
+X-Agent-Core-Inbound-Key: ac_inbound_<your-key>
+Content-Type: application/json
+
+{
+  "event_type": "activity.create",
+  "assigned_agent_id": "codex",
+  "task_description": "Review PR #142",
+  "memory_scope": "workspace:agent-core"
+}
+```
+
+### Supported commands
+
+Commands use dot notation and imperative form. They are not the same as outbound event types.
+
+| Command | Effect |
+| --- | --- |
+| `activity.create` | Create a new activity, assign it to an agent |
+| `activity.assign` | Reassign an existing activity to a different agent |
+| `activity.update` | Update status, description, or scope metadata of an existing activity |
+| `activity.cancel` | Cancel an existing activity |
+| `activity.note` | Append an append-only note to the activity's audit trail |
+
+`activity.assign`, `activity.update`, `activity.cancel`, and `activity.note` all require `activity_id`.
+
+`activity.note` writes only to the audit log — it does not modify the activity record or agent memory.
+If `workspace` is supplied on `activity.create`, Agent Core stores it as optional metadata on the activity record for display and downstream automation.
+
+### Key rotation
+
+To rotate the key: click **Rotate Key** in the dashboard. The old key stops working immediately. The new key is shown once.
+
+### Common pattern: push work from an external pipeline
+
+```json
+{
+  "event_type": "activity.create",
+  "assigned_agent_id": "codex",
+  "task_description": "Investigate build failure in CI run #1234",
+  "workspace": "workspace:eng"
+}
+```
+
+Then later, close the loop:
+
+```json
+{
+  "event_type": "activity.note",
+  "activity_id": "<returned activity_id>",
+  "note": "Build failure was a flaky test. Marked as fixed in PR #135."
+}
+```
+
+---
+
+## Outbound Webhook Notifications
+
+Agent Core can push signed HTTP notifications to external systems when events occur. This lets automation tools like n8n, Zapier, or custom services react to activity changes or connector executions without polling.
+
+Webhooks are **admin-only** and managed from the **Webhooks** page in the dashboard or via the REST API (`/api/webhooks`).
+
+### What events are available
+
+| Event | Fires when |
+| --- | --- |
+| `activity_created` | A new activity is created |
+| `activity_updated` | An activity's status or metadata changes |
+| `activity_heartbeat` | An agent sends a heartbeat on an active task |
+| `activity_cancelled` | An activity is cancelled |
+| `activity_recovered` | An activity is recovered (reassigned, resumed, closed) |
+| `connector_executed` | A connector binding action completes |
+
+### Payload shape
+
+Every delivery is an HTTP POST with `Content-Type: application/json`. The envelope is consistent across all event types:
+
+```json
+{
+  "event_type": "activity_cancelled",
+  "timestamp": "2026-05-18T10:30:00.000000+00:00",
+  "data": { ... }
+}
+```
+
+Activity events (`activity_created`, `activity_updated`, `activity_heartbeat`, `activity_cancelled`, `activity_recovered`) include the full activity context so receivers can act without a follow-up lookup:
+
+```json
+{
+  "activity_id": "abc123",
+  "task_description": "Refactor auth middleware",
+  "agent_id": "my-agent",
+  "assigned_agent_id": "my-agent",
+  "user_id": "admin",
+  "memory_scope": "workspace:my-project",
+  "status": "cancelled",
+  "started_at": "2026-05-18T09:00:00+00:00",
+  "updated_at": "2026-05-18T10:30:00+00:00",
+  "heartbeat_at": "2026-05-18T10:25:00+00:00",
+  "ended_at": "2026-05-18T10:30:00+00:00",
+  "previous_status": "active"
+}
+```
+
+Connector events (`connector_executed`) include binding identity, scope, and result:
+
+```json
+{
+  "binding_id": "bind123",
+  "binding_name": "GitHub Actions",
+  "scope": "workspace:my-project",
+  "connector_type_id": "github",
+  "connector_type_name": "GitHub",
+  "action": "list_repos",
+  "success": true,
+  "duration_ms": 312,
+  "status": "success",
+  "error_message": null
+}
+```
+
+### Signature verification
+
+Every delivery includes `X-Agent-Core-Signature: sha256=<hex>`. Compute HMAC-SHA256 of the raw request body using your webhook secret and compare:
+
+```python
+import hashlib, hmac
+
+def verify(body: bytes, secret: str, header: str) -> bool:
+    expected = "sha256=" + hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
+    return hmac.compare_digest(expected, header)
+```
+
+### v1 behavior
+
+- **Fire-and-log only.** No retries. If a delivery fails, it is recorded in the delivery log.
+- **5-second timeout.** Receivers should respond quickly; slow endpoints will time out.
+- Deliveries are non-blocking — they do not delay the API response that triggered the event.
+- The delivery log is visible per-webhook in the dashboard under **Deliveries**.
+
+### Common outbound automation pattern
+
+Push event → external automation decides what to do next. Agent Core does not schedule or orchestrate — it only notifies. Example n8n flow:
+
+1. Register a webhook in Agent Core pointing to your n8n webhook URL
+2. Subscribe to `activity_cancelled`
+3. n8n receives the payload and runs a workflow (send Slack alert, create ticket, etc.)
+
+To hand work *back into* Agent Core from n8n, use the inbound receiver described above.
+
+---
 
 A quick Python example:
 

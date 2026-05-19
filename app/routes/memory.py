@@ -73,6 +73,7 @@ class WriteMemoryRequest(BaseModel):
     valid_from: Optional[str] = None
     valid_to: Optional[str] = None
     last_confirmed_at: Optional[str] = None
+    expires_at: Optional[str] = None
 
 
 class SearchMemoryRequest(BaseModel):
@@ -153,6 +154,7 @@ async def write_memory(
             valid_from=body.valid_from,
             valid_to=body.valid_to,
             last_confirmed_at=body.last_confirmed_at,
+            expires_at=body.expires_at,
         )
     except ValueError as e:
         return error_response("INVALID_INPUT", str(e), 400)
@@ -435,7 +437,13 @@ async def delete_memory_record(
     if not enforcer.can_write(record["scope"]):
         return error_response("SCOPE_DENIED", "Access denied to this scope", 403)
 
-    memory_service.delete_memory_hard(record_id)
+    try:
+        success = memory_service.delete_memory_hard(record_id)
+    except Exception as exc:
+        return error_response("DELETE_FAILED", f"Unable to delete memory record: {exc}", 500)
+
+    if not success:
+        return error_response("NOT_FOUND", "Memory record not found", 404)
 
     audit_service.write_event(
         actor_type=ctx.actor_type,

@@ -299,6 +299,45 @@ CREATE TABLE IF NOT EXISTS connector_executions (
 );
 
 CREATE INDEX IF NOT EXISTS idx_executions_binding ON connector_executions(binding_id, executed_at DESC);
+
+-- Webhook registrations table
+CREATE TABLE IF NOT EXISTS webhook_registrations (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    url TEXT NOT NULL,
+    secret_encrypted TEXT NOT NULL,
+    event_types_json TEXT NOT NULL DEFAULT '[]',
+    enabled INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0, 1)),
+    created_by TEXT NOT NULL,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_webhook_registrations_enabled ON webhook_registrations(enabled);
+
+-- Webhook delivery log table
+CREATE TABLE IF NOT EXISTS webhook_delivery_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    webhook_id TEXT NOT NULL,
+    event_type TEXT NOT NULL,
+    payload_json TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('success', 'failure')),
+    http_status INTEGER,
+    error_message TEXT,
+    delivered_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (webhook_id) REFERENCES webhook_registrations(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_webhook_delivery_webhook ON webhook_delivery_log(webhook_id, delivered_at DESC);
+
+-- Inbound webhook keys table (installation-wide, one active key at a time)
+CREATE TABLE IF NOT EXISTS inbound_webhook_keys (
+    id TEXT PRIMARY KEY,
+    key_hash TEXT NOT NULL,
+    is_active INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0, 1)),
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    rotated_at TEXT
+);
 """
 
 
@@ -323,6 +362,8 @@ def create_schema(conn) -> None:
     conn.commit()
     _ensure_connector_type_action_state_column(conn)
     _ensure_connector_type_spec_columns(conn)
+    _ensure_webhook_tables(conn)
+    _ensure_inbound_webhook_table(conn)
     _seed_connector_types(conn)
 
 
@@ -336,6 +377,7 @@ def _ensure_memory_metadata_columns(conn) -> None:
         ("valid_from", "TEXT"),
         ("valid_to", "TEXT"),
         ("last_confirmed_at", "TEXT"),
+        ("expires_at", "TEXT"),
     ]
     for column_name, column_type in additions:
         if column_name not in columns:
@@ -403,6 +445,72 @@ def _ensure_connector_type_spec_columns(conn) -> None:
                 ADD COLUMN {column_name} {column_type}
                 """
             )
+    conn.commit()
+
+
+def _ensure_inbound_webhook_table(conn) -> None:
+    tables = {
+        row["name"]
+        for row in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'"
+        ).fetchall()
+    }
+    if "inbound_webhook_keys" not in tables:
+        conn.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS inbound_webhook_keys (
+                id TEXT PRIMARY KEY,
+                key_hash TEXT NOT NULL,
+                is_active INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0, 1)),
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                rotated_at TEXT
+            );
+            """
+        )
+        conn.commit()
+
+
+def _ensure_webhook_tables(conn) -> None:
+    tables = {
+        row["name"]
+        for row in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'"
+        ).fetchall()
+    }
+    if "webhook_registrations" not in tables:
+        conn.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS webhook_registrations (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                url TEXT NOT NULL,
+                secret_encrypted TEXT NOT NULL,
+                event_types_json TEXT NOT NULL DEFAULT '[]',
+                enabled INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0, 1)),
+                created_by TEXT NOT NULL,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE INDEX IF NOT EXISTS idx_webhook_registrations_enabled ON webhook_registrations(enabled);
+            """
+        )
+    if "webhook_delivery_log" not in tables:
+        conn.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS webhook_delivery_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                webhook_id TEXT NOT NULL,
+                event_type TEXT NOT NULL,
+                payload_json TEXT NOT NULL,
+                status TEXT NOT NULL CHECK (status IN ('success', 'failure')),
+                http_status INTEGER,
+                error_message TEXT,
+                delivered_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (webhook_id) REFERENCES webhook_registrations(id) ON DELETE CASCADE
+            );
+            CREATE INDEX IF NOT EXISTS idx_webhook_delivery_webhook ON webhook_delivery_log(webhook_id, delivered_at DESC);
+            """
+        )
     conn.commit()
 
 

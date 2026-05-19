@@ -60,6 +60,31 @@ class TestConnectorMCPTools:
         assert result["data"]["connector_type_id"] == "generic_http"
         assert "call_endpoint" in result["data"]["actions"]
 
+    def test_disabled_actions_are_hidden_from_tools_by_default(self, test_client, admin_token):
+        disable_r = test_client.put(
+            "/api/connector-types/generic_http/actions",
+            headers={"Authorization": f"Bearer {admin_token}"},
+            json={"disabled_actions": ["call_endpoint"]},
+        )
+        assert disable_r.status_code == 200, disable_r.text
+
+        tools_r = test_client.get(
+            "/api/connector-types/generic_http/tools",
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        assert tools_r.status_code == 200, tools_r.text
+        tools = tools_r.json()["data"]["tools"]
+        assert all(t["action"] != "call_endpoint" for t in tools)
+
+        tools_all_r = test_client.get(
+            "/api/connector-types/generic_http/tools?include_disabled=1",
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        assert tools_all_r.status_code == 200, tools_all_r.text
+        tools_all = tools_all_r.json()["data"]["tools"]
+        call_endpoint = next(t for t in tools_all if t["action"] == "call_endpoint")
+        assert call_endpoint["enabled"] is False
+
     def test_connector_type_tools_endpoint(self, test_client, admin_token):
         r = test_client.get(
             "/api/connector-types/generic_http/tools",
@@ -133,6 +158,54 @@ class TestConnectorMCPTools:
         result = connector_service.test_binding(binding["id"])
         assert result["success"] is True
         assert result["tools_discovered"] == 1
+        assert result["transport"] == "streamable_http"
+
+    def test_test_binding_without_credential_still_probes_connector(
+        self, test_client, admin_token, monkeypatch
+    ):
+        from app.services import connector_service
+
+        connector_service.create_connector_type(
+            connector_type_id="binding-no-cred-mcp",
+            display_name="Binding No Cred MCP",
+            provider_type="mcp",
+            auth_type="api_key",
+            supported_actions=["scrape"],
+            endpoint_url="https://example.com/mcp",
+            transport_type="streamable_http",
+            capabilities_json='{"tools":true}',
+            tool_snapshot_json='{"tools":[{"name":"scrape"}]}',
+        )
+        binding = connector_service.create_binding(
+            connector_type_id="binding-no-cred-mcp",
+            name="binding-no-cred-mcp",
+            scope="workspace:test",
+        )
+
+        called = {}
+
+        def fake_discover(endpoint_url, timeout_ms=10000, headers=None, client=None, validate_url=True):
+            called["endpoint_url"] = endpoint_url
+            called["timeout_ms"] = timeout_ms
+            called["headers"] = headers
+            return [{"name": "scrape"}]
+
+        monkeypatch.setattr(
+            "app.services.mcp_provider_service.discover_all_tools",
+            fake_discover,
+        )
+        monkeypatch.setattr(
+            "app.services.connector_service.get_binding_with_credential",
+            lambda binding_id: {
+                **connector_service.get_binding(binding_id),
+                "credential_plaintext": None,
+            },
+        )
+
+        result = connector_service.test_binding(binding["id"])
+        assert result["success"] is True
+        assert called["endpoint_url"] == "https://example.com/mcp"
+        assert called["headers"] is not None
         assert result["transport"] == "streamable_http"
 
     def test_import_mcp_server_rejects_unsupported_transport(self, test_client, admin_token):

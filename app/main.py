@@ -25,6 +25,8 @@ from app.routes import (
     connector_router,
     connector_types_router,
     connectors_page_router,
+    events_router,
+    webhooks_router,
 )
 from app.security.exceptions import APIError
 from app.services.broker_service import ensure_broker_credential
@@ -142,6 +144,8 @@ def create_app() -> FastAPI:
     app.include_router(connectors_page_router, tags=["connectors_page"])
     app.include_router(dashboard_api_router, tags=["dashboard_api"])
     app.include_router(backup_router, tags=["backup"])
+    app.include_router(events_router, tags=["events"])
+    app.include_router(webhooks_router, tags=["webhooks"])
     app.include_router(dashboard_router, prefix="", tags=["dashboard"])
 
     settings.data_dir

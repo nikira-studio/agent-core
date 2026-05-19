@@ -55,7 +55,7 @@ A few other things worth knowing:
 
 - **Inactive agents can't authenticate.** Rotating or deactivating an agent immediately revokes access.
 - **Inactive workspaces stop authorizing access.** Deactivating a workspace makes `workspace:<id>` invalid for reads and writes.
-- **Use workspace scopes for collaboration, not personal scopes.** The `agent:<id>` scope is private scratch space — don't use it as a handoff channel. For cross-agent work, use workspace scopes and keep activity and briefing records current. Other users do not automatically see a shared workspace row in their own dashboard; they see the shared capability through the agent scopes you grant.
+- **Use workspace scopes for collaboration, not personal scopes.** The `agent:<id>` scope is private scratch space — don't use it as a handoff channel. For cross-agent work, use workspace scopes and keep activity and briefing records current. Activity is a mailroom-style handoff board, not an orchestrator: a human or agent can leave work there, but the receiving agent still has to explicitly check for and claim it. Other users do not automatically see a shared workspace row in their own dashboard; they see the shared capability through the agent scopes you grant.
 - **Share workspaces with users, not with agent identities.** Workspace membership is the source of truth for collaboration. Once a user is added as a collaborator, they can grant their own agents `workspace:<id>` access. Revoking collaboration should immediately stop new runtime access even if an old agent scope is still present.
 
 ---
@@ -163,6 +163,34 @@ This replaces the current keyring with a single-key keyring containing the resto
 
 ---
 
+## Webhooks
+
+Inbound webhook commands are authenticated with a dedicated installation-wide inbound key in the `X-Agent-Core-Inbound-Key` header. They are not signed deliveries like outbound webhooks.
+
+Outbound webhooks let external systems receive signed notifications when events occur in Agent Core.
+
+**Admin-only.** Only admin users can create, edit, or delete webhook registrations. Agent API keys and non-admin sessions have no access to webhook configuration or secrets.
+
+**Secrets are encrypted at rest.** Webhook secrets are encrypted using the same Fernet key used for credentials. They are never returned in API responses — they are write-only on create and update.
+
+**Delivery is fire-and-log-only (v1).** If a receiver is down or slow, the failure is recorded in the delivery log and no retry is attempted. Keep receiver endpoints fast and reliable.
+
+**SSRF protection.** Webhook URLs are validated against the same SSRF guard as other outbound URLs. Private network addresses (RFC 1918, loopback, link-local) are blocked unless explicitly allowed via `AGENT_CORE_ALLOWED_INTERNAL_HOSTS`.
+
+**Signature verification.** Every delivery includes `X-Agent-Core-Signature: sha256=<hex>`. Receivers should verify this before acting on the payload:
+
+```python
+import hashlib, hmac
+
+def verify(body: bytes, secret: str, header: str) -> bool:
+    expected = "sha256=" + hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
+    return hmac.compare_digest(expected, header)
+```
+
+**Manual pruning.** Audit and activity history can be manually pruned by an admin from the dashboard using a cutoff date. This is an explicit maintenance action, not an automatic retention job, and it only deletes the targeted historical rows.
+
+---
+
 ## Deployment Checklist
 
 Before making Agent Core accessible beyond localhost:
@@ -174,4 +202,5 @@ Before making Agent Core accessible beyond localhost:
 - [ ] Set `AGENT_CORE_ALLOWED_IPS` if Agent Core is reachable on a LAN or shared network
 - [ ] Restrict filesystem permissions on `data/credential.key` and `data/broker.credential`
 - [ ] Rotate the broker credential after any suspected exposure
+- [ ] Rotate webhook secrets if any are suspected to be exposed
 - [ ] Review the audit log after sensitive operations: credential reveals, backup/restore, key rotation, connector execution

@@ -155,6 +155,35 @@ def list_activities(
         return [dict(row) for row in rows]
 
 
+def count_activities(
+    user_id: Optional[str] = None,
+    agent_id: Optional[str] = None,
+    status: Optional[str] = None,
+    assigned_agent_id: Optional[str] = None,
+) -> int:
+    conditions = ["1=1"]
+    params = []
+    if user_id:
+        conditions.append("user_id = ?")
+        params.append(user_id)
+    if agent_id:
+        conditions.append("agent_id = ?")
+        params.append(agent_id)
+    if status:
+        conditions.append("status = ?")
+        params.append(status)
+    if assigned_agent_id:
+        conditions.append("assigned_agent_id = ?")
+        params.append(assigned_agent_id)
+
+    where = " AND ".join(conditions)
+    with get_db() as conn:
+        row = conn.execute(
+            f"SELECT COUNT(*) FROM agent_activity WHERE {where}", params
+        ).fetchone()
+        return row[0] if row else 0
+
+
 def mark_stale_activities(threshold_minutes: Optional[int] = None) -> int:
     if threshold_minutes is None:
         threshold_minutes = settings.STALE_THRESHOLD_MINUTES
@@ -217,6 +246,43 @@ def cancel_activity(activity_id: str) -> bool:
         )
         conn.commit()
         return cursor.rowcount > 0
+
+
+def claim_next_activity(
+    agent_id: str,
+    authorized_scopes: list[str],
+) -> Optional[dict]:
+    if not authorized_scopes:
+        return None
+    now = utc_now_iso()
+    placeholders = ",".join("?" for _ in authorized_scopes)
+    with get_db() as conn:
+        row = conn.execute(
+            f"""
+            SELECT id, agent_id, user_id, assigned_agent_id, reassigned_from_agent_id,
+                   task_description, status, memory_scope, started_at, updated_at,
+                   heartbeat_at, ended_at, metadata_json
+            FROM agent_activity
+            WHERE assigned_agent_id = ? AND status = 'active'
+            AND memory_scope IN ({placeholders})
+            ORDER BY started_at ASC
+            LIMIT 1
+            """,
+            [agent_id] + list(authorized_scopes),
+        ).fetchone()
+        if not row:
+            return None
+        conn.execute(
+            """
+            UPDATE agent_activity SET heartbeat_at = ?, updated_at = ?
+            WHERE id = ? AND status = 'active' AND assigned_agent_id = ?
+            """,
+            (now, now, row["id"], agent_id),
+        )
+        result = dict(row)
+        result["heartbeat_at"] = now
+        result["updated_at"] = now
+        return result
 
 
 def get_active_activity_for_agent(agent_id: str, user_id: Optional[str] = None) -> Optional[dict]:
