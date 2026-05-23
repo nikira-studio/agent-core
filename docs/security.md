@@ -103,6 +103,8 @@ Any write to the `shared` memory scope is automatically scanned for content that
 
 If a match is found, the write is rejected with `422 PII_DETECTED`. This prevents personal data and secrets from accidentally landing in the shared scope where any authorized agent can read them. Agent-private memory (`agent:<id>`) doesn't have this restriction.
 
+The same protection applies to `/api/memory/import`. Imports are manual writes from curated text or markdown notes into the existing memory table, and shared-scope imports are scanned before records are created.
+
 Search queries that look like credentials, or are too short/noisy (single stop words, punctuation-only strings), are also rejected before FTS execution.
 
 ---

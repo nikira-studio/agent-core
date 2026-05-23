@@ -27,6 +27,7 @@ AUDIT_ACTIONS = (
     "broker_resolve",
     "credential_delete",
     "memory_write",
+    "memory_import",
     "memory_search",
     "memory_retract",
     "memory_restore",

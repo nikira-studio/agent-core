@@ -7,7 +7,8 @@ def test_audit_page_requires_admin(test_client, clean_db):
     session = create_session("admin", channel="dashboard")
     admin_session = session["session_id"]
 
-    r = test_client.get("/audit", cookies={"session_token": admin_session})
+    test_client.cookies.set("session_token", admin_session)
+    r = test_client.get("/audit")
     assert r.status_code == 200
 
 
@@ -19,7 +20,8 @@ def test_non_admin_cannot_access_audit(test_client, clean_db):
     session = create_session("regular", channel="dashboard")
     user_session = session["session_id"]
 
-    r = test_client.get("/audit", cookies={"session_token": user_session})
+    test_client.cookies.set("session_token", user_session)
+    r = test_client.get("/audit")
     assert r.status_code == 403
     assert "Admin Access Required" in r.text
     assert "Back to Overview" in r.text
@@ -52,9 +54,8 @@ def test_dashboard_connectors_filters_credentials_by_readable_scopes(
         created_by="user2",
     )
 
-    connectors_html = test_client.get(
-        "/connectors", cookies={"session_token": user1_session}
-    ).text
+    test_client.cookies.set("session_token", user1_session)
+    connectors_html = test_client.get("/connectors").text
     assert "user1-secret" in connectors_html
     assert "user2-secret" not in connectors_html
 

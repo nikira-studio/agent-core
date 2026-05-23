@@ -153,6 +153,32 @@ class TestConnectorBindingCRUD:
         assert updated["name"] == "updated-name"
         assert updated["enabled"] is False
 
+    def test_update_binding_clears_last_error(self, clean_db):
+        # A successful test must be able to reset last_error to NULL; otherwise a
+        # binding that failed once would keep reporting an error forever.
+        from app.services import connector_service
+
+        binding = connector_service.create_binding(
+            connector_type_id="generic_http",
+            name="health-binding",
+            scope="workspace:test",
+        )
+        connector_service.update_binding(
+            binding["id"],
+            last_tested_at="2026-05-22T00:00:00+00:00",
+            last_error="connection refused",
+        )
+        assert connector_service.get_binding(binding["id"])["last_error"] == "connection refused"
+
+        connector_service.update_binding(
+            binding["id"],
+            last_tested_at="2026-05-22T01:00:00+00:00",
+            last_error=None,
+        )
+        cleared = connector_service.get_binding(binding["id"])
+        assert cleared["last_error"] is None
+        assert cleared["last_tested_at"] == "2026-05-22T01:00:00+00:00"
+
     def test_delete_binding(self, clean_db):
         from app.services import connector_service
 

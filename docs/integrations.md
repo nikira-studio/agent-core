@@ -78,6 +78,7 @@ Once connected, these tools are available in any session:
 | `connectors_bindings_list` | List connector bindings in authorized scopes |
 | `connectors_bindings_test` | Test a binding using the stored credential |
 | `connectors_actions_list` | List actions supported by a connector type |
+| `connectors_summary` | Summarize visible connector types, bindings, credentials, actions, and health state |
 | `connectors_run` | Run one connector action server-side using a binding |
 
 This is the pattern throughout Agent Core: agents connect, discover what they’re allowed to use, and call what they need. Agent Core provides the capabilities and logs the results — it doesn’t act as a workflow engine.
@@ -488,7 +489,7 @@ Expected Agent Core tools:
 - `activity_pickup`, `activity_update`, `activity_get`, `activity_list`
 - `briefing_list`, `get_briefing`
 - `credential_list`, `credential_get`
-- `connectors_list`, `connectors_bindings_list`, `connectors_actions_list`, `connectors_bindings_test`, `connectors_run`
+- `connectors_list`, `connectors_summary`, `connectors_bindings_list`, `connectors_actions_list`, `connectors_bindings_test`, `connectors_run`
 
 Operating rules:
 - At startup or when idle, call `activity_pickup` to check for work a human has assigned to you in this workspace. If it returns an activity, that is your current task — read it and start working. Only call pickup once per session start; do not loop infinitely claiming new tasks on your own.

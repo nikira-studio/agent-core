@@ -217,6 +217,14 @@ class TestActivityPage:
         assert "Handoff From" in r.text
         assert "Coordination Snapshot" in r.text
 
+    def test_activity_page_uses_compact_task_first_layout(self, admin_client):
+        r = admin_client.get("/activity")
+        assert r.status_code == 200
+        assert '<th class="activity-task-cell">Task</th>' in r.text
+        assert '<th class="activity-id-cell">ID</th>' not in r.text
+        assert "activity-updated-cell" in r.text
+        assert 'No activities yet.' in r.text
+
     def test_activity_create_sends_assigned_agent_id(self, admin_client):
         r = admin_client.get("/activity")
         assert "assigned_agent_id: agentId" in r.text
@@ -283,7 +291,7 @@ class TestAuditPage:
         assert "exportAuditCsv" in r.text
         assert "Export CSV" in r.text
         assert "/api/dashboard/audit/export" in r.text
-        assert "Resource ID" in r.text
+        assert "<th class=\"audit-resource-cell\">Resource</th>" in r.text
         assert "Details" in r.text
 
     def test_audit_pagination_present(self, admin_client):

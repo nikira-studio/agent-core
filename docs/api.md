@@ -170,6 +170,7 @@ Agent or session authentication accepted, with scope enforcement on every operat
 | Method | Path | Description |
 | --- | --- | --- |
 | `POST` | `/api/memory/write` | Write a memory record |
+| `POST` | `/api/memory/import` | Import curated notes into memory records |
 | `POST` | `/api/memory/search` | Search memory (FTS5 + optional semantic hybrid search) |
 | `POST` | `/api/memory/get` | List records by scope |
 | `POST` | `/api/memory/retract` | Soft-delete a record |
@@ -204,6 +205,26 @@ Optional memory metadata:
 - `expires_at` is an ISO datetime after which the record is excluded from search results and swept on the next maintenance run. Useful for time-bounded facts or temporary scratchpad context.
 - `provenance` is server-generated on write and records who wrote the memory and from which channel; clients do not supply it directly.
 
+Import:
+```json
+{
+  "scope": "workspace:example",
+  "memory_class": "fact",
+  "domain": "import",
+  "topic": null,
+  "sources": [
+    {
+      "filename": "memory.md",
+      "content": "# Project Notes\n- Workspace: example\n- Decision: use workspace:example for durable memory\n- Fact: keep imports concise and specific"
+    }
+  ]
+}
+```
+
+Imports are explicit, manual writes into the existing memory table. The server splits markdown/text into deterministic chunks, writes them with `source_kind: "external_import"`, and stamps provenance with `/api/memory/import`, source filename, and chunk number. Import provenance is generated server-side; raw credential values are never accepted as metadata. The import path is intended for curated notes, handoffs, and memory-shaped summaries, not for raw repository instruction files unless you have already distilled the durable facts you want to keep.
+
+For files that are mostly instructions, such as `CLAUDE.md` or `AGENTS.md`, an AI-assisted extract-and-review flow is often a better fit than literal import. That keeps the memory table focused on durable facts, decisions, and preferences instead of recreating repo guidance verbatim.
+
 Search:
 ```json
 {
@@ -229,7 +250,7 @@ Get (list by scope):
 
 **Valid source kinds:** `operator_authored`, `human_direct`, `tool_output`, `agent_inference`, `episodic_inference`, `semantic_inference`, `external_import`
 
-Writes to `shared` are rejected if the content looks like PII or credentials. Very short, noisy, or credential-like search queries are also rejected.
+Writes and imports to `shared` are rejected if the content looks like PII or credentials. Very short, noisy, or credential-like search queries are also rejected.
 
 ---
 
@@ -543,6 +564,7 @@ Dispatch:
 | `connectors_bindings_list` | List connector bindings in authorized scopes |
 | `connectors_bindings_test` | Test a binding using its stored credential |
 | `connectors_actions_list` | List actions supported by a connector type |
+| `connectors_summary` | Summarize visible connector capability, binding, credential-presence, action, and health state |
 | `connectors_run` | Run one connector action server-side using a binding |
 
 ---

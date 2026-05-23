@@ -1,5 +1,3 @@
-import urllib.parse
-
 from fastapi import APIRouter, Depends, Request
 from app.security.context import build_user_context
 from app.security.scope_enforcer import ScopeEnforcer
@@ -8,7 +6,7 @@ from app.services import credential_service
 from app.services import workspace_service
 from app.services import connector_service
 from app.services.agent_service import list_agents
-from app.routes.dashboard import render_page, escape_html, require_auth, get_icon
+from app.routes.dashboard import render_page, escape_html, require_auth, get_icon, local_dt
 
 router = APIRouter()
 
@@ -95,6 +93,28 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
     for b in visible_bindings:
         if b["connector_type_id"] in binding_counts:
             binding_counts[b["connector_type_id"]] += 1
+
+    # Per connector-type health, derived from the last stored test result on each
+    # visible enabled binding. Surfaced as a badge on the Service Catalog card and
+    # refreshed when the operator runs Check Health.
+    ct_health = {}
+    for ct in connector_types:
+        enabled = [
+            b for b in visible_bindings
+            if b["connector_type_id"] == ct["id"] and b.get("enabled")
+        ]
+        failed = [b for b in enabled if b.get("last_error")]
+        tested_ok = [
+            b for b in enabled if b.get("last_tested_at") and not b.get("last_error")
+        ]
+        if not enabled:
+            ct_health[ct["id"]] = ("none", 0)
+        elif failed:
+            ct_health[ct["id"]] = ("issues", len(failed))
+        elif len(tested_ok) == len(enabled):
+            ct_health[ct["id"]] = ("healthy", len(enabled))
+        else:
+            ct_health[ct["id"]] = ("untested", len(enabled) - len(tested_ok))
     for b in visible_bindings:
         ct = next(
             (c for c in connector_types if c["id"] == b["connector_type_id"]), None
@@ -149,7 +169,7 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
           <td><button type="button" class="btn btn-sm btn-secondary" onclick='viewExecutions("{execution.get("binding_id", "")}")'>{escape_html(execution.get("binding_name", ""))}</button></td>
           <td><code>{escape_html(execution.get("action", ""))}</code></td>
           <td><span class="badge" style="{badge_style}">{escape_html(status)}</span></td>
-          <td>{escape_html(str(execution.get("executed_at", ""))[:16])}</td>
+          <td>{local_dt(execution.get("executed_at"))}</td>
           <td>{escape_html(str(execution.get("error_message", ""))[:48])}</td>
         </tr>"""
     if execution_rows_html:
@@ -165,42 +185,6 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
     for ct in connector_types:
         supported_actions = ct.get("supported_actions", [])
         disabled_actions = ct.get("disabled_actions") or []
-        operations_meta = {}
-        try:
-            operations_meta = json.loads(ct.get("operations_json") or "{}")
-        except Exception:
-            operations_meta = {}
-        operations = operations_meta.get("operations") or []
-        servers = operations_meta.get("servers") or []
-        op_count = len(operations) or len(supported_actions)
-        top_tags = []
-        tag_counts = {}
-        for op in operations:
-            for tag in op.get("tags") or []:
-                tag_counts[tag] = tag_counts.get(tag, 0) + 1
-        for tag, _count in sorted(tag_counts.items(), key=lambda kv: (-kv[1], kv[0]))[:3]:
-            top_tags.append(tag)
-        base_server = ""
-        if servers:
-            raw_server = servers[0]
-            try:
-                parsed_server = urllib.parse.urlparse(raw_server)
-                if parsed_server.netloc:
-                    base_server = parsed_server.netloc
-                else:
-                    base_server = raw_server.replace("https://", "").replace("http://", "").rstrip("/")
-            except Exception:
-                base_server = str(raw_server)
-        actions = "".join(
-            f'<span class="badge">{escape_html(a)}</span>'
-            for a in supported_actions[:8]
-        )
-        extra_actions = len(supported_actions) - 8
-        extra_badge = (
-            f'<span class="badge">+{extra_actions} more</span>'
-            if extra_actions > 0
-            else ""
-        )
         provider_type = ct.get("provider_type") or "openapi"
         if provider_type == "mcp":
             type_chip = '<span style="display:inline-block;font-size:0.72em;font-weight:600;line-height:1;padding:3px 8px;border-radius:10px;background:#7c3aed;color:#fff;letter-spacing:0.03em;white-space:nowrap">MCP</span>'
@@ -210,26 +194,6 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
             type_chip = '<span style="display:inline-block;font-size:0.72em;font-weight:600;line-height:1;padding:3px 8px;border-radius:10px;background:#6b7280;color:#fff;letter-spacing:0.03em;white-space:nowrap">Built-in</span>'
         else:
             type_chip = '<span style="display:inline-block;font-size:0.72em;font-weight:600;line-height:1;padding:3px 8px;border-radius:10px;background:#2563eb;color:#fff;letter-spacing:0.03em;white-space:nowrap">API</span>'
-        origin_badge = ""
-        spec_badge = (
-            '<span class="badge badge-info">Imported from spec</span>'
-            if provider_type == "openapi" and ct.get("operations_json")
-            else ""
-        )
-        op_badge = (
-            f'<span class="badge badge-stale">Ops: {op_count}</span>'
-            if op_count
-            else ""
-        )
-        base_badge = (
-            f'<span class="badge badge-info">Base: {escape_html(base_server)}</span>'
-            if base_server
-            else ""
-        )
-        tag_badges = "".join(
-            f'<span class="badge badge-stale">Tag: {escape_html(tag)}</span>'
-            for tag in top_tags
-        )
         action_count = len(supported_actions)
         enabled_action_count = max(action_count - len([a for a in disabled_actions if a in supported_actions]), 0)
         view_actions_btn = (
@@ -240,6 +204,15 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
         binding_action_line = f'{binding_counts.get(ct["id"], 0)} binding(s)'
         if action_count:
             binding_action_line += f' &middot; {enabled_action_count}/{action_count} actions'
+        health_state, health_n = ct_health.get(ct["id"], ("none", 0))
+        if health_state == "issues":
+            health_badge = f'<span class="badge badge-danger" title="Enabled bindings whose last health check failed">{health_n} issue(s)</span>'
+        elif health_state == "healthy":
+            health_badge = '<span class="badge badge-success" title="All enabled bindings passed their last health check">Healthy</span>'
+        elif health_state == "untested":
+            health_badge = f'<span class="badge badge-warning" title="Enabled bindings not yet health-checked">{health_n} untested</span>'
+        else:
+            health_badge = ""
         ct_cards += f"""
         <div class='connector-type-card'>
           <div style="padding:0 0 0.5rem">
@@ -247,9 +220,9 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
             <div style="font-size:0.8em;color:var(--text-muted);margin-top:0.1rem">{binding_action_line}</div>
             <div class='connector-type-desc' style="margin-top:0.35rem">{escape_html(ct.get("description", "") or "")}</div>
           </div>
-          <div class='connector-type-footer' style="margin-top:auto">
-            <div style="display:flex;align-items:center;flex-shrink:0">{type_chip}</div>
-            <div style="display:flex;gap:0.4rem;align-items:center;margin-left:auto">
+          <div class='connector-type-footer' style="margin-top:auto; display:flex; flex-direction:column; gap:8px; align-items:stretch;">
+            <div style="display:flex;align-items:center;gap:0.4rem;">{type_chip}{health_badge}</div>
+            <div style="display:flex;gap:0.4rem;align-items:center;justify-content:flex-end;">
               {view_actions_btn}
               <button type='button' class='btn btn-sm btn-secondary' onclick='openNewBinding("{ct["id"]}")'>Bind</button>
               <button type='button' class='btn btn-sm btn-danger icon-delete-btn' onclick='deleteConnectorType("{ct["id"]}")' title='Delete connector type' aria-label='Delete connector type'>{get_icon('delete')}</button>
@@ -267,6 +240,7 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
         </p>
       </div>
       <div class="page-actions">
+        <a class="btn btn-secondary" href="/credentials">+ New Credential</a>
         <a class="btn btn-secondary" href="/connectors/directory">Browse API Directory</a>
         <button class="btn btn-secondary" onclick="resetImportPreview();openModal('import-spec-modal')">+ Import API Spec</button>
         <button class="btn btn-secondary" onclick="openModal('import-mcp-modal')">+ Import MCP Server</button>
@@ -295,9 +269,12 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
     </div>
  
      <div class="card" id="service-catalog">
-      <div class="section-header">
-        <h3>Service Catalog</h3>
-        <div class="section-note">Built-in connector types and imported connector types are shared across the instance.</div>
+      <div class="section-header" style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px">
+        <div>
+          <h3>Service Catalog</h3>
+          <div class="section-note">Built-in connector types and imported connector types are shared across the instance.</div>
+        </div>
+        <button type="button" class="btn btn-sm btn-secondary" onclick="checkHealth(this)">Check Health</button>
       </div>
       <div class="connector-types-grid">{ct_cards or "<div class='empty'>No connector types yet. <a href='/connectors/directory'>Browse the API Directory</a> or import a custom spec.</div>"}</div>
     </div>
@@ -703,6 +680,46 @@ async function testBinding(id) {
     showToast(j.error?.message || 'Failed to test binding', 'danger');
   }
 }
+
+function renderHealthResult(data) {
+  const total = data.total || 0;
+  const passed = data.passed || 0;
+  const failed = data.failed || 0;
+  const content = document.getElementById('test-result-content');
+  if (!content) return;
+  const rows = (data.results || []).map(function(r) {
+    const status = r.success
+      ? '<span class="badge badge-success">Passed</span>'
+      : '<span class="badge badge-danger">Failed</span>';
+    return '<tr><td>' + escapeHtml(r.binding_name || r.binding_id || '') + '</td><td><code>' + escapeHtml(r.scope || '') + '</code></td><td>' + status + '</td><td>' + escapeHtml(r.error || '') + '</td></tr>';
+  }).join('');
+  content.innerHTML =
+    '<div class="' + (failed ? 'alert alert-warning' : 'alert alert-success') + '">Checked ' + total + ' binding(s): ' + passed + ' passed, ' + failed + ' failed.</div>' +
+    (rows ? '<table><thead><tr><th>Binding</th><th>Scope</th><th>Status</th><th>Error</th></tr></thead><tbody>' + rows + '</tbody></table>' : '<div class="empty">No enabled bindings to check.</div>');
+  openModal('test-result-modal');
+}
+
+async function checkHealth(btn) {
+  const label = btn ? btn.textContent : null;
+  if (btn) { btn.disabled = true; btn.textContent = 'Checking...'; }
+  const j = await apiFetch('/api/connector-types/health-check', { method: 'POST', body: JSON.stringify({}) });
+  if (!j.ok) {
+    if (btn) { btn.disabled = false; btn.textContent = label; }
+    showToast(j.error?.message || 'Health check failed', 'danger');
+    return;
+  }
+  // Persist the result and reload so the Service Catalog health badges reflect the
+  // freshly stored test state; the result modal is shown again after reload.
+  sessionStorage.setItem('connectorHealthResult', JSON.stringify(j.data));
+  location.reload();
+}
+
+(function showPendingHealthResult() {
+  const stored = sessionStorage.getItem('connectorHealthResult');
+  if (!stored) return;
+  sessionStorage.removeItem('connectorHealthResult');
+  try { renderHealthResult(JSON.parse(stored)); } catch (e) { /* ignore malformed */ }
+})();
 
 async function viewExecutions(id) {
   const j = await apiFetch('/api/connector-bindings/' + id + '/executions');

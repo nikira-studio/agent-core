@@ -1,4 +1,3 @@
-import ipaddress
 import json
 import logging
 import urllib.parse
@@ -78,12 +77,47 @@ def _jsonrpc_request(
     }
     response = client.post(url, json=payload)
     response.raise_for_status()
+    # Streamable-HTTP servers issue a session id on initialize that must be sent
+    # on every subsequent request. Capture it onto the shared client so following
+    # calls (tools/list, tools/call) include it.
+    session_id = response.headers.get("mcp-session-id")
+    if session_id:
+        client.headers["Mcp-Session-Id"] = session_id
     data = _parse_mcp_response(response)
     if isinstance(data, dict) and data.get("error"):
         raise ValueError(data["error"].get("message") or "MCP request failed")
     if not isinstance(data, dict) or "result" not in data:
         raise ValueError("Invalid MCP response")
     return data["result"]
+
+
+def _mcp_initialize(client: httpx.Client, url: str) -> dict[str, Any]:
+    """Perform the MCP initialize handshake on a shared client.
+
+    Captures the session id (via _jsonrpc_request) and sends the required
+    notifications/initialized. Tolerates servers that don't implement initialize
+    so cold tools/list still works for them.
+    """
+    try:
+        init_result = _jsonrpc_request(
+            client,
+            url,
+            "initialize",
+            {
+                "protocolVersion": DEFAULT_MCP_PROTOCOL_VERSION,
+                "capabilities": {},
+                "clientInfo": {"name": "agent-core", "version": "1.0.0"},
+            },
+            request_id=1,
+        )
+    except Exception:
+        logger.warning("MCP initialize failed for %s; continuing without a session", url)
+        return {}
+    try:
+        client.post(url, json={"jsonrpc": "2.0", "method": "notifications/initialized"})
+    except Exception:
+        pass
+    return init_result if isinstance(init_result, dict) else {}
 
 
 def _parse_json_object(value: Optional[str]) -> dict[str, Any]:
@@ -155,6 +189,9 @@ def discover_all_tools(
         client = httpx.Client(
             timeout=timeout_seconds, headers=client_headers, follow_redirects=False
         )
+        # Standalone use (e.g. binding health check): establish a session first so
+        # session-enforcing servers accept the tools/list call.
+        _mcp_initialize(client, endpoint_url)
     try:
         while True:
             params = {}
@@ -196,21 +233,7 @@ def discover_mcp_server(
     with httpx.Client(
         timeout=timeout_seconds, headers=client_headers, follow_redirects=False
     ) as client:
-        try:
-            init_result = _jsonrpc_request(
-                client,
-                endpoint_url,
-                "initialize",
-                {
-                    "protocolVersion": DEFAULT_MCP_PROTOCOL_VERSION,
-                    "capabilities": {},
-                    "clientInfo": {"name": "agent-core", "version": "1.0.0"},
-                },
-                request_id=1,
-            )
-        except Exception:
-            logger.warning("MCP initialize failed for %s; continuing with tools/list", endpoint_url)
-            init_result = {}
+        init_result = _mcp_initialize(client, endpoint_url)
 
         tools = discover_all_tools(
             endpoint_url,
@@ -274,7 +297,6 @@ def execute_mcp_tool(
             transport=transport_type,
         )
 
-    config = _parse_json_object(config_json)
     binding = {"endpoint_url": endpoint_url, "config_json": config_json}
     endpoint_url, headers, timeout_ms = build_mcp_request_config(
         binding, credential=credential
@@ -283,6 +305,9 @@ def execute_mcp_tool(
 
     with httpx.Client(timeout=timeout_seconds, headers=headers, follow_redirects=False) as client:
         try:
+            # Establish a session before invoking the tool; session-enforcing
+            # servers reject tools/call otherwise.
+            _mcp_initialize(client, endpoint_url)
             result = _jsonrpc_request(
                 client,
                 endpoint_url,

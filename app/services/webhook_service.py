@@ -304,10 +304,11 @@ def test_delivery(webhook_id: str, event_type: Optional[str] = None) -> dict:
     if not row:
         return {"ok": False, "error": "Webhook not found"}
 
-    subscribed = json.loads(row["event_types_json"] or "[]")
-
+    # A test delivery always sends a synthetic "test" event, never a replay of a
+    # real/subscribed event, so operators can verify wiring without emitting a
+    # payload that a receiver might treat as a genuine event.
     if event_type is None:
-        event_type = subscribed[0] if subscribed else "test"
+        event_type = "test"
     elif event_type not in WEBHOOK_EVENT_TYPES:
         return {"ok": False, "error": f"Unknown event type: {event_type}"}
 

@@ -79,6 +79,11 @@ class ActionSettingsRequest(BaseModel):
     disabled_actions: list[str] = Field(default_factory=list)
 
 
+class ConnectorHealthCheckRequest(BaseModel):
+    connector_type_id: Optional[str] = None
+    scope: Optional[str] = None
+
+
 @router.get("")
 async def list_bindings(
     scope: Optional[str] = None,
@@ -387,6 +392,89 @@ async def list_connector_types(
 ):
     types = connector_service.list_connector_types()
     return success_response({"connector_types": types, "total": len(types)})
+
+
+@connector_types_router.get("/summary")
+async def connector_summary(
+    connector_type_id: Optional[str] = None,
+    scope: Optional[str] = None,
+    enabled_only: bool = True,
+    ctx: RequestContext = Depends(get_request_context),
+):
+    enforcer = ScopeEnforcer(
+        ctx.read_scopes,
+        ctx.write_scopes,
+        ctx.agent_id,
+        is_admin=ctx.is_admin,
+        active_workspace_ids=ctx.active_workspace_ids,
+    )
+    if scope and not enforcer.can_read(scope):
+        return error_response("SCOPE_DENIED", "Access denied to this scope", 403)
+    summary = connector_service.build_capability_summary(
+        enforcer,
+        connector_type_id=connector_type_id,
+        scope=scope,
+        enabled_only=enabled_only,
+    )
+    return success_response(summary)
+
+
+@connector_types_router.post("/health-check")
+async def connector_health_check(
+    body: ConnectorHealthCheckRequest,
+    ctx: RequestContext = Depends(get_request_context),
+):
+    enforcer = ScopeEnforcer(
+        ctx.read_scopes,
+        ctx.write_scopes,
+        ctx.agent_id,
+        is_admin=ctx.is_admin,
+        active_workspace_ids=ctx.active_workspace_ids,
+    )
+    if body.scope and not enforcer.can_read(body.scope):
+        return error_response("SCOPE_DENIED", "Access denied to this scope", 403)
+
+    bindings = connector_service.list_bindings(
+        scope=body.scope,
+        connector_type_id=body.connector_type_id,
+        enabled=True,
+    )
+    visible = [binding for binding in bindings if enforcer.can_read(binding["scope"])]
+    results = []
+    for binding in visible:
+        result = connector_service.test_binding(binding["id"])
+        audit_service.write_event(
+            actor_type=ctx.actor_type,
+            actor_id=ctx.actor_id,
+            action="connector_binding_tested",
+            resource_type="connector_binding",
+            resource_id=binding["id"],
+            result=result.get("success") and "success" or "failure",
+            details={
+                "connector_type_id": binding["connector_type_id"],
+                "batch": True,
+            },
+        )
+        results.append(
+            {
+                "binding_id": binding["id"],
+                "binding_name": binding["name"],
+                "connector_type_id": binding["connector_type_id"],
+                "scope": binding["scope"],
+                "success": bool(result.get("success")),
+                "error": result.get("error"),
+                "error_code": result.get("error_code"),
+            }
+        )
+
+    return success_response(
+        {
+            "results": results,
+            "total": len(results),
+            "passed": len([r for r in results if r["success"]]),
+            "failed": len([r for r in results if not r["success"]]),
+        }
+    )
 
 
 @connector_types_router.get("/{connector_type_id}/tools")

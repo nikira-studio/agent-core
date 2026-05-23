@@ -132,6 +132,7 @@ def test_integrations_generates_verification_prompt(integrations_client):
     assert "connectors_bindings_list" in html
     assert "connectors_actions_list" in html
     assert "connectors_bindings_test" in html
+    assert "connectors_summary" in html
 
 
 def test_integrations_access_checks_show_ok_for_good_agent(integrations_client):
@@ -193,3 +194,13 @@ def test_integrations_preview_and_apply_access_endpoints(integrations_client):
     )
     assert apply_access.status_code == 200
     assert "read_scopes" in apply_access.json()["data"]
+
+
+def test_integrations_page_surfaces_artifact_validation(integrations_client):
+    r = integrations_client.get(
+        "/integrations?user_id=brian&workspace_id=agent-core&agent_id=claude-code&target=claude_code&output_type=mcp_json"
+    )
+    assert r.status_code == 200
+    html = r.text
+    assert "Check Setup" not in html
+    assert "Artifact validation:" not in html

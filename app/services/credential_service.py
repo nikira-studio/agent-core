@@ -18,7 +18,7 @@ def _build_reference_name(name: str) -> str:
     if len(name_clean) > 20:
         name_clean = name_clean[:20]
 
-    base = f"AC_SECRET_{name_clean}" if name_clean else f"AC_SECRET_VAULT"
+    base = f"AC_SECRET_{name_clean}" if name_clean else "AC_SECRET_VAULT"
     return f"{base}_{_generate_unique_suffix()}"
 
 

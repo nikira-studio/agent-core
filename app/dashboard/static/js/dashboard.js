@@ -432,3 +432,101 @@ document.addEventListener('DOMContentLoaded', function() {
     }, 5000);
   });
 });
+
+// ============================================================
+// Local time display
+//
+// All timestamps are stored and rendered in UTC. Each is emitted as
+// <span class="local-dt" data-utc="<iso-utc>">UTC fallback</span>; here we
+// convert every such element to the user's selected timezone (window.AC_USER_TZ),
+// falling back to the browser zone. If the user has no saved zone yet, we detect
+// the browser zone and persist it as their default.
+// ============================================================
+
+function acActiveTimezone() {
+  if (window.AC_USER_TZ) return window.AC_USER_TZ;
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+  } catch (e) {
+    return 'UTC';
+  }
+}
+
+function acFormatInstant(raw, dtStyle) {
+  var date = new Date(raw);
+  if (isNaN(date.getTime())) return null;
+  var tz = acActiveTimezone();
+  var opts;
+  if (dtStyle === 'date') {
+    opts = { timeZone: tz, year: 'numeric', month: 'short', day: 'numeric' };
+  } else if (dtStyle === 'time') {
+    opts = { timeZone: tz, hour: '2-digit', minute: '2-digit', timeZoneName: 'short' };
+  } else {
+    opts = { timeZone: tz, year: 'numeric', month: 'short', day: 'numeric',
+             hour: '2-digit', minute: '2-digit', timeZoneName: 'short' };
+  }
+  try {
+    return new Intl.DateTimeFormat(undefined, opts).format(date);
+  } catch (e) {
+    return null;
+  }
+}
+
+function applyLocalTimes(root) {
+  var scope = root || document;
+  var nodes = scope.querySelectorAll
+    ? scope.querySelectorAll('.local-dt[data-utc]:not([data-localized])')
+    : [];
+  nodes.forEach(function(node) {
+    var raw = node.getAttribute('data-utc');
+    if (!raw) return;
+    var dtStyle = node.getAttribute('data-dt-style') || '';
+    var formatted = acFormatInstant(raw, dtStyle);
+    if (formatted) {
+      node.textContent = formatted;
+      node.setAttribute('title', raw);
+      node.setAttribute('data-localized', '1');
+    }
+  });
+}
+window.applyLocalTimes = applyLocalTimes;
+
+// Build markup for a client-rendered timestamp; the observer below converts it.
+function localDt(utc, style) {
+  if (!utc) return '—';
+  var attr = style === 'date' ? ' data-dt-style="date"' : '';
+  var safe = String(utc).replace(/"/g, '&quot;');
+  return '<span class="local-dt" data-utc="' + safe + '"' + attr + '>' + safe + '</span>';
+}
+window.localDt = localDt;
+
+document.addEventListener('DOMContentLoaded', function() {
+  if (!window.AC_USER_TZ) {
+    var detected = 'UTC';
+    try {
+      detected = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+    } catch (e) { detected = 'UTC'; }
+    window.AC_USER_TZ = detected;
+    // Persist the detected zone as the user's default; display works regardless.
+    if (typeof apiFetch === 'function') {
+      apiFetch('/api/dashboard/user-settings', {
+        method: 'POST',
+        body: JSON.stringify({ timezone: detected }),
+      }).catch(function() { /* non-blocking */ });
+    }
+  }
+  applyLocalTimes(document);
+
+  // Convert any timestamps inserted later by client-side rendering.
+  if (window.MutationObserver) {
+    var observer = new MutationObserver(function(mutations) {
+      for (var i = 0; i < mutations.length; i++) {
+        if (mutations[i].addedNodes && mutations[i].addedNodes.length) {
+          applyLocalTimes(document);
+          return;
+        }
+      }
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
+  }
+});

@@ -6,6 +6,7 @@ CREATE TABLE IF NOT EXISTS users (
     password_hash TEXT NOT NULL,
     display_name TEXT NOT NULL,
     role TEXT NOT NULL DEFAULT 'user' CHECK (role IN ('admin', 'user')),
+    timezone TEXT,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
@@ -360,6 +361,7 @@ def create_schema(conn) -> None:
         "CREATE INDEX IF NOT EXISTS idx_memory_freshness ON memory_records(valid_from, valid_to, last_confirmed_at)"
     )
     conn.commit()
+    _ensure_user_timezone_column(conn)
     _ensure_connector_type_action_state_column(conn)
     _ensure_connector_type_spec_columns(conn)
     _ensure_webhook_tables(conn)
@@ -388,6 +390,15 @@ def _ensure_memory_metadata_columns(conn) -> None:
                 """
             )
     conn.commit()
+
+
+def _ensure_user_timezone_column(conn) -> None:
+    columns = {
+        row["name"] for row in conn.execute("PRAGMA table_info(users)").fetchall()
+    }
+    if "timezone" not in columns:
+        conn.execute("ALTER TABLE users ADD COLUMN timezone TEXT")
+        conn.commit()
 
 
 def _ensure_connector_type_action_state_column(conn) -> None:

@@ -1,8 +1,11 @@
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
 
 from app.services import agent_service
 from app.services import workspace_service
 from app.config import settings
+
+if TYPE_CHECKING:
+    from app.security.context import RequestContext
 
 
 class ScopeEnforcer:

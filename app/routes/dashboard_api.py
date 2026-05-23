@@ -177,7 +177,8 @@ async def export_audit_csv(
         limit=500,
         offset=0,
     )
-    import csv, io
+    import csv
+    import io
 
     output = io.StringIO()
     writer = csv.writer(output)

@@ -1,9 +1,9 @@
 from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel
-from typing import Any, Optional
+from typing import Optional
 
 from app.services import webhook_service, audit_service, inbound_webhook_service
-from app.security.dependencies import get_request_context, require_admin
+from app.security.dependencies import get_request_context
 from app.security.context import RequestContext
 from app.security.response_helpers import (
     success_response,

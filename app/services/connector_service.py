@@ -202,10 +202,14 @@ def update_binding(binding_id: str, **fields) -> bool:
         "last_tested_at",
         "last_error",
     )
+    # Status fields are nullable and must be clearable: a successful test has to
+    # reset last_error to NULL, otherwise a binding that failed once would keep
+    # reporting an error forever. Other fields keep the "skip None" semantics.
+    nullable = ("last_tested_at", "last_error")
     updates = []
     params = []
     for key, val in fields.items():
-        if key in allowed and val is not None:
+        if key in allowed and (val is not None or key in nullable):
             if key == "enabled":
                 updates.append("enabled = ?")
                 params.append(1 if val else 0)
@@ -297,14 +301,13 @@ def _check_rate_limit(binding: dict) -> Optional[str]:
         ).fetchall()
 
     if min_interval_ms and recent:
-        from app.time_utils import utc_now
-        import datetime
+        from app.time_utils import utc_now, parse_utc_datetime
 
         last = recent[0]["executed_at"] if recent else None
         if last:
             try:
-                last_dt = datetime.datetime.fromisoformat(last)
-                now_dt = datetime.datetime.fromisoformat(utc_now())
+                last_dt = parse_utc_datetime(last)
+                now_dt = utc_now()
                 elapsed_ms = int((now_dt - last_dt).total_seconds() * 1000)
                 if elapsed_ms < min_interval_ms:
                     return f"Rate limited: retry after {min_interval_ms - elapsed_ms}ms"
@@ -528,6 +531,138 @@ def test_binding(binding_id: str) -> dict:
     except Exception as e:
         update_binding(binding_id, last_tested_at=_utc_now(), last_error=str(e))
         return {"success": False, "error": str(e)}
+
+
+def build_capability_summary(
+    enforcer,
+    *,
+    connector_type_id: Optional[str] = None,
+    scope: Optional[str] = None,
+    enabled_only: bool = True,
+) -> dict:
+    from app.services import credential_service
+
+    connector_types = list_connector_types()
+    if connector_type_id:
+        connector_types = [ct for ct in connector_types if ct["id"] == connector_type_id]
+
+    visible_bindings = []
+    if scope:
+        if not enforcer.can_read(scope):
+            return {
+                "connectors": [],
+                "total_connectors": 0,
+                "visible_bindings": 0,
+                "usable_bindings": 0,
+            }
+        visible_bindings = list_bindings(scope=scope, enabled=enabled_only)
+    elif getattr(enforcer, "is_admin", False):
+        visible_bindings = list_bindings(enabled=enabled_only)
+    else:
+        for readable_scope in enforcer.filter_readable_scopes(list(enforcer.read_scopes)):
+            visible_bindings.extend(list_bindings(scope=readable_scope, enabled=enabled_only))
+
+    if connector_type_id:
+        visible_bindings = [
+            b for b in visible_bindings if b["connector_type_id"] == connector_type_id
+        ]
+
+    bindings_by_type: dict[str, list[dict]] = {}
+    for binding in visible_bindings:
+        bindings_by_type.setdefault(binding["connector_type_id"], []).append(binding)
+
+    summaries = []
+    usable_total = 0
+    for connector_type in connector_types:
+        try:
+            action_result = generate_connector_type_tools(
+                connector_type,
+                disabled_actions=connector_type.get("disabled_actions") or [],
+                include_disabled=False,
+                limit=1,
+            )
+            action_count = int(action_result.get("total", 0) or 0)
+            action_discovery = {
+                "success": True,
+                "action_count": action_count,
+            }
+        except Exception as exc:
+            action_count = 0
+            action_discovery = {
+                "success": False,
+                "action_count": 0,
+                "error": str(exc),
+            }
+
+        binding_summaries = []
+        scopes = set()
+        for binding in bindings_by_type.get(connector_type["id"], []):
+            scopes.add(binding["scope"])
+            credential_present = False
+            credential_readable = False
+            credential_scope = None
+            if binding.get("credential_id"):
+                credential = credential_service.get_credential(binding["credential_id"])
+                if credential:
+                    credential_present = True
+                    credential_scope = credential.get("scope")
+                    credential_readable = enforcer.can_read(credential_scope)
+
+            binding_config = _parse_json_object(binding.get("config_json")) or {}
+            auth_overridden = binding_config.get("auth_mode") == "none"
+            auth_required = connector_type.get("auth_type") != "none" and not auth_overridden
+            credential_ready = (not auth_required) or credential_present
+            usable = bool(binding.get("enabled")) and credential_ready and action_discovery["success"] and action_count > 0
+            if usable:
+                usable_total += 1
+
+            if not binding.get("last_tested_at"):
+                test_status = "unknown"
+            elif binding.get("last_error"):
+                test_status = "failed"
+            else:
+                test_status = "passed"
+
+            binding_summaries.append(
+                {
+                    "id": binding["id"],
+                    "name": binding["name"],
+                    "scope": binding["scope"],
+                    "enabled": bool(binding.get("enabled")),
+                    "credential": {
+                        "present": credential_present,
+                        "readable": credential_readable,
+                        "scope": credential_scope,
+                    },
+                    "health": {
+                        "test_status": test_status,
+                        "last_tested_at": binding.get("last_tested_at"),
+                        "last_error": binding.get("last_error"),
+                    },
+                    "usable_by_caller": usable,
+                }
+            )
+
+        summaries.append(
+            {
+                "id": connector_type["id"],
+                "display_name": connector_type["display_name"],
+                "provider_type": connector_type.get("provider_type") or "openapi",
+                "auth_type": connector_type.get("auth_type"),
+                "action_count": action_count,
+                "action_discovery": action_discovery,
+                "binding_count": len(binding_summaries),
+                "visible_scopes": sorted(scopes),
+                "bindings": binding_summaries,
+            }
+        )
+
+    return {
+        "connectors": summaries,
+        "total_connectors": len(summaries),
+        "visible_bindings": sum(len(c["bindings"]) for c in summaries),
+        "usable_bindings": usable_total,
+    }
 
 
 def _validate_action_for_connector(connector_type: dict, action: str) -> Optional[str]:
@@ -922,6 +1057,6 @@ def _normalize_action_list(actions: list[str]) -> list[str]:
 
 
 def _utc_now() -> str:
-    from app.time_utils import utc_now
+    from app.time_utils import utc_now_iso
 
-    return utc_now()
+    return utc_now_iso()

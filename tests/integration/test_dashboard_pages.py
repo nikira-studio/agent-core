@@ -78,18 +78,28 @@ def test_connectors_page_surfaces_credentials_workflow(authenticated_client):
     r = authenticated_client.get("/connectors")
     assert r.status_code == 200
     html = r.text
+    # Connectors links out to credential management and offers inline
+    # credential selection on the binding form; full credential CRUD lives
+    # on /credentials (see test_credentials_page_surfaces_credential_forms).
     assert "New Credential" in html
     assert "Import MCP Server" in html
     assert "Preview Spec" in html
-    assert "create-credential-form" in html
-    assert "edit-credential-form" in html
-    assert "Leave blank to keep current value" in html
-    assert "submitEditCredential" in html
     assert "/api/credentials/entries" in html
     assert "Create new credential" in html
     assert "Use stored credential" in html
     assert "import-spec-preview" in html
     assert "import-spec-import-btn" in html
+
+
+def test_credentials_page_surfaces_credential_forms(authenticated_client):
+    r = authenticated_client.get("/credentials")
+    assert r.status_code == 200
+    html = r.text
+    assert "create-credential-form" in html
+    assert "edit-credential-form" in html
+    assert "Leave blank to keep current value" in html
+    assert "submitEditCredential" in html
+    assert "/api/credentials/entries" in html
 
 
 def test_connectors_directory_page_surfaces_mcp_import(authenticated_client):

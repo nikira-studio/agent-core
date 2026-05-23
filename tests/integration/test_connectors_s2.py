@@ -16,6 +16,7 @@ class TestConnectorMCPTools:
         assert "connectors_bindings_list" in tool_names
         assert "connectors_bindings_test" in tool_names
         assert "connectors_actions_list" in tool_names
+        assert "connectors_summary" in tool_names
 
     def test_connectors_list_jsonrpc(self, test_client, admin_token):
         r = test_client.post(
@@ -95,6 +96,54 @@ class TestConnectorMCPTools:
         assert result["ok"] is True
         tool_names = [t["name"] for t in result["data"]["tools"]]
         assert "call_endpoint" in tool_names
+
+    def test_connector_summary_and_batch_health_respect_visible_scope(
+        self, test_client, agent_token
+    ):
+        from app.services import connector_service, credential_service
+
+        credential = credential_service.create_credential(
+            scope="agent:testagent",
+            name="dashboard-summary-token",
+            value_plaintext="dashboard-summary-secret",
+        )
+        visible = connector_service.create_binding(
+            connector_type_id="generic_http",
+            name="dashboard-visible",
+            scope="agent:testagent",
+            credential_id=credential["id"],
+        )
+        hidden = connector_service.create_binding(
+            connector_type_id="generic_http",
+            name="dashboard-hidden",
+            scope="workspace:hidden",
+            credential_id=credential["id"],
+        )
+
+        summary_r = test_client.get(
+            "/api/connector-types/summary?connector_type_id=generic_http",
+            headers={"Authorization": f"Bearer {agent_token}"},
+        )
+        assert summary_r.status_code == 200, summary_r.text
+        summary = summary_r.json()["data"]
+        generic = summary["connectors"][0]
+        binding_ids = {binding["id"] for binding in generic["bindings"]}
+        assert visible["id"] in binding_ids
+        assert hidden["id"] not in binding_ids
+        assert generic["action_count"] >= 1
+        assert "dashboard-summary-secret" not in json.dumps(summary)
+        assert "value_encrypted" not in json.dumps(summary)
+
+        health_r = test_client.post(
+            "/api/connector-types/health-check",
+            headers={"Authorization": f"Bearer {agent_token}"},
+            json={"connector_type_id": "generic_http"},
+        )
+        assert health_r.status_code == 200, health_r.text
+        health = health_r.json()["data"]
+        result_ids = {result["binding_id"] for result in health["results"]}
+        assert visible["id"] in result_ids
+        assert hidden["id"] not in result_ids
 
     def test_binding_tools_endpoint_returns_mcp_tools(self, test_client, admin_token, monkeypatch):
         from types import SimpleNamespace

@@ -247,6 +247,18 @@ MANIFEST = {
             },
         },
         {
+            "name": "connectors_summary",
+            "description": "Summarize visible connector types, bindings, credentials, actions, and health state for the current caller",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "scope": {"type": "string"},
+                    "connector_type_id": {"type": "string"},
+                    "enabled_only": {"type": "boolean", "default": True},
+                },
+            },
+        },
+        {
             "name": "connectors_run",
             "description": "Run a connector action server-side using a stored credential; the raw secret is never exposed to the agent",
             "inputSchema": {
@@ -1053,6 +1065,19 @@ async def _handle_custom_mcp_tool(body: dict, ctx: RequestContext):
                 },
             }
         )
+
+    elif tool == "connectors_summary":
+        from app.services import connector_service
+
+        summary = connector_service.build_capability_summary(
+            enforcer,
+            connector_type_id=params.get("connector_type_id"),
+            scope=params.get("scope"),
+            enabled_only=params.get("enabled_only", True)
+            if params.get("enabled_only") is not None
+            else True,
+        )
+        return JSONResponse(content={"ok": True, "data": summary})
 
     elif tool == "connectors_run":
         from app.services import connector_service

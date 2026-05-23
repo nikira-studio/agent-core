@@ -720,6 +720,31 @@ tr:hover td {
   color: var(--muted);
 }
 
+.badge-success {
+  background: rgba(80, 200, 120, 0.15);
+  color: var(--success);
+}
+
+.badge-danger {
+  background: rgba(224, 80, 80, 0.15);
+  color: var(--danger);
+}
+
+.badge-warning {
+  background: rgba(240, 160, 48, 0.15);
+  color: var(--warning);
+}
+
+.badge-info {
+  background: rgba(79, 142, 255, 0.15);
+  color: var(--accent);
+}
+
+.badge-ok {
+  background: rgba(80, 200, 120, 0.15);
+  color: var(--success);
+}
+
 /* === Status Pills === */
 .status-pill {
   display: inline-flex;
@@ -994,29 +1019,23 @@ tr:hover td {
   table-layout: fixed;
 }
 
-.activity-id-cell {
+.activity-task-cell {
+  width: auto;
+  min-width: 280px;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  white-space: normal;
+}
+
+.activity-scope-cell {
   width: 110px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.activity-task-cell {
-  width: auto;
-  min-width: 160px;
-  overflow-wrap: anywhere;
-  word-break: break-word;
-}
-
-.activity-scope-cell {
-  width: 150px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
 .activity-status-cell {
-  width: 85px;
+  width: 95px;
   white-space: nowrap;
 }
 
@@ -1027,14 +1046,21 @@ tr:hover td {
 }
 
 .activity-handoff-cell {
-  width: 100px;
+  width: 110px;
   overflow-wrap: anywhere;
   word-break: break-word;
 }
 
 .activity-updated-cell {
-  width: 130px;
-  white-space: nowrap;
+  width: 105px;
+  min-width: 105px;
+  vertical-align: middle;
+  line-height: 1.55;
+}
+
+.activity-updated-cell .local-dt:last-child {
+  color: var(--muted);
+  font-size: 0.78rem;
 }
 
 
@@ -1051,57 +1077,58 @@ tr:hover td {
 }
 
 .audit-time-cell {
-  width: 130px;
-  white-space: nowrap;
+  width: 105px;
+  vertical-align: middle;
+  line-height: 1.55;
+}
+
+.audit-time-cell .local-dt:last-child {
+  color: var(--muted);
+  font-size: 0.78rem;
 }
 
 .audit-actor-cell {
-  width: 76px;
+  width: 90px;
 }
 
 .audit-action-cell {
-  width: 150px;
+  width: 160px;
   overflow-wrap: anywhere;
   word-break: break-word;
   white-space: normal;
+  font-size: 0.85rem;
 }
 
 .audit-resource-cell {
-  width: 104px;
+  width: 110px;
   overflow-wrap: anywhere;
   word-break: break-word;
   white-space: normal;
 }
 
-.audit-resource-id-cell {
-  width: 136px;
-  overflow-wrap: anywhere;
-  word-break: break-word;
-  white-space: normal;
-}
 
 .audit-result-cell {
-  width: 80px;
+  width: 85px;
 }
 
 .audit-details-cell {
-  width: 162px;
+  width: auto;
+  min-width: 340px;
   white-space: normal;
   overflow-wrap: anywhere;
   word-break: break-word;
-  line-height: 1.35;
-  vertical-align: top;
+  line-height: 1.5;
+  vertical-align: middle;
 }
 
 .audit-ip-cell {
-  width: 120px;
-  min-width: 120px;
+  width: 110px;
+  min-width: 110px;
   white-space: nowrap;
 }
 
 .audit-action-cell code,
-.audit-resource-cell code,
-.audit-resource-id-cell code {
+.audit-resource-cell code {
   white-space: normal;
   overflow-wrap: anywhere;
   word-break: break-word;
@@ -1113,8 +1140,8 @@ th.actions-cell {
 }
 
 th.activity-actions-header {
-  width: 280px;
-  min-width: 280px;
+  width: 250px;
+  min-width: 250px;
   text-align: right;
 }
 
@@ -1591,4 +1618,34 @@ th.activity-actions-header {
     flex: 1 1 120px;
     text-align: center;
   }
+}
+
+/* === Micro-Design Additions (Enhanced Readability - Unboxed) === */
+.local-dt {
+  font-size: 0.82rem;
+  color: var(--muted);
+  white-space: nowrap;
+  display: inline-block;
+  vertical-align: middle;
+}
+
+.card .stat-card {
+  background: var(--bg);
+}
+
+.detail-item {
+  display: inline-block;
+  font-size: 0.82rem;
+  margin-right: 12px;
+  vertical-align: middle;
+}
+
+.detail-key {
+  color: var(--muted);
+  font-weight: 500;
+}
+
+.detail-val {
+  color: var(--text);
+  font-family: monospace;
 }

@@ -20,6 +20,7 @@ def test_mcp_manifest(test_client, agent_token):
         "activity_list",
         "connectors_list",
         "connectors_actions_list",
+        "connectors_summary",
         "connectors_bindings_list",
         "connectors_bindings_test",
         "connectors_run",
@@ -74,6 +75,7 @@ def test_mcp_jsonrpc_tools_list(test_client, agent_token):
     assert data["id"] == 2
     tool_names = {t["name"] for t in data["result"]["tools"]}
     assert "connectors_run" in tool_names
+    assert "connectors_summary" in tool_names
     assert "connectors_list" in tool_names
     assert data["result"]["tools"][0]["inputSchema"]["type"] == "object"
 
@@ -83,6 +85,7 @@ def test_mcp_connector_tool_roundtrip(test_client, agent_token):
         ("connectors_list", {}),
         ("connectors_actions_list", {"connector_type_id": "generic_http"}),
         ("connectors_bindings_list", {}),
+        ("connectors_summary", {}),
         ("connectors_bindings_test", {"binding_id": "missing"}),
     ]
     for idx, (tool, params) in enumerate(calls, start=10):
@@ -94,6 +97,49 @@ def test_mcp_connector_tool_roundtrip(test_client, agent_token):
         assert r.status_code in (200, 400, 404, 403)
         body = r.json()
         assert body["ok"] in (True, False)
+
+
+def test_mcp_connectors_summary_respects_scope_and_hides_secret_values(
+    test_client, agent_token
+):
+    from app.services import connector_service, credential_service
+
+    credential = credential_service.create_credential(
+        scope="agent:testagent",
+        name="summary-token",
+        value_plaintext="supersecret-summary-token",
+    )
+    visible = connector_service.create_binding(
+        connector_type_id="generic_http",
+        name="visible-summary-binding",
+        scope="agent:testagent",
+        credential_id=credential["id"],
+    )
+    hidden = connector_service.create_binding(
+        connector_type_id="generic_http",
+        name="hidden-summary-binding",
+        scope="workspace:hidden",
+        credential_id=credential["id"],
+    )
+
+    r = test_client.post(
+        "/mcp",
+        headers={"Authorization": f"Bearer {agent_token}"},
+        json={"tool": "connectors_summary", "params": {"connector_type_id": "generic_http"}},
+    )
+    assert r.status_code == 200, r.json()
+    data = r.json()["data"]
+    generic = next(c for c in data["connectors"] if c["id"] == "generic_http")
+    binding_ids = {b["id"] for b in generic["bindings"]}
+    assert visible["id"] in binding_ids
+    assert hidden["id"] not in binding_ids
+    assert generic["action_count"] >= 1
+    visible_summary = next(b for b in generic["bindings"] if b["id"] == visible["id"])
+    assert visible_summary["credential"]["present"] is True
+    assert visible_summary["credential"]["readable"] is True
+    assert visible_summary["usable_by_caller"] is True
+    assert "supersecret-summary-token" not in json.dumps(data)
+    assert "value_encrypted" not in json.dumps(data)
 
 
 def test_mcp_jsonrpc_tools_call(test_client, agent_token):

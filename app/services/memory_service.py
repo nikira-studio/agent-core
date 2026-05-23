@@ -2,6 +2,7 @@ import logging
 import re
 import secrets
 import json
+from pathlib import PurePath
 from typing import Optional
 
 from app.database import get_db
@@ -20,6 +21,7 @@ except Exception:
 logger = logging.getLogger(__name__)
 
 FTS5_SPECIAL = re.compile(r'[()^:*?"\'-]|--(.*?)$')
+MARKDOWN_HEADING = re.compile(r"^\s{0,3}#{1,6}\s+\S+")
 
 MEMORY_RECORD_COLUMNS = (
     "id, content, memory_class, scope, domain, topic, confidence, importance, "
@@ -84,6 +86,71 @@ def build_provenance(
     if extras:
         payload.update(extras)
     return json.dumps(payload, separators=(",", ":"), sort_keys=True)
+
+
+def sanitize_import_filename(filename: str) -> str:
+    name = (filename or "notes.txt").replace("\\", "/").rsplit("/", 1)[-1].strip()
+    name = PurePath(name).name.strip() or "notes.txt"
+    return name[:160]
+
+
+def parse_import_text(
+    content: str,
+    filename: str,
+    *,
+    max_chunk_chars: int = 2400,
+) -> list[dict]:
+    """Split imported notes into deterministic memory-sized chunks."""
+    text = content.replace("\r\n", "\n").replace("\r", "\n").strip()
+    if not text:
+        return []
+
+    sections: list[str] = []
+    current: list[str] = []
+    for line in text.split("\n"):
+        if MARKDOWN_HEADING.match(line) and current:
+            sections.append("\n".join(current).strip())
+            current = [line]
+        else:
+            current.append(line)
+    if current:
+        sections.append("\n".join(current).strip())
+
+    chunks: list[dict] = []
+    source = sanitize_import_filename(filename)
+
+    def add_chunk(chunk_text: str) -> None:
+        normalized = chunk_text.strip()
+        if normalized:
+            chunks.append({"content": normalized, "source_filename": source})
+
+    for section in sections:
+        if len(section) <= max_chunk_chars:
+            add_chunk(section)
+            continue
+
+        buffer = ""
+        for paragraph in re.split(r"\n\s*\n", section):
+            paragraph = paragraph.strip()
+            if not paragraph:
+                continue
+            if len(paragraph) > max_chunk_chars:
+                if buffer:
+                    add_chunk(buffer)
+                    buffer = ""
+                for start in range(0, len(paragraph), max_chunk_chars):
+                    add_chunk(paragraph[start : start + max_chunk_chars])
+                continue
+            next_buffer = f"{buffer}\n\n{paragraph}".strip() if buffer else paragraph
+            if len(next_buffer) > max_chunk_chars:
+                add_chunk(buffer)
+                buffer = paragraph
+            else:
+                buffer = next_buffer
+        if buffer:
+            add_chunk(buffer)
+
+    return chunks
 
 
 def _freshness_bonus(record: dict) -> float:

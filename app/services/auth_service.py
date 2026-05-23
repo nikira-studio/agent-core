@@ -92,10 +92,27 @@ def get_user_by_email(email: str) -> Optional[dict]:
 def get_user_by_id(user_id: str) -> Optional[dict]:
     with get_db() as conn:
         row = conn.execute(
-            "SELECT id, email, display_name, role FROM users WHERE id = ?",
+            "SELECT id, email, display_name, role, timezone FROM users WHERE id = ?",
             (user_id,),
         ).fetchone()
         return dict(row) if row else None
+
+
+def update_user_timezone(user_id: str, timezone: Optional[str]) -> bool:
+    """Set (or clear, with None) a user's display timezone. Validates against the
+    IANA database so only real zone names are stored."""
+    if timezone is not None:
+        from zoneinfo import available_timezones
+
+        if timezone not in available_timezones():
+            raise ValueError(f"Unknown timezone: {timezone}")
+    with get_db() as conn:
+        cursor = conn.execute(
+            "UPDATE users SET timezone = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+            (timezone, user_id),
+        )
+        conn.commit()
+        return cursor.rowcount > 0
 
 
 def count_users() -> int:
@@ -241,7 +258,7 @@ def get_session(session_id: str) -> Optional[dict]:
         cursor = conn.execute(
             """
             SELECT s.id, s.user_id, s.expires_at, s.last_activity, s.channel,
-                   u.email, u.display_name, u.role
+                   u.email, u.display_name, u.role, u.timezone
             FROM sessions s
             JOIN users u ON u.id = s.user_id
             WHERE s.id = ?

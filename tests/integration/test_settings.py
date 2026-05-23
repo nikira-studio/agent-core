@@ -602,3 +602,59 @@ def test_cookie_secure_setting_controls_login_cookie(test_client, clean_db):
     finally:
         settings.COOKIE_SECURE = original
 
+
+def test_settings_page_shows_timezone_picker(authenticated_client):
+    html = authenticated_client.get("/settings").text
+    assert "Preferences" in html
+    assert 'id="user-timezone"' in html
+    assert "America/New_York" in html
+
+
+def test_user_settings_saves_timezone(authenticated_client):
+    from app.services.auth_service import get_user_by_id
+
+    r = authenticated_client.post(
+        "/api/dashboard/user-settings",
+        json={"timezone": "America/New_York"},
+    )
+    assert r.status_code == 200
+    assert r.json()["data"]["timezone"] == "America/New_York"
+    assert get_user_by_id("testuser")["timezone"] == "America/New_York"
+
+
+def test_user_settings_rejects_invalid_timezone(authenticated_client):
+    r = authenticated_client.post(
+        "/api/dashboard/user-settings",
+        json={"timezone": "Mars/Olympus_Mons"},
+    )
+    assert r.status_code == 400
+    assert r.json()["error"]["code"] == "INVALID_TIMEZONE"
+
+
+def test_user_settings_clears_timezone(authenticated_client):
+    from app.services.auth_service import get_user_by_id
+
+    authenticated_client.post(
+        "/api/dashboard/user-settings", json={"timezone": "Europe/London"}
+    )
+    r = authenticated_client.post(
+        "/api/dashboard/user-settings", json={"timezone": ""}
+    )
+    assert r.status_code == 200
+    assert get_user_by_id("testuser")["timezone"] is None
+
+
+def test_session_carries_timezone(clean_db):
+    from app.services.auth_service import (
+        create_user,
+        create_session,
+        validate_session,
+        update_user_timezone,
+    )
+
+    create_user("tzuser", "tz@test.local", "testpassword123", "TZ User", "user")
+    update_user_timezone("tzuser", "Asia/Tokyo")
+    session = create_session("tzuser", channel="dashboard")
+    validated = validate_session(session["session_id"])
+    assert validated["timezone"] == "Asia/Tokyo"
+

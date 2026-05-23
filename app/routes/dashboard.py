@@ -35,6 +35,38 @@ def escape_html(s):
     )
 
 
+def local_dt(value, style: str = "datetime", empty: str = "—") -> str:
+    """Render a stored UTC timestamp as a client-convertible element.
+
+    All timestamps are stored in UTC; the browser converts the data-utc value to
+    the viewer's selected timezone (see applyLocalTimes in dashboard.js). The
+    rendered text is a UTC fallback shown until/if JS runs. style='date' shows
+    date only.
+    """
+    if not value:
+        return empty
+    from app.time_utils import parse_utc_datetime
+
+    try:
+        dt = parse_utc_datetime(value)
+    except (ValueError, TypeError):
+        return escape_html(str(value))
+    iso = dt.isoformat()
+    if style == "date":
+        fallback = dt.strftime("%Y-%m-%d")
+        attr = ' data-dt-style="date"'
+    elif style == "time":
+        fallback = dt.strftime("%H:%M UTC")
+        attr = ' data-dt-style="time"'
+    else:
+        fallback = dt.strftime("%Y-%m-%d %H:%M UTC")
+        attr = ""
+    return (
+        f'<span class="local-dt" data-utc="{escape_html(iso)}"{attr}>'
+        f"{escape_html(fallback)}</span>"
+    )
+
+
 def get_session_token(request: Request) -> str:
     auth_header = request.headers.get("Authorization", "")
     if auth_header.startswith("Bearer "):
@@ -122,6 +154,7 @@ def render_page(
   </div>"""
 
     layout_class = "layout" if show_sidebar else "layout no-sidebar"
+    user_tz_js = json.dumps((session or {}).get("timezone") or "")
 
     return HTMLResponse(
         f"""<!DOCTYPE html>
@@ -135,7 +168,7 @@ def render_page(
     <link rel="icon" type="image/png" sizes="16x16" href="/static/img/favicon/favicon-16x16.png">
     <link rel="apple-touch-icon" sizes="180x180" href="/static/img/favicon/apple-touch-icon.png">
     <link rel="manifest" href="/static/img/favicon/site.webmanifest">
-    <link rel="stylesheet" href="/static/css/dashboard.css?v=20260517e">
+    <link rel="stylesheet" href="/static/css/dashboard.css?v=20260523d">
 </head>
 <body>
 <div class="{layout_class}">
@@ -144,7 +177,8 @@ def render_page(
     {body}
   </div>
 </div>
-<script src="/static/js/dashboard.js?v=20260515d"></script>
+<script>window.AC_USER_TZ = {user_tz_js};</script>
+<script src="/static/js/dashboard.js?v=20260523d"></script>
 <script src="/static/js/events.js?v=20260518a"></script>
 {extra_js}
 </body>
@@ -615,7 +649,7 @@ async def dashboard_home(request: Request, session: dict = Depends(require_auth)
             f"<tr><td><div class='text-truncate' title='{escape_html(a.get('task_description', ''))}'>{escape_html(a.get('task_description', ''))}</div></td>"
             f"<td><span class='badge badge-{a.get('status', 'active')}'>{a.get('status', '')}</span></td>"
             f"<td>{escape_html(a.get('assigned_agent_id', ''))}</td>"
-            f"<td>{str(a.get('updated_at', '') or a.get('started_at', ''))[:16]}</td></tr>"
+            f"<td>{local_dt(a.get('updated_at') or a.get('started_at'))}</td></tr>"
             for a in recent_activity[:6]
         )
         if recent_activity
@@ -670,7 +704,7 @@ async def dashboard_home(request: Request, session: dict = Depends(require_auth)
         return;
       }}
       tbody.innerHTML = recent.map(function(a) {{
-        var ts = (a.updated_at || a.started_at || '').substring(0, 16);
+        var ts = localDt(a.updated_at || a.started_at);
         return '<tr>' +
           '<td><div class="text-truncate" title="' + escapeHtml(a.task_description || '') + '">' + escapeHtml(a.task_description || '') + '</div></td>' +
           '<td><span class="badge badge-' + escapeHtml(a.status || '') + '">' + escapeHtml(a.status || '') + '</span></td>' +
@@ -953,7 +987,7 @@ async def agents_page(request: Request, session: dict = Depends(require_auth)):
             f"<div class='text-muted'>Owner: {owner_id} · Default user: {default_user_id}</div></td>"
             f"<td>{status_badge}</td>"
             f"<td>{access_summary}</td>"
-            f"<td>{a.get('created_at', '')[:10]}</td>"
+            f"<td>{local_dt(a.get('created_at'), style='date')}</td>"
             f"<td><div class='actions-cell'>"
             f"{action_buttons}"
             f"</div></td></tr>"
@@ -1324,7 +1358,7 @@ async def workspaces_page(request: Request, session: dict = Depends(require_auth
             f"<div class='agent-read-list'><span class='access-label'>Read</span>{read_tags}</div>"
             f"<div class='agent-write-list'><span class='access-label'>Write</span>{write_tags}</div>"
             f"</td>"
-            f"<td>{p.get('created_at', '')[:10]}</td>"
+            f"<td>{local_dt(p.get('created_at'), style='date')}</td>"
             f"<td><div class='actions-cell'>"
             f"<button type='button' class='btn btn-sm btn-secondary' data-workspace-action='edit' data-workspace-id='{p['id']}'>Edit</button>"
             f"{toggle_btn}"
@@ -1838,7 +1872,7 @@ async def users_page(request: Request, session: dict = Depends(require_auth)):
             f"<td>{escape_html(u.get('email', ''))}</td>"
             f"<td><span class='badge badge-{'active' if u.get('role') == 'admin' else 'inactive'}'>{u.get('role', 'user')}</span></td>"
             f"<td>{otp}</td>"
-            f"<td>{u.get('created_at', '')[:10]}</td>"
+            f"<td>{local_dt(u.get('created_at'), style='date')}</td>"
             f"<td>{actions}</td>"
             f"</tr>"
         )
@@ -2106,10 +2140,10 @@ async def memory_page(request: Request, session: dict = Depends(require_auth)):
       document.getElementById('mem-detail-topic').textContent = r.topic || '';
       document.getElementById('mem-detail-confidence').textContent = r.confidence != null ? r.confidence.toFixed(2) : '';
       document.getElementById('mem-detail-importance').textContent = r.importance != null ? r.importance.toFixed(2) : '';
-      document.getElementById('mem-detail-created').textContent = r.created_at ? r.created_at.substring(0, 19) : '';
+      document.getElementById('mem-detail-created').innerHTML = localDt(r.created_at);
       document.getElementById('mem-detail-status').textContent = r.record_status || '';
       document.getElementById('mem-detail-slot-key').textContent = r.slot_key || '';
-      document.getElementById('mem-detail-valid-from').textContent = r.valid_from ? r.valid_from.substring(0, 19) : '';
+      document.getElementById('mem-detail-valid-from').innerHTML = r.valid_from ? localDt(r.valid_from) : '';
       document.getElementById('mem-detail-valid-to').textContent = r.valid_to ? r.valid_to.substring(0, 19) : '';
       document.getElementById('mem-detail-last-confirmed').textContent = r.last_confirmed_at ? r.last_confirmed_at.substring(0, 19) : '';
       const provenanceEl = document.getElementById('mem-detail-provenance');
@@ -2153,7 +2187,7 @@ async def memory_page(request: Request, session: dict = Depends(require_auth)):
         if (r.domain) metadataParts.push(r.domain);
         if (r.topic) metadataParts.push(r.topic);
         if (r.record_status) metadataParts.push(r.record_status);
-        if (r.created_at) metadataParts.push((r.created_at || '').substring(0, 19));
+        if (r.created_at) metadataParts.push(localDt(r.created_at));
         const metadata = metadataParts.length ? metadataParts.map(escapeHtml).join(' · ') : '';
         return '<div style="margin:8px 0;padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:var(--bg);white-space:normal;overflow-wrap:anywhere">' +
           edge +
@@ -2210,6 +2244,69 @@ async def memory_page(request: Request, session: dict = Depends(require_auth)):
         showToast('Memory write failed: ' + (err.message || err), 'danger');
       }
     }
+    async function doImport(e) {
+      if (e && e.preventDefault) e.preventDefault();
+      const importBtn = document.getElementById('mem-import-submit');
+      const resultEl = document.getElementById('mem-import-result');
+      const originalLabel = importBtn ? importBtn.textContent : '';
+      if (importBtn) {
+        importBtn.disabled = true;
+        importBtn.textContent = 'Importing...';
+      }
+      if (resultEl) {
+        resultEl.innerHTML = '<div class="alert alert-info">Importing notes...</div>';
+      }
+      try {
+        const files = Array.from(document.getElementById('mem-import-files').files || []);
+        const pasted = document.getElementById('mem-import-text').value.trim();
+        const sources = [];
+        for (const file of files) {
+          sources.push({ filename: file.name, content: await file.text() });
+        }
+        if (pasted) {
+          sources.push({
+            filename: document.getElementById('mem-import-name').value.trim() || 'pasted-notes.txt',
+            content: pasted
+          });
+        }
+        if (!sources.length) {
+          showToast('Choose files or paste text to import', 'warning');
+          if (resultEl) resultEl.innerHTML = '<div class="alert alert-warning">Choose files or paste text to import.</div>';
+          return;
+        }
+        const body = {
+          scope: document.getElementById('mem-import-scope').value || '"""
+        + user_scope
+        + """',
+          memory_class: document.getElementById('mem-import-class').value,
+          domain: document.getElementById('mem-import-domain').value.trim() || 'import',
+          topic: document.getElementById('mem-import-topic').value.trim() || null,
+          confidence: parseFloat(document.getElementById('mem-import-confidence').value) || 0.85,
+          importance: parseFloat(document.getElementById('mem-import-importance').value) || 0.6,
+          sources
+        };
+        const j = await apiFetch('/api/memory/import', { method: 'POST', body: JSON.stringify(body) });
+        if (j.ok) {
+          const total = j.data.total_records || 0;
+          const names = (j.data.imported || []).map(x => x.filename + ' (' + x.record_count + ')').join(', ');
+          if (resultEl) resultEl.innerHTML = '<div class="alert alert-success">Imported ' + total + ' record' + (total === 1 ? '' : 's') + (names ? ': ' + escapeHtml(names) : '') + '</div>';
+          showToast('Imported ' + total + ' memory record' + (total === 1 ? '' : 's'), 'success');
+          refreshMemory();
+        } else {
+          showToast(j.error?.message || 'Import failed', 'danger');
+          if (resultEl) resultEl.innerHTML = '<div class="alert alert-danger">' + escapeHtml(j.error?.message || 'Import failed') + '</div>';
+        }
+      } catch (err) {
+        console.error('Memory import failed', err);
+        showToast('Memory import failed: ' + (err.message || err), 'danger');
+        if (resultEl) resultEl.innerHTML = '<div class="alert alert-danger">Memory import failed: ' + escapeHtml(err.message || err) + '</div>';
+      } finally {
+        if (importBtn) {
+          importBtn.disabled = false;
+          importBtn.textContent = originalLabel || 'Import';
+        }
+      }
+    }
     function displayRecords(records) {
       const tbody = document.getElementById('mem-results-body');
       if (!records.length) { tbody.innerHTML = '<tr><td colspan=6 class=empty>No records found.</td></tr>'; return; }
@@ -2243,6 +2340,7 @@ async def memory_page(request: Request, session: dict = Depends(require_auth)):
             f"""
     <div class="page-header"><h1>Memory</h1><div class="page-actions">
         <button class="btn" onclick="openModal('write-memory-modal')">+ Save Memory</button>
+        <button class="btn btn-secondary" onclick="openModal('import-memory-modal')">Import Notes</button>
         <button class="btn btn-secondary" onclick="toggleFilters()">Search</button>
     </div></div>
 
@@ -2282,7 +2380,7 @@ async def memory_page(request: Request, session: dict = Depends(require_auth)):
     <div class="card">
       <h3>Active Records <span id="mem-count" class="text-muted" style="font-weight:normal;font-size:0.8rem">({len(active_records)})</span></h3>
       <p class="text-muted" style="font-size:0.85rem;margin-bottom:8px">These are the active records you can read right now. Use Search for a narrower view.</p>
-      <table><thead><tr><th>Class</th><th>Content</th><th>Scope</th><th>Domain</th><th>Confidence</th><th>Actions</th></tr></thead>
+      <table><thead><tr><th>Class</th><th>Content</th><th>Scope</th><th>Domain</th><th>Confidence</th><th class="actions-cell">Actions</th></tr></thead>
       <tbody id="mem-results-body">
         {records_rows}
       </tbody>
@@ -2296,7 +2394,7 @@ async def memory_page(request: Request, session: dict = Depends(require_auth)):
     <div class="card" style="border-left:4px solid var(--text-muted)">
       <h3 style="color:var(--text-muted)">Retracted Records <span class="text-muted" style="font-weight:normal;font-size:0.8rem">({len(retracted_records)})</span></h3>
       <p class="text-muted" style="font-size:0.85rem;margin-bottom:8px">These records are hidden from search. Restore to make them active again, or permanently delete.</p>
-      <table><thead><tr><th>Class</th><th>Content</th><th>Scope</th><th>Domain</th><th>Confidence</th><th>Actions</th></tr></thead>
+      <table><thead><tr><th>Class</th><th>Content</th><th>Scope</th><th>Domain</th><th>Confidence</th><th class="actions-cell">Actions</th></tr></thead>
       <tbody>{retracted_rows or "<tr><td colspan=6 class=empty>No retracted records.</td></tr>"}</tbody></table>
     </div>
     """
@@ -2391,6 +2489,85 @@ async def memory_page(request: Request, session: dict = Depends(require_auth)):
           <div class="modal-footer">
             <button type="button" class="btn btn-secondary" onclick="closeModal('write-memory-modal')">Cancel</button>
             <button type="submit" class="btn" onclick="doWrite(event)">Write</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- Import Memory Modal -->
+    <div class="modal-overlay" id="import-memory-modal" style="display:none">
+      <div class="modal" style="max-width:680px">
+        <h3>Import Notes</h3>
+        <form id="import-memory-form" onsubmit="doImport(event)">
+          <div class="form-group">
+            <label>Text files</label>
+            <input type="file" id="mem-import-files" multiple accept=".txt,.md,.markdown,text/plain,text/markdown">
+            <p class="form-hint">Import curated handoffs, decision notes, project facts, or markdown summaries into normal memory records. If a file is mostly agent instructions, extract only the durable facts first.</p>
+            <p class="form-hint">For raw instruction files like `CLAUDE.md` or `AGENTS.md`, AI-assisted extract-and-review is usually the better fit; this import path is for the distilled notes.</p>
+            <details style="margin-top:8px">
+              <summary class="text-muted" style="cursor:pointer">What good notes look like</summary>
+              <div style="margin-top:8px">
+                <p class="form-hint" style="margin-bottom:8px">Use short, durable statements that a future agent could search and reuse. One idea per line or paragraph works best.</p>
+                <pre style="white-space:pre-wrap;background:var(--bg);padding:10px;border-radius:6px;margin:0;overflow:auto"># Project Notes
+- Workspace: sage
+- Decision: default imported notes to `fact`
+- Fact: keep the import literal, not AI-summarized
+- Preference: use concise notes with explicit scope and topic</pre>
+              </div>
+            </details>
+          </div>
+          <div class="form-group">
+            <label>Pasted notes</label>
+            <input type="text" id="mem-import-name" placeholder="pasted-notes.txt" autocomplete="off" style="margin-bottom:6px">
+            <textarea id="mem-import-text" rows="7" placeholder="Paste curated notes here when you are not importing a file"></textarea>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>Save as</label>
+              <select id="mem-import-class">
+                <option value="fact">Fact</option>
+                <option value="decision">Decision</option>
+                <option value="scratchpad">Scratchpad</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Save to</label>
+              <select id="mem-import-scope" required>
+                <option value="{user_scope}" selected>{user_scope_label}</option>
+                {agent_options}
+                {project_options}
+                <option value="shared">Shared memory (shared)</option>
+              </select>
+            </div>
+          </div>
+          <details style="margin-top:4px">
+            <summary class="text-muted" style="cursor:pointer">More options</summary>
+            <div class="form-row" style="margin-top:10px">
+            <div class="form-group">
+              <label>Domain</label>
+              <input type="text" id="mem-import-domain" value="import" autocomplete="off">
+            </div>
+            <div class="form-group">
+              <label>Topic</label>
+              <input type="text" id="mem-import-topic" placeholder="Defaults to source filename" autocomplete="off">
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>Confidence</label>
+              <input type="number" id="mem-import-confidence" value="0.85" min="0" max="1" step="0.05">
+              <p class="form-hint">Fact is the default save class for imports. Switch to Decision only when the note records a chosen direction.</p>
+            </div>
+            <div class="form-group">
+              <label>Importance</label>
+              <input type="number" id="mem-import-importance" value="0.6" min="0" max="1" step="0.05">
+            </div>
+            </div>
+          </details>
+          <div id="mem-import-result" style="margin-top:10px"></div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" onclick="closeModal('import-memory-modal')">Cancel</button>
+            <button type="submit" class="btn" id="mem-import-submit" onclick="doImport(event)">Import</button>
           </div>
         </form>
       </div>
@@ -2561,13 +2738,12 @@ async def activity_page(request: Request, session: dict = Depends(require_auth))
 
     rows = "".join(
         f"<tr class='activity-row' data-status='{a.get('status', '')}'>"
-        f"<td class='activity-id-cell'><code>{a.get('id', '')[:12]}</code></td>"
-        f"<td class='activity-task-cell'>{a.get('task_description', '')[:60]}</td>"
+        f"<td class='activity-task-cell'>{a.get('task_description', '')[:120]}</td>"
         f"<td class='activity-scope-cell'><code>{escape_html((a.get('memory_scope') or '').replace('workspace:', '')) or '—'}</code></td>"
         f"<td class='activity-status-cell'><span class='badge badge-{a.get('status', 'active')}'>{a.get('status', '')}</span></td>"
         f"<td class='activity-agent-cell'>{escape_html(agent_labels.get(a.get('assigned_agent_id', ''), a.get('assigned_agent_id', '')))}</td>"
         f"<td class='activity-handoff-cell'>{escape_html(agent_labels.get(a.get('reassigned_from_agent_id', ''), a.get('reassigned_from_agent_id', '')))}</td>"
-        f"<td class='activity-updated-cell'>{str(a.get('updated_at', ''))[:16]}</td>"
+        f"<td class='activity-updated-cell'>{local_dt(a.get('updated_at'), style='date')}<br>{local_dt(a.get('updated_at'), style='time')}</td>"
         f"<td><div class='actions-cell activity-actions-cell'>"
         f"<button type='button' class='btn btn-sm btn-secondary' onclick=\"createHandoff('{a['id']}')\">Briefing</button>"
         f"<button type='button' class='btn btn-sm btn-secondary' onclick=\"reassignActivity('{a['id']}')\" title='Reassign'>Reassign</button>"
@@ -2730,8 +2906,8 @@ async def activity_page(request: Request, session: dict = Depends(require_auth))
         {status_tabs}
       </div>
       <div style="overflow-x:auto">
-      <table class="activity-table"><thead><tr><th class="activity-id-cell">ID</th><th class="activity-task-cell">Task</th><th class="activity-scope-cell">Scope</th><th class="activity-status-cell">Status</th><th class="activity-agent-cell">Agent</th><th class="activity-handoff-cell">Handoff From</th><th class="activity-updated-cell">Updated</th><th class="activity-actions-header">Actions</th></tr></thead>
-      <tbody>{rows or "<tr><td colspan=8 class=empty>No activities yet.</td></tr>"}</tbody></table>
+      <table class="activity-table"><thead><tr><th class="activity-task-cell">Task</th><th class="activity-scope-cell">Scope</th><th class="activity-status-cell">Status</th><th class="activity-agent-cell">Agent</th><th class="activity-handoff-cell">Handoff From</th><th class="activity-updated-cell">Updated</th><th class="activity-actions-header">Actions</th></tr></thead>
+      <tbody>{rows or "<tr><td colspan=7 class=empty>No activities yet.</td></tr>"}</tbody></table>
       </div>
       <div style="margin-top:8px;font-size:0.85rem;color:var(--text-muted)">{activity_page_info}</div>
       {activity_pagination_html}
@@ -2906,11 +3082,12 @@ async def audit_page(request: Request, session: dict = Depends(require_auth)):
             return ""
         preview_items = []
         for key, value in list(parsed.items())[:2]:
-            if isinstance(value, (dict, list)):
-                preview_items.append(f"{key}=" + json.dumps(value)[:40])
-            else:
-                preview_items.append(f"{key}={str(value)[:40]}")
-        return escape_html(" · ".join(preview_items))
+            val_str = json.dumps(value) if isinstance(value, (dict, list)) else str(value)
+            val_truncated = val_str[:40] + ("..." if len(val_str) > 40 else "")
+            preview_items.append(
+                f"<span class='detail-item'><span class='detail-key'>{escape_html(key)}</span>: <span class='detail-val'>{escape_html(val_truncated)}</span></span>"
+            )
+        return "".join(preview_items)
 
     no_details_html = "<span class='text-muted'>No details</span>"
 
@@ -2929,14 +3106,18 @@ async def audit_page(request: Request, session: dict = Depends(require_auth)):
 
     def audit_row(event: dict) -> str:
         result_class = "active" if event.get("result", "") == "success" else "cancelled"
-        resource_id = event.get("resource_id", "")
         details_html = details_preview(event) or no_details_html
+        ts = event.get('timestamp')
+        time_cell = (
+            f"{local_dt(ts, style='date')}<br>"
+            f"{local_dt(ts, style='time')}"
+            if ts else "—"
+        )
         return (
-            f"<tr><td class='audit-time-cell'>{event.get('timestamp', '')[:19]}</td>"
+            f"<tr><td class='audit-time-cell'>{time_cell}</td>"
             f"<td class='audit-actor-cell'><span class='badge badge-secondary'>{event.get('actor_type', '')}</span></td>"
             f"<td class='audit-action-cell'><code>{event.get('action', '')}</code></td>"
             f"<td class='audit-resource-cell'>{event.get('resource_type', '') or '-'}</td>"
-            f"<td class='audit-resource-id-cell'><code>{resource_id[:14] if resource_id else '-'}</code></td>"
             f"<td class='audit-result-cell'><span class='badge badge-{result_class}'>{event.get('result', '')}</span></td>"
             f"<td class='mono audit-details-cell'>{details_html}</td>"
             f"<td class='mono audit-ip-cell'>{event.get('ip_address', '') or '-'}</td></tr>"
@@ -3078,8 +3259,8 @@ async def audit_page(request: Request, session: dict = Depends(require_auth)):
         <button class="btn btn-sm btn-secondary" onclick="clearAuditFilters()">Clear</button>
       </div>
       <div style="overflow-x:auto">
-      <table class="audit-table"><thead><tr><th class="audit-time-cell">Time</th><th class="audit-actor-cell">Actor Type</th><th class="audit-action-cell">Action</th><th class="audit-resource-cell">Resource</th><th class="audit-resource-id-cell">Resource ID</th><th class="audit-result-cell">Result</th><th>Details</th><th class="audit-ip-cell">IP</th></tr></thead>
-      <tbody>{rows or "<tr><td colspan=8 class=empty>No events yet.</td></tr>"}</tbody></table>
+      <table class="audit-table"><thead><tr><th class="audit-time-cell">Time</th><th class="audit-actor-cell">Actor Type</th><th class="audit-action-cell">Action</th><th class="audit-resource-cell">Resource</th><th class="audit-result-cell">Result</th><th class="audit-details-cell">Details</th><th class="audit-ip-cell">IP</th></tr></thead>
+      <tbody>{rows or "<tr><td colspan=7 class=empty>No events yet.</td></tr>"}</tbody></table>
       </div>
       <div style="margin-top:8px;font-size:0.85rem;color:var(--text-muted)">{page_info}</div>
       {pagination_html}
@@ -3111,6 +3292,23 @@ async def audit_page(request: Request, session: dict = Depends(require_auth)):
 
 
 # ─── SETTINGS ─────────────────────────────────────────────────────────────────
+
+
+@router.post("/api/dashboard/user-settings")
+async def update_dashboard_user_settings(
+    request: Request, session: dict = Depends(require_auth)
+):
+    from app.services import auth_service
+
+    body = await request.json()
+    timezone = body.get("timezone")
+    if timezone is not None:
+        timezone = str(timezone).strip() or None
+    try:
+        auth_service.update_user_timezone(session["user_id"], timezone)
+    except ValueError as e:
+        return error_response("INVALID_TIMEZONE", str(e), 400)
+    return success_response({"timezone": timezone})
 
 
 @router.post("/api/dashboard/system-settings")
@@ -3423,6 +3621,32 @@ async def settings_page(request: Request, session: dict = Depends(require_auth))
       </div>
     </div>"""
 
+    from zoneinfo import available_timezones
+
+    current_tz = user.get("timezone") or ""
+    tz_option_list = '<option value="">Auto-detect from browser</option>'
+    for _zone in sorted(available_timezones()):
+        _sel = " selected" if _zone == current_tz else ""
+        tz_option_list += (
+            f'<option value="{escape_html(_zone)}"{_sel}>{escape_html(_zone)}</option>'
+        )
+    preferences_html = f"""
+    <div class="card">
+      <div class="section-header">
+        <h3>Preferences</h3>
+        <div class="section-note">Personal display options for your account.</div>
+      </div>
+      <form id="user-settings-form" onsubmit="saveUserSettings(event)">
+        <div class="form-group">
+          <label for="user-timezone">Timezone</label>
+          <select id="user-timezone" style="max-width:360px">{tz_option_list}</select>
+          <p class="form-hint">Dates and times across the dashboard are shown in this timezone. Stored data stays in UTC.</p>
+        </div>
+        <button type="submit" class="btn">Save Preferences</button>
+        <div id="user-settings-result" style="margin-top:12px"></div>
+      </form>
+    </div>"""
+
     secrets_snapshot_html = ""
     if is_admin:
         from app.services.broker_service import get_broker_credential_hash
@@ -3503,7 +3727,7 @@ async def settings_page(request: Request, session: dict = Depends(require_auth))
       <h3>System Behavior</h3>
       <form id="system-settings-form" onsubmit="saveSystemSettings(event)">
         <div class="form-group">
-          <label>Transient Memory Retention</label>
+          <label>Scratchpad Retention</label>
           <input type="number" id="scratchpad-retention-days" min="1" max="365" value="{escape_html(scratchpad_retention_days)}" style="width:120px">
           <p class="form-hint">Used by Run Maintenance. Transient scratchpad memories older than this many days are permanently deleted.</p>
         </div>
@@ -3662,6 +3886,22 @@ async def settings_page(request: Request, session: dict = Depends(require_auth))
 
     js = """
     <script>
+    async function saveUserSettings(e) {{
+      e.preventDefault();
+      const tz = document.getElementById('user-timezone').value;
+      const j = await apiFetch('/api/dashboard/user-settings', {{ method: 'POST', body: JSON.stringify({{ timezone: tz }}) }});
+      const res = document.getElementById('user-settings-result');
+      if (j.ok) {{
+        window.AC_USER_TZ = tz || (Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC');
+        if (window.applyLocalTimes) window.applyLocalTimes(document);
+        showToast('Preferences saved', 'success');
+        res.innerHTML = '<div class="alert alert-success">Saved. Times now shown in ' + escapeHtml(window.AC_USER_TZ) + '.</div>';
+      }} else {{
+        res.innerHTML = '<div class="alert alert-danger">' + escapeHtml((j.error && j.error.message) || 'Save failed') + '</div>';
+      }}
+    }}
+    window.saveUserSettings = saveUserSettings;
+
     async function exportBackup() {{
       const r = await fetch('/api/backup/export', {{
         method: 'POST',
@@ -3870,6 +4110,7 @@ async def settings_page(request: Request, session: dict = Depends(require_auth))
         f"""
     <div class="page-header"><h1>Settings</h1></div>
     {account_html}
+    {preferences_html}
     {secrets_snapshot_html}
     {system_settings_html}
     {vector_settings_html}
@@ -4752,7 +4993,6 @@ async def integrations_page(
     output_label_html = (
         f"<div class='output-label'>{output_label}</div>" if output_label else ""
     )
-
     body = f"""
     <div class="page-header setup-page-header">
       <h1>Integrations</h1>
@@ -4762,7 +5002,7 @@ async def integrations_page(
       </div>
     </div>
 
-    <form method="get" action="{page_path}#generated-output" class="setup-form">
+    <form method="get" action="{page_path}" class="setup-form" onsubmit="saveSetupScrollPosition()">
       <div class="form-section">
         <h2>Choose Context</h2>
         <div class="form-row">
@@ -4846,6 +5086,26 @@ function getGeneratedOutputText() {
   return document.querySelector('.output-block')?.innerText || '';
 }
 
+function getSetupScrollStorageKey() {
+  return 'agent-core-integrations-scroll:' + window.location.pathname;
+}
+
+function saveSetupScrollPosition() {
+  try {
+    sessionStorage.setItem(getSetupScrollStorageKey(), String(window.scrollY || 0));
+  } catch (e) {}
+}
+
+function restoreSetupScrollPosition() {
+  try {
+    const raw = sessionStorage.getItem(getSetupScrollStorageKey());
+    if (raw === null) return;
+    const y = parseInt(raw, 10);
+    if (!Number.isFinite(y)) return;
+    requestAnimationFrame(() => window.scrollTo({ top: y, behavior: 'auto' }));
+  } catch (e) {}
+}
+
 function getIntegrationConnectionKeyStorageKey() {
   const params = new URLSearchParams(window.location.search);
   const userId = params.get('user_id') || document.getElementById('user_id')?.value || '';
@@ -4895,13 +5155,6 @@ function copyGeneratedOutput(btn) {
 
 function downloadCurrentOutput(filename) {
   downloadGeneratedOutput(filename, getGeneratedOutputText());
-}
-
-function submitAgentSetupToOutput(input) {
-  const form = input.form;
-  if (!form) return;
-  const params = new URLSearchParams(new FormData(form));
-  window.location.href = form.getAttribute('action').split('#')[0] + '?' + params.toString() + '#generated-output';
 }
 
 async function applyRecommendedAccess() {
@@ -5004,6 +5257,8 @@ async function generateConnectionConfig() {
 }
 
 document.addEventListener('DOMContentLoaded', applyStoredIntegrationConnectionKey);
+document.addEventListener('DOMContentLoaded', restoreSetupScrollPosition);
+window.addEventListener('beforeunload', saveSetupScrollPosition);
 
 </script>
 """
@@ -5159,7 +5414,7 @@ def _build_instructions(
 
 - The MCP endpoint is `{base_url}/mcp`. Your client should send requests as JSON with `{{"tool": "...", "params": {{...}}}}`.
 - Authenticate using `Authorization: Bearer $AGENT_CORE_API_KEY` header or your client's equivalent auth mechanism.
-- Available tools include: `memory_search`, `memory_get`, `memory_write`, `memory_retract`, `credential_get`, `credential_list`, `activity_update`, `activity_list`, `get_briefing`, `briefing_list`, `connectors_list`, `connectors_bindings_list`, `connectors_bindings_test`, `connectors_actions_list`, and `connectors_run`.
+- Available tools include: `memory_search`, `memory_get`, `memory_write`, `memory_retract`, `credential_get`, `credential_list`, `activity_update`, `activity_list`, `get_briefing`, `briefing_list`, `connectors_list`, `connectors_summary`, `connectors_bindings_list`, `connectors_bindings_test`, `connectors_actions_list`, and `connectors_run`.
 """
 
     return f"""# Agent Core Setup Instructions
@@ -5201,7 +5456,7 @@ When a task may require an external service, credential, API token, repository h
 
 1. Use `credential_list` to discover available credential references in authorized scopes.
 2. Use `credential_get` only when you need a specific `AC_SECRET_*` reference for a local tool or command. Never ask the user for raw secrets and never print raw secrets.
-3. Use `connectors_list` and `connectors_bindings_list` to discover server-side connector bindings available to this agent.
+3. Use `connectors_summary` for a compact capability overview, or `connectors_list` and `connectors_bindings_list` when you need raw connector and binding lists.
 4. Use `connectors_actions_list` before running an unfamiliar connector action.
 5. Use `connectors_bindings_test` when a binding may be stale or unverified.
 6. Use `connectors_run` when Agent Core should perform the external action server-side.
@@ -5302,6 +5557,7 @@ def _build_session_prompt(
 
 Use Agent Core MCP for durable workspace memory, handoffs, and workspace context. If this is a handoff, resume, or review of prior work, also inspect the recent activity trail and any generated briefing before making changes. Use `activity_list` and `briefing_list` when you need that trail from MCP.
 Default memory scope for this setup is `{default_scope}`.
+Core MCP tools include `memory_search`, `memory_get`, `memory_write`, `memory_retract`, `credential_get`, `credential_list`, `activity_update`, `activity_list`, `get_briefing`, `briefing_list`, `connectors_list`, `connectors_summary`, `connectors_bindings_list`, `connectors_bindings_test`, `connectors_actions_list`, and `connectors_run`.
 Use your private scope `{agent_scope}` only for tool-specific scratch context.
 Use full prefixed scope names exactly as shown; do not use plain workspace IDs or agent IDs as memory scopes.
 Read `{user_scope}` for stable {user_display} preferences and other owner-context details when you have user-scope read access.
@@ -5310,7 +5566,7 @@ Activity records are operational task tracking, not durable memory. At the start
 If the session has to stop early or hits a token limit, leave the activity current and write durable decisions or handoff notes to memory so another agent can continue from the saved state.
 If work needs to move across users or workspaces, make that explicit in the activity scope and handoff notes rather than assuming a hidden policy layer.
 If the client has hooks or plugins, use them to automate memory/activity capture; if it does not, treat this prompt as the source of truth for those expectations.
-When an external service is needed, use `credential_list`, `credential_get`, `connectors_list`, `connectors_bindings_list`, `connectors_actions_list`, `connectors_bindings_test`, and `connectors_run` instead of asking the user to hand-wire secrets or run manual service calls.
+When an external service is needed, use `credential_list`, `credential_get`, `connectors_summary`, `connectors_list`, `connectors_bindings_list`, `connectors_actions_list`, `connectors_bindings_test`, and `connectors_run` instead of asking the user to hand-wire secrets or run manual service calls.
 
 ## Memory Workflow
 
@@ -5349,6 +5605,7 @@ def _build_claude_md(
 You are working on the {workspace_name} workspace.
 
 Use Agent Core for durable workspace memory, activity tracking, handoffs, and credential references. If this is a handoff, resume, or review of prior work, also inspect the recent activity trail and any generated briefing before making changes. Use `activity_list` and `briefing_list` when you need that trail from MCP.
+Core MCP tools include `memory_search`, `memory_get`, `memory_write`, `memory_retract`, `credential_get`, `credential_list`, `activity_update`, `activity_list`, `get_briefing`, `briefing_list`, `connectors_list`, `connectors_summary`, `connectors_bindings_list`, `connectors_bindings_test`, `connectors_actions_list`, and `connectors_run`.
 
 ## Connection
 
@@ -5395,7 +5652,7 @@ When a task may require an external service, credential, API token, repository h
 
 1. Use `credential_list` to discover available credential references in authorized scopes.
 2. Use `credential_get` only when you need a specific `AC_SECRET_*` reference for a local tool or command. Never ask the user for raw secrets and never print raw secrets.
-3. Use `connectors_list` and `connectors_bindings_list` to discover server-side connector bindings available to this agent.
+3. Use `connectors_summary` for a compact capability overview, or `connectors_list` and `connectors_bindings_list` when you need raw connector and binding lists.
 4. Use `connectors_actions_list` before running an unfamiliar connector action.
 5. Use `connectors_bindings_test` when a binding may be stale or unverified.
 6. Use `connectors_run` when Agent Core should perform the external action server-side.
@@ -5510,7 +5767,7 @@ When a task may require an external service, credential, API token, repository h
 
 1. Use `credential_list` to discover available credential references in authorized scopes.
 2. Use `credential_get` only when you need a specific `AC_SECRET_*` reference for a local tool or command. Never ask the user for raw secrets and never print raw secrets.
-3. Use `connectors_list` and `connectors_bindings_list` to discover server-side connector bindings available to this agent.
+3. Use `connectors_summary` for a compact capability overview, or `connectors_list` and `connectors_bindings_list` when you need raw connector and binding lists.
 4. Use `connectors_actions_list` before running an unfamiliar connector action.
 5. Use `connectors_bindings_test` when a binding may be stale or unverified.
 6. Use `connectors_run` when Agent Core should perform the external action server-side.
@@ -5606,7 +5863,7 @@ When a task may require an external service, credential, API token, repository h
 
 1. Use `credential_list` to discover available credential references in authorized scopes.
 2. Use `credential_get` only when you need a specific `AC_SECRET_*` reference for a local tool or command. Never ask the user for raw secrets and never print raw secrets.
-3. Use `connectors_list` and `connectors_bindings_list` to discover server-side connector bindings available to this agent.
+3. Use `connectors_summary` for a compact capability overview, or `connectors_list` and `connectors_bindings_list` when you need raw connector and binding lists.
 4. Use `connectors_actions_list` before running an unfamiliar connector action.
 5. Use `connectors_bindings_test` when a binding may be stale or unverified.
 6. Use `connectors_run` when Agent Core should perform the external action server-side.
@@ -5775,7 +6032,7 @@ def _build_verification_prompt(user_scope, workspace_scope):
 3. Call `memory_get` for that record id and confirm the record is readable from the workspace scope.
 4. Call `memory_search` in `{workspace_scope}` for an exact token from the record you just wrote and report the result. If the first search returns zero results, retry once with the exact token plus the `domain` and `topic` from the record.
 5. Call `credential_list` and report whether credential references are visible. Do not reveal or print raw secrets.
-6. Call `connectors_list` to list connector types. Then call `connectors_bindings_list` with no scope to see everything visible to this agent. If you can read `{user_scope}`, call `connectors_bindings_list` again with `scope` set to `{user_scope}`. If you can read `{workspace_scope}`, call `connectors_bindings_list` again with `scope` set to `{workspace_scope}`. Report user-scoped and workspace-scoped bindings separately if both exist.
+6. Call `connectors_summary` to list visible connector capability and binding health. Then call `connectors_bindings_list` with no scope to see everything visible to this agent. If you can read `{user_scope}`, call `connectors_bindings_list` again with `scope` set to `{user_scope}`. If you can read `{workspace_scope}`, call `connectors_bindings_list` again with `scope` set to `{workspace_scope}`. Report user-scoped and workspace-scoped bindings separately if both exist.
 7. Call `connectors_actions_list` with a real connector type id from the `connectors_list` result and pass it as `connector_type_id` exactly. Report whether connector actions are visible.
 8. If at least one enabled binding is visible in any scope, call `connectors_bindings_test` on a non-destructive binding and report the result. If none are visible, say that clearly.
 9. Call `activity_update` with `status` set to `completed`.
@@ -5838,10 +6095,12 @@ async def webhooks_page(request: Request, session: dict = Depends(require_auth))
             f"<td>{events_str}</td>"
             f"<td>{enabled_badge}</td>"
             "<td>"
+            f"<div class='actions-cell'>"
             f"<button class='btn btn-sm' onclick=\"openEditWebhook('{wh_id}')\">Edit</button> "
             f"<button class='btn btn-sm btn-secondary' onclick=\"openTestWebhook('{wh_id}')\">Test</button> "
             f"<button class='btn btn-sm btn-secondary' onclick=\"viewDeliveries('{wh_id}', '{wh_name_js}')\">Deliveries</button> "
             f"<button type='button' class='btn btn-sm btn-danger icon-delete-btn' onclick=\"deleteWebhook('{wh_id}', '{wh_name_js}')\" title='Delete webhook' aria-label='Delete webhook'>{get_icon('delete')}</button>"
+            f"</div>"
             "</td>"
             "</tr>"
         )
@@ -5918,7 +6177,7 @@ Content-Type: application/json
 <div class="card">
   <table class="data-table">
     <thead><tr>
-      <th>Name</th><th>URL</th><th>Events</th><th>Status</th><th>Actions</th>
+      <th>Name</th><th>URL</th><th>Events</th><th>Status</th><th class="actions-cell">Actions</th>
     </tr></thead>
     <tbody id="webhooks-table-body">{rows}</tbody>
   </table>
@@ -6196,7 +6455,7 @@ function viewDeliveries(id, name) {
           ? "<span class='badge badge-active'>success</span>"
           : "<span class='badge badge-stale'>failure</span>";
         const detail = d.error_message ? `<br><small style='color:var(--text-muted)'>${d.error_message}</small>` : '';
-        return `<tr><td>${d.delivered_at?.slice(0,19) || '—'}</td><td><code>${d.event_type}</code></td><td>${badge} ${d.http_status ? 'HTTP ' + d.http_status : ''}${detail}</td></tr>`;
+        return `<tr><td>${localDt(d.delivered_at)}</td><td><code>${d.event_type}</code></td><td>${badge} ${d.http_status ? 'HTTP ' + d.http_status : ''}${detail}</td></tr>`;
       }).join('');
       document.getElementById('deliveries-content').innerHTML =
         '<table class="data-table"><thead><tr><th>Time</th><th>Event</th><th>Result</th></tr></thead><tbody>' + rows + '</tbody></table>';

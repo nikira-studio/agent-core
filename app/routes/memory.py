@@ -19,6 +19,7 @@ from app.security.response_helpers import (
     success_response, success_response_with_headers, error_response, rate_limited_response, rate_limit_headers,
 )
 from app.models.enums import MEMORY_CLASSES, SOURCE_KINDS
+from app.security.pii_detector import contains_pii
 
 
 router = APIRouter(prefix="/api/memory", tags=["memory"])
@@ -58,6 +59,30 @@ def _memory_provenance(
     )
 
 
+def _memory_import_provenance(
+    ctx: RequestContext,
+    scope: str,
+    filename: str,
+    chunk_index: int,
+    chunk_count: int,
+) -> str:
+    return memory_service.build_provenance(
+        actor_type=ctx.actor_type,
+        actor_id=ctx.actor_id,
+        channel="api",
+        source_kind="external_import",
+        scope=scope,
+        user_id=ctx.user_id,
+        agent_id=ctx.agent_id,
+        extras={
+            "route": "/api/memory/import",
+            "import_source": filename,
+            "import_chunk": chunk_index,
+            "import_chunks": chunk_count,
+        },
+    )
+
+
 class WriteMemoryRequest(BaseModel):
     content: str
     memory_class: str
@@ -74,6 +99,21 @@ class WriteMemoryRequest(BaseModel):
     valid_to: Optional[str] = None
     last_confirmed_at: Optional[str] = None
     expires_at: Optional[str] = None
+
+
+class ImportMemorySource(BaseModel):
+    filename: str = "notes.txt"
+    content: str
+
+
+class ImportMemoryRequest(BaseModel):
+    scope: str
+    sources: list[ImportMemorySource]
+    memory_class: str = "fact"
+    domain: Optional[str] = "import"
+    topic: Optional[str] = None
+    confidence: float = 0.85
+    importance: float = 0.6
 
 
 class SearchMemoryRequest(BaseModel):
@@ -176,6 +216,125 @@ async def write_memory(
     )
 
     return success_response_with_headers({"record": record}, rate_headers, status_code=201)
+
+
+@router.post("/import")
+async def import_memory(
+    body: ImportMemoryRequest,
+    ctx: RequestContext = Depends(get_request_context),
+):
+    allowed, info = RL.check("agent", ctx.agent_id, "memory_write")
+    if not allowed:
+        return rate_limited_response("RATE_LIMITED", "memory_write rate limit exceeded", **info)
+
+    rate_headers = rate_limit_headers(**info)
+    enforcer = ScopeEnforcer(
+        ctx.read_scopes,
+        ctx.write_scopes,
+        ctx.agent_id,
+        is_admin=ctx.is_admin,
+        active_workspace_ids=ctx.active_workspace_ids,
+    )
+    if not enforcer.can_write(body.scope):
+        return error_response("SCOPE_DENIED", "Access denied to this scope", 403)
+
+    if body.memory_class not in MEMORY_CLASSES:
+        return error_response("INVALID_CLASS", f"memory_class must be one of {MEMORY_CLASSES}", 400)
+    if not 0.0 <= body.confidence <= 1.0:
+        return error_response("INVALID_CONFIDENCE", "confidence must be between 0.0 and 1.0", 400)
+    if not 0.0 <= body.importance <= 1.0:
+        return error_response("INVALID_IMPORTANCE", "importance must be between 0.0 and 1.0", 400)
+    if not body.sources:
+        return error_response("NO_SOURCES", "At least one import source is required", 400)
+    if len(body.sources) > 20:
+        return error_response("TOO_MANY_SOURCES", "At most 20 sources can be imported at once", 400)
+
+    parsed_sources = []
+    total_chars = 0
+    total_chunks = 0
+    for source in body.sources:
+        total_chars += len(source.content)
+        if total_chars > 500_000:
+            return error_response("IMPORT_TOO_LARGE", "Combined import content is too large", 413)
+        filename = memory_service.sanitize_import_filename(source.filename)
+        chunks = memory_service.parse_import_text(source.content, filename)
+        if not chunks:
+            continue
+        total_chunks += len(chunks)
+        parsed_sources.append({"filename": filename, "chunks": chunks})
+
+    if not parsed_sources:
+        return error_response("EMPTY_IMPORT", "No importable text was found", 400)
+    if total_chunks > 250:
+        return error_response("TOO_MANY_RECORDS", "Import would create too many memory records", 400)
+
+    if body.scope == "shared":
+        for parsed in parsed_sources:
+            for chunk in parsed["chunks"]:
+                if contains_pii(chunk["content"]):
+                    return error_response(
+                        "PII_DETECTED",
+                        "Imported content contains PII and cannot be written to shared scope",
+                        422,
+                    )
+
+    imported = []
+    records = []
+    try:
+        for parsed in parsed_sources:
+            record_ids = []
+            chunks = parsed["chunks"]
+            for index, chunk in enumerate(chunks, start=1):
+                record, pii_flag = memory_service.write_memory(
+                    content=chunk["content"],
+                    memory_class=body.memory_class,
+                    scope=body.scope,
+                    domain=body.domain,
+                    topic=body.topic or parsed["filename"],
+                    confidence=body.confidence,
+                    importance=body.importance,
+                    source_kind="external_import",
+                    provenance_json=_memory_import_provenance(
+                        ctx, body.scope, parsed["filename"], index, len(chunks)
+                    ),
+                )
+                if pii_flag == "PII_DETECTED":
+                    return error_response(
+                        "PII_DETECTED",
+                        "Imported content contains PII and cannot be written to shared scope",
+                        422,
+                    )
+                records.append(record)
+                record_ids.append(record["id"])
+            imported.append(
+                {
+                    "filename": parsed["filename"],
+                    "record_count": len(record_ids),
+                    "record_ids": record_ids,
+                }
+            )
+    except ValueError as e:
+        return error_response("INVALID_INPUT", str(e), 400)
+
+    audit_service.write_event(
+        actor_type=ctx.actor_type,
+        actor_id=ctx.actor_id,
+        action="memory_import",
+        resource_type="memory_record",
+        resource_id=None,
+        result="success",
+        details={
+            "scope": body.scope,
+            "source_count": len(imported),
+            "record_count": len(records),
+        },
+    )
+
+    return success_response_with_headers(
+        {"imported": imported, "records": records, "total_records": len(records)},
+        rate_headers,
+        status_code=201,
+    )
 
 
 @router.post("/search")

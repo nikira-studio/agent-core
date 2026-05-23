@@ -37,9 +37,25 @@ def rate_limited_response(code: str, message: str, limit: int, remaining: int, r
     return resp
 
 
-SCOPE_DENIED = lambda msg="Agent does not have access to this scope.": error_response("SCOPE_DENIED", msg, 403)
-NOT_FOUND = lambda msg="Resource not found.": error_response("NOT_FOUND", msg, 404)
-BAD_REQUEST = lambda msg="Bad request.": error_response("BAD_REQUEST", msg, 400)
-UNAUTHORIZED = lambda msg="Authentication required.": error_response("UNAUTHORIZED", msg, 401)
-FORBIDDEN = lambda msg="Action not permitted.": error_response("FORBIDDEN", msg, 403)
-INTERNAL_ERROR = lambda msg="Internal server error.": error_response("INTERNAL_ERROR", msg, 500)
+def SCOPE_DENIED(msg="Agent does not have access to this scope."):
+    return error_response("SCOPE_DENIED", msg, 403)
+
+
+def NOT_FOUND(msg="Resource not found."):
+    return error_response("NOT_FOUND", msg, 404)
+
+
+def BAD_REQUEST(msg="Bad request."):
+    return error_response("BAD_REQUEST", msg, 400)
+
+
+def UNAUTHORIZED(msg="Authentication required."):
+    return error_response("UNAUTHORIZED", msg, 401)
+
+
+def FORBIDDEN(msg="Action not permitted."):
+    return error_response("FORBIDDEN", msg, 403)
+
+
+def INTERNAL_ERROR(msg="Internal server error."):
+    return error_response("INTERNAL_ERROR", msg, 500)

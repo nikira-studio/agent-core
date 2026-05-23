@@ -190,7 +190,6 @@ async def login(body: LoginRequest, request: Request):
         )
         return error_response("INVALID_CREDENTIALS", "Invalid credentials", 401)
 
-    from app.services.auth_service import verify_password
     if not verify_password(body.password, user["password_hash"]):
         allowed_ip, info_ip = RL.check("user", client_ip, "login_failed")
         allowed_user, info_user = RL.check("user", user["id"], "login_failed")
