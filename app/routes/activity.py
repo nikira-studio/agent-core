@@ -24,12 +24,14 @@ class CreateActivityRequest(BaseModel):
 
 class UpdateActivityRequest(BaseModel):
     status: Optional[str] = None
+    task_result: Optional[str] = None
     metadata_json: Optional[str] = None
 
 
 class RecoveryRequest(BaseModel):
     action: str
     new_agent_id: Optional[str] = None
+    task_result: Optional[str] = None
 
 
 def _can_modify_activity(ctx: RequestContext, activity: dict) -> bool:
@@ -47,6 +49,8 @@ def _activity_audit_details(activity: dict, **extra) -> dict:
         "memory_scope": activity.get("memory_scope"),
         "agent_id": activity.get("agent_id"),
     }
+    if activity.get("task_result") is not None:
+        details["task_result"] = activity.get("task_result")
     assigned_agent_id = activity.get("assigned_agent_id")
     if assigned_agent_id:
         details["assigned_agent_id"] = assigned_agent_id
@@ -58,6 +62,7 @@ def _activity_event_data(activity: dict, **extra) -> dict:
     event_data = {
         "activity_id": activity.get("id"),
         "task_description": activity.get("task_description"),
+        "task_result": activity.get("task_result"),
         "agent_id": activity.get("agent_id"),
         "assigned_agent_id": activity.get("assigned_agent_id"),
         "user_id": activity.get("user_id"),
@@ -205,6 +210,7 @@ async def update_activity(
     success = activity_service.update_activity(
         activity_id,
         status=body.status,
+        task_result=body.task_result,
         metadata_json=body.metadata_json,
     )
     if not success:
@@ -387,8 +393,14 @@ async def recover_activity(
     result_data = {"activity_id": activity_id}
 
     if body.action == "mark_completed":
-        activity_service.update_activity(activity_id, status="completed")
+        activity_service.update_activity(
+            activity_id,
+            status="completed",
+            task_result=body.task_result,
+        )
         result_data["status"] = "completed"
+        if body.task_result is not None:
+            result_data["task_result"] = body.task_result
 
     elif body.action == "mark_cancelled":
         activity_service.cancel_activity(activity_id)

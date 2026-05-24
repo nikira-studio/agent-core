@@ -68,11 +68,11 @@ Once connected, these tools are available in any session:
 | `memory_retract` | Soft-delete a memory record |
 | `credential_get` | Get an `AC_SECRET_*` reference for a stored credential |
 | `credential_list` | List credential entries the agent can access (metadata and references only — no raw values) |
-| `activity_update` | Create or update an activity record (for tracking active work) |
+| `activity_update` | Create or update an activity record, including a completion result |
 | `activity_get` | Get the status of an activity |
 | `activity_list` | List activities visible to the current agent or user |
 | `activity_pickup` | Claim the next active work item a human assigned to this agent in authorized scopes |
-| `get_briefing` | Pull a handoff briefing when taking over from another agent |
+| `get_briefing` | Pull a briefing when taking over from another agent |
 | `briefing_list` | List generated briefings visible to the current agent or user |
 | `connectors_list` | List available connector types |
 | `connectors_bindings_list` | List connector bindings in authorized scopes |
@@ -385,6 +385,8 @@ You are connected to Agent Core at http://localhost:3500.
 - Store decisions, preferences, and facts: `memory_write`
 - For credentials: use `credential_get` to retrieve an AC_SECRET_* reference — never ask the user for raw API keys
 - Send `activity_update` heartbeats every 1–2 minutes while working on a task
+- If the session reloads, a handoff begins, or no active activity exists yet, open a fresh activity first with `status: active` before attempting to close it
+- When finishing a task, include `status: completed` and a short `task_result` summary of what changed
 ```
 
 ---
@@ -674,7 +676,8 @@ Agent sessions do not wake up automatically. The pickup is an explicit pull:
 2. The agent session calls `activity_pickup` at startup or when idle.
 3. If a matching activity exists (same `assigned_agent_id`, same readable workspace scope), it is returned and heartbeated.
 4. The agent reads the task, starts working, and sends heartbeats via `activity_update`.
-5. When done, the agent marks the activity `completed` or `blocked`.
+5. If no active activity exists yet after a reload or handoff, open one with `status: active` before closing it.
+6. When done, the agent marks the activity `completed` with a short `task_result` summary, or `blocked` if it cannot finish.
 
 **Pickup is workspace-aware.** An agent session only sees activities whose `memory_scope` is within its authorized read scopes. An agent configured for `workspace:project-a` cannot claim a task scoped to `workspace:project-b`, and it cannot claim tasks assigned to a different agent.
 
@@ -714,7 +717,7 @@ The practical flow is:
 1. The current agent keeps its activity record up to date with `activity_update` heartbeats.
 2. It writes durable decisions, facts, and handoff notes to memory when something should survive beyond the current session.
 3. When work stops, the next agent reads the latest activity, relevant memory, and any generated briefing.
-4. If an activity is stale or being handed off intentionally, generate a briefing with `/api/briefings/handoff` or `get_briefing`. Briefings are handoff artifacts created on demand, not something the system scheduler produces automatically.
+4. If an activity is stale or being handed off intentionally, generate a briefing with `/api/briefings/handoff` or `get_briefing`. Briefings are on-demand task transfer artifacts, not something the system scheduler produces automatically.
 
 This isn't automatic orchestration — it's a durable handoff trail and mailroom. A different agent picks up where the last one stopped, with full context, instead of starting blind.
 
@@ -733,7 +736,7 @@ curl -X POST http://localhost:3500/api/briefings/handoff \
   -d '{"activity_id": "<activity-id>"}'
 ```
 
-The briefing includes the current task description, recent decisions, key facts, and relevant memory pulled from the activity's scope. The incoming agent can call `get_briefing` via MCP to pull this as part of its startup.
+The briefing includes the current task description, any recorded task result, recent decisions, key facts, and relevant memory pulled from the activity's scope. The incoming agent can call `get_briefing` via MCP to pull this as part of its startup.
 
 ---
 
@@ -787,7 +790,7 @@ Commands use dot notation and imperative form. They are not the same as outbound
 | --- | --- |
 | `activity.create` | Create a new activity, assign it to an agent |
 | `activity.assign` | Reassign an existing activity to a different agent |
-| `activity.update` | Update status, description, or scope metadata of an existing activity |
+| `activity.update` | Update status, description, result, or scope metadata of an existing activity |
 | `activity.cancel` | Cancel an existing activity |
 | `activity.note` | Append an append-only note to the activity's audit trail |
 
@@ -834,7 +837,7 @@ Webhooks are **admin-only** and managed from the **Webhooks** page in the dashbo
 | Event | Fires when |
 | --- | --- |
 | `activity_created` | A new activity is created |
-| `activity_updated` | An activity's status or metadata changes |
+| `activity_updated` | An activity's status, metadata, or task result changes |
 | `activity_heartbeat` | An agent sends a heartbeat on an active task |
 | `activity_cancelled` | An activity is cancelled |
 | `activity_recovered` | An activity is recovered (reassigned, resumed, closed) |
@@ -858,6 +861,7 @@ Activity events (`activity_created`, `activity_updated`, `activity_heartbeat`, `
 {
   "activity_id": "abc123",
   "task_description": "Refactor auth middleware",
+  "task_result": "Completed auth middleware refactor and added tests",
   "agent_id": "my-agent",
   "assigned_agent_id": "my-agent",
   "user_id": "admin",
@@ -870,6 +874,8 @@ Activity events (`activity_created`, `activity_updated`, `activity_heartbeat`, `
   "previous_status": "active"
 }
 ```
+
+`task_result` is optional and is typically populated when a task is completed. `previous_status` is present on `activity_updated` and `activity_cancelled`. `recovery_action` and `result` are present on `activity_recovered`.
 
 Connector events (`connector_executed`) include binding identity, scope, and result:
 

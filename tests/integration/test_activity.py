@@ -72,6 +72,40 @@ def test_update_activity_status(test_client, agent_token):
     assert details["action"] == "update"
     assert details["previous_status"] == "active"
     assert details["new_status"] == "stale"
+    assert "task_result" not in details
+
+
+def test_update_activity_can_store_task_result(test_client, agent_token):
+    create_r = test_client.post(
+        "/api/activity",
+        headers={"Authorization": f"Bearer {agent_token}"},
+        json={"task_description": "Completion result test"},
+    )
+    assert create_r.status_code == 201
+    activity_id = create_r.json()["data"]["activity"]["id"]
+
+    r = test_client.put(
+        f"/api/activity/{activity_id}",
+        headers={"Authorization": f"Bearer {agent_token}"},
+        json={"status": "completed", "task_result": "Finished the requested update"},
+    )
+    assert r.status_code == 200
+    activity = r.json()["data"]["activity"]
+    assert activity["status"] == "completed"
+    assert activity["task_result"] == "Finished the requested update"
+
+    from app.database import get_db
+
+    with get_db() as conn:
+        row = conn.execute(
+            "SELECT details_json FROM audit_log WHERE action = 'activity_update' AND resource_id = ? ORDER BY id DESC LIMIT 1",
+            (activity_id,),
+        ).fetchone()
+
+    assert row is not None
+    details = json.loads(row["details_json"])
+    assert details["new_status"] == "completed"
+    assert details["task_result"] == "Finished the requested update"
 
 
 def test_activity_requires_agent(test_client, admin_token):

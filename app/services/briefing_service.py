@@ -73,7 +73,7 @@ def generate_handoff_briefing(
                 requesting_agent_id,
                 requesting_agent_id,
                 requesting_user_id,
-                f"Handoff briefing for activity {activity_id}",
+                f"Briefing for activity {activity_id}",
                 memory_scope,
                 now,
                 json.dumps({
@@ -95,12 +95,18 @@ def generate_handoff_briefing(
         "assigned_agent_id": activity.get("assigned_agent_id") or activity["agent_id"],
         "memory_scope": memory_scope,
         "task_description": activity["task_description"],
+        "task_result": activity.get("task_result"),
         "started_at": activity["started_at"],
         "decisions": [{"id": r["id"], "content": r["content"]} for r in decisions[:10]],
         "facts": [{"id": r["id"], "content": r["content"]} for r in facts[:10]],
         "preferences": [{"id": r["id"], "content": r["content"]} for r in preferences[:10]],
         "recent_completed": [
-            {"id": a["id"], "task_description": a["task_description"], "ended_at": a.get("ended_at")}
+            {
+                "id": a["id"],
+                "task_description": a["task_description"],
+                "task_result": a.get("task_result"),
+                "ended_at": a.get("ended_at"),
+            }
             for a in recent_activities
         ],
         "generated_at": now,
@@ -196,7 +202,12 @@ def generate_prd_handoff_briefing(
             "started_at": active_task["started_at"],
         } if active_task else None,
         "recent_completed": [
-            {"description": a["task_description"], "ended_at": a.get("ended_at"), "outcome": "success"}
+            {
+                "description": a["task_description"],
+                "task_result": a.get("task_result"),
+                "ended_at": a.get("ended_at"),
+                "outcome": "success",
+            }
             for a in recent_completed
         ],
         "key_decisions": key_decisions,
@@ -215,7 +226,7 @@ def generate_prd_handoff_briefing(
                 from_agent_id,
                 to_agent_id,
                 user_id,
-                f"PRD handoff briefing {from_agent_id} -> {to_agent_id}",
+                f"PRD briefing {from_agent_id} -> {to_agent_id}",
                 f"agent:{from_agent_id}",
                 now,
                 json.dumps({"briefing": briefing}),
@@ -258,7 +269,7 @@ def list_briefings(
         params.extend([agent_id, agent_id])
 
     conditions.append(
-        "(task_description LIKE 'Handoff briefing%' OR task_description LIKE 'PRD handoff briefing%' OR metadata_json LIKE '%\"briefing\"%')"
+        "(task_description LIKE 'Briefing%' OR task_description LIKE 'PRD briefing%' OR task_description LIKE 'Handoff briefing%' OR task_description LIKE 'PRD handoff briefing%' OR metadata_json LIKE '%\"briefing\"%')"
     )
     where = " AND ".join(conditions)
     params.extend([limit, offset])

@@ -123,6 +123,24 @@ class TestDispatch:
             args = mock_deliver.call_args[0]
             assert args[3] == "activity_cancelled"
 
+    def test_dispatch_preserves_task_result(self, clean_db):
+        _make_webhook(clean_db, event_types=["activity_updated"])
+        captured = []
+
+        def fake_deliver(webhook_id, url, secret_encrypted, event_type, payload):
+            captured.append(payload)
+
+        with patch("app.services.webhook_service._deliver_one", side_effect=fake_deliver):
+            from app.services.webhook_service import dispatch_event
+            dispatch_event(
+                "activity_updated",
+                {"activity_id": "abc", "task_result": "Completed the task"},
+            )
+            import time; time.sleep(0.05)
+
+        assert captured
+        assert captured[0]["data"]["task_result"] == "Completed the task"
+
     def test_dispatch_skips_unsubscribed_event(self, clean_db):
         _make_webhook(clean_db, event_types=["activity_cancelled"])
         with patch("threading.Thread") as mock_thread:
@@ -189,6 +207,27 @@ class TestTestDelivery:
         assert "timestamp" in payload
         assert "data" in payload
         assert payload["data"]["message"] == "Agent Core webhook test delivery"
+
+    def test_activity_updated_test_delivery_includes_task_result(self, clean_db):
+        wh = _make_webhook(clean_db)
+        posted_bodies = []
+
+        def mock_post(url, *, content, headers, timeout):
+            posted_bodies.append(json.loads(content))
+            resp = MagicMock()
+            resp.status_code = 200
+            return resp
+
+        with patch("httpx.post", side_effect=mock_post):
+            from app.services.webhook_service import test_delivery
+            result = test_delivery(wh["id"], event_type="activity_updated")
+
+        assert result["ok"] is True
+        assert len(posted_bodies) == 1
+        payload = posted_bodies[0]
+        assert payload["event_type"] == "activity_updated"
+        assert payload["data"]["status"] == "completed"
+        assert payload["data"]["task_result"] == "Completed the sample task and verified the result"
 
     def test_test_delivery_does_not_replay_prior_delivery(self, clean_db):
         from app.services.webhook_service import _record_delivery, test_delivery, list_deliveries

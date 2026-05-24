@@ -450,7 +450,7 @@ The broker credential authenticates the request. The `agent_id` must come from t
 | `GET` | `/api/activity` | Agent/session | List visible activities |
 | `POST` | `/api/activity/pickup` | Agent | Claim the next active work item assigned to this agent in authorized scopes |
 | `GET` | `/api/activity/{activity_id}` | Agent/session | Get activity |
-| `PUT` | `/api/activity/{activity_id}` | Agent/session | Update status or metadata |
+| `PUT` | `/api/activity/{activity_id}` | Agent/session | Update status, metadata, or task result |
 | `POST` | `/api/activity/{activity_id}/heartbeat` | Agent/session | Refresh heartbeat timestamp |
 | `DELETE` | `/api/activity/{activity_id}` | Agent/session | Cancel activity |
 | `POST` | `/api/activity/{activity_id}/recovery` | Admin | Reassign stale activity and generate briefing |
@@ -502,8 +502,8 @@ The pickup is workspace-aware: an agent configured with `workspace:proj-a` in it
 
 | Method | Path | Description |
 | --- | --- | --- |
-| `POST` | `/api/briefings/handoff` | Generate handoff briefing for an activity |
-| `POST` | `/api/briefings/handoff/prd` | Generate a PRD-shaped handoff from one agent to another |
+| `POST` | `/api/briefings/handoff` | Generate briefing for an activity |
+| `POST` | `/api/briefings/handoff/prd` | Generate a PRD-shaped briefing from one agent to another |
 | `GET` | `/api/briefings/{briefing_id}` | Get briefing |
 
 Standard handoff (based on an active activity):
@@ -520,7 +520,7 @@ PRD-shaped handoff (agent-to-agent transition):
 }
 ```
 
-Briefings include authorized decision, fact, and preference memory linked to the activity scope.
+Briefings include authorized decision, fact, and preference memory linked to the activity scope, plus the source activity's task result when one was recorded.
 
 ---
 
@@ -554,11 +554,11 @@ Dispatch:
 | `memory_retract` | Soft-delete a memory record |
 | `credential_get` | Get an `AC_SECRET_*` reference for a credential entry |
 | `credential_list` | List credential metadata and references in authorized scopes |
-| `activity_update` | Create or update an activity record |
+| `activity_update` | Create or update an activity record, including completion result |
 | `activity_get` | Get an activity record |
 | `activity_list` | List activities visible to the current caller |
 | `activity_pickup` | Claim the next active work item assigned to this agent in authorized scopes |
-| `get_briefing` | Fetch a handoff briefing |
+| `get_briefing` | Fetch a briefing |
 | `briefing_list` | List briefings visible to the current caller |
 | `connectors_list` | List available connector types |
 | `connectors_bindings_list` | List connector bindings in authorized scopes |
@@ -612,7 +612,7 @@ data: {"type": "activity_created", "timestamp": "2026-05-18T12:34:56.789Z", "dat
 | Event | Trigger |
 | --- | --- |
 | `activity_created` | A new activity record is created |
-| `activity_updated` | An activity status or metadata is updated |
+| `activity_updated` | An activity status, metadata, or task result is updated |
 | `activity_heartbeat` | An agent sends a heartbeat for an activity |
 | `activity_cancelled` | An activity is cancelled |
 | `activity_recovered` | A stale activity is reassigned or recovered |
@@ -749,7 +749,7 @@ Commands use dot notation and imperative form to distinguish them from outbound 
 | --- | --- | --- |
 | `activity.create` | `assigned_agent_id` | `task_description`, `memory_scope`, `workspace` |
 | `activity.assign` | `activity_id`, `assigned_agent_id` | `memory_scope` |
-| `activity.update` | `activity_id` + at least one of: `status`, `task_description`, `memory_scope` | |
+| `activity.update` | `activity_id` + at least one of: `status`, `task_description`, `task_result`, `memory_scope` | |
 | `activity.cancel` | `activity_id` | `reason` |
 | `activity.note` | `activity_id`, `note` | |
 
@@ -786,14 +786,15 @@ Reassigns an existing activity to a different agent.
 
 #### activity.update
 
-Updates status or description of an existing activity.
+Updates status, description, result, or scope metadata of an existing activity.
 
 ```json
 {
   "event_type": "activity.update",
   "activity_id": "abc123",
   "status": "completed",
-  "task_description": "Reviewed and approved"
+  "task_description": "Reviewed and approved",
+  "task_result": "Reviewed the patch and approved the change"
 }
 ```
 
@@ -903,6 +904,7 @@ Every delivery is a signed HTTP POST. The envelope is the same for all event typ
 {
   "activity_id": "abc123",
   "task_description": "Refactor auth middleware",
+  "task_result": "Completed auth middleware refactor and added tests",
   "agent_id": "my-agent",
   "assigned_agent_id": "my-agent",
   "user_id": "admin",
@@ -916,7 +918,7 @@ Every delivery is a signed HTTP POST. The envelope is the same for all event typ
 }
 ```
 
-`previous_status` is present on `activity_updated` and `activity_cancelled`. `recovery_action` and `result` are present on `activity_recovered`.
+`task_result` is optional and is typically populated when a task is completed. `previous_status` is present on `activity_updated` and `activity_cancelled`. `recovery_action` and `result` are present on `activity_recovered`.
 
 **Connector event `data` fields** (`connector_executed`):
 

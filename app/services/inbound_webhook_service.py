@@ -220,7 +220,7 @@ def _handle_update(payload: dict, ip_address: Optional[str]) -> dict:
     activity_id = payload["activity_id"]
     updates = {
         k: payload[k]
-        for k in ("status", "task_description", "memory_scope")
+        for k in ("status", "task_description", "task_result", "memory_scope")
         if k in payload
     }
     if not updates:

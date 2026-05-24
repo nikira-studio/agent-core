@@ -88,7 +88,9 @@ def test_integrations_generates_claude_md(integrations_client):
     assert output_match is not None
     output = output_match.group(1)
     assert "CLAUDE.md" in html
+    assert "open a fresh activity first" in output
     assert "workspace:agent-core" in output
+    assert "task_result" in output
     assert "user:brian" not in output
     assert "Agent ID:" not in output
 
@@ -133,6 +135,7 @@ def test_integrations_generates_verification_prompt(integrations_client):
     assert "connectors_actions_list" in html
     assert "connectors_bindings_test" in html
     assert "connectors_summary" in html
+    assert "task_result" in html
 
 
 def test_integrations_access_checks_show_ok_for_good_agent(integrations_client):

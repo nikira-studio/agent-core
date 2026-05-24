@@ -69,6 +69,21 @@ def test_claim_does_not_return_cancelled_activity(clean_db):
     assert result is None
 
 
+def test_update_activity_can_store_task_result(clean_db):
+    from app.services.activity_service import create_activity, update_activity, get_activity
+
+    act = create_activity(
+        agent_id="agentA",
+        user_id="testuser",
+        task_description="Do something",
+        memory_scope="agent:agentA",
+    )
+    update_activity(act["id"], status="completed", task_result="Finished the work")
+    fresh = get_activity(act["id"])
+    assert fresh["status"] == "completed"
+    assert fresh["task_result"] == "Finished the work"
+
+
 def test_claim_different_agent_cannot_claim(clean_db):
     from app.services.activity_service import claim_next_activity
 

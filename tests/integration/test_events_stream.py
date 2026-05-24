@@ -56,13 +56,14 @@ def test_activity_update_publishes_event(test_client, agent_token):
         r2 = test_client.put(
             f"/api/activity/{activity_id}",
             headers={"Authorization": f"Bearer {agent_token}"},
-            json={"status": "completed"},
+            json={"status": "completed", "task_result": "Event stream result test"},
         )
         assert r2.status_code == 200
 
         payload = q.get_nowait()
         assert payload["type"] == "activity_updated"
         assert payload["data"]["activity_id"] == activity_id
+        assert payload["data"]["task_result"] == "Event stream result test"
     finally:
         event_hub.unregister(client_id)
 

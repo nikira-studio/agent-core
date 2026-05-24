@@ -256,26 +256,30 @@ def _sample_payload(event_type: str) -> dict:
     started = "2026-01-15T10:00:00+00:00"
     if event_type in ("activity_created", "activity_updated", "activity_heartbeat",
                        "activity_cancelled", "activity_recovered"):
+        status_map = {
+            "activity_created": "active",
+            "activity_updated": "completed",
+            "activity_heartbeat": "active",
+            "activity_cancelled": "cancelled",
+            "activity_recovered": "active",
+        }
         data = {
             "activity_id": "sample-activity-id",
             "task_description": "Sample task: reviewing PR #42",
+            "task_result": "Completed the sample task and verified the result" if event_type == "activity_updated" else None,
             "agent_id": "my-agent",
             "assigned_agent_id": "my-agent",
             "user_id": "admin",
             "memory_scope": "workspace:my-project",
-            "status": {
-                "activity_created": "active",
-                "activity_updated": "active",
-                "activity_heartbeat": "active",
-                "activity_cancelled": "cancelled",
-                "activity_recovered": "active",
-            }[event_type],
+            "status": status_map[event_type],
             "started_at": started,
             "updated_at": now,
             "heartbeat_at": now,
-            "ended_at": now if event_type == "activity_cancelled" else None,
+            "ended_at": now if event_type in ("activity_cancelled", "activity_updated") else None,
             "previous_status": "active" if event_type != "activity_created" else None,
         }
+        if event_type == "activity_updated":
+            data["previous_status"] = "active"
     elif event_type == "connector_executed":
         data = {
             "binding_id": "sample-binding-id",

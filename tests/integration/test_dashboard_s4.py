@@ -36,7 +36,7 @@ def test_integrations_page_is_current_workflow(admin_client):
     html = r.text
     assert "<h1>Integrations</h1>" in html
     assert "Generate setup instructions, environment variables, MCP config, and AI-facing prompts for connecting tools to Agent Core." in html
-    assert 'action="/integrations#generated-output"' in html
+    assert 'action="/integrations"' in html
     assert 'id="user_id"' in html
     assert 'id="workspace_id"' in html
     assert 'id="agent_id"' in html

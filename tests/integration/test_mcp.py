@@ -329,6 +329,40 @@ def test_mcp_activity_update_can_change_existing_task_and_scope(
     assert activity["memory_scope"] == "agent:testagent"
 
 
+def test_mcp_activity_update_can_store_task_result(test_client, agent_token):
+    created = test_client.post(
+        "/mcp",
+        headers={"Authorization": f"Bearer {agent_token}"},
+        json={
+            "tool": "activity_update",
+            "params": {
+                "task_description": "Result task",
+                "memory_scope": "agent:testagent",
+            },
+        },
+    )
+    assert created.status_code == 201, created.json()
+    activity_id = created.json()["data"]["activity"]["id"]
+
+    updated = test_client.post(
+        "/mcp",
+        headers={"Authorization": f"Bearer {agent_token}"},
+        json={
+            "tool": "activity_update",
+            "params": {
+                "status": "completed",
+                "task_result": "Completed via MCP",
+                "memory_scope": "agent:testagent",
+            },
+        },
+    )
+    assert updated.status_code == 200, updated.json()
+    activity = updated.json()["data"]["activity"]
+    assert activity["id"] == activity_id
+    assert activity["status"] == "completed"
+    assert activity["task_result"] == "Completed via MCP"
+
+
 def test_mcp_tool_briefing_list(test_client, agent_token):
     created = test_client.post(
         "/mcp",

@@ -178,6 +178,7 @@ CREATE TABLE IF NOT EXISTS agent_activity (
     assigned_agent_id TEXT,
     reassigned_from_agent_id TEXT,
     task_description TEXT NOT NULL,
+    task_result TEXT,
     status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'stale', 'reassigned', 'completed', 'blocked', 'cancelled')),
     memory_scope TEXT,
     started_at TEXT NOT NULL,
@@ -344,6 +345,7 @@ CREATE TABLE IF NOT EXISTS inbound_webhook_keys (
 
 def create_schema(conn) -> None:
     conn.executescript(SCHEMA_SQL)
+    _ensure_activity_columns(conn)
     _ensure_memory_metadata_columns(conn)
     _ensure_connector_type_provider_columns(conn)
     conn.execute(
@@ -367,6 +369,15 @@ def create_schema(conn) -> None:
     _ensure_webhook_tables(conn)
     _ensure_inbound_webhook_table(conn)
     _seed_connector_types(conn)
+
+
+def _ensure_activity_columns(conn) -> None:
+    columns = {
+        row["name"] for row in conn.execute("PRAGMA table_info(agent_activity)").fetchall()
+    }
+    if "task_result" not in columns:
+        conn.execute("ALTER TABLE agent_activity ADD COLUMN task_result TEXT")
+        conn.commit()
 
 
 def _ensure_memory_metadata_columns(conn) -> None:

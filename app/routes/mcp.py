@@ -22,6 +22,7 @@ def _activity_event_data(activity: dict, **extra) -> dict:
     event_data = {
         "activity_id": activity.get("id"),
         "task_description": activity.get("task_description"),
+        "task_result": activity.get("task_result"),
         "agent_id": activity.get("agent_id"),
         "assigned_agent_id": activity.get("assigned_agent_id"),
         "user_id": activity.get("user_id"),
@@ -143,6 +144,7 @@ MANIFEST = {
                 "type": "object",
                 "properties": {
                     "task_description": {"type": "string"},
+                    "task_result": {"type": "string"},
                     "status": {"type": "string"},
                     "memory_scope": {"type": "string"},
                 },
@@ -392,6 +394,8 @@ def _activity_audit_details(activity: dict, **extra) -> dict:
         "memory_scope": activity.get("memory_scope"),
         "agent_id": activity.get("agent_id"),
     }
+    if activity.get("task_result") is not None:
+        details["task_result"] = activity.get("task_result")
     if activity.get("assigned_agent_id"):
         details["assigned_agent_id"] = activity.get("assigned_agent_id")
     details.update({k: v for k, v in extra.items() if v is not None})
@@ -772,13 +776,15 @@ async def _handle_custom_mcp_tool(body: dict, ctx: RequestContext):
                 activity_service.update_activity(
                     existing["id"],
                     task_description=params.get("task_description"),
+                    task_result=params.get("task_result"),
                     memory_scope=memory_scope,
                     status=params["status"],
                 )
-            elif params.get("task_description") or memory_scope:
+            elif params.get("task_description") or params.get("task_result") or memory_scope:
                 activity_service.update_activity(
                     existing["id"],
                     task_description=params.get("task_description"),
+                    task_result=params.get("task_result"),
                     memory_scope=memory_scope,
                 )
             else:
@@ -796,6 +802,7 @@ async def _handle_custom_mcp_tool(body: dict, ctx: RequestContext):
                     action="heartbeat"
                     if not params.get("status")
                     and not params.get("task_description")
+                    and not params.get("task_result")
                     and not memory_scope
                     else "update",
                     previous_status=existing["status"],
@@ -805,7 +812,12 @@ async def _handle_custom_mcp_tool(body: dict, ctx: RequestContext):
             )
             _evt_data = _activity_event_data(_updated, previous_status=existing["status"])
             _new_status = params.get("status")
-            if not _new_status and not params.get("task_description") and not memory_scope:
+            if (
+                not _new_status
+                and not params.get("task_description")
+                and not params.get("task_result")
+                and not memory_scope
+            ):
                 webhook_service.dispatch_event("activity_heartbeat", _evt_data)
             elif _new_status == "cancelled":
                 webhook_service.dispatch_event("activity_cancelled", _evt_data)

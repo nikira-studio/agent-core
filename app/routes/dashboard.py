@@ -371,7 +371,11 @@ async def dashboard_search(
         is_briefing = bool(
             isinstance(metadata, dict)
             and metadata.get("briefing")
+            or (activity.get("task_description") or "").startswith("Briefing")
             or (activity.get("task_description") or "").startswith("Handoff briefing")
+            or (activity.get("task_description") or "").startswith(
+                "PRD briefing"
+            )
             or (activity.get("task_description") or "").startswith(
                 "PRD handoff briefing"
             )
@@ -2817,7 +2821,7 @@ async def activity_page(request: Request, session: dict = Depends(require_auth))
         const section = function(title, items, emptyLabel) {
           const rows = (items || []).map(function(item) {
             const label = item.content || item.description || item.task_description || '';
-            const meta = item.ended_at || item.started_at || item.generated_at || item.outcome || '';
+            const meta = item.task_result || item.outcome || item.ended_at || item.started_at || item.generated_at || '';
             return '<li><div style="font-weight:600">' + escapeHtml(label).substring(0, 120) + '</div>' +
               (meta ? '<div class="text-muted" style="font-size:0.85rem">' + escapeHtml(String(meta)).substring(0, 60) + '</div>' : '') +
               '</li>';
@@ -2829,6 +2833,7 @@ async def activity_page(request: Request, session: dict = Depends(require_auth))
           '<div class="card" style="margin-bottom:12px;padding:12px">',
           '<div class="text-muted" style="font-size:0.85rem">Source activity</div>',
           '<div style="font-weight:600">' + escapeHtml(b.task_description || '') + '</div>',
+          (b.task_result ? '<div class="text-muted" style="font-size:0.85rem;margin-top:4px">Result: ' + escapeHtml(b.task_result) + '</div>' : ''),
           '<div class="text-muted" style="font-size:0.85rem;margin-top:4px">',
           'Agent: ' + escapeHtml(b.agent_id || '') + ' | Assigned: ' + escapeHtml(b.assigned_agent_id || '') + ' | Generated: ' + escapeHtml((b.generated_at || '').substring(0, 19)),
           '</div>',
@@ -2989,7 +2994,7 @@ async def activity_page(request: Request, session: dict = Depends(require_auth))
     <!-- Briefing Modal -->
     <div class="modal-overlay" id="briefing-modal" style="display:none">
       <div class="modal" style="max-width:600px">
-        <h3>Handoff Briefing</h3>
+  <h3>Briefing</h3>
         <div id="briefing-content" style="max-height:400px;overflow-y:auto"></div>
         <div class="modal-footer">
           <button class="btn btn-secondary" onclick="closeModal('briefing-modal')">Close</button>
@@ -5562,7 +5567,7 @@ Use your private scope `{agent_scope}` only for tool-specific scratch context.
 Use full prefixed scope names exactly as shown; do not use plain workspace IDs or agent IDs as memory scopes.
 Read `{user_scope}` for stable {user_display} preferences and other owner-context details when you have user-scope read access.
 Use credential references through Agent Core MCP; never request or print raw secrets.
-Activity records are operational task tracking, not durable memory. At the start of every non-trivial user task, immediately call `activity_update` with a concise `task_description`, `memory_scope` set to `{default_scope}`, and `status` set to `active`. While actively working, call `activity_update` again every 1-2 minutes as a heartbeat. Before your final response, call `activity_update` with `status: completed` when the task is complete, or `status: blocked` if you cannot proceed and need user input.
+Activity records are operational task tracking, not durable memory. At the start of every non-trivial user task, immediately call `activity_update` with a concise `task_description`, `memory_scope` set to `{default_scope}`, and `status` set to `active`. If the session reloads, a handoff begins, or no active activity exists yet, open a fresh activity first with `status: active` before attempting to close it. While actively working, call `activity_update` again every 1-2 minutes as a heartbeat. Before your final response, call `activity_update` with `status: completed` and a short `task_result` summary when the task is complete, or `status: blocked` if you cannot proceed and need user input.
 If the session has to stop early or hits a token limit, leave the activity current and write durable decisions or handoff notes to memory so another agent can continue from the saved state.
 If work needs to move across users or workspaces, make that explicit in the activity scope and handoff notes rather than assuming a hidden policy layer.
 If the client has hooks or plugins, use them to automate memory/activity capture; if it does not, treat this prompt as the source of truth for those expectations.
@@ -5674,7 +5679,7 @@ Use `activity_list` and `briefing_list` when you need to inspect that trail from
 
 While actively working, call `activity_update` again every 1-2 minutes as a heartbeat. Update `task_description` if the task changes materially.
 
-Before your final response, call `activity_update` with `status: completed` when the task is complete. Use `status: blocked` if you cannot proceed and need user input. Do not create activity records for trivial one-shot answers that do not inspect or modify project state.
+If the session reloads, a handoff begins, or no active activity exists yet, open a fresh activity first with `status: active` before attempting to close it. Before your final response, call `activity_update` with `status: completed` and a short `task_result` summary when the task is complete. Use `status: blocked` if you cannot proceed and need user input. Do not create activity records for trivial one-shot answers that do not inspect or modify project state.
 If the session has to stop early or hits a token limit, leave the activity current and write durable decisions or handoff notes to memory so another agent can continue from the saved state.
 If work needs to move across users or workspaces, make that explicit in the activity scope and handoff notes rather than assuming a hidden policy layer.
 If the client supports hooks or plugins, use them to automate these calls. If it does not, keep using this file as the manual operating contract.
@@ -5734,7 +5739,7 @@ Use `activity_list` and `briefing_list` when you need to inspect that trail from
 
 While actively working, call `activity_update` again every 1-2 minutes as a heartbeat. Update `task_description` if the task changes materially.
 
-Before your final response, call `activity_update` with `status: completed` when the task is complete. Use `status: blocked` if you cannot proceed and need user input. Do not create activity records for trivial one-shot answers that do not inspect or modify project state.
+If the session reloads, a handoff begins, or no active activity exists yet, open a fresh activity first with `status: active` before attempting to close it. Before your final response, call `activity_update` with `status: completed` and a short `task_result` summary when the task is complete. Use `status: blocked` if you cannot proceed and need user input. Do not create activity records for trivial one-shot answers that do not inspect or modify project state.
 If the session has to stop early or hits a token limit, leave the activity current and write durable decisions or handoff notes to memory so another agent can continue from the saved state.
 If work needs to move across users or workspaces, make that explicit in the activity scope and handoff notes rather than assuming a hidden policy layer.
 If the client supports hooks or plugins, use them to automate these calls. If it does not, keep using this file as the manual operating contract.
@@ -5842,7 +5847,7 @@ At the start of every meaningful task, call `activity_update` immediately with:
 
 While actively working, call `activity_update` again every 1-2 minutes as a heartbeat. Update `task_description` if the task changes materially.
 
-Before your final response, call `activity_update` with `status: completed` when the task is complete. Use `status: blocked` if you cannot proceed and need user input.
+If the session reloads, a handoff begins, or no active activity exists yet, open a fresh activity first with `status: active` before attempting to close it. Before your final response, call `activity_update` with `status: completed` and a short `task_result` summary when the task is complete. Use `status: blocked` if you cannot proceed and need user input.
 
 At the start of a meaningful task:
 
@@ -6035,7 +6040,7 @@ def _build_verification_prompt(user_scope, workspace_scope):
 6. Call `connectors_summary` to list visible connector capability and binding health. Then call `connectors_bindings_list` with no scope to see everything visible to this agent. If you can read `{user_scope}`, call `connectors_bindings_list` again with `scope` set to `{user_scope}`. If you can read `{workspace_scope}`, call `connectors_bindings_list` again with `scope` set to `{workspace_scope}`. Report user-scoped and workspace-scoped bindings separately if both exist.
 7. Call `connectors_actions_list` with a real connector type id from the `connectors_list` result and pass it as `connector_type_id` exactly. Report whether connector actions are visible.
 8. If at least one enabled binding is visible in any scope, call `connectors_bindings_test` on a non-destructive binding and report the result. If none are visible, say that clearly.
-9. Call `activity_update` with `status` set to `completed`.
+9. Call `activity_update` with `status` set to `completed` and include a short `task_result` summary of the verification outcome. If the session reloads or no active activity exists yet, first open the fresh verification activity with `status: active` before closing it.
 10. Report which scope you wrote to and summarize the memory, credential, and connector checks.
 
 Use the full prefixed scope name exactly as shown. Do not use a plain workspace ID as a memory scope.

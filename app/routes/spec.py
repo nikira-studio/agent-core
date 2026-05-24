@@ -99,7 +99,7 @@ async def spec(
         {
             "prefix": "/api/briefings",
             "methods": ["POST", "GET"],
-            "description": "Handoff briefing generate and retrieve",
+            "description": "Briefing generate and retrieve",
         },
         {
             "prefix": "/api/backup",
