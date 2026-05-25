@@ -36,6 +36,7 @@ def create_activity(
             "assigned_agent_id": agent_id,
             "user_id": user_id,
             "task_description": task_description,
+            "task_note": None,
             "task_result": None,
             "status": "active",
             "memory_scope": memory_scope,
@@ -50,7 +51,7 @@ def get_activity(activity_id: str) -> Optional[dict]:
         row = conn.execute(
             """
             SELECT id, agent_id, user_id, assigned_agent_id, reassigned_from_agent_id,
-                   task_description, task_result, status, memory_scope, started_at, updated_at,
+                   task_description, task_note, task_result, status, memory_scope, started_at, updated_at,
                    heartbeat_at, ended_at, metadata_json
             FROM agent_activity WHERE id = ?
             """,
@@ -73,6 +74,7 @@ def heartbeat_activity(activity_id: str) -> bool:
 def update_activity(
     activity_id: str,
     task_description: Optional[str] = None,
+    task_note: Optional[str] = None,
     task_result: Optional[str] = None,
     memory_scope: Optional[str] = None,
     status: Optional[str] = None,
@@ -85,6 +87,9 @@ def update_activity(
     if task_description is not None:
         updates.append("task_description = ?")
         params.append(task_description)
+    if task_note is not None:
+        updates.append("task_note = ?")
+        params.append(task_note)
     if task_result is not None:
         updates.append("task_result = ?")
         params.append(task_result)
@@ -148,7 +153,7 @@ def list_activities(
         rows = conn.execute(
             f"""
             SELECT id, agent_id, user_id, assigned_agent_id, reassigned_from_agent_id,
-                   task_description, task_result, status, memory_scope, started_at, updated_at,
+                   task_description, task_note, task_result, status, memory_scope, started_at, updated_at,
                    heartbeat_at, ended_at, metadata_json
             FROM agent_activity
             WHERE {where}
@@ -265,7 +270,7 @@ def claim_next_activity(
         row = conn.execute(
             f"""
             SELECT id, agent_id, user_id, assigned_agent_id, reassigned_from_agent_id,
-                   task_description, task_result, status, memory_scope, started_at, updated_at,
+                   task_description, task_note, task_result, status, memory_scope, started_at, updated_at,
                    heartbeat_at, ended_at, metadata_json
             FROM agent_activity
             WHERE assigned_agent_id = ? AND status = 'active'
@@ -301,7 +306,7 @@ def get_active_activity_for_agent(agent_id: str, user_id: Optional[str] = None) 
         row = conn.execute(
             f"""
             SELECT id, agent_id, user_id, assigned_agent_id, reassigned_from_agent_id,
-                   task_description, task_result, status, memory_scope, started_at, updated_at,
+                   task_description, task_note, task_result, status, memory_scope, started_at, updated_at,
                    heartbeat_at, ended_at, metadata_json
             FROM agent_activity
             WHERE {' AND '.join(conditions)}

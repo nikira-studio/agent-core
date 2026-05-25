@@ -1,5 +1,7 @@
 import pytest
 
+from app.branding import APP_NAME, CREDENTIAL_PREFIX
+
 
 @pytest.fixture
 def authenticated_client(test_client, clean_db):
@@ -46,7 +48,7 @@ def test_admin_settings_exposes_encryption_key_and_restore_mode_controls(admin_c
     assert "Secrets Snapshot" in html
     assert "Credential Entries" in html
     assert "This key protects stored credential values" in html
-    assert "AC_SECRET_* references at runtime" in html
+    assert f"{CREDENTIAL_PREFIX}* references at runtime" in html
     assert "Rotate Key" in html
     assert "Restore Key" in html
     assert 'id="restore-mode"' in html
@@ -213,7 +215,7 @@ def test_first_run_creates_admin_account(test_client, clean_db):
     assert r.status_code == 200
     html = r.text
     assert (
-        "Welcome to Agent Core" in html
+        f"Welcome to {APP_NAME}" in html
         or "Create your admin account" in html
         or "Sign In" in html
     )
@@ -379,7 +381,7 @@ def test_change_password_endpoint(authenticated_client):
         json={"current_password": "testpassword123", "new_password": "newpassword456"},
     )
     assert r.status_code == 200
-    assert r.json()["ok"] == True
+    assert r.json()["ok"] is True
 
 
 def test_change_password_wrong_current_fails(authenticated_client):
@@ -388,7 +390,7 @@ def test_change_password_wrong_current_fails(authenticated_client):
         json={"current_password": "wrongpassword", "new_password": "newpassword456"},
     )
     assert r.status_code == 400
-    assert r.json()["ok"] == False
+    assert r.json()["ok"] is False
 
 
 def test_admin_can_create_and_update_user(admin_client):
@@ -429,7 +431,6 @@ def test_admin_delete_user_cascades_owned_data(admin_client):
         agent_service,
         auth_service,
         memory_service,
-        workspace_service,
         workspace_service,
         credential_service,
         activity_service,
@@ -571,7 +572,7 @@ def test_system_behavior_settings_validate_real_ranges(admin_client):
         json={"scratchpad_retention_days": "0", "solo_mode_enabled": "maybe"},
     )
     assert r.status_code == 400
-    assert r.json()["ok"] == False
+    assert r.json()["ok"] is False
 
 
 def test_cookie_secure_setting_controls_login_cookie(test_client, clean_db):

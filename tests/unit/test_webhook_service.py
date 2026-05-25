@@ -2,7 +2,6 @@
 import hashlib
 import hmac
 import json
-import pytest
 from unittest.mock import patch, MagicMock
 
 
@@ -118,7 +117,8 @@ class TestDispatch:
         with patch("app.services.webhook_service._deliver_one") as mock_deliver:
             from app.services.webhook_service import dispatch_event
             dispatch_event("activity_cancelled", {"activity_id": "abc"})
-            import time; time.sleep(0.05)
+            import time
+            time.sleep(0.05)
             mock_deliver.assert_called_once()
             args = mock_deliver.call_args[0]
             assert args[3] == "activity_cancelled"
@@ -134,11 +134,17 @@ class TestDispatch:
             from app.services.webhook_service import dispatch_event
             dispatch_event(
                 "activity_updated",
-                {"activity_id": "abc", "task_result": "Completed the task"},
+                {
+                    "activity_id": "abc",
+                    "task_note": "Progress note",
+                    "task_result": "Completed the task",
+                },
             )
-            import time; time.sleep(0.05)
+            import time
+            time.sleep(0.05)
 
         assert captured
+        assert captured[0]["data"]["task_note"] == "Progress note"
         assert captured[0]["data"]["task_result"] == "Completed the task"
 
     def test_dispatch_skips_unsubscribed_event(self, clean_db):
@@ -206,9 +212,10 @@ class TestTestDelivery:
         assert payload["event_type"] == "test"
         assert "timestamp" in payload
         assert "data" in payload
-        assert payload["data"]["message"] == "Agent Core webhook test delivery"
+        from app.branding import APP_NAME
+        assert payload["data"]["message"] == f"{APP_NAME} webhook test delivery"
 
-    def test_activity_updated_test_delivery_includes_task_result(self, clean_db):
+    def test_activity_updated_test_delivery_includes_task_note(self, clean_db):
         wh = _make_webhook(clean_db)
         posted_bodies = []
 
@@ -226,11 +233,12 @@ class TestTestDelivery:
         assert len(posted_bodies) == 1
         payload = posted_bodies[0]
         assert payload["event_type"] == "activity_updated"
-        assert payload["data"]["status"] == "completed"
-        assert payload["data"]["task_result"] == "Completed the sample task and verified the result"
+        assert payload["data"]["status"] == "active"
+        assert payload["data"]["task_note"] == "Applied a sample progress update"
+        assert payload["data"]["task_result"] is None
 
     def test_test_delivery_does_not_replay_prior_delivery(self, clean_db):
-        from app.services.webhook_service import _record_delivery, test_delivery, list_deliveries
+        from app.services.webhook_service import _record_delivery, test_delivery
         wh = _make_webhook(clean_db)
         _record_delivery(wh["id"], "activity_created", '{"real":"payload"}', "success", 200, None)
 

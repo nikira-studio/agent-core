@@ -1,6 +1,8 @@
 import os
 import pytest
 
+from app.branding import ENV_PREFIX
+
 
 _original_settings = {}
 
@@ -19,14 +21,14 @@ def test_db_path():
 def clean_db(test_db_path):
     import app.database as db_mod
     db_mod.DB_PATH_OVERRIDE = str(test_db_path)
-    os.environ["AGENT_CORE_TEST_DB"] = str(test_db_path)
+    os.environ[f"{ENV_PREFIX}TEST_DB"] = str(test_db_path)
 
     tmpdir = test_db_path.parent
     from app.config import settings
 
     _original_settings["DATA_PATH"] = settings.DATA_PATH
     settings.DATA_PATH = str(tmpdir)
-    os.environ["AGENT_CORE_DATA_PATH"] = str(tmpdir)
+    os.environ[f"{ENV_PREFIX}DATA_PATH"] = str(tmpdir)
     try:
         from app.security import encryption
         encryption._fernet = None
@@ -49,7 +51,7 @@ def clean_db(test_db_path):
     yield test_db_path
 
     db_mod.DB_PATH_OVERRIDE = None
-    os.environ.pop("AGENT_CORE_TEST_DB", None)
+    os.environ.pop(f"{ENV_PREFIX}TEST_DB", None)
     try:
         from app.security import encryption
         encryption._fernet = None

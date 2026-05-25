@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, Request
+from app.branding import APP_NAME, JS_WINDOW_EVENT
 from app.security.context import build_user_context
 from app.security.scope_enforcer import ScopeEnforcer
 from app.database import get_db
@@ -442,7 +443,7 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
       <div class="modal">
         <h3>Import MCP Server</h3>
         <div style="background:var(--bg-secondary);border-left:3px solid var(--warning-color);padding:0.6rem 0.85rem;border-radius:4px;margin-bottom:1rem;font-size:0.875em">
-          <strong>HTTP transport only.</strong> Agent Core connects to MCP servers over HTTP — it cannot launch local processes.
+          <strong>HTTP transport only.</strong> {APP_NAME} connects to MCP servers over HTTP — it cannot launch local processes.
           Servers configured with <code>command</code>/<code>args</code> (stdio) are not supported here.
           Use <strong>+ Add HTTP Connector</strong> for REST APIs, or run a stdio server behind an HTTP bridge first.
         </div>
@@ -1087,6 +1088,7 @@ window.onAgentCoreEvent = function(event) {
 };
 
 </script>"""
+    js = js.replace("window.onAgentCoreEvent", "window." + JS_WINDOW_EVENT)
 
     return render_page("Connectors", body, "/connectors", js, session=session)
 
@@ -1359,6 +1361,7 @@ async def connectors_help_page(request: Request, session: dict = Depends(require
       <a href="/connectors" class="btn btn-secondary">Back to Connectors</a>
     </div>
     """
+    body = body.replace("Agent Core", APP_NAME)
     return render_page("Connector Help", body, "/connectors", session=session)
 
 
@@ -1802,4 +1805,5 @@ async def connectors_directory_page(
     (typeof apiFetch !== 'undefined') ? loadDirectory() : document.addEventListener('DOMContentLoaded', function() { loadDirectory(); });
     </script>
     """
+    body = body.replace("Agent Core", APP_NAME)
     return render_page("API Directory", body, "/connectors", session=session)

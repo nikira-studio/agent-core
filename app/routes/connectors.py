@@ -12,6 +12,7 @@ from app.services import (
     openapi_service,
     mcp_provider_service,
 )
+from app.branding import APP_USER_AGENT
 from app.security.dependencies import get_request_context
 from app.security.context import RequestContext
 from app.security.scope_enforcer import ScopeEnforcer
@@ -584,7 +585,7 @@ def _fetch_directory():
 
     try:
         req = urllib.request.Request(
-            _APIS_GURU_URL, headers={"User-Agent": "AgentCore/1.0"}
+            _APIS_GURU_URL, headers={"User-Agent": APP_USER_AGENT}
         )
         with safe_urlopen(req, timeout=15) as resp:
             raw = json.loads(resp.read().decode())

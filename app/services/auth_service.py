@@ -4,6 +4,7 @@ from typing import Optional
 import bcrypt
 import pyotp
 
+from app.branding import APP_ISSUER
 from app.database import get_db
 from app.models.enums import USER_ROLES
 from jose import jwt
@@ -343,7 +344,7 @@ def enroll_otp(user_id: str) -> dict:
         conn.commit()
 
     totp = pyotp.TOTP(secret)
-    otp_uri = totp.provisioning_uri(name=user_id, issuer_name="AgentCore")
+    otp_uri = totp.provisioning_uri(name=user_id, issuer_name=APP_ISSUER)
 
     return {
         "secret": secret,

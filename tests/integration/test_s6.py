@@ -7,6 +7,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from cryptography.fernet import Fernet
+from app.branding import CREDENTIAL_PREFIX, DB_FILENAME, MANIFEST_VERSION_KEY
 from app.schema import SCHEMA_SQL
 
 
@@ -211,7 +212,7 @@ def test_backup_restore_accepts_merge_mode(test_client, admin_token):
             {
                 "exported_by": "admin",
                 "exported_at": "2026-04-27T00:00:00Z",
-                "agent_core_version": "1.0.0",
+                MANIFEST_VERSION_KEY: "1.0.0",
             },
         )
         r = test_client.post(
@@ -260,7 +261,7 @@ def _build_test_backup(
             "backup_token",
             "Backup Token",
             encrypted,
-            "AC_SECRET_BACKUP_TOKEN_ABCD",
+            f"{CREDENTIAL_PREFIX}BACKUP_TOKEN_ABCD",
             "admin",
         ),
     )
@@ -270,7 +271,7 @@ def _build_test_backup(
     key_path = tmp_path / "backup-credential.key"
     key_path.write_bytes(backup_key)
     files = {
-        "agent-core.db": backup_db.read_bytes(),
+        DB_FILENAME: backup_db.read_bytes(),
         "credential.key": key_path.read_bytes(),
     }
     manifest_files = {
@@ -279,7 +280,7 @@ def _build_test_backup(
     if tamper_manifest:
         manifest_files["credential.key"] = "0" * 64
     manifest = {
-        "agent_core_version": "1.0.0",
+        MANIFEST_VERSION_KEY: "1.0.0",
         "exported_at": "2026-04-30T00:00:00Z",
         "exported_by": "admin",
         "files": manifest_files,
@@ -326,9 +327,9 @@ def test_merge_restore_imports_missing_rows_and_preserves_current_credential_key
             ("backup-credential",),
         ).fetchone()
     assert memory["content"] == "Backup memory content"
-    assert credential["reference_name"] == "AC_SECRET_BACKUP_TOKEN_ABCD"
+    assert credential["reference_name"] == f"{CREDENTIAL_PREFIX}BACKUP_TOKEN_ABCD"
     assert (
-        credential_service.resolve_reference("AC_SECRET_BACKUP_TOKEN_ABCD")
+        credential_service.resolve_reference(f"{CREDENTIAL_PREFIX}BACKUP_TOKEN_ABCD")
         == "backup-secret"
     )
 

@@ -1,5 +1,7 @@
 import pytest
 
+from app.branding import APP_NAME
+
 
 @pytest.fixture
 def admin_client(test_client, clean_db):
@@ -35,7 +37,7 @@ def test_integrations_page_is_current_workflow(admin_client):
     assert r.status_code == 200
     html = r.text
     assert "<h1>Integrations</h1>" in html
-    assert "Generate setup instructions, environment variables, MCP config, and AI-facing prompts for connecting tools to Agent Core." in html
+    assert f"Generate setup instructions, environment variables, MCP config, and AI-facing prompts for connecting tools to {APP_NAME}." in html
     assert 'action="/integrations"' in html
     assert 'id="user_id"' in html
     assert 'id="workspace_id"' in html
@@ -86,7 +88,7 @@ def test_mcp_manifest_is_valid_test_connection_target(test_client, admin_token):
 
     manifest = test_client.get("/mcp", headers={"Authorization": f"Bearer {api_key}"})
     assert manifest.status_code == 200
-    assert manifest.json()["name"] == "Agent Core"
+    assert manifest.json()["name"] == APP_NAME
 
 
 def test_dashboard_search_spans_operational_state(admin_client):

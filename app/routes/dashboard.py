@@ -13,6 +13,7 @@ from app.security.dependencies import get_request_context
 from app.security.dependencies import require_admin
 from app.security.response_helpers import success_response, error_response
 from app.security.scope_enforcer import ScopeEnforcer
+from app.branding import APP_NAME, APP_SLUG, BACKUP_KEY_HEADER, CREDENTIAL_PREFIX, ENV_PREFIX, JS_WINDOW_EVENT  # noqa: F401 (BACKUP_KEY_HEADER used in f-string)
 from app.config import settings
 
 
@@ -140,9 +141,9 @@ def render_page(
     if show_sidebar:
         sidebar_html = f"""
   <div class="sidebar">
-    <a href="/" class="brand-link" aria-label="Agent Core overview">
+    <a href="/" class="brand-link" aria-label="{APP_NAME} overview">
       <img src="/static/img/logo.png" alt="" class="brand-logo">
-      <span>Agent Core</span>
+      <span>{APP_NAME}</span>
     </a>
     <nav>
       {nav_html}
@@ -162,7 +163,7 @@ def render_page(
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{title} - Agent Core</title>
+    <title>{title} - {APP_NAME}</title>
     <link rel="icon" href="/static/img/favicon/favicon.ico" sizes="any">
     <link rel="icon" type="image/png" sizes="32x32" href="/static/img/favicon/favicon-32x32.png">
     <link rel="icon" type="image/png" sizes="16x16" href="/static/img/favicon/favicon-16x16.png">
@@ -178,6 +179,7 @@ def render_page(
   </div>
 </div>
 <script>window.AC_USER_TZ = {user_tz_js};</script>
+<script>window.AGENT_CORE_WINDOW_EVENT = {json.dumps(JS_WINDOW_EVENT)};</script>
 <script src="/static/js/dashboard.js?v=20260523d"></script>
 <script src="/static/js/events.js?v=20260518a"></script>
 {extra_js}
@@ -672,7 +674,7 @@ async def dashboard_home(request: Request, session: dict = Depends(require_auth)
     <div class="page-header">
       <h1>Overview</h1>
       <p class="text-muted" style="max-width:760px;margin-top:8px">
-        Agent Core is the local capability layer for your agents. This page gives you a quick read on
+        {APP_NAME} is the local capability layer for your agents. This page gives you a quick read on
       memory, connectors, activity, and the services your agents can actually use.
       </p>
     </div>
@@ -691,7 +693,7 @@ async def dashboard_home(request: Request, session: dict = Depends(require_auth)
       <table><thead><tr><th>Task</th><th>Status</th><th>Agent</th><th>Updated</th></tr></thead><tbody id="overview-activity-tbody">{activity_rows}</tbody></table>
     </div>
     <script>
-    window.onAgentCoreEvent = async function(event) {{
+    window.{JS_WINDOW_EVENT} = async function(event) {{
       if (!(event.type || '').startsWith('activity_')) return;
       var j = await apiFetch('/api/dashboard/activity/summary');
       if (!j.ok) return;
@@ -792,7 +794,7 @@ async def login_page(request: Request):
             "Setup",
             """
     <div class="card">
-      <h3>Welcome to Agent Core</h3>
+      <h3>Welcome to {APP_NAME}</h3>
       <p class="text-muted" style="margin-bottom:20px">Create your admin account to get started.</p>
       <form id="setup-form" onsubmit="submitSetup(event)">
         <div class="form-group">
@@ -2821,7 +2823,7 @@ async def activity_page(request: Request, session: dict = Depends(require_auth))
         const section = function(title, items, emptyLabel) {
           const rows = (items || []).map(function(item) {
             const label = item.content || item.description || item.task_description || '';
-            const meta = item.task_result || item.outcome || item.ended_at || item.started_at || item.generated_at || '';
+            const meta = item.task_result || item.task_note || item.outcome || item.ended_at || item.started_at || item.generated_at || '';
             return '<li><div style="font-weight:600">' + escapeHtml(label).substring(0, 120) + '</div>' +
               (meta ? '<div class="text-muted" style="font-size:0.85rem">' + escapeHtml(String(meta)).substring(0, 60) + '</div>' : '') +
               '</li>';
@@ -2833,6 +2835,7 @@ async def activity_page(request: Request, session: dict = Depends(require_auth))
           '<div class="card" style="margin-bottom:12px;padding:12px">',
           '<div class="text-muted" style="font-size:0.85rem">Source activity</div>',
           '<div style="font-weight:600">' + escapeHtml(b.task_description || '') + '</div>',
+          (b.task_note ? '<div class="text-muted" style="font-size:0.85rem;margin-top:4px">Note: ' + escapeHtml(b.task_note) + '</div>' : ''),
           (b.task_result ? '<div class="text-muted" style="font-size:0.85rem;margin-top:4px">Result: ' + escapeHtml(b.task_result) + '</div>' : ''),
           '<div class="text-muted" style="font-size:0.85rem;margin-top:4px">',
           'Agent: ' + escapeHtml(b.agent_id || '') + ' | Assigned: ' + escapeHtml(b.assigned_agent_id || '') + ' | Generated: ' + escapeHtml((b.generated_at || '').substring(0, 19)),
@@ -2882,6 +2885,7 @@ async def activity_page(request: Request, session: dict = Depends(require_auth))
       return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
     }
     </script>"""
+    js = js.replace("window.onAgentCoreEvent", "window." + JS_WINDOW_EVENT)
 
     return render_page(
         "Activity",
@@ -3665,7 +3669,7 @@ async def settings_page(request: Request, session: dict = Depends(require_auth))
             [
                 f"<tr><td>Credential Entries</td><td>{credential_count}</td><td class='text-muted'>Encrypted secrets stored in the vault</td></tr>",
                 f"<tr><td>Encryption Key</td><td><span class='badge badge-{ 'active' if key_status.get('mode') == 'keyring' else 'stale' }'>{escape_html(key_status.get('mode', 'unknown'))}</span></td><td class='text-muted'>Keyring size: {escape_html(key_status.get('keyring_size', 0))} · Primary key ID: {escape_html(key_status.get('primary_key_id', 'none'))}</td></tr>",
-                f"<tr><td>Broker Credential</td><td><span class='badge badge-{broker_badge}'>{broker_label}</span></td><td class='text-muted'>Resolves AC_SECRET_* references at runtime</td></tr>",
+                f"<tr><td>Broker Credential</td><td><span class='badge badge-{broker_badge}'>{broker_label}</span></td><td class='text-muted'>Resolves {CREDENTIAL_PREFIX}* references at runtime</td></tr>",
             ]
         )
         secrets_snapshot_html = f"""
@@ -3682,7 +3686,7 @@ async def settings_page(request: Request, session: dict = Depends(require_auth))
 
     backup_html = ""
     if is_admin:
-        backup_html = """
+        backup_html = f"""
     <div class="card">
       <div class="section-header">
         <h3>Backup & Restore</h3>
@@ -3693,7 +3697,7 @@ async def settings_page(request: Request, session: dict = Depends(require_auth))
         <button class="btn btn-secondary" onclick="openModal('restore-modal')">Restore from Backup</button>
         <button class="btn btn-secondary" onclick="runMaintenance()">Run Maintenance</button>
       </div>
-      <p class="form-hint">Maintenance marks stale activities using <code>AGENT_CORE_STALE_THRESHOLD_MINUTES</code> and deletes transient scratchpad memories older than the retention setting below. This does not touch credentials or connector bindings.</p>
+      <p class="form-hint">Maintenance marks stale activities using <code>{ENV_PREFIX}STALE_THRESHOLD_MINUTES</code> and deletes transient scratchpad memories older than the retention setting below. This does not touch credentials or connector bindings.</p>
       <div id="backup-result" style="margin-top:12px"></div>
       <hr class=divider>
       <h4 class="section-title">Startup Checks</h4>
@@ -3719,7 +3723,7 @@ async def settings_page(request: Request, session: dict = Depends(require_auth))
         broker_html = """
     <div class="card">
       <h3>Broker</h3>
-      <p class="text-muted" style="margin-bottom:12px">The broker credential resolves <code>AC_SECRET_*</code> references at runtime. Rotate it if a local consumer should stop using the current broker secret.</p>
+      <p class="text-muted" style="margin-bottom:12px">The broker credential resolves <code>{CREDENTIAL_PREFIX}*</code> references at runtime. Rotate it if a local consumer should stop using the current broker secret.</p>
         <button class="btn btn-danger" onclick="rotateBroker()">Rotate Broker Credential</button>
       <div id="broker-result" style="margin-top:12px"></div>
     </div>"""
@@ -3913,10 +3917,10 @@ async def settings_page(request: Request, session: dict = Depends(require_auth))
       }});
       if (r.ok) {{
         const blob = await r.blob();
-        const backupKey = r.headers.get('X-Agent-Core-Backup-Key');
+        const backupKey = r.headers.get('{BACKUP_KEY_HEADER}');
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
-        a.href = url; a.download = 'agent-core-backup.zip.enc'; a.click();
+        a.href = url; a.download = '{APP_SLUG}-backup.zip.enc'; a.click();
         URL.revokeObjectURL(url);
         const keyHtml = backupKey
           ? '<div class="alert alert-warning"><strong>Save this backup key now.</strong> It will not be shown again.<div class="api-key-display" style="margin-top:8px"><code>' + backupKey + '</code></div><button class="copy-btn" onclick="copyToClipboard(' + JSON.stringify(backupKey) + ', this)">Copy</button></div>'
@@ -4475,14 +4479,14 @@ def _agent_user_matches(agent, user_id):
 
 def _agent_setup_output_options(target=None):
     return [
-        ("instructions", "Instructions", "agent-core-instructions.md"),
-        ("mcp_json", "MCP Config", "agent-core-mcp-config.txt"),
-        ("env", "Environment Variables", "agent-core.env"),
+        ("instructions", "Instructions", f"{APP_SLUG}-instructions.md"),
+        ("mcp_json", "MCP Config", f"{APP_SLUG}-mcp-config.txt"),
+        ("env", "Environment Variables", f"{APP_SLUG}.env"),
         ("claude_md", "CLAUDE.md", "CLAUDE.md"),
         ("agents_md", "AGENTS.md", "AGENTS.md"),
         ("assistants_md", "Assistants", "Assistants"),
-        ("session", "Session Prompt", "agent-core-session-prompt.md"),
-        ("verification", "Verification Prompt", "agent-core-verification.md"),
+        ("session", "Session Prompt", f"{APP_SLUG}-session-prompt.md"),
+        ("verification", "Verification Prompt", f"{APP_SLUG}-verification.md"),
     ]
 
 
@@ -4792,7 +4796,7 @@ async def generate_agent_connection(
             for v, _l, f in _agent_setup_output_options(body.target)
             if v == body.output_type
         ),
-        "agent-core-output.txt",
+        f"{APP_SLUG}-output.txt",
     )
     return success_response(
         {
@@ -4952,7 +4956,7 @@ async def integrations_page(
         output_tabs += f'<a class="setup-tab {active}" href="{page_path}?{urlencode(params)}">{escape_html(label)}</a>\n'
     filename = next(
         (f for v, _l, f in _agent_setup_output_options(target) if v == output_type),
-        "agent-core-output.txt",
+        f"{APP_SLUG}-output.txt",
     )
 
     if generated_output:
@@ -5001,7 +5005,7 @@ async def integrations_page(
     body = f"""
     <div class="page-header setup-page-header">
       <h1>Integrations</h1>
-      <p class="subtitle">Generate setup instructions, environment variables, MCP config, and AI-facing prompts for connecting tools to Agent Core.</p>
+      <p class="subtitle">Generate setup instructions, environment variables, MCP config, and AI-facing prompts for connecting tools to {APP_NAME}.</p>
       <div class="text-muted" style="font-size:0.86rem;margin-top:8px">
         Current tool preset: <strong>{escape_html(tool_label)}</strong>. The main presets are Claude Code, Codex, Cursor, Windsurf, Antigravity, and Generic MCP/REST. The generated outputs in this page are the canonical setup files and prompts.
       </div>
@@ -5067,8 +5071,10 @@ async def integrations_page(
 
 
 def _agent_setup_extra_js():
-    return """
-<script>
+    _bracket = "{{" + ENV_PREFIX + "API_KEY}}"
+    _angle = "<" + ENV_PREFIX + "API_KEY>"
+    _js_constants = f"\nconst _AC_APP_SLUG = '{APP_SLUG}';\nconst _AC_API_KEY_BRACKET = '{_bracket}';\nconst _AC_API_KEY_ANGLE = '{_angle}';\n"
+    return "\n<script>" + _js_constants + """
 function escapeHtml(s) {
   return String(s ?? '').replace(/[&<>"']/g, function(c) {
     return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c];
@@ -5092,7 +5098,7 @@ function getGeneratedOutputText() {
 }
 
 function getSetupScrollStorageKey() {
-  return 'agent-core-integrations-scroll:' + window.location.pathname;
+  return (_AC_APP_SLUG + '-integrations-scroll:') + window.location.pathname;
 }
 
 function saveSetupScrollPosition() {
@@ -5117,7 +5123,7 @@ function getIntegrationConnectionKeyStorageKey() {
   const workspaceId = params.get('workspace_id') || document.getElementById('workspace_id')?.value || '';
   const agentId = params.get('agent_id') || document.getElementById('agent_id')?.value || '';
   const target = params.get('target') || 'generic_mcp';
-  return ['agent-core-connection-key', userId, workspaceId, agentId, target].join(':');
+  return [_AC_APP_SLUG + '-connection-key', userId, workspaceId, agentId, target].join(':');
 }
 
 function getStoredIntegrationConnectionKey() {
@@ -5140,10 +5146,10 @@ function applyStoredIntegrationConnectionKey() {
   const block = document.querySelector('.output-block');
   if (!block) return;
   const current = block.innerText || '';
-  if (!current.includes('<AGENT_CORE_API_KEY>') && !current.includes('{{AGENT_CORE_API_KEY}}')) return;
+  if (!current.includes(_AC_API_KEY_ANGLE) && !current.includes(_AC_API_KEY_BRACKET)) return;
   const updated = current
-    .replaceAll('<AGENT_CORE_API_KEY>', key)
-    .replaceAll('{{AGENT_CORE_API_KEY}}', key);
+    .replaceAll(_AC_API_KEY_ANGLE, key)
+    .replaceAll(_AC_API_KEY_BRACKET, key);
   if (updated !== current) {
     block.innerText = updated;
     const warning = document.getElementById('connection-warning');
@@ -5374,57 +5380,57 @@ def _build_instructions(
     )
     if target == "claude_code":
         scope_guide = f"{workspace_context_line}\n- Use `{user_scope}` only for stable preferences or personal working context.\n- Use `{agent_scope}` only for private scratch context."
-        tool_tips = """## Claude Code Tips
+        tool_tips = f"""## Claude Code Tips
 
 - Claude Code automatically reads `CLAUDE.md` in the workspace root. Consider generating that output instead for a self-contained file.
-- Claude Code will inherit the scopes from your Agent Core agent configuration. The scopes above are informational.
-- For best results, set `AGENT_CORE_API_KEY` in your shell environment before starting Claude Code:
-    export AGENT_CORE_API_KEY="your-key-here"
+- Claude Code will inherit the scopes from your {APP_NAME} agent configuration. The scopes above are informational.
+- For best results, set `{ENV_PREFIX}API_KEY` in your shell environment before starting Claude Code:
+    export {ENV_PREFIX}API_KEY="your-key-here"
 """
     elif target == "codex":
         scope_guide = f"- Work in `{default_scope}` for default context.\n- Read `{user_scope}` for user preferences.\n- Keep private notes in `{agent_scope}`."
-        tool_tips = """## Codex Tips
+        tool_tips = f"""## Codex Tips
 
 - Codex reads `AGENTS.md` in the workspace root. Consider generating that output instead for a self-contained file.
 - Codex can use both the MCP tools and the REST API. The MCP endpoint is preferred for memory operations.
-- Set `AGENT_CORE_API_KEY` in your environment before starting a Codex session.
+- Set `{ENV_PREFIX}API_KEY` in your environment before starting a Codex session.
 """
     elif target == "cursor":
         scope_guide = f"{workspace_context_line}\n- Use `{user_scope}` only for stable preferences or personal working context.\n- Use `{agent_scope}` only for private scratch context."
-        tool_tips = """## Cursor Tips
+        tool_tips = f"""## Cursor Tips
 
 - Add the MCP config to `.cursor/mcp.json` in the workspace root for workspace-level access, or `~/.cursor/mcp.json` for global access.
 - After adding the MCP config, run the "Reload MCP Servers" command or restart Cursor.
-- Cursor's AI chat can use MCP tools directly once the server is connected. Set `AGENT_CORE_API_KEY` in Cursor's terminal or your shell profile.
+- Cursor's AI chat can use MCP tools directly once the server is connected. Set `{ENV_PREFIX}API_KEY` in Cursor's terminal or your shell profile.
 """
     elif target == "windsurf":
         scope_guide = f"{workspace_context_line}\n- Use `{user_scope}` only for stable preferences or personal working context.\n- Use `{agent_scope}` only for private scratch context."
-        tool_tips = """## Windsurf Tips
+        tool_tips = f"""## Windsurf Tips
 
 - Add the MCP config to Windsurf's MCP settings for your workspace.
 - Windsurf may require a restart after adding MCP servers.
-- Set `AGENT_CORE_API_KEY` in your shell environment before starting a Windsurf session.
+- Set `{ENV_PREFIX}API_KEY` in your shell environment before starting a Windsurf session.
 """
     elif target == "antigravity":
         scope_guide = f"{workspace_context_line}\n- Use `{user_scope}` only for stable preferences or personal working context.\n- Use `{agent_scope}` only for private scratch context."
-        tool_tips = """## Antigravity Tips
+        tool_tips = f"""## Antigravity Tips
 
 - Add the MCP config using the `serverUrl` field instead of `url`.
 - Restart Antigravity after adding MCP servers if the config does not appear immediately.
-- Set `AGENT_CORE_API_KEY` in your shell environment before starting an Antigravity session.
+- Set `{ENV_PREFIX}API_KEY` in your shell environment before starting an Antigravity session.
 """
     else:
         scope_guide = f"- Default memory scope: `{default_scope}`\n- User scope: `{user_scope}`\n- Private scope: `{agent_scope}`"
         tool_tips = f"""## Generic MCP Client Tips
 
 - The MCP endpoint is `{base_url}/mcp`. Your client should send requests as JSON with `{{"tool": "...", "params": {{...}}}}`.
-- Authenticate using `Authorization: Bearer $AGENT_CORE_API_KEY` header or your client's equivalent auth mechanism.
+- Authenticate using `Authorization: Bearer ${ENV_PREFIX}API_KEY` header or your client's equivalent auth mechanism.
 - Available tools include: `memory_search`, `memory_get`, `memory_write`, `memory_retract`, `credential_get`, `credential_list`, `activity_update`, `activity_list`, `get_briefing`, `briefing_list`, `connectors_list`, `connectors_summary`, `connectors_bindings_list`, `connectors_bindings_test`, `connectors_actions_list`, and `connectors_run`.
 """
 
-    return f"""# Agent Core Setup Instructions
+    return f"""# {APP_NAME} Setup Instructions
 
-You are connected to Agent Core.
+You are connected to {APP_NAME}.
 
 **User:** {user_display}
 **Workspace:** {workspace_name}
@@ -5440,7 +5446,7 @@ You are connected to Agent Core.
 1. Call `activity_pickup` at startup or when idle to check for work a human has assigned to you in this workspace. If it returns an activity, that is your current task — read it, start working, and send heartbeats. If it returns null, there is no assigned work and you can proceed with whatever the user is asking.
 2. Search memory in `{default_scope}` for relevant context before starting work. If the search returns little or nothing, retry with exact topic values, exact keywords from prior records, or a known record id. When embeddings are unavailable, broad conceptual queries can miss; exact tokens and known ids are more reliable. If this is a handoff, resume, or review of prior work, also inspect the recent activity trail and any generated briefing before making changes. Use `activity_list` and `briefing_list` when you need that trail from MCP.
 3. Search memory in `{user_scope}` for relevant user preferences and owner-context details when you have user-scope read access.
-4. Create or update an activity record when starting a meaningful task.
+4. Create or update an activity record when starting a meaningful task. Use `task_note` for in-flight progress updates and `task_result` when closing the task.
 5. Store durable decisions and handoff notes in `{default_scope}`.
 6. Use `credential_list` and `credential_get` to retrieve credential references — never ask for raw secrets.
 7. Use connector tools to discover and run available server-side connector bindings before asking the user to wire an external service manually.
@@ -5457,20 +5463,20 @@ You are connected to Agent Core.
 
 ## Credentials And Connectors
 
-When a task may require an external service, credential, API token, repository host, chat service, browser service, or Composio-style connector, check Agent Core before asking the user for setup details.
+When a task may require an external service, credential, API token, repository host, chat service, browser service, or Composio-style connector, check {APP_NAME} before asking the user for setup details.
 
 1. Use `credential_list` to discover available credential references in authorized scopes.
-2. Use `credential_get` only when you need a specific `AC_SECRET_*` reference for a local tool or command. Never ask the user for raw secrets and never print raw secrets.
+2. Use `credential_get` only when you need a specific `{CREDENTIAL_PREFIX}*` reference for a local tool or command. Never ask the user for raw secrets and never print raw secrets.
 3. Use `connectors_summary` for a compact capability overview, or `connectors_list` and `connectors_bindings_list` when you need raw connector and binding lists.
 4. Use `connectors_actions_list` before running an unfamiliar connector action.
 5. Use `connectors_bindings_test` when a binding may be stale or unverified.
-6. Use `connectors_run` when Agent Core should perform the external action server-side.
+6. Use `connectors_run` when {APP_NAME} should perform the external action server-side.
 
-Prefer connector bindings over local secret handling when both are available, because the raw credential stays inside Agent Core.
+Prefer connector bindings over local secret handling when both are available, because the raw credential stays inside {APP_NAME}.
 
 ## API Key
 
-Set `AGENT_CORE_API_KEY` in your local environment using the key shown when this agent was created or rotated.
+Set `{ENV_PREFIX}API_KEY` in your local environment using the key shown when this agent was created or rotated.
 Do not commit API keys to workspace files.
 
 {tool_tips}
@@ -5497,13 +5503,13 @@ def _build_user_instructions(
         if workspace_scope
         else f"No workspace is selected. Generated prompts use `{user_scope}` as read-only owner context and keep shared facts/decisions in the default shared scope."
     )
-    return f"""# Agent Core Instructions
+    return f"""# {APP_NAME} Instructions
 
-Use these steps to connect an AI tool to Agent Core for {user_display}.
+Use these steps to connect an AI tool to {APP_NAME} for {user_display}.
 
 ## What To Generate
 
-1. Generate `MCP Config` when you are ready to connect the tool to Agent Core. This is the normal connection step for MCP-capable tools.
+1. Generate `MCP Config` when you are ready to connect the tool to {APP_NAME}. This is the normal connection step for MCP-capable tools.
 2. Generate `Environment Variables` only when your MCP config or launcher reads values from environment variables.
 3. Generate `CLAUDE.md`, `AGENTS.md`, or `Assistants` guidance for reusable repository-level or agent-level instructions.
 4. Generate `Session Prompt` when you want one-time agent-specific instructions pasted into a chat/session.
@@ -5517,18 +5523,18 @@ Click the one-time key button on `MCP Config` when you are ready to connect the 
 Use the one-time key button on `Environment Variables` only when you need shell or launcher environment variables.
 That rotates this agent's API key and inserts the new key into the generated output.
 The key is shown once. Generating again invalidates the previous key for this connection.
-The API key is the authoritative agent identity. Agent Core identifies requests as `{agent_scope}` by looking up the bearer token; repo instruction files do not set identity.
+The API key is the authoritative agent identity. {APP_NAME} identifies requests as `{agent_scope}` by looking up the bearer token; repo instruction files do not set identity.
 
 ## Where Things Go
 
 - MCP Config belongs in the MCP configuration location for the tool you are connecting. For Claude Code, run `claude mcp add` (CLI) or create `.mcp.json` in the repo root; for Codex CLI, that is `~/.codex/config.toml`; for OpenCode, add the OpenCode block under `mcp` in `~/.config/opencode/opencode.json`.
-- Environment variables belong in your shell profile, launcher, service environment, or tool-specific environment settings. They do not connect Agent Core by themselves.
+- Environment variables belong in your shell profile, launcher, service environment, or tool-specific environment settings. They do not connect {APP_NAME} by themselves.
 - Session Prompt is pasted into the first message or custom instructions for a single session. Use it to bootstrap behavior when no plugin or hook layer exists.
 - `CLAUDE.md` and `AGENTS.md` belong in the workspace/repository root when you want persistent per-repository behavior. `Assistants` guidance is for assistant-style agents that manage their own config. These files are workspace-centric and can be shared by Codex, OpenCode, Claude Code, and other agents using their own MCP keys.
 
 ## Selected Context
 
-- Agent Core URL: `{base_url}`
+- {APP_NAME} URL: `{base_url}`
 - Connection agent for generated MCP/env output: `{agent_scope}`
 - User: `{user_scope}`
 - Workspace: `{workspace_scope or "optional / not selected"}`
@@ -5560,14 +5566,14 @@ def _build_session_prompt(
     }.get(target, "You are an MCP-capable AI agent.")
     return f"""{tool_line} You are working for {user_display} on {workspace_name}.
 
-Use Agent Core MCP for durable workspace memory, handoffs, and workspace context. If this is a handoff, resume, or review of prior work, also inspect the recent activity trail and any generated briefing before making changes. Use `activity_list` and `briefing_list` when you need that trail from MCP.
+Use {APP_NAME} MCP for durable workspace memory, handoffs, and workspace context. If this is a handoff, resume, or review of prior work, also inspect the recent activity trail and any generated briefing before making changes. Use `activity_list` and `briefing_list` when you need that trail from MCP.
 Default memory scope for this setup is `{default_scope}`.
 Core MCP tools include `memory_search`, `memory_get`, `memory_write`, `memory_retract`, `credential_get`, `credential_list`, `activity_update`, `activity_list`, `get_briefing`, `briefing_list`, `connectors_list`, `connectors_summary`, `connectors_bindings_list`, `connectors_bindings_test`, `connectors_actions_list`, and `connectors_run`.
 Use your private scope `{agent_scope}` only for tool-specific scratch context.
 Use full prefixed scope names exactly as shown; do not use plain workspace IDs or agent IDs as memory scopes.
 Read `{user_scope}` for stable {user_display} preferences and other owner-context details when you have user-scope read access.
-Use credential references through Agent Core MCP; never request or print raw secrets.
-Activity records are operational task tracking, not durable memory. At the start of every non-trivial user task, immediately call `activity_update` with a concise `task_description`, `memory_scope` set to `{default_scope}`, and `status` set to `active`. If the session reloads, a handoff begins, or no active activity exists yet, open a fresh activity first with `status: active` before attempting to close it. While actively working, call `activity_update` again every 1-2 minutes as a heartbeat. Before your final response, call `activity_update` with `status: completed` and a short `task_result` summary when the task is complete, or `status: blocked` if you cannot proceed and need user input.
+Use credential references through {APP_NAME} MCP; never request or print raw secrets.
+Activity records are operational task tracking, not durable memory. At the start of every non-trivial user task, immediately call `activity_update` with a concise `task_description`, `memory_scope` set to `{default_scope}`, and `status` set to `active`. If the session reloads, a handoff begins, or no active activity exists yet, open a fresh activity first with `status: active` before attempting to close it. While actively working, use `task_note` for short progress updates and call `activity_update` again every 1-2 minutes as a heartbeat. Before your final response, call `activity_update` with `status: completed` and a short `task_result` summary when the task is complete, or `status: blocked` if you cannot proceed and need user input.
 If the session has to stop early or hits a token limit, leave the activity current and write durable decisions or handoff notes to memory so another agent can continue from the saved state.
 If work needs to move across users or workspaces, make that explicit in the activity scope and handoff notes rather than assuming a hidden policy layer.
 If the client has hooks or plugins, use them to automate memory/activity capture; if it does not, treat this prompt as the source of truth for those expectations.
@@ -5592,7 +5598,7 @@ Write memory only when it will help a future session:
 Do not write memory for routine progress, command output, facts already obvious from files, secrets, raw credentials, or noisy transient debugging notes. Use concise content, add domain/topic when useful for exact filtering, set confidence to match certainty, and set importance higher only for information likely to matter later.
 Use this prompt to bootstrap behavior in clients without lifecycle hooks; it is not a substitute for a configured MCP server or plugin.
 
-Start by confirming you can reach Agent Core at {base_url}/mcp, then search `{default_scope}` for relevant context before making changes.
+Start by confirming you can reach {APP_NAME} at {base_url}/mcp, then search `{default_scope}` for relevant context before making changes.
 """
 
 
@@ -5601,28 +5607,28 @@ def _build_claude_md(
 ):
     default_scope = (
         workspace_scope
-        or "the authenticated/default user scope from your Agent Core connection"
+        or f"the authenticated/default user scope from your {APP_NAME} connection"
     )
     workspace_scope_label = workspace_scope or "No workspace scope selected"
-    private_scope_guidance = "Use your authenticated Agent Core private scope, usually `agent:<your-agent-id>`, only for tool-specific scratch context."
-    return f"""# Agent Core Workspace Context
+    private_scope_guidance = f"Use your authenticated {APP_NAME} private scope, usually `agent:<your-agent-id>`, only for tool-specific scratch context."
+    return f"""# {APP_NAME} Workspace Context
 
 You are working on the {workspace_name} workspace.
 
-Use Agent Core for durable workspace memory, activity tracking, handoffs, and credential references. If this is a handoff, resume, or review of prior work, also inspect the recent activity trail and any generated briefing before making changes. Use `activity_list` and `briefing_list` when you need that trail from MCP.
+Use {APP_NAME} for durable workspace memory, activity tracking, handoffs, and credential references. If this is a handoff, resume, or review of prior work, also inspect the recent activity trail and any generated briefing before making changes. Use `activity_list` and `briefing_list` when you need that trail from MCP.
 Core MCP tools include `memory_search`, `memory_get`, `memory_write`, `memory_retract`, `credential_get`, `credential_list`, `activity_update`, `activity_list`, `get_briefing`, `briefing_list`, `connectors_list`, `connectors_summary`, `connectors_bindings_list`, `connectors_bindings_test`, `connectors_actions_list`, and `connectors_run`.
 
 ## Connection
 
-- **Agent Core URL:** {base_url}
+- **{APP_NAME} URL:** {base_url}
 - **Workspace scope:** {workspace_scope_label}
 
-The active Agent Core user and agent identities are determined by the MCP/API key configured in your tool, not by this file. Do not add API keys to this file.
+The active {APP_NAME} user and agent identities are determined by the MCP/API key configured in your tool, not by this file. Do not add API keys to this file.
 
 ## Memory Scopes
 
 Use `{default_scope}` for default memory in this setup.
-Read the authenticated/default user scope from your Agent Core connection for stable personal preferences and owner-context details when you have user-scope read access.
+Read the authenticated/default user scope from your {APP_NAME} connection for stable personal preferences and owner-context details when you have user-scope read access.
 {private_scope_guidance}
 Use full prefixed scope names exactly as shown. Do not use plain workspace IDs like `{workspace_name}` or agent IDs like `{agent_display}` as memory scopes.
 
@@ -5648,21 +5654,21 @@ Keep memory content concise. Add domain/topic when useful for exact filtering. S
 
 ## Credentials
 
-Use `credential_get` to retrieve `AC_SECRET_*` references. The Credential Broker resolves them at execution time.
+Use `credential_get` to retrieve `{CREDENTIAL_PREFIX}*` references. The Credential Broker resolves them at execution time.
 Never ask users for raw credential values.
 
 ## Connectors
 
-When a task may require an external service, credential, API token, repository host, chat service, browser service, or Composio-style connector, check Agent Core before asking the user for setup details.
+When a task may require an external service, credential, API token, repository host, chat service, browser service, or Composio-style connector, check {APP_NAME} before asking the user for setup details.
 
 1. Use `credential_list` to discover available credential references in authorized scopes.
-2. Use `credential_get` only when you need a specific `AC_SECRET_*` reference for a local tool or command. Never ask the user for raw secrets and never print raw secrets.
+2. Use `credential_get` only when you need a specific `{CREDENTIAL_PREFIX}*` reference for a local tool or command. Never ask the user for raw secrets and never print raw secrets.
 3. Use `connectors_summary` for a compact capability overview, or `connectors_list` and `connectors_bindings_list` when you need raw connector and binding lists.
 4. Use `connectors_actions_list` before running an unfamiliar connector action.
 5. Use `connectors_bindings_test` when a binding may be stale or unverified.
-6. Use `connectors_run` when Agent Core should perform the external action server-side.
+6. Use `connectors_run` when {APP_NAME} should perform the external action server-side.
 
-Prefer connector bindings over local secret handling when both are available, because the raw credential stays inside Agent Core.
+Prefer connector bindings over local secret handling when both are available, because the raw credential stays inside {APP_NAME}.
 
 ## Activity Tracking
 
@@ -5677,9 +5683,9 @@ At the start of every non-trivial user task, call `activity_update` immediately 
 When the task is a handoff, resume, or review of prior work, inspect the recent activity trail and any generated briefing before making changes. Use workspace memory, not agent-private scratch notes, as the durable source of truth for prior work.
 Use `activity_list` and `briefing_list` when you need to inspect that trail from MCP instead of the dashboard.
 
-While actively working, call `activity_update` again every 1-2 minutes as a heartbeat. Update `task_description` if the task changes materially.
+While actively working, call `activity_update` again every 1-2 minutes as a heartbeat. Use `task_note` for interim progress updates and update `task_description` if the task changes materially.
 
-If the session reloads, a handoff begins, or no active activity exists yet, open a fresh activity first with `status: active` before attempting to close it. Before your final response, call `activity_update` with `status: completed` and a short `task_result` summary when the task is complete. Use `status: blocked` if you cannot proceed and need user input. Do not create activity records for trivial one-shot answers that do not inspect or modify project state.
+If the session reloads, a handoff begins, or no active activity exists yet, open a fresh activity first with `status: active` before attempting to close it. Before your final response, call `activity_update` with `status: completed` and a short `task_result` summary when the task is complete. Use `task_note` for in-flight updates. Use `status: blocked` if you cannot proceed and need user input. Do not create activity records for trivial one-shot answers that do not inspect or modify project state.
 If the session has to stop early or hits a token limit, leave the activity current and write durable decisions or handoff notes to memory so another agent can continue from the saved state.
 If work needs to move across users or workspaces, make that explicit in the activity scope and handoff notes rather than assuming a hidden policy layer.
 If the client supports hooks or plugins, use them to automate these calls. If it does not, keep using this file as the manual operating contract.
@@ -5688,10 +5694,10 @@ If the client supports hooks or plugins, use them to automate these calls. If it
 ## Claude Code Notes
 
 - Claude Code automatically reads this `CLAUDE.md` file when present in the workspace root.
-- Claude Code uses the configured MCP connection or your shell environment's `AGENT_CORE_API_KEY`. That key determines which Agent Core user and agent are active.
+- Claude Code uses the configured MCP connection or your shell environment's `{ENV_PREFIX}API_KEY`. That key determines which {APP_NAME} user and agent are active.
 - Do not add your API key to this file.
-- **Tool availability:** Claude Code defers MCP tool schemas at startup to save context. Before calling any Agent Core tool in a new session, load the schemas with `ToolSearch("select:mcp__agent-core__memory_search,mcp__agent-core__activity_update,mcp__agent-core__memory_write")`. Skipping this causes `InputValidationError`. Add other tool names to the select list as needed.
-- If Claude Code can't reach Agent Core, run the Verification Prompt output to verify the full end-to-end setup.
+- **Tool availability:** Claude Code defers MCP tool schemas at startup to save context. Before calling any {APP_NAME} tool in a new session, load the schemas with `ToolSearch("select:mcp__{APP_SLUG}__memory_search,mcp__{APP_SLUG}__activity_update,mcp__{APP_SLUG}__memory_write")`. Skipping this causes `InputValidationError`. Add other tool names to the select list as needed.
+- If Claude Code can't reach {APP_NAME}, run the Verification Prompt output to verify the full end-to-end setup.
 """
 
 
@@ -5700,28 +5706,28 @@ def _build_agents_md(
 ):
     default_scope = (
         workspace_scope
-        or "the authenticated/default user scope from your Agent Core connection"
+        or f"the authenticated/default user scope from your {APP_NAME} connection"
     )
     workspace_scope_label = workspace_scope or "No workspace scope selected"
-    return f"""# Agent Core Workspace Context
+    return f"""# {APP_NAME} Workspace Context
 
 You are working on the {workspace_name} workspace.
 
-## Agent Core
+## {APP_NAME}
 
-Use Agent Core MCP for memory, credential references, and activity tracking. If this is a handoff, resume, or review of prior work, also inspect the recent activity trail and any generated briefing before making changes. Use `activity_list` and `briefing_list` when you need that trail from MCP.
+Use {APP_NAME} MCP for memory, credential references, and activity tracking. If this is a handoff, resume, or review of prior work, also inspect the recent activity trail and any generated briefing before making changes. Use `activity_list` and `briefing_list` when you need that trail from MCP.
 
 - **Base URL:** {base_url}
 - **Workspace scope:** {workspace_scope_label}
 
-The active Agent Core user and agent identities are determined by the MCP/API key configured in your tool, not by this file. Do not commit credentials to this file.
-If your host defers tool availability, run its tool discovery/load step first so the Agent Core MCP tools are available before you try to call them.
+The active {APP_NAME} user and agent identities are determined by the MCP/API key configured in your tool, not by this file. Do not commit credentials to this file.
+If your host defers tool availability, run its tool discovery/load step first so the {APP_NAME} MCP tools are available before you try to call them.
 
 ## Memory Scope Guidance
 
 Default memory scope for this setup is `{default_scope}`.
-Read the authenticated/default user scope from your Agent Core connection for stable personal preferences and owner-context details when you have user-scope read access.
-Use your authenticated Agent Core private scope, usually `agent:<your-agent-id>`, for private scratch notes only.
+Read the authenticated/default user scope from your {APP_NAME} connection for stable personal preferences and owner-context details when you have user-scope read access.
+Use your authenticated {APP_NAME} private scope, usually `agent:<your-agent-id>`, for private scratch notes only.
 Use full prefixed scope names exactly as shown. Do not use plain workspace IDs or agent IDs as memory scopes.
 
 ## Activity Workflow
@@ -5737,9 +5743,9 @@ At the start of every non-trivial user task, call `activity_update` immediately 
 When the task is a handoff, resume, or review of prior work, inspect the recent activity trail and any generated briefing before making changes. Use workspace memory, not agent-private scratch notes, as the durable source of truth for prior work.
 Use `activity_list` and `briefing_list` when you need to inspect that trail from MCP instead of the dashboard.
 
-While actively working, call `activity_update` again every 1-2 minutes as a heartbeat. Update `task_description` if the task changes materially.
+While actively working, call `activity_update` again every 1-2 minutes as a heartbeat. Use `task_note` for interim progress updates and update `task_description` if the task changes materially.
 
-If the session reloads, a handoff begins, or no active activity exists yet, open a fresh activity first with `status: active` before attempting to close it. Before your final response, call `activity_update` with `status: completed` and a short `task_result` summary when the task is complete. Use `status: blocked` if you cannot proceed and need user input. Do not create activity records for trivial one-shot answers that do not inspect or modify project state.
+If the session reloads, a handoff begins, or no active activity exists yet, open a fresh activity first with `status: active` before attempting to close it. Before your final response, call `activity_update` with `status: completed` and a short `task_result` summary when the task is complete. Use `task_note` for in-flight updates. Use `status: blocked` if you cannot proceed and need user input. Do not create activity records for trivial one-shot answers that do not inspect or modify project state.
 If the session has to stop early or hits a token limit, leave the activity current and write durable decisions or handoff notes to memory so another agent can continue from the saved state.
 If work needs to move across users or workspaces, make that explicit in the activity scope and handoff notes rather than assuming a hidden policy layer.
 If the client supports hooks or plugins, use them to automate these calls. If it does not, keep using this file as the manual operating contract.
@@ -5748,7 +5754,7 @@ If the client supports hooks or plugins, use them to automate these calls. If it
 
 At the start of a meaningful task:
 
-1. Confirm Agent Core is reachable at {base_url}/mcp if this is a new setup or connectivity is uncertain.
+1. Confirm {APP_NAME} is reachable at {base_url}/mcp if this is a new setup or connectivity is uncertain.
 2. Start or refresh the activity record using the Activity Workflow above.
 3. Search `{default_scope}` with 2-3 focused queries for relevant architecture, decisions, prior bugs, and current project state. If the search returns little or nothing, retry with exact topic values, exact keywords from prior records, or a known record id. When embeddings are unavailable, broad conceptual queries can miss; exact tokens and known ids are more reliable.
 4. If this is a handoff, resume, or review of prior work, inspect the recent activity trail and any generated briefing before making changes.
@@ -5768,16 +5774,16 @@ Keep memory content concise. Add domain/topic when useful for exact filtering. S
 
 ## Credentials And Connectors
 
-When a task may require an external service, credential, API token, repository host, chat service, browser service, or Composio-style connector, check Agent Core before asking the user for setup details.
+When a task may require an external service, credential, API token, repository host, chat service, browser service, or Composio-style connector, check {APP_NAME} before asking the user for setup details.
 
 1. Use `credential_list` to discover available credential references in authorized scopes.
-2. Use `credential_get` only when you need a specific `AC_SECRET_*` reference for a local tool or command. Never ask the user for raw secrets and never print raw secrets.
+2. Use `credential_get` only when you need a specific `{CREDENTIAL_PREFIX}*` reference for a local tool or command. Never ask the user for raw secrets and never print raw secrets.
 3. Use `connectors_summary` for a compact capability overview, or `connectors_list` and `connectors_bindings_list` when you need raw connector and binding lists.
 4. Use `connectors_actions_list` before running an unfamiliar connector action.
 5. Use `connectors_bindings_test` when a binding may be stale or unverified.
-6. Use `connectors_run` when Agent Core should perform the external action server-side.
+6. Use `connectors_run` when {APP_NAME} should perform the external action server-side.
 
-Prefer connector bindings over local secret handling when both are available, because the raw credential stays inside Agent Core.
+Prefer connector bindings over local secret handling when both are available, because the raw credential stays inside {APP_NAME}.
 This file is the manual fallback when the client has no lifecycle hook or plugin layer.
 
 ## Codex Notes
@@ -5793,7 +5799,7 @@ This file is the manual fallback when the client has no lifecycle hook or plugin
 def _build_assistants_md(base_url, user_scope, workspace_scope, agent_scope, api_key=None):
     default_scope = (
         workspace_scope
-        or "the authenticated/default user scope from your Agent Core connection"
+        or f"the authenticated/default user scope from your {APP_NAME} connection"
     )
     connection_key = _connection_key_value(api_key)
     workspace_context_line = (
@@ -5801,11 +5807,11 @@ def _build_assistants_md(base_url, user_scope, workspace_scope, agent_scope, api
         if workspace_scope
         else ""
     )
-    return f"""# Agent Core Assistant Onboarding
+    return f"""# {APP_NAME} Assistant Onboarding
 
-Use Agent Core as the durable backend for assistant-style agents that manage their own MCP configuration.
+Use {APP_NAME} as the durable backend for assistant-style agents that manage their own MCP configuration.
 
-## Agent Core
+## {APP_NAME}
 
 - **Base URL:** {base_url}
 {workspace_context_line}
@@ -5817,23 +5823,23 @@ Use Agent Core as the durable backend for assistant-style agents that manage the
 
 Use the one-time key button when you need a fresh bearer token. The generated output should use the value above directly.
 
-The active Agent Core user and agent identities are determined by the MCP/API key configured in your tool, not by this file. Do not add API keys to this file.
-If your host defers tool availability, run its tool discovery/load step first so the Agent Core MCP tools are available before you try to call them.
+The active {APP_NAME} user and agent identities are determined by the MCP/API key configured in your tool, not by this file. Do not add API keys to this file.
+If your host defers tool availability, run its tool discovery/load step first so the {APP_NAME} MCP tools are available before you try to call them.
 
 ## Memory Scope Guidance
 
 Default memory scope for this setup is `{default_scope}`.
-Read the authenticated/default user scope from your Agent Core connection for stable personal preferences and owner-context details when you have user-scope read access.
-Use your authenticated Agent Core private scope, usually `agent:<your-agent-id>`, for temporary private scratch notes only.
+Read the authenticated/default user scope from your {APP_NAME} connection for stable personal preferences and owner-context details when you have user-scope read access.
+Use your authenticated {APP_NAME} private scope, usually `agent:<your-agent-id>`, for temporary private scratch notes only.
 Use full prefixed scope names exactly as shown. Do not use plain workspace IDs or agent IDs as memory scopes.
 If a workspace was selected in the Integrations page, include that workspace scope in shared context. Otherwise use the authenticated/default user scope.
 
 ## Setup
 
-1. Add Agent Core as an MCP server using the connection values provided for this session.
+1. Add {APP_NAME} as an MCP server using the connection values provided for this session.
 2. Update your own MCP configuration in the location your agent normally uses.
 3. Reload or restart the agent as supported.
-4. Verify that the Agent Core server is visible before doing any Agent Core work.
+4. Verify that the {APP_NAME} server is visible before doing any {APP_NAME} work.
 
 ## Operating Rules
 
@@ -5845,9 +5851,9 @@ At the start of every meaningful task, call `activity_update` immediately with:
 - `memory_scope`: `{default_scope}`
 - `status`: `active`
 
-While actively working, call `activity_update` again every 1-2 minutes as a heartbeat. Update `task_description` if the task changes materially.
+While actively working, call `activity_update` again every 1-2 minutes as a heartbeat. Use `task_note` for interim progress updates and update `task_description` if the task changes materially.
 
-If the session reloads, a handoff begins, or no active activity exists yet, open a fresh activity first with `status: active` before attempting to close it. Before your final response, call `activity_update` with `status: completed` and a short `task_result` summary when the task is complete. Use `status: blocked` if you cannot proceed and need user input.
+If the session reloads, a handoff begins, or no active activity exists yet, open a fresh activity first with `status: active` before attempting to close it. Before your final response, call `activity_update` with `status: completed` and a short `task_result` summary when the task is complete. Use `task_note` for in-flight updates. Use `status: blocked` if you cannot proceed and need user input.
 
 At the start of a meaningful task:
 
@@ -5864,30 +5870,31 @@ Write memory only when it will help a future session:
 
 Do not write memory for routine progress, command output, facts already obvious from files, secrets, raw credentials, or noisy transient debugging notes.
 
-When a task may require an external service, credential, API token, repository host, chat service, browser service, or Composio-style connector, check Agent Core before asking the user for setup details.
+When a task may require an external service, credential, API token, repository host, chat service, browser service, or Composio-style connector, check {APP_NAME} before asking the user for setup details.
 
 1. Use `credential_list` to discover available credential references in authorized scopes.
-2. Use `credential_get` only when you need a specific `AC_SECRET_*` reference for a local tool or command. Never ask the user for raw secrets and never print raw secrets.
+2. Use `credential_get` only when you need a specific `{CREDENTIAL_PREFIX}*` reference for a local tool or command. Never ask the user for raw secrets and never print raw secrets.
 3. Use `connectors_summary` for a compact capability overview, or `connectors_list` and `connectors_bindings_list` when you need raw connector and binding lists.
 4. Use `connectors_actions_list` before running an unfamiliar connector action.
 5. Use `connectors_bindings_test` when a binding may be stale or unverified.
-6. Use `connectors_run` when Agent Core should perform the external action server-side.
+6. Use `connectors_run` when {APP_NAME} should perform the external action server-side.
 
-Prefer connector bindings over local secret handling when both are available, because the raw credential stays inside Agent Core.
+Prefer connector bindings over local secret handling when both are available, because the raw credential stays inside {APP_NAME}.
 """
 
 
 def _connection_key_value(api_key=None):
-    return api_key or "{{AGENT_CORE_API_KEY}}"
+    return api_key or "{{" + ENV_PREFIX + "API_KEY}}"
 
 
 def _build_mcp_json(base_url, api_key=None):
     key = _connection_key_value(api_key)
+    _shell_api_key = "${" + ENV_PREFIX + "API_KEY}"
     codex_auth = f'http_headers = {{ Authorization = "Bearer {key}" }}'
     generic_json = json.dumps(
         {
             "mcpServers": {
-                "agent-core": {
+                APP_SLUG: {
                     "type": "http",
                     "url": f"{base_url}/mcp",
                     "headers": {
@@ -5901,7 +5908,7 @@ def _build_mcp_json(base_url, api_key=None):
     opencode_json = json.dumps(
         {
             "mcp": {
-                "agent-core": {
+                APP_SLUG: {
                     "type": "remote",
                     "url": f"{base_url}/mcp",
                     "enabled": True,
@@ -5916,7 +5923,7 @@ def _build_mcp_json(base_url, api_key=None):
     antigravity_json = json.dumps(
         {
             "mcpServers": {
-                "agent-core": {
+                APP_SLUG: {
                     "type": "http",
                     "serverUrl": f"{base_url}/mcp",
                     "headers": {
@@ -5929,15 +5936,15 @@ def _build_mcp_json(base_url, api_key=None):
     )
     return f"""# Claude Code
 # Option 1 — CLI (recommended, adds to user-level config so it works in every project):
-claude mcp add --transport http --scope user agent-core {base_url}/mcp \\
+claude mcp add --transport http --scope user {APP_SLUG} {base_url}/mcp \\
   --header "Authorization: Bearer {key}"
 
 # Option 2 — create .mcp.json in your repo root (workspace-level, committable):
-# If committing, replace the key with an env var: "Bearer ${{AGENT_CORE_API_KEY}}"
+# If committing, replace the key with an env var: "Bearer {_shell_api_key}"
 {generic_json}
 
 # Codex CLI: add this to ~/.codex/config.toml
-[mcp_servers.agent-core]
+[mcp_servers.{APP_SLUG}]
 url = "{base_url}/mcp"
 {codex_auth}
 
@@ -5952,16 +5959,18 @@ url = "{base_url}/mcp"
 
 def _build_cursor_mcp_json(base_url, api_key=None):
     key = _connection_key_value(api_key)
+    _api_key_var = ENV_PREFIX + "API_KEY"
+    _url_var = ENV_PREFIX + "URL"
     return f"""{{
   "mcpServers": {{
-    "agent-core": {{
+    "{APP_SLUG}": {{
       "url": "{base_url}/mcp",
       "headers": {{
         "Authorization": "Bearer {key}"
       }},
       "env": {{
-        "AGENT_CORE_API_KEY": "{key}",
-        "AGENT_CORE_URL": "{base_url}"
+        "{_api_key_var}": "{key}",
+        "{_url_var}": "{base_url}"
       }}
     }}
   }}
@@ -5970,16 +5979,18 @@ def _build_cursor_mcp_json(base_url, api_key=None):
 
 def _build_windsurf_mcp_json(base_url, api_key=None):
     key = _connection_key_value(api_key)
+    _api_key_var = ENV_PREFIX + "API_KEY"
+    _url_var = ENV_PREFIX + "URL"
     return f"""{{
   "mcpServers": {{
-    "agent-core": {{
+    "{APP_SLUG}": {{
       "url": "{base_url}/mcp",
       "headers": {{
         "Authorization": "Bearer {key}"
       }},
       "env": {{
-        "AGENT_CORE_API_KEY": "{key}",
-        "AGENT_CORE_URL": "{base_url}"
+        "{_api_key_var}": "{key}",
+        "{_url_var}": "{base_url}"
       }}
     }}
   }}
@@ -5989,35 +6000,35 @@ def _build_windsurf_mcp_json(base_url, api_key=None):
 def _build_env_vars(base_url, agent_id, user_scope, workspace_scope, api_key=None):
     key = _connection_key_value(api_key)
     workspace_line = (
-        f'export AGENT_CORE_WORKSPACE_SCOPE="{workspace_scope}"'
+        f'export {ENV_PREFIX}WORKSPACE_SCOPE="{workspace_scope}"'
         if workspace_scope
-        else '# export AGENT_CORE_WORKSPACE_SCOPE="workspace:your-workspace-id"  # Optional'
+        else f'# export {ENV_PREFIX}WORKSPACE_SCOPE="workspace:your-workspace-id"  # Optional'
     )
-    return f"""# Agent Core Environment Variables
-# Use these only when your MCP config, launcher, or script reads Agent Core values from the environment.
+    return f"""# {APP_NAME} Environment Variables
+# Use these only when your MCP config, launcher, or script reads {APP_NAME} values from the environment.
 # MCP config is still the normal connection setup for MCP-capable tools.
 # Do not commit these to workspace files.
 #
-# AGENT_CORE_API_KEY is the real authenticated agent identity.
-# AGENT_CORE_AGENT_ID is helper metadata only; the server does not trust it for identity.
+# {ENV_PREFIX}API_KEY is the real authenticated agent identity.
+# {ENV_PREFIX}AGENT_ID is helper metadata only; the server does not trust it for identity.
 
-export AGENT_CORE_URL="{base_url}"
-export AGENT_CORE_API_KEY="{key}"
-export AGENT_CORE_AGENT_ID="{agent_id}"
-export AGENT_CORE_USER_SCOPE="{user_scope}"
+export {ENV_PREFIX}URL="{base_url}"
+export {ENV_PREFIX}API_KEY="{key}"
+export {ENV_PREFIX}AGENT_ID="{agent_id}"
+export {ENV_PREFIX}USER_SCOPE="{user_scope}"
 {workspace_line}
 """
 
 
 def _get_destination_guidance(target, output_type):
     if output_type == "claude_md":
-        return "Save this as <code>CLAUDE.md</code> in the workspace repository root. It is workspace-centric; the configured MCP/API key determines the active Agent Core agent."
+        return f"Save this as <code>CLAUDE.md</code> in the workspace repository root. It is workspace-centric; the configured MCP/API key determines the active {APP_NAME} agent."
     elif output_type == "agents_md":
-        return "Save this as <code>AGENTS.md</code> in the workspace repository root. It is workspace-centric and can be shared by multiple agents; the configured MCP/API key determines the active Agent Core agent."
+        return f"Save this as <code>AGENTS.md</code> in the workspace repository root. It is workspace-centric and can be shared by multiple agents; the configured MCP/API key determines the active {APP_NAME} agent."
     elif output_type == "assistants_md":
         return "Paste this into the assistant's own onboarding or instruction field. It is meant for assistant-style agents that manage their own MCP configuration. Use the one-time key button here when you want the prompt to include a fresh bearer token."
     elif output_type == "mcp_json":
-        return "Use the section that matches your tool. For Claude Code, run the <code>claude mcp add</code> command or save the JSON as <code>.mcp.json</code> in your repo root. Antigravity uses the same MCP shape but expects <code>serverUrl</code> instead of <code>url</code>. The bearer key determines the active Agent Core agent."
+        return f"Use the section that matches your tool. For Claude Code, run the <code>claude mcp add</code> command or save the JSON as <code>.mcp.json</code> in your repo root. Antigravity uses the same MCP shape but expects <code>serverUrl</code> instead of <code>url</code>. The bearer key determines the active {APP_NAME} agent."
     elif output_type == "env":
         return "Optional. Paste these into your shell profile (<code>~/.bashrc</code>, <code>~/.zshrc</code>) or tool environment only if you want the tool to read values from environment variables. This does not configure MCP by itself."
     elif output_type == "instructions":
@@ -6030,9 +6041,9 @@ def _get_destination_guidance(target, output_type):
 
 
 def _build_verification_prompt(user_scope, workspace_scope):
-    return f"""Run the Agent Core verification flow end to end:
+    return f"""Run the {APP_NAME} verification flow end to end:
 
-1. Call `activity_update` with `task_description` set to "Agent Core verification", `memory_scope` set to `{workspace_scope}`, and `status` set to `active`.
+1. Call `activity_update` with `task_description` set to "{APP_NAME} verification", `memory_scope` set to `{workspace_scope}`, and `status` set to `active`.
 2. Write a memory record to `{workspace_scope}` that says this agent is connected, includes the current verification context, and is safe to use for this workspace. Capture the returned record id.
 3. Call `memory_get` for that record id and confirm the record is readable from the workspace scope.
 4. Call `memory_search` in `{workspace_scope}` for an exact token from the record you just wrote and report the result. If the first search returns zero results, retry once with the exact token plus the `domain` and `topic` from the record.
@@ -6040,7 +6051,7 @@ def _build_verification_prompt(user_scope, workspace_scope):
 6. Call `connectors_summary` to list visible connector capability and binding health. Then call `connectors_bindings_list` with no scope to see everything visible to this agent. If you can read `{user_scope}`, call `connectors_bindings_list` again with `scope` set to `{user_scope}`. If you can read `{workspace_scope}`, call `connectors_bindings_list` again with `scope` set to `{workspace_scope}`. Report user-scoped and workspace-scoped bindings separately if both exist.
 7. Call `connectors_actions_list` with a real connector type id from the `connectors_list` result and pass it as `connector_type_id` exactly. Report whether connector actions are visible.
 8. If at least one enabled binding is visible in any scope, call `connectors_bindings_test` on a non-destructive binding and report the result. If none are visible, say that clearly.
-9. Call `activity_update` with `status` set to `completed` and include a short `task_result` summary of the verification outcome. If the session reloads or no active activity exists yet, first open the fresh verification activity with `status: active` before closing it.
+9. Use `task_note` for intermediate verification updates and call `activity_update` with `status` set to `completed` and include a short `task_result` summary of the verification outcome. If the session reloads or no active activity exists yet, first open the fresh verification activity with `status: active` before closing it.
 10. Report which scope you wrote to and summarize the memory, credential, and connector checks.
 
 Use the full prefixed scope name exactly as shown. Do not use a plain workspace ID as a memory scope.
@@ -6133,7 +6144,7 @@ async def webhooks_page(request: Request, session: dict = Depends(require_auth))
 <!-- Inbound section -->
 <div class="card" style="margin-bottom:1.5rem">
   <h3 style="margin-top:0">Inbound Receiver</h3>
-  <p>External systems (n8n, Zapier, custom scripts) can push work commands into Agent Core using the inbound webhook endpoint. Authenticate requests with the <code>X-Agent-Core-Inbound-Key</code> header.</p>
+  <p>External systems (n8n, Zapier, custom scripts) can push work commands into {APP_NAME} using the inbound webhook endpoint. Authenticate requests with the <code>X-Agent-Core-Inbound-Key</code> header.</p>
   <div style="margin-bottom:1rem">
     <label style="display:block;margin-bottom:0.35rem;font-weight:600">Inbound URL</label>
     <div style="display:flex;gap:0.5rem;align-items:center">
@@ -6176,7 +6187,7 @@ Content-Type: application/json
 <!-- Outbound section -->
 <h2 style="margin-bottom:0.75rem">Outbound Notifications</h2>
 <div class="card" style="margin-bottom:1.5rem">
-  <p>Outbound webhook notifications let external systems react to Agent Core events. Each registered endpoint receives a signed HTTP POST when a subscribed event occurs. Webhooks are admin-only and fire-and-log — no retries, no orchestration.</p>
+  <p>Outbound webhook notifications let external systems react to {APP_NAME} events. Each registered endpoint receives a signed HTTP POST when a subscribed event occurs. Webhooks are admin-only and fire-and-log — no retries, no orchestration.</p>
   <p><strong>Signing:</strong> Every delivery includes <code>X-Agent-Core-Signature: sha256=&lt;hex&gt;</code> so receivers can verify authenticity using HMAC-SHA256 with the stored secret.</p>
 </div>
 <div class="card">

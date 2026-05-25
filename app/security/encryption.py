@@ -4,6 +4,7 @@ from typing import Optional
 
 from cryptography.fernet import Fernet, MultiFernet
 
+from app.branding import ENV_PREFIX
 from app.config import settings
 
 
@@ -24,7 +25,7 @@ def _load_or_generate_key() -> bytes:
             return key_bytes
         except ValueError as ex:
             raise ValueError(
-                f"AGENT_CORE_ENCRYPTION_KEY is not a valid Fernet key: {ex}"
+                f"{ENV_PREFIX}ENCRYPTION_KEY is not a valid Fernet key: {ex}"
             )
 
     key_path = settings.credential_key_path

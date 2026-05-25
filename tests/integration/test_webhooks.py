@@ -120,7 +120,9 @@ class TestWebhookDelivery:
         posted = []
         def mock_post(url, *, content, headers, timeout):
             posted.append(json.loads(content))
-            resp = MagicMock(); resp.status_code = 200; return resp
+            resp = MagicMock()
+            resp.status_code = 200
+            return resp
 
         with patch("httpx.post", side_effect=mock_post):
             webhook_service.dispatch_event(
@@ -134,7 +136,8 @@ class TestWebhookDelivery:
                     "status": "active",
                 },
             )
-            import time; time.sleep(0.1)
+            import time
+            time.sleep(0.1)
 
         assert len(posted) == 1
         assert posted[0]["event_type"] == "activity_created"
@@ -164,11 +167,14 @@ class TestWebhookDelivery:
         wh_id = _create_webhook(admin_client, event_types=["activity_created"]).json()["data"]["webhook"]["id"]
 
         def mock_post(url, *, content, headers, timeout):
-            resp = MagicMock(); resp.status_code = 500; return resp
+            resp = MagicMock()
+            resp.status_code = 500
+            return resp
 
         with patch("httpx.post", side_effect=mock_post):
             webhook_service.dispatch_event("activity_created", {"activity_id": "abc"})
-            import time; time.sleep(0.1)
+            import time
+            time.sleep(0.1)
 
         r = admin_client.get(f"/api/webhooks/{wh_id}/deliveries")
         deliveries = r.json()["data"]["deliveries"]
@@ -176,18 +182,20 @@ class TestWebhookDelivery:
         assert deliveries[0]["status"] == "failure"
 
     def test_signed_payload_has_correct_header(self, admin_client):
-        import hashlib, hmac as _hmac
         from app.services import webhook_service
         _create_webhook(admin_client, event_types=["activity_created"], secret="mywebhooksecret")
 
         sent_headers = []
         def mock_post(url, *, content, headers, timeout):
             sent_headers.append(dict(headers))
-            resp = MagicMock(); resp.status_code = 200; return resp
+            resp = MagicMock()
+            resp.status_code = 200
+            return resp
 
         with patch("httpx.post", side_effect=mock_post):
             webhook_service.dispatch_event("activity_created", {"activity_id": "test"})
-            import time; time.sleep(0.1)
+            import time
+            time.sleep(0.1)
 
         assert len(sent_headers) == 1
         sig = sent_headers[0].get("X-Agent-Core-Signature", "")
@@ -222,7 +230,9 @@ class TestWebhookDelivery:
 
         def mock_post(url, *, content, headers, timeout):
             captured.append(json.loads(content))
-            resp = MagicMock(); resp.status_code = 200; return resp
+            resp = MagicMock()
+            resp.status_code = 200
+            return resp
 
         with patch("httpx.post", side_effect=mock_post):
             webhook_service.dispatch_event(
@@ -239,7 +249,8 @@ class TestWebhookDelivery:
                     "status": "success",
                 },
             )
-            import time; time.sleep(0.1)
+            import time
+            time.sleep(0.1)
 
         assert captured
         payload = captured[0]["data"]
@@ -272,7 +283,9 @@ class TestTestDelivery:
 
         def mock_post(url, *, content, headers, timeout):
             posted.append(json.loads(content))
-            resp = MagicMock(); resp.status_code = 200; return resp
+            resp = MagicMock()
+            resp.status_code = 200
+            return resp
 
         with patch("httpx.post", side_effect=mock_post):
             r = admin_client.post(f"/api/webhooks/{wh_id}/test")
@@ -293,7 +306,9 @@ class TestTestDelivery:
         def mock_post(url, *, content, headers, timeout):
             payload = json.loads(content)
             assert payload["event_type"] == "test", "should use synthetic payload, not replay prior"
-            resp = MagicMock(); resp.status_code = 200; return resp
+            resp = MagicMock()
+            resp.status_code = 200
+            return resp
 
         with patch("httpx.post", side_effect=mock_post):
             r = admin_client.post(f"/api/webhooks/{wh_id}/test")
@@ -303,7 +318,9 @@ class TestTestDelivery:
         wh_id = _create_webhook(admin_client).json()["data"]["webhook"]["id"]
 
         def mock_post(url, *, content, headers, timeout):
-            resp = MagicMock(); resp.status_code = 200; return resp
+            resp = MagicMock()
+            resp.status_code = 200
+            return resp
 
         with patch("httpx.post", side_effect=mock_post):
             admin_client.post(f"/api/webhooks/{wh_id}/test")
@@ -316,7 +333,9 @@ class TestTestDelivery:
         wh_id = _create_webhook(admin_client).json()["data"]["webhook"]["id"]
 
         def mock_post(url, *, content, headers, timeout):
-            resp = MagicMock(); resp.status_code = 503; return resp
+            resp = MagicMock()
+            resp.status_code = 503
+            return resp
 
         with patch("httpx.post", side_effect=mock_post):
             r = admin_client.post(f"/api/webhooks/{wh_id}/test")

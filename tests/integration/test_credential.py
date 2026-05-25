@@ -11,7 +11,8 @@ def test_credential_create_entry(test_client, agent_token):
     )
     assert r.status_code == 201, f"create failed: {r.json()}"
     data = r.json()["data"]
-    assert data["entry"]["reference_name"].startswith("AC_SECRET_TEST_API_KEY_")
+    from app.branding import CREDENTIAL_PREFIX
+    assert data["entry"]["reference_name"].startswith(f"{CREDENTIAL_PREFIX}TEST_API_KEY_")
 
 
 def test_credential_rejects_empty_name_on_update(test_client, agent_token):

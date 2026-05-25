@@ -170,7 +170,7 @@ def test_deactivate_agent(test_client, admin_token):
         "/api/agents/deactagent",
         headers={"Authorization": f"Bearer {admin_token}"},
     )
-    assert r2.json()["data"]["agent"]["is_active"] == False
+    assert not r2.json()["data"]["agent"]["is_active"]
 
 
 def test_default_user_scope_is_always_granted_to_owner(

@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import StreamingResponse, JSONResponse
+from app.branding import APP_SLUG, APP_VERSION, BACKUP_KEY_HEADER, MANIFEST_VERSION_KEY
 from app.services import backup_service
 from app.security.dependencies import require_admin, get_current_session
 from app.security.response_helpers import success_response, error_response
@@ -30,18 +31,18 @@ async def backup_export(
         str(settings.db_path),
         str(settings.credential_key_path),
         session["user_id"],
-        agent_core_version="1.0.0",
+        app_version=APP_VERSION,
     )
 
-    filename = f"agent-core-backup-{utc_now().strftime('%Y%m%d-%H%M%S')}.zip.enc"
+    filename = f"{APP_SLUG}-backup-{utc_now().strftime('%Y%m%d-%H%M%S')}.zip.enc"
 
     return StreamingResponse(
         zip_buf,
         media_type="application/octet-stream",
         headers={
             "Content-Disposition": f"attachment; filename={filename}",
-            "X-Agent-Core-Backup-Key": backup_key.decode(),
-            "X-Agent-Core-Backup-Encrypted": "true",
+            BACKUP_KEY_HEADER: backup_key.decode(),
+            f"{BACKUP_KEY_HEADER}-Encrypted": "true",
         },
     )
 
@@ -122,7 +123,7 @@ async def backup_restore(
             "manifest": {
                 "exported_by": manifest.get("exported_by"),
                 "exported_at": manifest.get("exported_at"),
-                "agent_core_version": manifest.get("agent_core_version"),
+                MANIFEST_VERSION_KEY: manifest.get(MANIFEST_VERSION_KEY),
             },
         }
     )

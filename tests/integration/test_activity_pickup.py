@@ -6,7 +6,6 @@ Flow under test:
   2. Agent calls POST /api/activity/pickup → receives the claimed activity
   3. Workspace isolation: an agent with different scopes cannot claim work meant for another
 """
-import pytest
 
 
 # ---------------------------------------------------------------------------

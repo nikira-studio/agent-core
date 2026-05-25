@@ -9,6 +9,8 @@ from typing import Optional
 
 import httpx
 
+from app.branding import APP_NAME
+
 from app.database import get_db
 from app.security.encryption import encrypt_value, decrypt_value
 
@@ -258,7 +260,7 @@ def _sample_payload(event_type: str) -> dict:
                        "activity_cancelled", "activity_recovered"):
         status_map = {
             "activity_created": "active",
-            "activity_updated": "completed",
+            "activity_updated": "active",
             "activity_heartbeat": "active",
             "activity_cancelled": "cancelled",
             "activity_recovered": "active",
@@ -266,7 +268,8 @@ def _sample_payload(event_type: str) -> dict:
         data = {
             "activity_id": "sample-activity-id",
             "task_description": "Sample task: reviewing PR #42",
-            "task_result": "Completed the sample task and verified the result" if event_type == "activity_updated" else None,
+            "task_note": "Applied a sample progress update" if event_type == "activity_updated" else None,
+            "task_result": None,
             "agent_id": "my-agent",
             "assigned_agent_id": "my-agent",
             "user_id": "admin",
@@ -275,11 +278,9 @@ def _sample_payload(event_type: str) -> dict:
             "started_at": started,
             "updated_at": now,
             "heartbeat_at": now,
-            "ended_at": now if event_type in ("activity_cancelled", "activity_updated") else None,
+            "ended_at": now if event_type == "activity_cancelled" else None,
             "previous_status": "active" if event_type != "activity_created" else None,
         }
-        if event_type == "activity_updated":
-            data["previous_status"] = "active"
     elif event_type == "connector_executed":
         data = {
             "binding_id": "sample-binding-id",
@@ -294,7 +295,7 @@ def _sample_payload(event_type: str) -> dict:
             "error_message": None,
         }
     else:
-        data = {"message": "Agent Core webhook test delivery", "event_type": event_type}
+        data = {"message": f"{APP_NAME} webhook test delivery", "event_type": event_type}
     return data
 
 

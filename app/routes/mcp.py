@@ -7,6 +7,7 @@ from app.security.dependencies import get_mcp_request_context
 from app.security.scope_enforcer import ScopeEnforcer
 from app.security.context import RequestContext
 from app.security.pii_detector import contains_pii
+from app.branding import APP_NAME, CREDENTIAL_PREFIX, MCP_SERVER_DESCRIPTION
 from app.services import (
     memory_service,
     credential_service,
@@ -22,6 +23,7 @@ def _activity_event_data(activity: dict, **extra) -> dict:
     event_data = {
         "activity_id": activity.get("id"),
         "task_description": activity.get("task_description"),
+        "task_note": activity.get("task_note"),
         "task_result": activity.get("task_result"),
         "agent_id": activity.get("agent_id"),
         "assigned_agent_id": activity.get("assigned_agent_id"),
@@ -42,9 +44,9 @@ router = APIRouter(prefix="", tags=["mcp"])
 
 MANIFEST = {
     "schema_version": "1.0",
-    "name": "Agent Core",
+    "name": APP_NAME,
     "version": "1.0.0",
-    "description": "Agent Core local-first AI agent control layer",
+    "description": MCP_SERVER_DESCRIPTION,
     "tools": [
         {
             "name": "memory_search",
@@ -144,6 +146,7 @@ MANIFEST = {
                 "type": "object",
                 "properties": {
                     "task_description": {"type": "string"},
+                    "task_note": {"type": "string"},
                     "task_result": {"type": "string"},
                     "status": {"type": "string"},
                     "memory_scope": {"type": "string"},
@@ -396,6 +399,8 @@ def _activity_audit_details(activity: dict, **extra) -> dict:
     }
     if activity.get("task_result") is not None:
         details["task_result"] = activity.get("task_result")
+    if activity.get("task_note") is not None:
+        details["task_note"] = activity.get("task_note")
     if activity.get("assigned_agent_id"):
         details["assigned_agent_id"] = activity.get("assigned_agent_id")
     details.update({k: v for k, v in extra.items() if v is not None})
@@ -436,15 +441,15 @@ async def _handle_mcp_jsonrpc(body: dict, request: Request, ctx: RequestContext)
                     "tools": {},
                 },
                 "serverInfo": {
-                    "name": "Agent Core",
+                    "name": APP_NAME,
                     "version": "1.0.0",
                 },
                 "instructions": (
-                    "Agent Core provides workspace memory, activity tracking, and credential access. "
+                    f"{APP_NAME} provides workspace memory, activity tracking, and credential access. "
                     "At the start of every non-trivial task: call activity_update (status=active, memory_scope=workspace:<your-scope>), "
                     "then run 2-3 memory_search queries for relevant context. "
-                    "Send activity_update heartbeats every 1-2 minutes while working; mark completed when done. "
-                    "Use credential_get for AC_SECRET_* references — never ask the user for raw secrets. "
+                    "Send activity_update heartbeats or task_note progress updates every 1-2 minutes while working; mark completed with task_result when done. "
+                    f"Use credential_get for {CREDENTIAL_PREFIX}* references — never ask the user for raw secrets. "
                     "If tools appear unavailable, your host may defer MCP schemas — run the host's tool discovery or schema-load step first."
                 ),
             },
@@ -776,14 +781,16 @@ async def _handle_custom_mcp_tool(body: dict, ctx: RequestContext):
                 activity_service.update_activity(
                     existing["id"],
                     task_description=params.get("task_description"),
+                    task_note=params.get("task_note"),
                     task_result=params.get("task_result"),
                     memory_scope=memory_scope,
                     status=params["status"],
                 )
-            elif params.get("task_description") or params.get("task_result") or memory_scope:
+            elif params.get("task_description") or params.get("task_note") or params.get("task_result") or memory_scope:
                 activity_service.update_activity(
                     existing["id"],
                     task_description=params.get("task_description"),
+                    task_note=params.get("task_note"),
                     task_result=params.get("task_result"),
                     memory_scope=memory_scope,
                 )
@@ -802,6 +809,7 @@ async def _handle_custom_mcp_tool(body: dict, ctx: RequestContext):
                     action="heartbeat"
                     if not params.get("status")
                     and not params.get("task_description")
+                    and not params.get("task_note")
                     and not params.get("task_result")
                     and not memory_scope
                     else "update",
@@ -815,6 +823,7 @@ async def _handle_custom_mcp_tool(body: dict, ctx: RequestContext):
             if (
                 not _new_status
                 and not params.get("task_description")
+                and not params.get("task_note")
                 and not params.get("task_result")
                 and not memory_scope
             ):

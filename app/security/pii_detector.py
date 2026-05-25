@@ -1,5 +1,7 @@
 import re
 
+from app.branding import APP_CODE
+
 
 PII_PATTERNS = [
     (re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b"), "EMAIL"),
@@ -9,7 +11,7 @@ PII_PATTERNS = [
     (re.compile(r"\b(AIza|ya29\.|BQBN|ya0\.)[A-Za-z0-9_-]{20,}\b"), "GOOGLE_API_KEY"),
     (re.compile(r"\bsk-[A-Za-z0-9]{20,}\b"), "OPENAI_KEY"),
     (re.compile(r"\bamzn\.[A-Za-z0-9=_-]{20,}\b"), "AWS_KEY"),
-    (re.compile(r"\b(A3T|AQS|AGPA|SM|ASIA|AC)[A-Z0-9]{16,}\b"), "AWS_KEY"),
+    (re.compile(rf"\b(A3T|AQS|AGPA|SM|ASIA|{re.escape(APP_CODE)})[A-Z0-9]{{16,}}\b"), "AWS_KEY"),
 ]
 
 

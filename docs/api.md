@@ -554,7 +554,7 @@ Dispatch:
 | `memory_retract` | Soft-delete a memory record |
 | `credential_get` | Get an `AC_SECRET_*` reference for a credential entry |
 | `credential_list` | List credential metadata and references in authorized scopes |
-| `activity_update` | Create or update an activity record, including completion result |
+| `activity_update` | Create or update an activity record, including progress notes and completion result |
 | `activity_get` | Get an activity record |
 | `activity_list` | List activities visible to the current caller |
 | `activity_pickup` | Claim the next active work item assigned to this agent in authorized scopes |
@@ -612,7 +612,7 @@ data: {"type": "activity_created", "timestamp": "2026-05-18T12:34:56.789Z", "dat
 | Event | Trigger |
 | --- | --- |
 | `activity_created` | A new activity record is created |
-| `activity_updated` | An activity status, metadata, or task result is updated |
+| `activity_updated` | An activity status, metadata, progress note, or task result is updated |
 | `activity_heartbeat` | An agent sends a heartbeat for an activity |
 | `activity_cancelled` | An activity is cancelled |
 | `activity_recovered` | A stale activity is reassigned or recovered |
@@ -749,7 +749,7 @@ Commands use dot notation and imperative form to distinguish them from outbound 
 | --- | --- | --- |
 | `activity.create` | `assigned_agent_id` | `task_description`, `memory_scope`, `workspace` |
 | `activity.assign` | `activity_id`, `assigned_agent_id` | `memory_scope` |
-| `activity.update` | `activity_id` + at least one of: `status`, `task_description`, `task_result`, `memory_scope` | |
+| `activity.update` | `activity_id` + at least one of: `status`, `task_description`, `task_note`, `task_result`, `memory_scope` | |
 | `activity.cancel` | `activity_id` | `reason` |
 | `activity.note` | `activity_id`, `note` | |
 
@@ -794,6 +794,7 @@ Updates status, description, result, or scope metadata of an existing activity.
   "activity_id": "abc123",
   "status": "completed",
   "task_description": "Reviewed and approved",
+  "task_note": "Checked the diff and verified the schema change",
   "task_result": "Reviewed the patch and approved the change"
 }
 ```
@@ -904,6 +905,7 @@ Every delivery is a signed HTTP POST. The envelope is the same for all event typ
 {
   "activity_id": "abc123",
   "task_description": "Refactor auth middleware",
+  "task_note": "Applied the middleware change and started the test pass",
   "task_result": "Completed auth middleware refactor and added tests",
   "agent_id": "my-agent",
   "assigned_agent_id": "my-agent",
@@ -918,7 +920,7 @@ Every delivery is a signed HTTP POST. The envelope is the same for all event typ
 }
 ```
 
-`task_result` is optional and is typically populated when a task is completed. `previous_status` is present on `activity_updated` and `activity_cancelled`. `recovery_action` and `result` are present on `activity_recovered`.
+`task_note` is optional and is typically populated for in-flight updates. `task_result` is optional and is typically populated when a task is completed. `previous_status` is present on `activity_updated` and `activity_cancelled`. `recovery_action` and `result` are present on `activity_recovered`.
 
 **Connector event `data` fields** (`connector_executed`):
 

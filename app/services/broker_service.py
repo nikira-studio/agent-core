@@ -1,11 +1,12 @@
 import os
 import secrets
 import hashlib
+from app.branding import APP_SLUG
 from app.database import get_db
 from app.config import settings
 
 
-BROKER_NAME = "agent-core-broker"
+BROKER_NAME = f"{APP_SLUG}-broker"
 BROKER_CREDENTIAL_FILE = "broker.credential"
 
 

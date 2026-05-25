@@ -84,6 +84,20 @@ def test_update_activity_can_store_task_result(clean_db):
     assert fresh["task_result"] == "Finished the work"
 
 
+def test_update_activity_can_store_task_note(clean_db):
+    from app.services.activity_service import create_activity, update_activity, get_activity
+
+    act = create_activity(
+        agent_id="agentA",
+        user_id="testuser",
+        task_description="Do something else",
+        memory_scope="agent:agentA",
+    )
+    update_activity(act["id"], task_note="Worked through the next step")
+    fresh = get_activity(act["id"])
+    assert fresh["task_note"] == "Worked through the next step"
+
+
 def test_claim_different_agent_cannot_claim(clean_db):
     from app.services.activity_service import claim_next_activity
 
@@ -98,7 +112,8 @@ def test_claim_updates_heartbeat(clean_db):
 
     act = _make_activity("agentA", "agent:agentA")
     original_heartbeat = act["heartbeat_at"]
-    import time; time.sleep(0.01)
+    import time
+    time.sleep(0.01)
     claimed = claim_next_activity("agentA", ["agent:agentA"])
     assert claimed is not None
     assert claimed["heartbeat_at"] >= original_heartbeat

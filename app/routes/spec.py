@@ -4,6 +4,7 @@ from pydantic import BaseModel
 from app.security.dependencies import get_request_context
 from app.security.context import RequestContext
 from app.security.response_helpers import success_response
+from app.branding import CREDENTIAL_PREFIX
 from app.config import settings
 from app.models.enums import MEMORY_CLASSES, SOURCE_KINDS
 
@@ -176,6 +177,8 @@ async def spec(
             "description": "Update the current agent's active activity or create one if none exists",
             "inputSchema": {
                 "task_description": "string?",
+                "task_note": "string?",
+                "task_result": "string?",
                 "status": "string?",
                 "memory_scope": "string?",
             },
@@ -237,7 +240,7 @@ async def spec(
         "description": "Credential values are resolved internally by the credential broker and never exposed in API responses, prompts, or logs",
         "resolve_endpoint": "/internal/credentials/resolve",
         "resolve_auth": "broker credential required; agent API keys cannot call resolve",
-        "variable_prefix": "AC_SECRET_",
+        "variable_prefix": CREDENTIAL_PREFIX,
     }
 
     rate_limits = {

@@ -1,5 +1,10 @@
 
+import io
+import json
+import zipfile
 from io import BytesIO
+
+from app.branding import APP_SLUG
 
 
 def test_backup_restore_requires_admin(test_client, agent_token):
@@ -33,12 +38,53 @@ def test_backup_restore_accepts_encrypted_archive_and_key(
         "/api/backup/restore",
         headers={"Authorization": f"Bearer {admin_token}"},
         files={
-            "backup": ("agent-core-backup.zip.enc", BytesIO(encrypted_buf.getvalue())),
+            "backup": (f"{APP_SLUG}-backup.zip.enc", BytesIO(encrypted_buf.getvalue())),
         },
         data={"backup_key": backup_key.decode(), "mode": "replace_all"},
     )
     assert r.status_code == 200, r.text
     assert r.json()["data"]["mode"] == "replace_all"
+
+
+def test_backup_restore_accepts_legacy_manifest_key(
+    test_client, admin_token, clean_db
+):
+    from cryptography.fernet import Fernet
+    from app.services import backup_service
+    from app.config import settings
+
+    plain_buf = backup_service.build_backup_zip(
+        str(clean_db),
+        str(settings.credential_key_path),
+        "admin",
+    )
+
+    rewritten = io.BytesIO()
+    with zipfile.ZipFile(plain_buf, "r") as src, zipfile.ZipFile(
+        rewritten, "w", zipfile.ZIP_DEFLATED
+    ) as dst:
+        for name in src.namelist():
+            data = src.read(name)
+            if name == "manifest.json":
+                manifest = json.loads(data)
+                manifest["agent_core_version"] = manifest.pop("app_version")
+                data = json.dumps(manifest, indent=2).encode()
+            dst.writestr(name, data)
+
+    backup_key = Fernet.generate_key()
+    encrypted = Fernet(backup_key).encrypt(rewritten.getvalue())
+
+    r = test_client.post(
+        "/api/backup/restore",
+        headers={"Authorization": f"Bearer {admin_token}"},
+        files={
+            "backup": (f"{APP_SLUG}-legacy-backup.zip.enc", BytesIO(encrypted)),
+        },
+        data={"backup_key": backup_key.decode(), "mode": "replace_all"},
+    )
+
+    assert r.status_code == 200, r.text
+    assert r.json()["data"]["manifest"]["app_version"] == "1.0.0"
 
 
 def test_merge_restore_preserves_connector_tables(clean_db):

@@ -4,9 +4,10 @@ from pathlib import Path
 from contextlib import contextmanager
 from typing import Generator
 
+from app.branding import ENV_PREFIX
 from app.config import settings
 
-DB_PATH_OVERRIDE: str | None = os.environ.get("AGENT_CORE_TEST_DB")
+DB_PATH_OVERRIDE: str | None = os.environ.get(f"{ENV_PREFIX}TEST_DB")
 
 
 def get_db_path() -> Path:

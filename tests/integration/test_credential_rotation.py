@@ -1,5 +1,6 @@
 from unittest.mock import patch
 from cryptography.fernet import Fernet
+from app.branding import DB_FILENAME
 
 
 def test_rotate_requires_admin(test_client, agent_token):
@@ -268,7 +269,7 @@ def test_full_backup_contains_keyring_after_rotation(clean_db, tmp_path):
         manifest = json.loads(zf.read("manifest.json"))
 
     assert {
-        "agent-core.db",
+        DB_FILENAME,
         "credential.key",
         "credential.keyring",
         "manifest.json",
@@ -304,7 +305,7 @@ def test_encrypted_backup_package_can_be_decrypted_and_restored(clean_db):
     with zipfile.ZipFile(decrypted, "r") as zf:
         names = set(zf.namelist())
 
-    assert "agent-core.db" in names
+    assert DB_FILENAME in names
     assert "credential.key" in names
     assert "manifest.json" in names
 

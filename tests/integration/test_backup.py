@@ -1,5 +1,7 @@
 from unittest.mock import patch
 
+from app.branding import BACKUP_KEY_HEADER
+
 
 def test_backup_export_no_longer_requires_otp(test_client, admin_token):
     from io import BytesIO
@@ -17,7 +19,7 @@ def test_backup_export_no_longer_requires_otp(test_client, admin_token):
 
     assert r.status_code == 200, r.text
     assert r.headers["content-type"].startswith("application/octet-stream")
-    assert r.headers["x-agent-core-backup-key"] == backup_key.decode()
+    assert r.headers[BACKUP_KEY_HEADER.lower()] == backup_key.decode()
 
 
 def test_backup_export_requires_admin(test_client):

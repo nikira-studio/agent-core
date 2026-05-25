@@ -178,6 +178,7 @@ CREATE TABLE IF NOT EXISTS agent_activity (
     assigned_agent_id TEXT,
     reassigned_from_agent_id TEXT,
     task_description TEXT NOT NULL,
+    task_note TEXT,
     task_result TEXT,
     status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'stale', 'reassigned', 'completed', 'blocked', 'cancelled')),
     memory_scope TEXT,
@@ -366,6 +367,7 @@ def create_schema(conn) -> None:
     _ensure_user_timezone_column(conn)
     _ensure_connector_type_action_state_column(conn)
     _ensure_connector_type_spec_columns(conn)
+    _ensure_connector_type_backend_columns(conn)
     _ensure_webhook_tables(conn)
     _ensure_inbound_webhook_table(conn)
     _seed_connector_types(conn)
@@ -373,16 +375,20 @@ def create_schema(conn) -> None:
 
 def _ensure_activity_columns(conn) -> None:
     columns = {
-        row["name"] for row in conn.execute("PRAGMA table_info(agent_activity)").fetchall()
+        row["name"]
+        for row in conn.execute("PRAGMA table_info(agent_activity)").fetchall()
     }
+    if "task_note" not in columns:
+        conn.execute("ALTER TABLE agent_activity ADD COLUMN task_note TEXT")
     if "task_result" not in columns:
         conn.execute("ALTER TABLE agent_activity ADD COLUMN task_result TEXT")
-        conn.commit()
+    conn.commit()
 
 
 def _ensure_memory_metadata_columns(conn) -> None:
     columns = {
-        row["name"] for row in conn.execute("PRAGMA table_info(memory_records)").fetchall()
+        row["name"]
+        for row in conn.execute("PRAGMA table_info(memory_records)").fetchall()
     }
     additions = [
         ("provenance_json", "TEXT"),
@@ -458,6 +464,26 @@ def _ensure_connector_type_spec_columns(conn) -> None:
     additions = [
         ("spec_url", "TEXT"),
         ("operations_json", "TEXT"),
+    ]
+    for column_name, column_type in additions:
+        if column_name not in columns:
+            conn.execute(
+                f"""
+                ALTER TABLE connector_types
+                ADD COLUMN {column_name} {column_type}
+                """
+            )
+    conn.commit()
+
+
+def _ensure_connector_type_backend_columns(conn) -> None:
+    columns = {
+        row["name"]
+        for row in conn.execute("PRAGMA table_info(connector_types)").fetchall()
+    }
+    additions = [
+        ("backend_type", "TEXT"),
+        ("backend_json", "TEXT"),
     ]
     for column_name, column_type in additions:
         if column_name not in columns:

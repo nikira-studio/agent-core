@@ -2,10 +2,12 @@ from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from app.branding import DB_FILENAME, ENV_PREFIX
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_prefix="AGENT_CORE_", env_file=".env", extra="ignore"
+        env_prefix=ENV_PREFIX, env_file=".env", extra="ignore"
     )
 
     PORT: int = 3500
@@ -29,7 +31,7 @@ class Settings(BaseSettings):
 
     @property
     def db_path(self) -> Path:
-        return self.data_dir / "agent-core.db"
+        return self.data_dir / DB_FILENAME
 
     @property
     def credential_key_path(self) -> Path:

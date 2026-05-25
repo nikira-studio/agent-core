@@ -10,9 +10,7 @@ via the HTTP layer in the test suite. Instead:
    that activity/connector routes put events in the queue
 """
 
-import queue as stdlib_queue
 
-import pytest
 
 
 def test_sse_requires_auth(test_client):
@@ -56,13 +54,18 @@ def test_activity_update_publishes_event(test_client, agent_token):
         r2 = test_client.put(
             f"/api/activity/{activity_id}",
             headers={"Authorization": f"Bearer {agent_token}"},
-            json={"status": "completed", "task_result": "Event stream result test"},
+            json={
+                "task_note": "Event stream progress note",
+                "status": "completed",
+                "task_result": "Event stream result test",
+            },
         )
         assert r2.status_code == 200
 
         payload = q.get_nowait()
         assert payload["type"] == "activity_updated"
         assert payload["data"]["activity_id"] == activity_id
+        assert payload["data"]["task_note"] == "Event stream progress note"
         assert payload["data"]["task_result"] == "Event stream result test"
     finally:
         event_hub.unregister(client_id)

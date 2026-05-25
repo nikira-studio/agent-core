@@ -30,7 +30,11 @@ def test_handoff_briefing_returns_structured_sections(test_client, agent_token):
     complete_r = test_client.put(
         f"/api/activity/{activity_id}",
         headers={"Authorization": f"Bearer {agent_token}"},
-        json={"status": "completed", "task_result": "Finished the briefing source task"},
+        json={
+            "task_note": "Captured the intermediate findings",
+            "status": "completed",
+            "task_result": "Finished the briefing source task",
+        },
     )
     assert complete_r.status_code == 200
 
@@ -46,6 +50,7 @@ def test_handoff_briefing_returns_structured_sections(test_client, agent_token):
     assert "preferences" in briefing
     assert "recent_completed" in briefing
     assert briefing["task_description"] == "Structured briefing test"
+    assert briefing["task_note"] == "Captured the intermediate findings"
     assert briefing["task_result"] == "Finished the briefing source task"
     assert briefing["source_activity_id"] == activity_id
 

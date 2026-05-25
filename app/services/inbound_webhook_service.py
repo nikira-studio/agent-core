@@ -220,11 +220,11 @@ def _handle_update(payload: dict, ip_address: Optional[str]) -> dict:
     activity_id = payload["activity_id"]
     updates = {
         k: payload[k]
-        for k in ("status", "task_description", "task_result", "memory_scope")
+        for k in ("status", "task_description", "task_note", "task_result", "memory_scope")
         if k in payload
     }
     if not updates:
-        raise ValueError("activity.update requires at least one of: status, task_description, memory_scope")
+        raise ValueError("activity.update requires at least one of: status, task_description, task_note, task_result, memory_scope")
 
     updated = activity_service.update_activity(activity_id, **updates)
     if updated is False:

@@ -29,19 +29,19 @@ def test_normalize_id_exactly_max_length():
 
 
 def test_validate_id_valid():
-    assert validate_id("admin") == True
-    assert validate_id("test-agent") == True
-    assert validate_id("agent123") == True
-    assert validate_id("my_agent") == True
+    assert validate_id("admin") is True
+    assert validate_id("test-agent") is True
+    assert validate_id("agent123") is True
+    assert validate_id("my_agent") is True
 
 
 def test_validate_id_rejects_spaces():
-    assert validate_id("my agent") == False
+    assert validate_id("my agent") is False
 
 
 def test_validate_id_rejects_colon():
-    assert validate_id("user:admin") == False
+    assert validate_id("user:admin") is False
 
 
 def test_validate_id_too_long():
-    assert validate_id("a" * 65) == False
+    assert validate_id("a" * 65) is False

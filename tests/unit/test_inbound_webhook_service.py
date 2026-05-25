@@ -1,6 +1,6 @@
 """Unit tests for inbound_webhook_service."""
 import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 
 @pytest.fixture(autouse=True)
@@ -159,10 +159,14 @@ class TestActivityUpdate:
             updated.update(kwargs)
 
         with patch("app.services.inbound_webhook_service.activity_service.update_activity", side_effect=fake_update):
-            svc.handle_inbound("activity.update", {"activity_id": "act-1", "status": "completed"})
+            svc.handle_inbound(
+                "activity.update",
+                {"activity_id": "act-1", "status": "completed", "task_note": "Handled the request"},
+            )
 
         assert updated["id"] == "act-1"
         assert updated["status"] == "completed"
+        assert updated["task_note"] == "Handled the request"
 
 
 class TestActivityCancel:

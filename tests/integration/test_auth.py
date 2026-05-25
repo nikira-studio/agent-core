@@ -7,13 +7,13 @@ from app.security.rate_limiter import RL
 def test_health_endpoint(test_client):
     r = test_client.get("/health")
     assert r.status_code == 200
-    assert r.json()["ok"] == True
+    assert r.json()["ok"] is True
 
 
 def test_spec_public_endpoint(test_client):
     r = test_client.get("/spec/public")
     assert r.status_code == 200
-    assert r.json()["ok"] == True
+    assert r.json()["ok"] is True
 
 
 def test_register_first_admin(test_client, clean_db):
@@ -23,7 +23,7 @@ def test_register_first_admin(test_client, clean_db):
         "display_name": "Admin Test",
     })
     assert r.status_code == 200
-    assert r.json()["ok"] == True
+    assert r.json()["ok"] is True
     data = r.json()["data"]
     assert data["role"] == "admin"
 
@@ -72,7 +72,7 @@ def test_login_valid_credentials(test_client, clean_db):
         "password": "testpassword123",
     })
     assert r.status_code == 200
-    assert r.json()["ok"] == True
+    assert r.json()["ok"] is True
     assert "session_id" in r.json()["data"]
 
     with get_db() as conn:
@@ -137,6 +137,6 @@ def test_protected_endpoint_without_auth(test_client):
 def test_api_error_envelope(test_client):
     r = test_client.get("/api/agents")
     assert r.status_code == 401
-    assert r.json()["ok"] == False
+    assert r.json()["ok"] is False
     assert "error" in r.json()
     assert "code" in r.json()["error"]

@@ -146,8 +146,7 @@ class TestConnectorMCPTools:
         assert hidden["id"] not in result_ids
 
     def test_binding_tools_endpoint_returns_mcp_tools(self, test_client, admin_token, monkeypatch):
-        from types import SimpleNamespace
-        from app.services import connector_service, mcp_provider_service
+        from app.services import connector_service
 
         connector_service.create_connector_type(
             connector_type_id="binding-mcp",

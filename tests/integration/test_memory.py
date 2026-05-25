@@ -14,7 +14,7 @@ def test_memory_write(test_client, agent_token):
         },
     )
     assert r.status_code == 201, f"write failed: {r.json()}"
-    assert r.json()["ok"] == True
+    assert r.json()["ok"] is True
 
 
 def test_memory_write_rejects_removed_classes(test_client, agent_token):
@@ -644,4 +644,3 @@ def test_preference_slot_key_supersedes_previous_active_preference(
         "Use concise responses",
         "Use detailed responses",
     ]
-import json

@@ -24,6 +24,7 @@ class CreateActivityRequest(BaseModel):
 
 class UpdateActivityRequest(BaseModel):
     status: Optional[str] = None
+    task_note: Optional[str] = None
     task_result: Optional[str] = None
     metadata_json: Optional[str] = None
 
@@ -51,6 +52,8 @@ def _activity_audit_details(activity: dict, **extra) -> dict:
     }
     if activity.get("task_result") is not None:
         details["task_result"] = activity.get("task_result")
+    if activity.get("task_note") is not None:
+        details["task_note"] = activity.get("task_note")
     assigned_agent_id = activity.get("assigned_agent_id")
     if assigned_agent_id:
         details["assigned_agent_id"] = assigned_agent_id
@@ -62,6 +65,7 @@ def _activity_event_data(activity: dict, **extra) -> dict:
     event_data = {
         "activity_id": activity.get("id"),
         "task_description": activity.get("task_description"),
+        "task_note": activity.get("task_note"),
         "task_result": activity.get("task_result"),
         "agent_id": activity.get("agent_id"),
         "assigned_agent_id": activity.get("assigned_agent_id"),
@@ -210,6 +214,7 @@ async def update_activity(
     success = activity_service.update_activity(
         activity_id,
         status=body.status,
+        task_note=body.task_note,
         task_result=body.task_result,
         metadata_json=body.metadata_json,
     )

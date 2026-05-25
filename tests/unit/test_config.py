@@ -1,11 +1,12 @@
 from pathlib import Path
 
+from app.branding import ENV_PREFIX
 from app.config import Settings
 
 
 def test_default_values():
     import os
-    os.environ.pop("AGENT_CORE_DATA_PATH", None)
+    os.environ.pop(f"{ENV_PREFIX}DATA_PATH", None)
     s = Settings()
     assert s.PORT == 3500
     assert s.DATA_PATH == "./data"
@@ -15,8 +16,8 @@ def test_default_values():
 
 
 def test_env_override(monkeypatch):
-    monkeypatch.setenv("AGENT_CORE_PORT", "4000")
-    monkeypatch.setenv("AGENT_CORE_ENCRYPTION_KEY", "test-key-32-bytes-long-here!!")
+    monkeypatch.setenv(f"{ENV_PREFIX}PORT", "4000")
+    monkeypatch.setenv(f"{ENV_PREFIX}ENCRYPTION_KEY", "test-key-32-bytes-long-here!!")
     s = Settings()
     assert s.PORT == 4000
     assert s.ENCRYPTION_KEY == "test-key-32-bytes-long-here!!"
@@ -41,5 +42,5 @@ def test_shared_scope_agent_list_parsed():
 
 def test_checked_in_compose_uses_auto_encryption_key():
     compose = (Path(__file__).parents[2] / "docker-compose.yml").read_text()
-    assert "AGENT_CORE_ENCRYPTION_KEY=auto" in compose
-    assert "AGENT_CORE_ENCRYPTION_KEY=autookay" not in compose
+    assert f"{ENV_PREFIX}ENCRYPTION_KEY=auto" in compose
+    assert f"{ENV_PREFIX}ENCRYPTION_KEY=autookay" not in compose

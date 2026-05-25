@@ -7,6 +7,7 @@ from urllib.parse import urlparse
 
 import httpx
 
+from app.branding import APP_SLUG, APP_VERSION
 from app.security.url_validation import validate_public_url
 
 
@@ -106,7 +107,7 @@ def _mcp_initialize(client: httpx.Client, url: str) -> dict[str, Any]:
             {
                 "protocolVersion": DEFAULT_MCP_PROTOCOL_VERSION,
                 "capabilities": {},
-                "clientInfo": {"name": "agent-core", "version": "1.0.0"},
+                "clientInfo": {"name": APP_SLUG, "version": APP_VERSION},
             },
             request_id=1,
         )

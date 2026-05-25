@@ -7,6 +7,7 @@ from fastapi.templating import Jinja2Templates
 from fastapi.responses import JSONResponse
 from starlette.middleware.cors import CORSMiddleware
 
+from app.branding import APP_NAME, ENV_PREFIX
 from app.config import settings
 from app.routes import (
     health_router,
@@ -43,7 +44,7 @@ logging.getLogger("uvicorn.access").addFilter(_SuppressManifestPolling())
 
 
 ALLOWED_IPS: set = set()
-_ip_list = os.environ.get("AGENT_CORE_ALLOWED_IPS", "").strip()
+_ip_list = os.environ.get(f"{ENV_PREFIX}ALLOWED_IPS", "").strip()
 if _ip_list:
     ALLOWED_IPS = {ip.strip() for ip in _ip_list.split(",") if ip.strip()}
 
@@ -52,9 +53,9 @@ MAX_REQUEST_SIZE = 1024 * 1024
 
 def create_app() -> FastAPI:
     app = FastAPI(
-        title="Agent Core",
+        title=APP_NAME,
         version="1.0.0",
-        description="Local-first AI agent control layer",
+        description=f"{APP_NAME} local-first AI agent control layer",
     )
 
     @app.middleware("http")
@@ -121,7 +122,7 @@ def create_app() -> FastAPI:
             return await call_next(request)
 
     _cors_origins = ["*"]
-    _env_origins = os.environ.get("AGENT_CORE_CORS_ORIGINS", "").strip()
+    _env_origins = os.environ.get(f"{ENV_PREFIX}CORS_ORIGINS", "").strip()
     if _env_origins:
         _cors_origins = [o.strip() for o in _env_origins.split(",") if o.strip()]
 

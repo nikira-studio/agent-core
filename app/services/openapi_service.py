@@ -5,6 +5,7 @@ import urllib.error
 import urllib.parse
 from typing import Optional
 
+from app.branding import APP_USER_AGENT
 from app.security.url_validation import validate_public_url
 from app.security.safe_http import safe_urlopen
 
@@ -22,7 +23,7 @@ def fetch_spec(url: str) -> str:
     validate_public_url(url)
     req = urllib.request.Request(url, method="GET")
     req.add_header("Accept", "application/json, application/yaml, text/yaml, */*")
-    req.add_header("User-Agent", "AgentCore/1.0")
+    req.add_header("User-Agent", APP_USER_AGENT)
     try:
         with safe_urlopen(req, timeout=_FETCH_TIMEOUT) as resp:
             if resp.headers.get("Content-Length"):

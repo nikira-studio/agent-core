@@ -45,9 +45,10 @@
     } catch (_) {
       return;
     }
-    if (typeof window.onAgentCoreEvent === 'function') {
+    var handlerName = window.AGENT_CORE_WINDOW_EVENT || 'onAgentCoreEvent';
+    if (typeof window[handlerName] === 'function') {
       try {
-        Promise.resolve(window.onAgentCoreEvent(payload)).catch(function () {});
+        Promise.resolve(window[handlerName](payload)).catch(function () {});
       } catch (_) {}
     }
   }

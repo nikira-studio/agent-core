@@ -18,7 +18,8 @@ def list_connector_types(include_inactive: bool = False) -> list[dict]:
                    supported_actions_json, required_credential_fields_json,
                    default_binding_rules_json, disabled_actions_json, endpoint_url,
                    transport_type, capabilities_json, tool_snapshot_json, spec_url,
-                   operations_json, is_active, created_at, updated_at
+                   operations_json, backend_type, backend_json,
+                   is_active, created_at, updated_at
             FROM connector_types
         """
         if not include_inactive:
@@ -36,7 +37,8 @@ def get_connector_type(connector_type_id: str) -> Optional[dict]:
                    supported_actions_json, required_credential_fields_json,
                    default_binding_rules_json, disabled_actions_json, endpoint_url,
                    transport_type, capabilities_json, tool_snapshot_json, spec_url,
-                   operations_json, is_active, created_at, updated_at
+                   operations_json, backend_type, backend_json,
+                   is_active, created_at, updated_at
             FROM connector_types
             WHERE id = ?
             """,
@@ -69,6 +71,8 @@ def _row_to_connector_type(row: dict) -> dict:
         "tool_snapshot_json": row.get("tool_snapshot_json"),
         "spec_url": row.get("spec_url"),
         "operations_json": row.get("operations_json"),
+        "backend_type": row.get("backend_type"),
+        "backend_json": row.get("backend_json"),
         "created_at": row.get("created_at"),
         "updated_at": row.get("updated_at"),
     }
@@ -221,7 +225,9 @@ def update_binding(binding_id: str, **fields) -> bool:
                 if val is not None and config_data is None:
                     raise ValueError("config_json must be a JSON object")
                 updates.append("config_json = ?")
-                params.append(json.dumps(config_data) if config_data is not None else None)
+                params.append(
+                    json.dumps(config_data) if config_data is not None else None
+                )
             elif key == "rate_limit_config_json":
                 rate_limit_data = _parse_json_object(val)
                 if val is not None and rate_limit_data is None:
@@ -258,10 +264,17 @@ def delete_binding(binding_id: str) -> bool:
         return cursor.rowcount > 0
 
 
-_NON_TRANSIENT_CODES = frozenset({
-    "NOT_FOUND", "DISABLED", "INVALID_ACTION", "NO_CREDENTIAL",
-    "RATE_LIMITED", "INVALID_CONFIGURATION", "SCOPE_DENIED",
-})
+_NON_TRANSIENT_CODES = frozenset(
+    {
+        "NOT_FOUND",
+        "DISABLED",
+        "INVALID_ACTION",
+        "NO_CREDENTIAL",
+        "RATE_LIMITED",
+        "INVALID_CONFIGURATION",
+        "SCOPE_DENIED",
+    }
+)
 
 
 def _is_transient_result(result: dict) -> bool:
@@ -317,20 +330,36 @@ def _check_rate_limit(binding: dict) -> Optional[str]:
     return None
 
 
+def _infer_backend_type(connector_type: dict) -> Optional[str]:
+    """Infer backend type from legacy fields for existing connector_types rows."""
+    if connector_type.get("provider_type") == "mcp":
+        return "mcp"
+    if connector_type.get("operations_json"):
+        return "openapi"
+    if connector_type.get("id") == "generic_http":
+        return "generic_http"
+    return None
+
+
 def _resolve_executor(connector_type: dict):
     from app.connectors import get_connector
 
     registered = get_connector(connector_type["id"])
     if registered:
         return registered
-    if connector_type.get("provider_type") == "generic_http":
-        from app.connectors.generic_http import GenericHttpConnector
 
-        return GenericHttpConnector()
-    if connector_type.get("operations_json"):
+    backend = connector_type.get("backend_type") or _infer_backend_type(connector_type)
+
+    if backend == "http":
+        from app.connectors.http_engine import HttpEngine
+
+        return HttpEngine(connector_type)
+
+    if backend == "openapi" or connector_type.get("operations_json"):
         from app.connectors.openapi_executor import OpenApiExecutor
 
         return OpenApiExecutor()
+
     return None
 
 
@@ -341,8 +370,6 @@ def _build_executor_config(binding: dict, connector_type: dict) -> str:
             config = json.loads(binding["config_json"])
         except json.JSONDecodeError:
             pass
-    if connector_type.get("provider_type") == "generic_http" and connector_type.get("endpoint_url"):
-        config.setdefault("base_url", connector_type["endpoint_url"])
     if connector_type.get("operations_json"):
         try:
             config["_operations_json"] = json.loads(connector_type["operations_json"])
@@ -462,11 +489,7 @@ def generate_connector_type_tools(
     ]
     if query:
         q = query.lower()
-        tools = [
-            t
-            for t in tools
-            if q in t["name"].lower() or q in t["action"].lower()
-        ]
+        tools = [t for t in tools if q in t["name"].lower() or q in t["action"].lower()]
     if not include_disabled:
         tools = [t for t in tools if t["enabled"]]
     total = len(tools)
@@ -477,9 +500,17 @@ def generate_connector_type_tools(
 def test_binding(binding_id: str) -> dict:
     binding = get_binding_with_credential(binding_id)
     if not binding:
-        return {"success": False, "error": "Binding not found", "error_code": "NOT_FOUND"}
+        return {
+            "success": False,
+            "error": "Binding not found",
+            "error_code": "NOT_FOUND",
+        }
     if not binding.get("enabled"):
-        return {"success": False, "error": "Binding is disabled", "error_code": "DISABLED"}
+        return {
+            "success": False,
+            "error": "Binding is disabled",
+            "error_code": "DISABLED",
+        }
 
     connector_type = get_connector_type(binding["connector_type_id"])
     if not connector_type:
@@ -492,18 +523,20 @@ def test_binding(binding_id: str) -> dict:
         if connector_type.get("provider_type") == "mcp":
             try:
                 test_binding_context = dict(binding)
-                test_binding_context["endpoint_url"] = connector_type.get("endpoint_url")
-                endpoint_url, headers, timeout_ms = mcp_provider_service.build_mcp_request_config(
-                    test_binding_context, credential=credential
+                test_binding_context["endpoint_url"] = connector_type.get(
+                    "endpoint_url"
+                )
+                endpoint_url, headers, timeout_ms = (
+                    mcp_provider_service.build_mcp_request_config(
+                        test_binding_context, credential=credential
+                    )
                 )
                 tools = mcp_provider_service.discover_all_tools(
                     endpoint_url,
                     timeout_ms=min(timeout_ms, 10000),
                     headers=headers,
                 )
-                update_binding(
-                    binding_id, last_tested_at=_utc_now(), last_error=None
-                )
+                update_binding(binding_id, last_tested_at=_utc_now(), last_error=None)
                 return {
                     "success": True,
                     "tools_discovered": len(tools),
@@ -512,7 +545,11 @@ def test_binding(binding_id: str) -> dict:
             except Exception as e:
                 update_binding(binding_id, last_tested_at=_utc_now(), last_error=str(e))
                 return {"success": False, "error": str(e), "error_code": "TEST_FAILED"}
-        return {"success": False, "error": "No handler for this connector type", "error_code": "NO_HANDLER"}
+        return {
+            "success": False,
+            "error": "No handler for this connector type",
+            "error_code": "NO_HANDLER",
+        }
 
     rate_error = _check_rate_limit(binding)
     if rate_error:
@@ -544,7 +581,9 @@ def build_capability_summary(
 
     connector_types = list_connector_types()
     if connector_type_id:
-        connector_types = [ct for ct in connector_types if ct["id"] == connector_type_id]
+        connector_types = [
+            ct for ct in connector_types if ct["id"] == connector_type_id
+        ]
 
     visible_bindings = []
     if scope:
@@ -559,8 +598,12 @@ def build_capability_summary(
     elif getattr(enforcer, "is_admin", False):
         visible_bindings = list_bindings(enabled=enabled_only)
     else:
-        for readable_scope in enforcer.filter_readable_scopes(list(enforcer.read_scopes)):
-            visible_bindings.extend(list_bindings(scope=readable_scope, enabled=enabled_only))
+        for readable_scope in enforcer.filter_readable_scopes(
+            list(enforcer.read_scopes)
+        ):
+            visible_bindings.extend(
+                list_bindings(scope=readable_scope, enabled=enabled_only)
+            )
 
     if connector_type_id:
         visible_bindings = [
@@ -610,9 +653,16 @@ def build_capability_summary(
 
             binding_config = _parse_json_object(binding.get("config_json")) or {}
             auth_overridden = binding_config.get("auth_mode") == "none"
-            auth_required = connector_type.get("auth_type") != "none" and not auth_overridden
+            auth_required = (
+                connector_type.get("auth_type") != "none" and not auth_overridden
+            )
             credential_ready = (not auth_required) or credential_present
-            usable = bool(binding.get("enabled")) and credential_ready and action_discovery["success"] and action_count > 0
+            usable = (
+                bool(binding.get("enabled"))
+                and credential_ready
+                and action_discovery["success"]
+                and action_count > 0
+            )
             if usable:
                 usable_total += 1
 
@@ -707,12 +757,22 @@ def _validate_action_for_connector(connector_type: dict, action: str) -> Optiona
     return None
 
 
-def execute_binding_action(binding_id: str, action: str, params: Optional[dict] = None) -> dict:
+def execute_binding_action(
+    binding_id: str, action: str, params: Optional[dict] = None
+) -> dict:
     binding = get_binding(binding_id)
     if not binding:
-        return {"success": False, "error": "Binding not found", "error_code": "NOT_FOUND"}
+        return {
+            "success": False,
+            "error": "Binding not found",
+            "error_code": "NOT_FOUND",
+        }
     if not binding.get("enabled"):
-        return {"success": False, "error": "Binding is disabled", "error_code": "DISABLED"}
+        return {
+            "success": False,
+            "error": "Binding is disabled",
+            "error_code": "DISABLED",
+        }
 
     connector_type = get_connector_type(binding["connector_type_id"])
     if not connector_type:
@@ -739,7 +799,11 @@ def execute_binding_action(binding_id: str, action: str, params: Optional[dict] 
         except json.JSONDecodeError:
             pass
     auth_overridden = binding_config.get("auth_mode") == "none"
-    if connector_type.get("auth_type") != "none" and not credential and not auth_overridden:
+    if (
+        connector_type.get("auth_type") != "none"
+        and not credential
+        and not auth_overridden
+    ):
         return {
             "success": False,
             "error": "No credential linked to this binding",
@@ -784,7 +848,8 @@ def execute_binding_action(binding_id: str, action: str, params: Optional[dict] 
                     params=params or {},
                     credential=credential,
                     config_json=binding.get("config_json"),
-                    transport_type=connector_type.get("transport_type") or "streamable_http",
+                    transport_type=connector_type.get("transport_type")
+                    or "streamable_http",
                 )
                 return {
                     "success": result.success,
@@ -820,10 +885,16 @@ def execute_binding_action(binding_id: str, action: str, params: Optional[dict] 
     for attempt in range(1, max_retries + 1):
         if not _is_transient_result(result):
             break
-        delay = min(retry_base_delay * (2 ** (attempt - 1)) + random.uniform(0, 0.5), 30.0)
+        delay = min(
+            retry_base_delay * (2 ** (attempt - 1)) + random.uniform(0, 0.5), 30.0
+        )
         logger.info(
             "Connector retry %d/%d for binding %s after transient failure (delay %.2fs): %s",
-            attempt, max_retries, binding_id, delay, result.get("error"),
+            attempt,
+            max_retries,
+            binding_id,
+            delay,
+            result.get("error"),
         )
         time.sleep(delay)
         result = _run_once()
@@ -831,7 +902,9 @@ def execute_binding_action(binding_id: str, action: str, params: Optional[dict] 
     return result
 
 
-def execute_binding_action_with_logging(binding_id: str, action: str, params: Optional[dict] = None) -> dict:
+def execute_binding_action_with_logging(
+    binding_id: str, action: str, params: Optional[dict] = None
+) -> dict:
     from app.services.event_stream_service import event_hub
     from app.services import webhook_service
 
@@ -850,17 +923,24 @@ def execute_binding_action_with_logging(binding_id: str, action: str, params: Op
         duration_ms=duration_ms,
     )
     binding = get_binding(binding_id) or {}
-    connector_type = get_connector_type(binding.get("connector_type_id", "")) if binding.get("connector_type_id") else None
+    connector_type = (
+        get_connector_type(binding.get("connector_type_id", ""))
+        if binding.get("connector_type_id")
+        else None
+    )
     _event_data = {
         "binding_id": binding_id,
         "binding_name": binding.get("name"),
         "scope": binding.get("scope"),
         "connector_type_id": binding.get("connector_type_id"),
-        "connector_type_name": connector_type.get("display_name") if connector_type else None,
+        "connector_type_name": connector_type.get("display_name")
+        if connector_type
+        else None,
         "action": action,
         "success": result.get("success"),
         "duration_ms": duration_ms,
-        "status": result.get("error_code") or ("success" if result.get("success") else "failure"),
+        "status": result.get("error_code")
+        or ("success" if result.get("success") else "failure"),
         "error_message": result.get("error") if not result.get("success") else None,
     }
     event_hub.publish("connector_executed", _event_data)

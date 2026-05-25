@@ -1,6 +1,7 @@
 import pytest
 import re
 
+from app.branding import ENV_PREFIX
 from app.services.auth_service import create_user, create_session, get_user_by_id
 from app.services.agent_service import create_agent
 from app.services.workspace_service import create_workspace
@@ -89,6 +90,7 @@ def test_integrations_generates_claude_md(integrations_client):
     output = output_match.group(1)
     assert "CLAUDE.md" in html
     assert "open a fresh activity first" in output
+    assert "task_note" in output
     assert "workspace:agent-core" in output
     assert "task_result" in output
     assert "user:brian" not in output
@@ -101,9 +103,9 @@ def test_integrations_generates_env_vars(integrations_client):
     )
     assert r.status_code == 200
     html = r.text
-    assert "AGENT_CORE_URL" in html
-    assert "AGENT_CORE_API_KEY" in html
-    assert "AGENT_CORE_WORKSPACE_SCOPE" in html
+    assert f"{ENV_PREFIX}URL" in html
+    assert f"{ENV_PREFIX}API_KEY" in html
+    assert f"{ENV_PREFIX}WORKSPACE_SCOPE" in html
     assert "workspace:agent-core" in html
 
 
@@ -114,8 +116,8 @@ def test_integrations_project_is_optional_for_env(integrations_client):
     assert r.status_code == 200
     html = r.text
     assert "-- Optional --" in html
-    assert "AGENT_CORE_AGENT_ID" in html
-    assert "AGENT_CORE_USER_SCOPE" in html
+    assert f"{ENV_PREFIX}AGENT_ID" in html
+    assert f"{ENV_PREFIX}USER_SCOPE" in html
     assert "workspace:your-workspace-id" in html
 
 
@@ -167,7 +169,7 @@ def test_integrations_generate_connection_endpoint(integrations_client):
     assert r.status_code == 200
     data = r.json()["data"]
     assert data["api_key"]
-    assert "AGENT_CORE_URL" in data["output"]
+    assert f"{ENV_PREFIX}URL" in data["output"]
 
 
 def test_integrations_preview_and_apply_access_endpoints(integrations_client):

@@ -1,4 +1,3 @@
-import pytest
 from app.services.connector_service import _is_transient_result
 
 

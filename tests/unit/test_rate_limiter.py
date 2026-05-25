@@ -4,13 +4,13 @@ from app.security.rate_limiter import TokenBucket, RateLimiter, ConcurrentSearch
 def test_token_bucket_consume():
     tb = TokenBucket(tokens=5.0, max_tokens=5.0, refill_rate=1.0)
     assert tb.remaining == 5
-    assert tb.consume(2) == True
+    assert tb.consume(2) is True
     assert tb.remaining == 3
 
 
 def test_token_bucket_reject_when_empty():
     tb = TokenBucket(tokens=0.0, max_tokens=5.0, refill_rate=1.0)
-    assert tb.consume(1) == False
+    assert tb.consume(1) is False
 
 
 def test_token_bucket_refill():
@@ -24,7 +24,7 @@ def test_token_bucket_refill():
 def test_rate_limiter_check_allows():
     RL = RateLimiter()
     allowed, info = RL.check("agent", "testagent", "memory_write")
-    assert allowed == True
+    assert allowed is True
     assert info["limit"] == 60
 
 
@@ -32,8 +32,8 @@ def test_rate_limiter_bucket_per_key():
     RL = RateLimiter()
     allowed1, _ = RL.check("agent", "agent1", "memory_write")
     allowed2, _ = RL.check("agent", "agent2", "memory_write")
-    assert allowed1 == True
-    assert allowed2 == True
+    assert allowed1 is True
+    assert allowed2 is True
 
 
 def test_rate_limiter_prunes_old_buckets(monkeypatch):
@@ -54,7 +54,7 @@ def test_rate_limiter_prunes_old_buckets(monkeypatch):
 
 def test_concurrent_search_guard_acquire_release():
     CSG = ConcurrentSearchGuard()
-    assert CSG.acquire("testagent") == True
+    assert CSG.acquire("testagent") is True
     assert CSG.get_active("testagent") == 1
     CSG.release("testagent")
     assert CSG.get_active("testagent") == 0
@@ -63,7 +63,7 @@ def test_concurrent_search_guard_acquire_release():
 def test_concurrent_search_guard_limit():
     CSG = ConcurrentSearchGuard()
     for _ in range(5):
-        assert CSG.acquire("testagent") == True
-    assert CSG.acquire("testagent") == False
+        assert CSG.acquire("testagent") is True
+    assert CSG.acquire("testagent") is False
     CSG.release("testagent")
-    assert CSG.acquire("testagent") == True
+    assert CSG.acquire("testagent") is True

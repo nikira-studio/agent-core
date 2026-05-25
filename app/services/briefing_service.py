@@ -95,6 +95,7 @@ def generate_handoff_briefing(
         "assigned_agent_id": activity.get("assigned_agent_id") or activity["agent_id"],
         "memory_scope": memory_scope,
         "task_description": activity["task_description"],
+        "task_note": activity.get("task_note"),
         "task_result": activity.get("task_result"),
         "started_at": activity["started_at"],
         "decisions": [{"id": r["id"], "content": r["content"]} for r in decisions[:10]],
@@ -104,6 +105,7 @@ def generate_handoff_briefing(
             {
                 "id": a["id"],
                 "task_description": a["task_description"],
+                "task_note": a.get("task_note"),
                 "task_result": a.get("task_result"),
                 "ended_at": a.get("ended_at"),
             }
@@ -204,6 +206,7 @@ def generate_prd_handoff_briefing(
         "recent_completed": [
             {
                 "description": a["task_description"],
+                "task_note": a.get("task_note"),
                 "task_result": a.get("task_result"),
                 "ended_at": a.get("ended_at"),
                 "outcome": "success",

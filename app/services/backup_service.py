@@ -11,6 +11,7 @@ from typing import Optional
 
 from cryptography.fernet import Fernet
 
+from app.branding import APP_VERSION, DB_FILENAME, MANIFEST_VERSION_KEY
 from app.config import settings
 from app.database import get_db
 from app.time_utils import parse_utc_datetime, utc_now, utc_now_iso
@@ -37,11 +38,11 @@ def build_backup_manifest(
     db_path: str,
     credential_key_path: str,
     exported_by: str,
-    agent_core_version: str,
+    app_version: str,
 ) -> dict:
     checksums = {}
     if os.path.exists(db_path):
-        checksums["agent-core.db"] = compute_sha256(db_path)
+        checksums[DB_FILENAME] = compute_sha256(db_path)
 
     env_key = _configured_env_key_bytes()
     if env_key is not None:
@@ -52,7 +53,7 @@ def build_backup_manifest(
         checksums["credential.keyring"] = compute_sha256(_keyring_path())
 
     return {
-        "agent_core_version": agent_core_version,
+        MANIFEST_VERSION_KEY: app_version,
         "exported_at": utc_now_iso(),
         "exported_by": exported_by,
         "files": checksums,
@@ -63,16 +64,16 @@ def build_backup_zip(
     db_path: str,
     credential_key_path: str,
     exported_by: str,
-    agent_core_version: str = "1.0.0",
+    app_version: str = APP_VERSION,
 ) -> io.BytesIO:
     manifest = build_backup_manifest(
-        db_path, credential_key_path, exported_by, agent_core_version
+        db_path, credential_key_path, exported_by, app_version
     )
 
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
         if os.path.exists(db_path):
-            zf.write(db_path, arcname="agent-core.db")
+            zf.write(db_path, arcname=DB_FILENAME)
         env_key = _configured_env_key_bytes()
         if env_key is not None:
             zf.writestr("credential.key", env_key)
@@ -90,7 +91,7 @@ def build_encrypted_backup_package(
     db_path: str,
     credential_key_path: str,
     exported_by: str,
-    agent_core_version: str = "1.0.0",
+    app_version: str = APP_VERSION,
 ) -> tuple[io.BytesIO, bytes]:
     """
     Build the regular backup ZIP, then encrypt the archive with a one-time Fernet key.
@@ -100,7 +101,7 @@ def build_encrypted_backup_package(
         db_path,
         credential_key_path,
         exported_by,
-        agent_core_version=agent_core_version,
+        app_version=app_version,
     )
     backup_key = Fernet.generate_key()
     encrypted_bytes = Fernet(backup_key).encrypt(archive_buf.getvalue())
@@ -113,13 +114,17 @@ def decrypt_backup_package(backup_bytes: bytes, backup_key: bytes) -> io.BytesIO
 
 
 def parse_manifest(data: dict) -> tuple[bool, str]:
-    required = ["agent_core_version", "exported_at", "exported_by", "files"]
+    version_key = MANIFEST_VERSION_KEY if MANIFEST_VERSION_KEY in data else "agent_core_version"
+    required = [version_key, "exported_at", "exported_by", "files"]
     for field in required:
         if field not in data:
-            return False, f"Missing field: {field}"
+            return False, f"Missing field: {MANIFEST_VERSION_KEY}"
 
     if not isinstance(data.get("files"), dict):
         return False, "files must be a dict"
+
+    if version_key != MANIFEST_VERSION_KEY and version_key in data:
+        data[MANIFEST_VERSION_KEY] = data[version_key]
 
     return True, ""
 
@@ -146,7 +151,7 @@ def _read_validated_backup(
     zip_bytes: io.BytesIO,
 ) -> tuple[bool, str, dict, dict[str, bytes]]:
     allowed_zip_entries = {
-        "agent-core.db",
+        DB_FILENAME,
         "credential.key",
         "credential.keyring",
         "manifest.json",
@@ -170,7 +175,7 @@ def _read_validated_backup(
             manifest_data = json.loads(zf.read("manifest.json"))
             extracted = {
                 name: zf.read(name)
-                for name in ("agent-core.db", "credential.key", "credential.keyring")
+                for name in (DB_FILENAME, "credential.key", "credential.keyring")
                 if name in names
             }
     except Exception:
@@ -181,8 +186,8 @@ def _read_validated_backup(
         return False, msg, {}, {}
 
     checksums = manifest_data.get("files", {})
-    required_files = {"agent-core.db", "credential.key"}
-    allowed_files = {"agent-core.db", "credential.key", "credential.keyring"}
+    required_files = {DB_FILENAME, "credential.key"}
+    allowed_files = {DB_FILENAME, "credential.key", "credential.keyring"}
     checksum_keys = set(checksums.keys())
     if not required_files.issubset(checksum_keys):
         return (
@@ -344,7 +349,7 @@ def merge_restore_from_zip(
     backup_con = None
     try:
         with open(db_temp, "wb") as f:
-            f.write(extracted["agent-core.db"])
+            f.write(extracted[DB_FILENAME])
 
         backup_con = sqlite3.connect(db_temp)
         backup_con.row_factory = sqlite3.Row
@@ -447,8 +452,8 @@ def restore_from_zip(
 
     backup_key = extracted["credential.key"]
     effective_key = _configured_env_key_bytes() or backup_key
-    extracted["agent-core.db"] = _reencrypt_credential_rows_in_db_bytes(
-        extracted["agent-core.db"],
+    extracted[DB_FILENAME] = _reencrypt_credential_rows_in_db_bytes(
+        extracted[DB_FILENAME],
         backup_key,
         effective_key,
         timestamp,
@@ -465,7 +470,7 @@ def restore_from_zip(
             shutil.copy2(dst_path, backup_path)
         os.replace(tmp_path, dst_path)
 
-    atomic_replace(extracted["agent-core.db"], db_path, "db")
+    atomic_replace(extracted[DB_FILENAME], db_path, "db")
     if settings.ENCRYPTION_KEY and settings.ENCRYPTION_KEY.lower() != "auto":
         _backup_existing_file(credential_key_path, str(backup_dir), timestamp, "key")
     else:
