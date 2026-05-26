@@ -6,15 +6,17 @@ import shutil
 from pathlib import Path
 
 from app.config import settings
-from app.connectors import get_connector, register_connector
 from app.connectors.manifest import Manifest, load_and_validate
 from app.database import get_db
 
 logger = logging.getLogger(__name__)
 
 
-def discover_and_seed_adapters() -> None:
-    adapters_dir = Path(settings.data_dir) / "adapters"
+def discover_and_seed_adapters(adapters_dir=None) -> None:
+    if adapters_dir is None:
+        adapters_dir = Path(settings.data_dir) / "adapters"
+    else:
+        adapters_dir = Path(adapters_dir)
     if not adapters_dir.is_dir():
         logger.info("No data/adapters/ directory found, skipping adapter discovery")
         return
@@ -63,26 +65,11 @@ def _requirements_met(manifest: Manifest, manifest_dir: Path) -> bool:
             logger.info("Env var %r not set, skipping adapter %s", env_var, manifest.id)
             return False
 
-    config_fields = req.get("config", [])
-    if config_fields:
-        try:
-            with get_db() as conn:
-                rows = conn.execute(
-                    "SELECT config_json FROM bindings WHERE connector_type_id = ? LIMIT 1",
-                    (manifest.id,),
-                ).fetchall()
-            if not rows:
-                return True
-            cfg = json.loads(rows[0]["config_json"] or "{}")
-            for f in config_fields:
-                if not cfg.get(f):
-                    logger.info(
-                        "Config field %r missing, skipping adapter %s", f, manifest.id
-                    )
-                    return False
-        except Exception:
-            pass
-
+    # requires.config describes fields that a BINDING must supply (per-binding,
+    # validated at binding create/execute time). It is NOT a hard gate at
+    # adapter discovery — an adapter is still discoverable/listable so users can
+    # see what bindings to create. Hard availability gates are `requires.bins`
+    # (binaries the operator must install) and `requires.env` (env vars), above.
     return True
 
 
@@ -93,24 +80,23 @@ def _seed_unavailable(manifest: Manifest) -> None:
         ).fetchone()
         if existing:
             conn.execute(
-                "UPDATE connector_types SET display_name = ?, description = ?, version = ?, supported_actions = ? WHERE id = ?",
+                """UPDATE connector_types SET display_name = ?, description = ?, supported_actions_json = ?
+                   WHERE id = ?""",
                 (
                     manifest.display_name or manifest.id,
                     f"[unavailable] {manifest.description or ''}",
-                    manifest.version,
                     json.dumps(manifest.actions),
                     manifest.id,
                 ),
             )
         else:
             conn.execute(
-                """INSERT INTO connector_types (id, display_name, description, version, backend_type, supported_actions)
-                   VALUES (?, ?, ?, ?, 'http', ?)""",
+                """INSERT INTO connector_types (id, display_name, description, backend_type, supported_actions_json)
+                   VALUES (?, ?, ?, 'http', ?)""",
                 (
                     manifest.id,
                     manifest.display_name or manifest.id,
                     f"[unavailable] {manifest.description or ''}",
-                    manifest.version,
                     json.dumps(manifest.actions),
                 ),
             )
@@ -127,45 +113,40 @@ def _seed_connector_type(manifest: Manifest) -> None:
         if existing:
             conn.execute(
                 """UPDATE connector_types SET
-                   display_name = ?, description = ?, version = ?,
-                   backend_type = ?, backend_json = ?, supported_actions = ?,
-                   credential_schema = ?
+                   display_name = ?, description = ?,
+                   backend_type = ?, backend_json = ?, supported_actions_json = ?
                    WHERE id = ?""",
                 (
                     row["display_name"],
                     row["description"],
-                    row["version"],
                     row["backend_type"],
                     row["backend_json"],
-                    row["supported_actions"],
-                    row["credential_schema"],
+                    row["supported_actions_json"],
                     manifest.id,
                 ),
             )
         else:
             conn.execute(
                 """INSERT INTO connector_types
-                   (id, display_name, description, version, backend_type, backend_json, supported_actions, credential_schema)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                   (id, display_name, description, backend_type, backend_json, supported_actions_json)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
                 (
                     manifest.id,
                     row["display_name"],
                     row["description"],
-                    row["version"],
                     row["backend_type"],
                     row["backend_json"],
-                    row["supported_actions"],
-                    row["credential_schema"],
+                    row["supported_actions_json"],
                 ),
             )
         conn.commit()
 
 
 def _load_connector_engine(manifest: Manifest) -> None:
+    """For data-only `http` adapters, no registration is needed — the engine is
+    constructed on demand by `connector_service._resolve_executor` from the
+    seeded connector_type row (which carries `backend_json`). Future code-bearing
+    backends (mcp/cli) may need to register a handler here."""
     backend_type = manifest.backend.get("type")
     if backend_type == "http":
-        from app.connectors.http_engine import HttpEngine
-
-        existing = get_connector(manifest.id)
-        if not existing:
-            register_connector(manifest.id, type("HttpConnector", (HttpEngine,), {}))
+        return

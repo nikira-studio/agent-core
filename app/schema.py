@@ -245,6 +245,7 @@ CREATE TABLE IF NOT EXISTS connector_types (
     id TEXT PRIMARY KEY,
     display_name TEXT NOT NULL,
     description TEXT,
+    version TEXT,
     provider_type TEXT NOT NULL DEFAULT 'openapi' CHECK (provider_type IN ('openapi', 'mcp', 'builtin')),
     auth_type TEXT NOT NULL DEFAULT 'api_key' CHECK (auth_type IN ('api_key', 'bearer', 'oauth2', 'basic', 'none')),
     supported_actions_json TEXT NOT NULL DEFAULT '[]',
@@ -257,6 +258,8 @@ CREATE TABLE IF NOT EXISTS connector_types (
     tool_snapshot_json TEXT,
     spec_url TEXT,
     operations_json TEXT,
+    backend_type TEXT,
+    backend_json TEXT,
     is_active INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0, 1)),
     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT DEFAULT CURRENT_TIMESTAMP

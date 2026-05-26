@@ -130,12 +130,9 @@ class Manifest:
             "display_name": self.display_name or self.id,
             "description": self.description or "",
             "version": self.version,
+            "supported_actions_json": json.dumps(self.actions),
             "backend_type": self.backend.get("type"),
             "backend_json": json.dumps(self.backend),
-            "credential_schema": json.dumps(self.credential_schema)
-            if self.credential_schema
-            else None,
-            "supported_actions": json.dumps(self.actions),
         }
 
 

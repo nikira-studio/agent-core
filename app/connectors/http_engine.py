@@ -20,7 +20,7 @@ from app.security.url_validation import validate_public_url
 
 
 _RE_TEMPLATE = re.compile(
-    r"\{\{\s*(params|cred|config)\.(\w+?)(?:\|(\w+)(?:\(([^)]*)\))?)?\s*\}\}"
+    r"\{\{\s*(params|cred|config)\.(\w+?)\s*(?:\s*\|\s*(\w+)(?:\(([^)]*)\))?)?\s*\}\}"
 )
 
 
@@ -32,7 +32,7 @@ class HttpEngine(BaseConnector):
             self.spec = json.loads(raw)
         else:
             self.spec = raw
-        self.needs_session = bool(self.spec.get("session") or self.spec.get("refresh"))
+        self.needs_session = "session" in self.spec or "refresh" in self.spec
 
     def execute(
         self,
@@ -50,12 +50,48 @@ class HttpEngine(BaseConnector):
             }
 
         config = _parse_json(config_json)
-        req = self._build_request(request_def, params, config)
+        req = self._build_request(request_def, params, config, credential)
         self._apply_auth(req, credential, session, config)
         self._apply_session(req, session)
         resp = self._send(req, config)
+
+        # Internal challenge_retry: per-request handshake (e.g. Transmission's
+        # X-Transmission-Session-Id 409). The engine handles this transparently
+        # up to max_retries times by capturing the new token from the response
+        # and resending the same request. Only persistent failure escalates to
+        # SessionExpiredError (via _raise_on_errors) for the execution layer.
+        session_spec = self.spec.get("session", {})
+        if session_spec.get("type") == "challenge_retry":
+            max_retries = int(session_spec.get("max_retries", 1))
+            attempts = 0
+            while attempts < max_retries and self._is_session_challenge(resp):
+                captured = self._capture_from_response(resp, session_spec)
+                if not captured:
+                    break
+                session = {**(session or {}), **captured}
+                req = self._build_request(request_def, params, config, credential)
+                self._apply_auth(req, credential, session, config)
+                self._apply_session(req, session)
+                resp = self._send(req, config)
+                attempts += 1
+
         self._raise_on_errors(resp)
         return self._extract(resp, request_def, config)
+
+    def _capture_from_response(self, resp, session_spec: dict) -> dict:
+        """Pull the session token out of a challenge response per session.capture."""
+        capture = session_spec.get("capture", {})
+        source = capture.get("source")
+        name = capture.get("name")
+        as_key = capture.get("as", "session_id")
+        if source == "response_header" and name:
+            try:
+                val = resp.headers.get(name)
+            except Exception:
+                val = None
+            if val:
+                return {as_key: val}
+        return {}
 
     def refresh_session(
         self,
@@ -73,9 +109,15 @@ class HttpEngine(BaseConnector):
 
     # ─── request building ────────────────────────────────────────────────────
 
-    def _build_request(self, request_def: dict, params: dict, config: dict) -> dict:
+    def _build_request(
+        self,
+        request_def: dict,
+        params: dict,
+        config: dict,
+        cred: Optional[Credential] = None,
+    ) -> dict:
         method = request_def.get("method", "GET")
-        path = self._render(request_def.get("path", ""), params, config)
+        path = self._render(request_def.get("path", ""), params, config, cred)
         base_url = self._base_url(config)
         url = self._join_url(base_url, path)
 
@@ -87,14 +129,25 @@ class HttpEngine(BaseConnector):
                 for param_name, param_loc in mapping.items():
                     if param_loc == "request_header":
                         val = self._render(
-                            str(param_loc.get("default", "")), params, config
+                            str(param_loc.get("default", "")), params, config, cred
                         )
                         req["headers"][param_name] = val
 
         body_tpl = request_def.get("body", {}).get("template")
         if body_tpl:
-            rendered = self._render(json.dumps(body_tpl), params, config)
-            req["body"] = json.loads(rendered)
+            if isinstance(body_tpl, dict):
+                req["body"] = _render_dict(body_tpl, params, config, cred)
+            elif isinstance(body_tpl, str):
+                rendered = self._render(body_tpl, params, config, cred)
+                if rendered.startswith(("{", "[")):
+                    try:
+                        req["body"] = json.loads(rendered)
+                    except json.JSONDecodeError:
+                        req["body"] = rendered
+                else:
+                    req["body"] = rendered
+            else:
+                req["body"] = body_tpl
 
         return req
 
@@ -107,7 +160,13 @@ class HttpEngine(BaseConnector):
             return ""
         return str(spec_base) if spec_base else ""
 
-    def _render(self, template: str, params: dict, config: dict) -> str:
+    def _render(
+        self,
+        template: str,
+        params: dict,
+        config: dict,
+        cred: Optional[Credential] = None,
+    ) -> str:
         def replacer(m):
             src, key = m.group(1), m.group(2)
             filter_name = m.group(3)
@@ -117,7 +176,7 @@ class HttpEngine(BaseConnector):
                 if src == "params":
                     return params.get(key, m.group(0))
                 if src == "cred":
-                    return self._cred_get(key, params, config)
+                    return self._cred_get(key, params, config, cred)
                 if src == "config":
                     return config.get(key, m.group(0))
                 return m.group(0)
@@ -132,24 +191,47 @@ class HttpEngine(BaseConnector):
                         "bool": False,
                         "list": [],
                     }
-                    fallback = type_map.get(filter_arg, "") if filter_arg else ""
-                    return str(fallback)
+                    fallback_str = ""
+                    type_arg = filter_arg
+                    if filter_arg and ", as=" in filter_arg:
+                        parts = filter_arg.split(", as=", 1)
+                        fallback_str = parts[0]
+                        type_arg = parts[1] if len(parts) > 1 else ""
+                    if type_arg and type_arg in type_map:
+                        return str(type_map[type_arg])
+                    if fallback_str:
+                        try:
+                            return str(json.loads(fallback_str))
+                        except (json.JSONDecodeError, ValueError):
+                            return fallback_str
+                    return ""
                 return str(val)
             return str(val)
 
         return _RE_TEMPLATE.sub(replacer, template)
 
-    def _cred_get(self, key: str, params: dict, config: dict) -> Any:
+    def _cred_get(
+        self, key: str, params: dict, config: dict, cred: Optional[Credential] = None
+    ) -> Any:
         parts = key.split(".", 1)
         field = parts[0]
         sub = parts[1] if len(parts) > 1 else None
 
+        if field == "raw":
+            return cred.raw if cred is not None else params.get("_cred", {}).get("raw")
+
         if field == "base64_credentials":
-            username = self._cred_get("username", params, config) or ""
-            password = self._cred_get("password", params, config) or ""
+            username = self._cred_get("username", params, config, cred) or ""
+            password = self._cred_get("password", params, config, cred) or ""
             import base64
 
             return base64.b64encode(f"{username}:{password}".encode()).decode()
+
+        if cred is not None and field in cred.fields:
+            val = cred.fields[field]
+            if sub and isinstance(val, dict):
+                return val.get(sub)
+            return val
 
         val = params.get("_cred", {}).get(field) or config.get(field)
         if sub and isinstance(val, dict):
@@ -164,7 +246,7 @@ class HttpEngine(BaseConnector):
     # ─── auth ────────────────────────────────────────────────────────────────
 
     def _apply_auth(
-        self, req: dict, credential: Credential, session, config: dict
+        self, req: dict, credential: Credential, session, config: Optional[dict] = None
     ) -> None:
         auth = self.spec.get("auth", {})
         auth_type = auth.get("type")
@@ -179,7 +261,7 @@ class HttpEngine(BaseConnector):
         elif auth_type == "oauth2":
             self._apply_oauth2(req, auth, credential, session)
         else:
-            if credential and credential.raw:
+            if credential is not None and getattr(credential, "raw", None) is not None:
                 req["headers"]["Authorization"] = f"Bearer {credential.raw}"
 
     def _apply_api_key(self, req: dict, auth: dict, credential: Credential) -> None:
@@ -209,7 +291,8 @@ class HttpEngine(BaseConnector):
     ) -> None:
         name = auth.get("name", "X-API-Key")
         value_template = auth.get("template", "{{ cred.raw }}")
-        value = self._render(value_template, {"_cred": credential.fields}, {})
+        cred_params = {"raw": credential.raw, **credential.fields}
+        value = self._render(value_template, {"_cred": cred_params}, {})
         req["headers"][name] = value
 
     def _apply_oauth2(
@@ -447,3 +530,114 @@ def _parse_json(config_json: Optional[str]) -> dict:
         return val if isinstance(val, dict) else {}
     except json.JSONDecodeError:
         return {}
+
+
+def _render_dict(
+    template: Any, params: dict, config: dict, cred: Optional[Credential] = None
+) -> Any:
+    if isinstance(template, dict):
+        return {k: _render_dict(v, params, config, cred) for k, v in template.items()}
+    if isinstance(template, list):
+        rendered_items = []
+        for item in template:
+            rendered = _render_dict(item, params, config, cred)
+            try:
+                rendered_items.append(json.loads(rendered))
+            except (json.JSONDecodeError, TypeError):
+                rendered_items.append(rendered)
+        return rendered_items
+    if isinstance(template, str):
+        rendered = _RE_TEMPLATE.sub(
+            lambda m: _render_value(m, params, config, cred), template
+        )
+        try:
+            return json.loads(rendered)
+        except (json.JSONDecodeError, TypeError):
+            return rendered
+    return template
+
+
+def _render_value(
+    m, params: dict, config: dict, cred: Optional[Credential] = None
+) -> str:
+    src, key = m.group(1), m.group(2)
+    filter_name = m.group(3)
+    filter_arg = m.group(4)
+
+    def _get_value():
+        if src == "params":
+            return params.get(key, m.group(0))
+        if src == "cred":
+            return _cred_get_impl(key, params, config, cred)
+        if src == "config":
+            return config.get(key, m.group(0))
+        return m.group(0)
+
+    val = _get_value()
+    if filter_name == "default":
+        if val is None or val == m.group(0):
+            type_map = {
+                "str": "",
+                "int": 0,
+                "float": 0.0,
+                "bool": False,
+                "list": [],
+            }
+            fallback_str = ""
+            type_arg = filter_arg
+            if filter_arg and ", as=" in filter_arg:
+                parts = filter_arg.split(", as=", 1)
+                fallback_str = parts[0]
+                type_arg = parts[1] if len(parts) > 1 else ""
+            if type_arg and type_arg in type_map:
+                return str(type_map[type_arg])
+            if fallback_str:
+                try:
+                    return str(json.loads(fallback_str))
+                except (json.JSONDecodeError, ValueError):
+                    return fallback_str
+            return ""
+        return _stringify_for_template(val)
+    return _stringify_for_template(val)
+
+
+def _stringify_for_template(val: Any) -> str:
+    """Render a resolved value into the template stream so that
+    `_render_dict`'s outer json.loads round-trips the type. Plain strings
+    must stay quote-free (so 'hello {{name}}' works for interpolation);
+    non-string types are emitted as JSON so True/42/[1,2] round-trip to
+    bool/int/list rather than ending up as the literal strings 'True' etc."""
+    if isinstance(val, str):
+        return val
+    return json.dumps(val)
+
+
+def _cred_get_impl(
+    key: str, params: dict, config: dict, cred: Optional[Credential] = None
+) -> Any:
+    parts = key.split(".", 1)
+    field = parts[0]
+    sub = parts[1] if len(parts) > 1 else None
+
+    if field == "raw":
+        if cred is not None:
+            return cred.raw
+        return params.get("_cred", {}).get("raw")
+
+    if field == "base64_credentials":
+        import base64
+
+        username = _cred_get_impl("username", params, config, cred) or ""
+        password = _cred_get_impl("password", params, config, cred) or ""
+        return base64.b64encode(f"{username}:{password}".encode()).decode()
+
+    if cred is not None and field in cred.fields:
+        val = cred.fields[field]
+        if sub and isinstance(val, dict):
+            return val.get(sub)
+        return val
+
+    val = params.get("_cred", {}).get(field) or config.get(field)
+    if sub and isinstance(val, dict):
+        return val.get(sub)
+    return val
