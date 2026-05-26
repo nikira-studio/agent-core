@@ -40,6 +40,7 @@ class _SuppressManifestPolling(logging.Filter):
         msg = record.getMessage()
         return not ("GET /mcp" in msg and '" 200' in msg)
 
+
 logging.getLogger("uvicorn.access").addFilter(_SuppressManifestPolling())
 
 
@@ -170,6 +171,13 @@ def create_app() -> FastAPI:
     init_db()
     ensure_broker_credential()
     from app.connectors import generic_http  # noqa: F401 - registers Generic HTTP connector
+
+    try:
+        from app.services.adapter_loader import discover_and_seed_adapters
+
+        discover_and_seed_adapters()
+    except Exception as exc:
+        logging.exception("Failed to load adapters from data/adapters/: %s", exc)
 
     return app
 

@@ -1,9 +1,11 @@
-import secrets
 import re
+import secrets
 import sqlite3
 from typing import Optional
-from app.database import get_db
+
 from app.branding import CREDENTIAL_PREFIX
+from app.connectors.base import Credential
+from app.database import get_db
 from app.security.encryption import encrypt_value, decrypt_value
 from app.models.enums import normalize_id
 from app.time_utils import parse_utc_datetime, utc_now
@@ -19,7 +21,11 @@ def _build_reference_name(name: str) -> str:
     if len(name_clean) > 20:
         name_clean = name_clean[:20]
 
-    base = f"{CREDENTIAL_PREFIX}{name_clean}" if name_clean else f"{CREDENTIAL_PREFIX}VAULT"
+    base = (
+        f"{CREDENTIAL_PREFIX}{name_clean}"
+        if name_clean
+        else f"{CREDENTIAL_PREFIX}VAULT"
+    )
     return f"{base}_{_generate_unique_suffix()}"
 
 
@@ -169,6 +175,22 @@ def resolve_reference(reference_name: str) -> Optional[str]:
         if utc_now() > parse_utc_datetime(entry["expires_at"]):
             return None
     return decrypt_value(entry["value_encrypted"])
+
+
+def resolve_credential(reference_name: str) -> Optional[Credential]:
+    entry = get_credential_by_reference(reference_name)
+    if not entry:
+        return None
+    if entry.get("expires_at") and utc_now() > parse_utc_datetime(entry["expires_at"]):
+        return None
+    return Credential.from_resolved(decrypt_value(entry["value_encrypted"]), entry)
+
+
+def update_credential_value(reference_name: str, new_plaintext: str) -> bool:
+    entry = get_credential_by_reference(reference_name)
+    if not entry:
+        return False
+    return update_credential(entry["id"], value_encrypted=encrypt_value(new_plaintext))
 
 
 def mask_preview(value_encrypted: str) -> str:

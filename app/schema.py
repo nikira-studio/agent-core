@@ -341,6 +341,14 @@ CREATE TABLE IF NOT EXISTS inbound_webhook_keys (
     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
     rotated_at TEXT
 );
+
+-- Connector session cache table
+CREATE TABLE IF NOT EXISTS connector_session_cache (
+    binding_id TEXT PRIMARY KEY,
+    session_data_encrypted TEXT,
+    expires_at TEXT,
+    updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
 """
 
 
@@ -370,6 +378,7 @@ def create_schema(conn) -> None:
     _ensure_connector_type_backend_columns(conn)
     _ensure_webhook_tables(conn)
     _ensure_inbound_webhook_table(conn)
+    _ensure_connector_session_cache_table(conn)
     _seed_connector_types(conn)
 
 
@@ -512,6 +521,27 @@ def _ensure_inbound_webhook_table(conn) -> None:
                 is_active INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0, 1)),
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP,
                 rotated_at TEXT
+            );
+            """
+        )
+        conn.commit()
+
+
+def _ensure_connector_session_cache_table(conn) -> None:
+    tables = {
+        row["name"]
+        for row in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'"
+        ).fetchall()
+    }
+    if "connector_session_cache" not in tables:
+        conn.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS connector_session_cache (
+                binding_id TEXT PRIMARY KEY,
+                session_data_encrypted TEXT,
+                expires_at TEXT,
+                updated_at TEXT DEFAULT CURRENT_TIMESTAMP
             );
             """
         )

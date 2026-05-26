@@ -144,17 +144,20 @@ def get_binding_with_credential(binding_id: str) -> Optional[dict]:
     binding = get_binding(binding_id)
     if not binding:
         return None
-    binding["credential_plaintext"] = None
     binding["credential"] = None
+    binding["credential_plaintext"] = None
     if binding.get("credential_id"):
         from app.services import credential_service
 
         cred = credential_service.get_credential(binding["credential_id"])
         if cred:
-            from app.services.credential_service import resolve_reference
+            from app.services.credential_service import (
+                resolve_reference,
+                resolve_credential,
+            )
 
             binding["credential_plaintext"] = resolve_reference(cred["reference_name"])
-            binding["credential"] = cred
+            binding["credential"] = resolve_credential(cred["reference_name"])
     return binding
 
 
@@ -261,7 +264,11 @@ def delete_binding(binding_id: str) -> bool:
             "DELETE FROM connector_bindings WHERE id = ?", (binding_id,)
         )
         conn.commit()
-        return cursor.rowcount > 0
+        result = cursor.rowcount > 0
+    from app.services import connector_session_service as _css
+
+    _css.clear_session(binding_id)
+    return result
 
 
 _NON_TRANSIENT_CODES = frozenset(
@@ -473,6 +480,51 @@ def generate_connector_type_tools(
             offset=offset,
         )
 
+    backend_json = connector_type.get("backend_json")
+    if backend_json:
+        import json as _json
+
+        try:
+            backend = _json.loads(backend_json)
+        except Exception:
+            backend = {}
+        requests = backend.get("requests", {})
+        manifest_actions = {
+            a["name"]: a
+            for a in connector_type.get("supported_actions") or []
+            if isinstance(a, dict)
+        }
+        if requests:
+            disabled_set = {a for a in (disabled_actions or []) if isinstance(a, str)}
+            tools = []
+            for name, spec in requests.items():
+                if query and query.lower() not in name.lower():
+                    continue
+                if not include_disabled and name in disabled_set:
+                    continue
+                action_meta = manifest_actions.get(name, {})
+                tools.append(
+                    {
+                        "name": name,
+                        "action": name,
+                        "method": spec.get("method", ""),
+                        "path": spec.get("path", ""),
+                        "description": action_meta.get("description", ""),
+                        "enabled": name not in disabled_set,
+                        "input_schema": action_meta.get("input_schema", {}),
+                        "side_effect": action_meta.get(
+                            "side_effect", spec.get("side_effect", "none")
+                        ),
+                    }
+                )
+            total = len(tools)
+            page = tools[offset : offset + limit] if offset or limit != 20 else tools
+            return {
+                "tools": page,
+                "total": total,
+                "connector_type_id": connector_type["id"],
+            }
+
     disabled_set = {
         action for action in (disabled_actions or []) if isinstance(action, str)
     }
@@ -516,7 +568,7 @@ def test_binding(binding_id: str) -> dict:
     if not connector_type:
         return {"success": False, "error": "Connector type not found"}
 
-    credential = binding.get("credential_plaintext")
+    cred = binding.get("credential")
 
     executor = _resolve_executor(connector_type)
     if not executor:
@@ -528,7 +580,7 @@ def test_binding(binding_id: str) -> dict:
                 )
                 endpoint_url, headers, timeout_ms = (
                     mcp_provider_service.build_mcp_request_config(
-                        test_binding_context, credential=credential
+                        test_binding_context, credential=cred.raw if cred else None
                     )
                 )
                 tools = mcp_provider_service.discover_all_tools(
@@ -557,7 +609,7 @@ def test_binding(binding_id: str) -> dict:
 
     try:
         executor_config = _build_executor_config(binding, connector_type)
-        result = executor.test_connection(credential, executor_config)
+        result = executor.test_connection(cred, executor_config)
         if result.get("success"):
             update_binding(binding_id, last_tested_at=_utc_now(), last_error=None)
         else:
@@ -791,7 +843,7 @@ def execute_binding_action(
         }
 
     binding_with_cred = get_binding_with_credential(binding_id)
-    credential = binding_with_cred.get("credential_plaintext")
+    cred = binding_with_cred.get("credential")
     binding_config = {}
     if binding.get("config_json"):
         try:
@@ -799,11 +851,7 @@ def execute_binding_action(
         except json.JSONDecodeError:
             pass
     auth_overridden = binding_config.get("auth_mode") == "none"
-    if (
-        connector_type.get("auth_type") != "none"
-        and not credential
-        and not auth_overridden
-    ):
+    if connector_type.get("auth_type") != "none" and not cred and not auth_overridden:
         return {
             "success": False,
             "error": "No credential linked to this binding",
@@ -829,8 +877,11 @@ def execute_binding_action(
             pass
 
     provider_type = connector_type.get("provider_type") or "openapi"
+    executor = _resolve_executor(connector_type)
+    uses_session = bool(executor and getattr(executor, "needs_session", False))
 
     def _run_once() -> dict:
+        nonlocal cred
         try:
             if provider_type == "mcp":
                 from app.services import mcp_provider_service as _mcp
@@ -846,7 +897,7 @@ def execute_binding_action(
                     endpoint_url=endpoint_url,
                     action=action,
                     params=params or {},
-                    credential=credential,
+                    credential=cred.raw if cred else None,
                     config_json=binding.get("config_json"),
                     transport_type=connector_type.get("transport_type")
                     or "streamable_http",
@@ -860,20 +911,57 @@ def execute_binding_action(
                     "transport": result.transport,
                 }
 
-            executor = _resolve_executor(connector_type)
             if not executor:
                 return {
                     "success": False,
                     "error": "Connector handler not found",
                     "error_code": "NOT_FOUND",
                 }
-            executor_config = _build_executor_config(binding, connector_type)
-            return executor.execute(
-                action=action,
-                params=params or {},
-                credential=credential,
-                config_json=executor_config,
-            )
+
+            def _do_execute(session):
+                executor_config = _build_executor_config(binding, connector_type)
+                return executor.execute(
+                    action=action,
+                    params=params or {},
+                    credential=cred,
+                    config_json=executor_config,
+                    session=session,
+                )
+
+            if not uses_session:
+                return _do_execute(None)
+
+            from app.services import connector_session_service as _sessions
+            from app.connectors.errors import SessionExpiredError, AuthExpiredError
+
+            session = _sessions.load_session(binding_id)
+            try:
+                return _do_execute(session)
+            except (SessionExpiredError, AuthExpiredError):
+                with _sessions.binding_lock(binding_id):
+                    session = _sessions.load_session(binding_id)
+                    try:
+                        return _do_execute(session)
+                    except (SessionExpiredError, AuthExpiredError):
+                        refreshed = executor.refresh_session(
+                            cred,
+                            binding_config,
+                            session,
+                        )
+                        _sessions.save_session(
+                            binding_id,
+                            refreshed.get("session"),
+                            refreshed.get("expires_at"),
+                        )
+                        upd = refreshed.get("credential_update")
+                        if upd and cred and cred.reference_name:
+                            from app.services import credential_service as _cs
+                            import json
+
+                            new_blob = json.dumps({**cred.fields, **upd})
+                            _cs.update_credential_value(cred.reference_name, new_blob)
+                            cred = _cs.resolve_credential(cred.reference_name)
+                        return _do_execute(refreshed.get("session"))
         except Exception as e:
             return {
                 "success": False,

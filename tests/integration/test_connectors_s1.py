@@ -1,5 +1,3 @@
-
-
 class TestConnectorSchema:
     def test_connector_tables_exist(self, clean_db):
         from app.database import get_db
@@ -39,9 +37,13 @@ class TestConnectorSchema:
                 row["name"]
                 for row in conn.execute("PRAGMA table_info(connector_types)").fetchall()
             }
-        assert {"provider_type", "endpoint_url", "transport_type", "capabilities_json", "tool_snapshot_json"}.issubset(
-            columns
-        )
+        assert {
+            "provider_type",
+            "endpoint_url",
+            "transport_type",
+            "capabilities_json",
+            "tool_snapshot_json",
+        }.issubset(columns)
 
     def test_imported_connector_defaults_to_openapi_provider(self, clean_db):
         from app.services import connector_service
@@ -168,7 +170,10 @@ class TestConnectorBindingCRUD:
             last_tested_at="2026-05-22T00:00:00+00:00",
             last_error="connection refused",
         )
-        assert connector_service.get_binding(binding["id"])["last_error"] == "connection refused"
+        assert (
+            connector_service.get_binding(binding["id"])["last_error"]
+            == "connection refused"
+        )
 
         connector_service.update_binding(
             binding["id"],
@@ -263,7 +268,7 @@ class TestCredentialStillWorks:
         binding_with_cred = connector_service.get_binding_with_credential(binding["id"])
         assert binding_with_cred["credential_plaintext"] == "test-secret-123"
         assert (
-            binding_with_cred["credential"]["reference_name"]
+            binding_with_cred["credential"].reference_name
             == credential_entry["reference_name"]
         )
 

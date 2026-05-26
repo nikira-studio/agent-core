@@ -253,6 +253,8 @@ class OpenApiExecutor(BaseConnector):
         config_json: Optional[str],
         url: Optional[str] = None,
     ) -> Optional[str]:
+        if hasattr(credential, "raw"):
+            credential = credential.raw
         if not credential:
             return url
 
@@ -310,16 +312,22 @@ class OpenApiExecutor(BaseConnector):
         scheme_type = scheme.get("type")
         if scheme_type == "apiKey":
             location = (scheme.get("auth_location") or "header").lower()
-            key_name = scheme.get("auth_header") or scheme.get("query_param") or "X-API-Key"
+            key_name = (
+                scheme.get("auth_header") or scheme.get("query_param") or "X-API-Key"
+            )
             if location == "query":
                 if url is None:
                     return None
                 separator = "&" if urllib.parse.urlparse(url).query else "?"
-                return f"{url}{separator}{urllib.parse.urlencode({key_name: credential})}"
+                return (
+                    f"{url}{separator}{urllib.parse.urlencode({key_name: credential})}"
+                )
             if location == "cookie":
                 existing = headers.get("Cookie")
                 cookie_value = f"{key_name}={urllib.parse.quote(credential)}"
-                headers["Cookie"] = f"{existing}; {cookie_value}" if existing else cookie_value
+                headers["Cookie"] = (
+                    f"{existing}; {cookie_value}" if existing else cookie_value
+                )
                 return url
             headers[key_name] = credential
             return url

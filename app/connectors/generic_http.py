@@ -12,7 +12,9 @@ from app.security.safe_http import safe_urlopen
 class GenericHttpConnector:
     connector_type_id = "generic_http"
 
-    def test_connection(self, credential: str, config_json: Optional[str]) -> dict:
+    def test_connection(self, credential, config_json: Optional[str]) -> dict:
+        if hasattr(credential, "raw"):
+            credential = credential.raw
         config = self._parse_config(config_json)
         test_url = config.get("test_url") or config.get("base_url")
         if not test_url:
@@ -34,8 +36,15 @@ class GenericHttpConnector:
         return result
 
     def execute(
-        self, action: str, params: dict, credential: str, config_json: Optional[str]
+        self,
+        action: str,
+        params: dict,
+        credential,
+        config_json: Optional[str],
+        session=None,
     ) -> dict:
+        if hasattr(credential, "raw"):
+            credential = credential.raw
         config = self._parse_config(config_json)
         merged_params = dict(params)
         if action != "call_endpoint":
@@ -48,7 +57,9 @@ class GenericHttpConnector:
             merged_params.setdefault("path", path)
             if "body" not in merged_params:
                 _transport_keys = {"method", "path", "url", "headers", "query"}
-                body = {k: v for k, v in merged_params.items() if k not in _transport_keys}
+                body = {
+                    k: v for k, v in merged_params.items() if k not in _transport_keys
+                }
                 if body:
                     merged_params["body"] = body
         return self._call(credential, config, merged_params)
@@ -62,7 +73,9 @@ class GenericHttpConnector:
         except json.JSONDecodeError:
             return {}
 
-    def _call(self, credential: str, config: dict, params: dict) -> dict:
+    def _call(self, credential, config: dict, params: dict) -> dict:
+        if hasattr(credential, "raw"):
+            credential = credential.raw
         url = params.get("url") or self._join_url(
             config.get("base_url"), params.get("path")
         )
@@ -113,7 +126,9 @@ class GenericHttpConnector:
         except Exception as e:
             return {"success": False, "error": str(e)}
 
-    def _apply_auth(self, url: str, headers: dict, credential: str, config: dict) -> str:
+    def _apply_auth(self, url: str, headers: dict, credential, config: dict) -> str:
+        if hasattr(credential, "raw"):
+            credential = credential.raw
         location = config.get("auth_location", "header")
         if location == "query":
             param_name = config.get("query_param", "api_key")
