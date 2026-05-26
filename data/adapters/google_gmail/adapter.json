@@ -1,0 +1,176 @@
+{
+  "spec_version": "1.0",
+  "id": "google_gmail",
+  "display_name": "Google Gmail",
+  "version": "1.0.0",
+  "author": "agent-core team",
+  "description": "Gmail API via OAuth2. Supports send_email, list_messages, get_message, search_messages with automatic token refresh and refresh_token rotation.",
+  "credential_schema": {
+    "fields": [
+      { "name": "client_id", "type": "string", "secret": false, "required": true },
+      { "name": "client_secret", "type": "string", "secret": true, "required": true },
+      { "name": "refresh_token", "type": "string", "secret": true, "required": true },
+      { "name": "access_token", "type": "string", "secret": true, "required": false },
+      { "name": "expires_at", "type": "string", "secret": false, "required": false }
+    ]
+  },
+  "requires": { "config": [] },
+  "actions": [
+    {
+      "name": "send_email",
+      "description": "Send an email via Gmail API.",
+      "side_effect": "write",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "to": { "type": "array", "items": { "type": "string" }, "description": "Recipients" },
+          "subject": { "type": "string", "description": "Subject line" },
+          "body": { "type": "string", "description": "Email body (plain text)" },
+          "cc": { "type": "array", "items": { "type": "string" }, "description": "CC recipients" },
+          "bcc": { "type": "array", "items": { "type": "string" }, "description": "BCC recipients" }
+        },
+        "required": ["to", "subject", "body"]
+      }
+    },
+    {
+      "name": "list_messages",
+      "description": "List messages in a Gmail label or inbox.",
+      "side_effect": "read",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "label": { "type": "string", "description": "Gmail label (e.g. INBOX, SPAM). Defaults to INBOX." },
+          "max_results": { "type": "integer", "description": "Maximum messages to return (1-500)" }
+        }
+      }
+    },
+    {
+      "name": "get_message",
+      "description": "Get a message by ID.",
+      "side_effect": "read",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "message_id": { "type": "string", "description": "The message ID" }
+        },
+        "required": ["message_id"]
+      }
+    },
+    {
+      "name": "search_messages",
+      "description": "Search messages using Gmail search syntax.",
+      "side_effect": "read",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "query": { "type": "string", "description": "Gmail search query (e.g. 'from:user@example.com subject:report')" },
+          "max_results": { "type": "integer", "description": "Maximum messages to return (1-500)" }
+        },
+        "required": ["query"]
+      }
+    },
+    {
+      "name": "modify_labels",
+      "description": "Add or remove labels from a message.",
+      "side_effect": "write",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "message_id": { "type": "string", "description": "The message ID" },
+          "add_labels": { "type": "array", "items": { "type": "string" }, "description": "Label IDs to add" },
+          "remove_labels": { "type": "array", "items": { "type": "string" }, "description": "Label IDs to remove" }
+        },
+        "required": ["message_id"]
+      }
+    }
+  ],
+  "backend": {
+    "type": "http",
+    "base_url": { "from": "config", "field": "gmail_base_url" },
+    "auth": {
+      "type": "oauth2",
+      "apply": {
+        "target": "request_header",
+        "name": "Authorization",
+        "template": "Bearer {{ cred.access_token }}"
+      }
+    },
+    "refresh": {
+      "trigger": {
+        "http_status": 401,
+        "or_expired": "cred.expires_at"
+      },
+      "token_url": "https://oauth2.googleapis.com/token",
+      "grant": "refresh_token",
+      "response_map": {
+        "access_token": "access_token",
+        "expires_in": "expires_in"
+      },
+      "persist": {
+        "refresh_token": "credential_if_present.refresh_token"
+      }
+    },
+    "requests": {
+      "send_email": {
+        "method": "POST",
+        "path": "/gmail/v1/messages/send",
+        "body": {
+          "template": {
+            "raw": "{{ params.base64_message | default('', as=str) }}"
+          }
+        },
+        "response": {
+          "success_when": "$.status >= 200 and $.status < 300",
+          "extract": "$.id"
+        }
+      },
+      "list_messages": {
+        "method": "GET",
+        "path": "/gmail/v1/users/me/messages",
+        "query_params": {
+          "labelIds": "{{ params.label | default('INBOX', as=str) }}",
+          "maxResults": "{{ params.max_results | default(10, as=int) }}"
+        },
+        "response": {
+          "success_when": "$.status >= 200 and $.status < 300",
+          "extract": "$.messages"
+        }
+      },
+      "get_message": {
+        "method": "GET",
+        "path": "/gmail/v1/users/me/messages/{{ params.message_id }}",
+        "query_params": {
+          "format": "full"
+        },
+        "response": {
+          "success_when": "$.status >= 200 and $.status < 300"
+        }
+      },
+      "search_messages": {
+        "method": "GET",
+        "path": "/gmail/v1/users/me/messages",
+        "query_params": {
+          "q": "{{ params.query }}",
+          "maxResults": "{{ params.max_results | default(10, as=int) }}"
+        },
+        "response": {
+          "success_when": "$.status >= 200 and $.status < 300",
+          "extract": "$.messages"
+        }
+      },
+      "modify_labels": {
+        "method": "POST",
+        "path": "/gmail/v1/users/me/messages/{{ params.message_id }}/modify",
+        "body": {
+          "template": {
+            "addLabelIds": "{{ params.add_labels | default([], as=list) }}",
+            "removeLabelIds": "{{ params.remove_labels | default([], as=list) }}"
+          }
+        },
+        "response": {
+          "success_when": "$.status >= 200 and $.status < 300"
+        }
+      }
+    }
+  }
+}
