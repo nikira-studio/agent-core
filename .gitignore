@@ -65,6 +65,7 @@ AGENTS.md
 CLAUDE.md
 scratch/
 temp.txt
+*_output.txt
 plan.md
 fixes.md
 roadmap.md

@@ -20,7 +20,7 @@ from app.security.url_validation import validate_public_url
 
 
 _RE_TEMPLATE = re.compile(
-    r"\{\{\s*(params|cred|config)\.(\w+?)\s*(?:\s*\|\s*(\w+)(?:\(([^)]*)\))?)?\s*\}\}"
+    r"\{\{\s*(params|cred|config)(?:\.(\w+?))?\s*(?:\s+\|\s*(\w+)(?:\(([^)]*)\))?)?\s*\}\}"
 )
 
 
@@ -123,7 +123,7 @@ class HttpEngine(BaseConnector):
 
         req = {"method": method, "url": url, "headers": {}, "body": None}
 
-        for loc, key in [("query", "query_params"), ("header", "header_params")]:
+        for loc, key in [("query_params", "header_params")]:
             mapping = request_def.get(loc, {})
             if isinstance(mapping, dict):
                 for param_name, param_loc in mapping.items():
@@ -132,6 +132,17 @@ class HttpEngine(BaseConnector):
                             str(param_loc.get("default", "")), params, config, cred
                         )
                         req["headers"][param_name] = val
+                    elif loc == "query_params" and isinstance(param_loc, str):
+                        val = self._render(param_loc, params, config, cred)
+                        if val and not (
+                            val == param_loc and param_loc.startswith("{{")
+                        ):
+                            sep = (
+                                "&" if urllib.parse.urlparse(req["url"]).query else "?"
+                            )
+                            req["url"] = (
+                                f"{req['url']}{sep}{urllib.parse.urlencode({param_name: val})}"
+                            )
 
         body_tpl = request_def.get("body", {}).get("template")
         if body_tpl:
@@ -174,11 +185,17 @@ class HttpEngine(BaseConnector):
 
             def _get_value():
                 if src == "params":
-                    return params.get(key, m.group(0))
+                    if key:
+                        return params.get(key, m.group(0))
+                    return params
                 if src == "cred":
-                    return self._cred_get(key, params, config, cred)
+                    if key:
+                        return self._cred_get(key, params, config, cred)
+                    return params
                 if src == "config":
-                    return config.get(key, m.group(0))
+                    if key:
+                        return config.get(key, m.group(0))
+                    return params
                 return m.group(0)
 
             val = _get_value()
@@ -197,15 +214,50 @@ class HttpEngine(BaseConnector):
                         parts = filter_arg.split(", as=", 1)
                         fallback_str = parts[0]
                         type_arg = parts[1] if len(parts) > 1 else ""
-                    if type_arg and type_arg in type_map:
-                        return str(type_map[type_arg])
                     if fallback_str:
                         try:
                             return str(json.loads(fallback_str))
                         except (json.JSONDecodeError, ValueError):
                             return fallback_str
+                    if type_arg and type_arg in type_map:
+                        return str(type_map[type_arg])
                     return ""
                 return str(val)
+            if filter_name == "rfc822_base64url":
+                import base64
+
+                def make_rfc822(p: dict) -> str:
+                    lines = []
+                    to_list = p.get("to", [])
+                    if isinstance(to_list, list):
+                        lines.append(f"To: {', '.join(to_list)}")
+                    else:
+                        lines.append(f"To: {to_list}")
+                    subject = p.get("subject", "")
+                    if subject:
+                        lines.append(f"Subject: {subject}")
+                    body = p.get("body", "")
+                    if body:
+                        lines.append("")
+                        lines.append(body)
+                    cc_list = p.get("cc", [])
+                    if cc_list:
+                        if isinstance(cc_list, list):
+                            lines.append(f"Cc: {', '.join(cc_list)}")
+                        else:
+                            lines.append(f"Cc: {cc_list}")
+                    bcc_list = p.get("bcc", [])
+                    if bcc_list:
+                        if isinstance(bcc_list, list):
+                            lines.append(f"Bcc: {', '.join(bcc_list)}")
+                        else:
+                            lines.append(f"Bcc: {bcc_list}")
+                    raw = "\r\n".join(lines).encode("utf-8")
+                    return base64.urlsafe_b64encode(raw).rstrip(b"=").decode("utf-8")
+
+                return make_rfc822(params) if isinstance(params, dict) else m.group(0)
+            if val is None:
+                return m.group(0)
             return str(val)
 
         return _RE_TEMPLATE.sub(replacer, template)
@@ -566,7 +618,7 @@ def _render_value(
 
     def _get_value():
         if src == "params":
-            return params.get(key, m.group(0))
+            return params.get(key) if key else params
         if src == "cred":
             return _cred_get_impl(key, params, config, cred)
         if src == "config":
@@ -598,6 +650,39 @@ def _render_value(
                     return fallback_str
             return ""
         return _stringify_for_template(val)
+    if filter_name == "rfc822_base64url":
+        import base64
+
+        def make_rfc822(p: dict) -> str:
+            lines = []
+            to_list = p.get("to", [])
+            if isinstance(to_list, list):
+                lines.append(f"To: {', '.join(to_list)}")
+            else:
+                lines.append(f"To: {to_list}")
+            subject = p.get("subject", "")
+            if subject:
+                lines.append(f"Subject: {subject}")
+            body_text = p.get("body", "")
+            if body_text:
+                lines.append("")
+                lines.append(body_text)
+            cc_list = p.get("cc", [])
+            if cc_list:
+                if isinstance(cc_list, list):
+                    lines.append(f"Cc: {', '.join(cc_list)}")
+                else:
+                    lines.append(f"Cc: {cc_list}")
+            bcc_list = p.get("bcc", [])
+            if bcc_list:
+                if isinstance(bcc_list, list):
+                    lines.append(f"Bcc: {', '.join(bcc_list)}")
+                else:
+                    lines.append(f"Bcc: {bcc_list}")
+            raw = "\r\n".join(lines).encode("utf-8")
+            return base64.urlsafe_b64encode(raw).rstrip(b"=").decode("utf-8")
+
+        return make_rfc822(val) if isinstance(val, dict) else m.group(0)
     return _stringify_for_template(val)
 
 

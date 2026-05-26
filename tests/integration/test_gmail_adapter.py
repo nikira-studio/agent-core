@@ -1,11 +1,271 @@
 """Integration tests for the Google Gmail adapter manifest."""
 
+import base64
 import json
 import tempfile
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+from app.connectors.base import Credential
+from app.connectors.http_engine import HttpEngine
 from app.connectors.manifest import load_and_validate
+
+
+def make_gmail_ct(backend_json: dict) -> dict:
+    return {"id": "google_gmail", "backend_json": json.dumps(backend_json)}
+
+
+def make_gmail_cred(fields: dict | None = None) -> Credential:
+    return Credential(
+        raw=None,
+        fields=fields
+        or {"client_id": "cid", "client_secret": "csec", "refresh_token": "rt"},
+        reference_name="gmail-cref",
+    )
+
+
+class TestGmailAdapterWireLevel:
+    def test_send_email_renders_valid_rfc822_base64_raw(self):
+        manifest_path = Path(
+            "/srv/docker-data/projects/Apps/agent-core/data/adapters/google_gmail/adapter.json"
+        )
+        m, err = load_and_validate(manifest_path)
+        assert err is None
+
+        engine = HttpEngine(
+            {"id": "google_gmail", "backend_json": json.dumps(m.backend)}
+        )
+
+        captured = []
+        engine._send = MagicMock(
+            side_effect=lambda req, cfg: captured.append(req)
+            or MagicMock(
+                status=200,
+                read=MagicMock(return_value=json.dumps({"id": "msg123"}).encode()),
+            )
+        )
+        engine._raise_on_errors = MagicMock()
+
+        result = engine.execute(
+            "send_email",
+            {"to": ["alice@example.com"], "subject": "Hello", "body": "World"},
+            make_gmail_cred(),
+            None,
+            session=None,
+        )
+
+        assert result["success"] is True
+        assert len(captured) == 1
+        call = captured[0]
+
+        assert "gmail.googleapis.com" in call["url"]
+        assert "/gmail/v1/messages/send" in call["url"]
+
+        body = json.loads(json.dumps(call["body"]))
+        assert "raw" in body
+        raw = body["raw"]
+        assert raw, "raw field must not be empty"
+
+        padded = raw + "=" * (4 - len(raw) % 4)
+        decoded = base64.urlsafe_b64decode(padded).decode("utf-8")
+        assert "Subject: Hello" in decoded, f"RFC822 should contain subject: {decoded}"
+        assert "World" in decoded, f"RFC822 should contain body: {decoded}"
+        assert "To: alice@example.com" in decoded
+
+    def test_send_email_with_cc_and_bcc(self):
+        manifest_path = Path(
+            "/srv/docker-data/projects/Apps/agent-core/data/adapters/google_gmail/adapter.json"
+        )
+        m, err = load_and_validate(manifest_path)
+        assert err is None
+
+        engine = HttpEngine(
+            {"id": "google_gmail", "backend_json": json.dumps(m.backend)}
+        )
+
+        captured = []
+        engine._send = MagicMock(
+            side_effect=lambda req, cfg: captured.append(req)
+            or MagicMock(
+                status=200,
+                read=MagicMock(return_value=json.dumps({"id": "msg456"}).encode()),
+            )
+        )
+        engine._raise_on_errors = MagicMock()
+
+        result = engine.execute(
+            "send_email",
+            {
+                "to": ["alice@example.com", "bob@example.com"],
+                "subject": "Meeting",
+                "body": "Let's meet tomorrow.",
+                "cc": ["carol@example.com"],
+                "bcc": ["david@example.com"],
+            },
+            make_gmail_cred(),
+            None,
+            session=None,
+        )
+
+        assert result["success"] is True
+        body = json.loads(json.dumps(captured[0]["body"]))
+        padded = body["raw"] + "=" * (4 - len(body["raw"]) % 4)
+        decoded = base64.urlsafe_b64decode(padded).decode("utf-8")
+        assert "To: alice@example.com, bob@example.com" in decoded
+        assert "Cc: carol@example.com" in decoded
+        assert "Bcc: david@example.com" in decoded
+
+    def test_list_messages_renders_correct_query_params(self):
+        manifest_path = Path(
+            "/srv/docker-data/projects/Apps/agent-core/data/adapters/google_gmail/adapter.json"
+        )
+        m, err = load_and_validate(manifest_path)
+        assert err is None
+
+        engine = HttpEngine(
+            {"id": "google_gmail", "backend_json": json.dumps(m.backend)}
+        )
+
+        captured = []
+        engine._send = MagicMock(
+            side_effect=lambda req, cfg: captured.append(req)
+            or MagicMock(
+                status=200,
+                read=MagicMock(
+                    return_value=json.dumps(
+                        {"messages": [{"id": "msg1"}, {"id": "msg2"}]}
+                    ).encode()
+                ),
+            )
+        )
+        engine._raise_on_errors = MagicMock()
+
+        result = engine.execute(
+            "list_messages",
+            {"label": "SENT", "max_results": 25},
+            make_gmail_cred(),
+            None,
+            session={"access_token": "test-token"},
+        )
+
+        assert result["success"] is True
+        assert len(captured) == 1
+        call = captured[0]
+
+        assert "gmail.googleapis.com" in call["url"]
+        assert "/gmail/v1/users/me/messages" in call["url"]
+        assert "labelIds=SENT" in call["url"]
+        assert "maxResults=25" in call["url"]
+        assert "Authorization" in call["headers"]
+        assert "Bearer test-token" in call["headers"]["Authorization"]
+
+    def test_list_messages_defaults_label_and_max_results(self):
+        manifest_path = Path(
+            "/srv/docker-data/projects/Apps/agent-core/data/adapters/google_gmail/adapter.json"
+        )
+        m, err = load_and_validate(manifest_path)
+        assert err is None
+
+        engine = HttpEngine(
+            {"id": "google_gmail", "backend_json": json.dumps(m.backend)}
+        )
+
+        captured = []
+        engine._send = MagicMock(
+            side_effect=lambda req, cfg: captured.append(req)
+            or MagicMock(
+                status=200,
+                read=MagicMock(return_value=json.dumps({"messages": []}).encode()),
+            )
+        )
+        engine._raise_on_errors = MagicMock()
+
+        result = engine.execute(
+            "list_messages", {}, make_gmail_cred(), None, session=None
+        )
+
+        assert result["success"] is True
+        call = captured[0]
+        assert "labelIds=INBOX" in call["url"]
+        assert "maxResults=10" in call["url"]
+
+    def test_get_message_renders_correct_path(self):
+        manifest_path = Path(
+            "/srv/docker-data/projects/Apps/agent-core/data/adapters/google_gmail/adapter.json"
+        )
+        m, err = load_and_validate(manifest_path)
+        assert err is None
+
+        engine = HttpEngine(
+            {"id": "google_gmail", "backend_json": json.dumps(m.backend)}
+        )
+
+        captured = []
+        engine._send = MagicMock(
+            side_effect=lambda req, cfg: captured.append(req)
+            or MagicMock(
+                status=200,
+                read=MagicMock(
+                    return_value=json.dumps({"id": "abc", "snippet": "hi"}).encode()
+                ),
+            )
+        )
+        engine._raise_on_errors = MagicMock()
+
+        result = engine.execute(
+            "get_message",
+            {"message_id": "msg_abc123"},
+            make_gmail_cred(),
+            None,
+            session=None,
+        )
+
+        assert result["success"] is True
+        call = captured[0]
+        assert "/gmail/v1/users/me/messages/msg_abc123" in call["url"]
+        assert "format=full" in call["url"]
+
+    def test_modify_labels_renders_correct_body(self):
+        manifest_path = Path(
+            "/srv/docker-data/projects/Apps/agent-core/data/adapters/google_gmail/adapter.json"
+        )
+        m, err = load_and_validate(manifest_path)
+        assert err is None
+
+        engine = HttpEngine(
+            {"id": "google_gmail", "backend_json": json.dumps(m.backend)}
+        )
+
+        captured = []
+        engine._send = MagicMock(
+            side_effect=lambda req, cfg: captured.append(req)
+            or MagicMock(
+                status=200,
+                read=MagicMock(
+                    return_value=json.dumps(
+                        {"id": "msg789", "labelIds": ["STARRED"]}
+                    ).encode()
+                ),
+            )
+        )
+        engine._raise_on_errors = MagicMock()
+
+        result = engine.execute(
+            "modify_labels",
+            {
+                "message_id": "msg_xyz",
+                "add_labels": ["STARRED"],
+                "remove_labels": ["INBOX"],
+            },
+            make_gmail_cred(),
+            None,
+            session=None,
+        )
+
+        assert result["success"] is True
+        body = json.loads(json.dumps(captured[0]["body"]))
+        assert body.get("addLabelIds") == ["STARRED"]
+        assert body.get("removeLabelIds") == ["INBOX"]
 
 
 class TestGmailAdapterManifest:

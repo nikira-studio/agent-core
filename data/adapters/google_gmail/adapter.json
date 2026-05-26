@@ -86,7 +86,7 @@
   ],
   "backend": {
     "type": "http",
-    "base_url": { "from": "config", "field": "gmail_base_url" },
+    "base_url": "https://gmail.googleapis.com",
     "auth": {
       "type": "oauth2",
       "apply": {
@@ -116,7 +116,7 @@
         "path": "/gmail/v1/messages/send",
         "body": {
           "template": {
-            "raw": "{{ params.base64_message | default('', as=str) }}"
+            "raw": "{{ params | rfc822_base64url }}"
           }
         },
         "response": {
@@ -128,7 +128,7 @@
         "method": "GET",
         "path": "/gmail/v1/users/me/messages",
         "query_params": {
-          "labelIds": "{{ params.label | default('INBOX', as=str) }}",
+          "labelIds": "{{ params.label | default(\"INBOX\", as=str) }}",
           "maxResults": "{{ params.max_results | default(10, as=int) }}"
         },
         "response": {
