@@ -100,12 +100,21 @@ When you generate reusable instructions, keep those distinctions in mind. For as
 
 ## Connector Setup in Agent Core
 
-Use **OpenAPI import** when the service already publishes a REST spec. Use **Import MCP Server** when the service is a native MCP server and you want Agent Core to keep the capability catalog, credentials, scopes, execution history, and audit trail in one place.
+There are four ways to add a connector, all behind a single **+ Add Connector** dropdown on `/connectors`:
+
+| Method | Use when… |
+|---|---|
+| **Import API Spec** | the service publishes a REST OpenAPI/Swagger spec |
+| **Import MCP Server** | the service is a native MCP server (HTTP transport) |
+| **Add HTTP Connector** | the service is plain authenticated HTTP and you just need a base URL |
+| **Install Adapter** | you have an adapter manifest (data/adapters/, git repo, or a vendored package) — see [Adapters](#adapters) |
+
+For browsing pre-curated catalogs, the **Browse API Directory** page lists 2000+ public OpenAPI specs (powered by apis.guru) you can one-click import.
 
 ### OpenAPI import
 
 - Go to `/connectors`
-- Click `+ Import API Spec`
+- Click **+ Add Connector → Import API Spec**
 - Paste a URL, upload a file, or paste the JSON/YAML directly
 - Click **Preview Spec** — this shows the connector name, auth type, base server URL, operation count, and any warnings before anything is saved
 - Click **Import API** to commit the import
@@ -126,12 +135,12 @@ Example: for a local Firecrawl deployment, import the public spec from GitHub, t
 
 And set `AGENT_CORE_ALLOWED_INTERNAL_HOSTS=firecrawl` in the Agent Core environment. That keeps the imported spec public while routing execution to your trusted internal Firecrawl instance.
 
-### HTTP Connector (+ Add HTTP Connector)
+### HTTP Connector
 
 Use this when the service does not publish an OpenAPI spec and you just need to make authenticated HTTP calls to a known base URL. This creates a `generic_http` connector type — no spec import required.
 
 - Go to `/connectors`
-- Click `+ Add HTTP Connector`
+- Click **+ Add Connector → Add HTTP Connector**
 - Enter a display name and base URL
 - Choose an auth type:
   - **Bearer** — injects `Authorization: Bearer <credential>` (default; works for most REST APIs)
@@ -213,12 +222,39 @@ Check the [OpenRouter model list](https://openrouter.ai/models) for which models
 ### MCP server import
 
 - Go to `/connectors`
-- Click `+ Import MCP Server`
+- Click **+ Add Connector → Import MCP Server**
 - Enter the MCP endpoint URL, transport, and optional discovery headers
 - Refresh later if the server's tool set changes
 - Create a binding to a stored credential if the server needs one
 
 The MCP import is server-side only: it discovers and stores the tool list in Agent Core, then agents call those tools through the same connector/binding execution path as OpenAPI-backed connectors.
+
+### Adapters
+
+Adapters are the fourth way to add a connector — for services that don't fit OpenAPI/MCP cleanly (OAuth refresh, session handshakes, multi-field credentials, CLI wrappers). An adapter is a single JSON **manifest** that describes the service's actions, auth, and request shape; Agent Core's built-in **engines** interpret the manifest at runtime — no Python is added to your installation, and adapters survive Agent Core upgrades.
+
+**Three install paths**, all under **+ Add Connector → Install Adapter**:
+
+1. **Drop in a folder.** Place an adapter directory at `data/adapters/<adapter-id>/adapter.json`. Agent Core scans this folder at startup (and via rescan) and seeds each valid manifest as a connector type. Invalid manifests are logged and skipped — they never crash startup.
+2. **Install from git.** Paste a `git:owner/repo@ref` URL. Agent Core clones, validates, and copies the adapter into `data/adapters/`. Code-bearing adapters (mcp/cli backends — see below) are scanned for dangerous patterns before enabling.
+3. **Vendored / shipped.** Adapters that ship with Agent Core (e.g. `transmission`, `google_gmail`, `github_cli`) appear automatically.
+
+**Three backends** an adapter manifest can use:
+
+| Backend | What it does | Code? |
+|---|---|---|
+| `http` | declarative HTTP requests (auth, session handshake, OAuth refresh, response extraction) | none — pure data |
+| `mcp` | wraps an external MCP server you already run | external server, out-of-process |
+| `cli` | drives a local binary as subprocess (e.g. `gh`, `rclone`); declares `requires.bins` so missing tools mark the adapter unavailable | external binary, out-of-process |
+
+Once installed, an adapter shows up in the connector catalog like any other connector. Create a binding with the right credential, set the scope, and agents call it via `connectors_run(binding_id, action, params)` — same path as OpenAPI and MCP. The credential is resolved server-side; raw secrets never reach the agent.
+
+**Reference adapters** shipped in `data/adapters/`:
+- `transmission` — `http` backend with `X-Transmission-Session-Id` 409 handshake. Proves the session-retry pattern.
+- `google_gmail` — `http` backend with OAuth2 token refresh, refresh-token rotation persistence, and the per-binding refresh lock. Proves multi-field credentials and the race-safe refresh loop.
+- `github_cli` — `cli` backend wrapping `gh`. Proves subprocess execution + `requires.bins` gating.
+
+For maintainers: the adapter manifest schema is in `app/connectors/manifest.py`; the design rationale is in `plan.md` at the repo root.
 
 #### HTTP transport only — stdio servers are not supported
 

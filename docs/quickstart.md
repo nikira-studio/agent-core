@@ -75,7 +75,7 @@ You won't be prompted for it during normal use — only at login.
 
 ## Step 4: Create Your First Agent
 
-Agents are the identities that connect to Agent Core. Each one gets its own API key and its own scope of what memory, credentials, and connector capabilities it can access. Connector capabilities can come from imported OpenAPI specs, native MCP server registrations, or the built-in Generic HTTP fallback.
+Agents are the identities that connect to Agent Core. Each one gets its own API key and its own scope of what memory, credentials, and connector capabilities it can access. Connector capabilities can come from imported OpenAPI specs, native MCP server registrations, the built-in Generic HTTP fallback, or installed **adapters** (data manifests in `data/adapters/` — see [Adapters](integrations.md#adapters)).
 
 Open **Agents** in the sidebar and create a new agent. Give it a descriptive name like `claude-coding-agent` or `cursor-agent`. When you save it, you'll see the API key **exactly once** — copy it somewhere safe before closing the page. There's no way to retrieve it later (you can always generate a new one if you lose it).
 
@@ -174,7 +174,7 @@ The search automatically covers everything the agent has read access to — you 
 
 ## Step 7: Store a Credential
 
-Credentials are managed from the **Connectors** page. A credential is the encrypted secret itself: an API key, token, password, URL, or config value. A connector binding is separate — it tells Agent Core how to use a stored credential with a connector type: an imported OpenAPI spec, a registered native MCP server, or the built-in Generic HTTP fallback.
+Credentials are managed from the **Connectors** page. A credential is the encrypted secret itself: an API key, token, password, URL, or config value. A connector binding is separate — it tells Agent Core how to use a stored credential with a connector type: an imported OpenAPI spec, a registered native MCP server, the built-in Generic HTTP fallback, or an installed adapter manifest.
 
 From the dashboard:
 
