@@ -24,7 +24,7 @@ It is good at:
 
 - keeping durable memory in one place
 - controlling access to credentials and external services
-- exposing server-side connectors as agent tools, including imported OpenAPI specs and native MCP servers
+- exposing server-side connectors as agent tools — imported OpenAPI specs, native MCP servers, and **adapters** (shareable data-manifest integrations for OAuth, session handshakes, and CLI wrappers; see [docs/adapters.md](docs/adapters.md))
 - showing what agents are doing right now
 
 It is not trying to be:
