@@ -399,6 +399,85 @@ class TestTransmissionAdapterManifest:
         assert result["body"]["torrentCount"] == 5
         assert result["body"]["downloadSpeed"] == 1024
 
+    def test_transmission_test_connection_uses_health_action(self):
+        engine = HttpEngine(
+            make_ct(
+                {
+                    "base_url": {"from": "config", "field": "base_url"},
+                    "auth": {"type": "basic"},
+                    "session": {
+                        "type": "challenge_retry",
+                        "trigger": {"http_status": 409},
+                        "capture": {
+                            "source": "response_header",
+                            "name": "X-Transmission-Session-Id",
+                            "as": "session_id",
+                        },
+                        "apply": {
+                            "target": "request_header",
+                            "name": "X-Transmission-Session-Id",
+                            "from": "session_id",
+                        },
+                        "max_retries": 1,
+                    },
+                    "requests": {
+                        "get_session_stats": {
+                            "method": "POST",
+                            "path": "/transmission/rpc",
+                            "body": {
+                                "template": {"method": "session-stats", "arguments": {}}
+                            },
+                            "response": {
+                                "success_when": "$.result == 'success'",
+                                "extract": "$.arguments",
+                            },
+                        },
+                    },
+                }
+            )
+        )
+
+        calls = []
+        engine._raise_on_errors = MagicMock()
+
+        responses = [
+            MagicMock(
+                status=409,
+                headers={"X-Transmission-Session-Id": "abc123"},
+                read=MagicMock(
+                    return_value=json.dumps({"result": "session-id-required"}).encode()
+                ),
+            ),
+            MagicMock(
+                status=200,
+                headers={},
+                read=MagicMock(
+                    return_value=json.dumps(
+                        {
+                            "result": "success",
+                            "arguments": {"torrentCount": 0, "downloadSpeed": 0},
+                        }
+                    ).encode()
+                ),
+            ),
+        ]
+
+        def fake_send(req, config):
+            calls.append(req)
+            return responses[len(calls) - 1]
+
+        engine._send = MagicMock(side_effect=fake_send)
+
+        result = engine.test_connection(
+            Credential(raw=None, fields={"username": "admin", "password": "secret"}),
+            '{"base_url": "http://localhost:9091"}',
+        )
+
+        assert result["success"] is True
+        assert result["status"] == 200
+        assert calls[0]["headers"]["Authorization"].startswith("Basic ")
+        assert calls[1]["headers"]["X-Transmission-Session-Id"] == "abc123"
+
 
 class TestTransmissionSessionRefresh:
     def test_refresh_session_captures_session_id(self):

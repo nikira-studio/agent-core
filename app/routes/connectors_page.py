@@ -6,6 +6,7 @@ from app.database import get_db
 from app.services import credential_service
 from app.services import workspace_service
 from app.services import connector_service
+from app.services import adapter_loader
 from app.services.agent_service import list_agents
 from app.routes.dashboard import (
     render_page,
@@ -16,6 +17,80 @@ from app.routes.dashboard import (
 )
 
 router = APIRouter()
+
+
+def _render_adapter_cards(adapter_entries: list[dict], ctx) -> str:
+    adapter_cards = ""
+    for adapter in adapter_entries:
+        source_label = "System" if adapter["source_kind"] == "system" else "Local"
+        installed = bool(adapter.get("installed"))
+        installable = bool(adapter.get("installable"))
+        req = adapter.get("requirements_summary") or {}
+        missing_bins = req.get("bins") or []
+        missing_env = req.get("env") or []
+        required_config = req.get("config") or []
+        credential_fields = req.get("credential_fields") or []
+        req_bits = []
+        if missing_bins:
+            req_bits.append("Requires binary: " + ", ".join(missing_bins))
+        if missing_env:
+            req_bits.append("Requires env: " + ", ".join(missing_env))
+        if credential_fields:
+            req_bits.append("Credential fields: " + ", ".join(credential_fields))
+        if required_config:
+            req_bits.append("Binding config: " + ", ".join(required_config))
+        req_text = " · ".join(req_bits)
+        req_hover = " | ".join(req_bits)
+        if installed:
+            state_badge = '<span class="badge badge-success">Installed</span>'
+            action_btn = (
+                f"<button type='button' class='btn btn-sm btn-danger' "
+                f"onclick='uninstallAdapter(\"{adapter['id']}\")'>Uninstall</button>"
+                if ctx.is_admin
+                else ""
+            )
+        elif installable:
+            state_badge = '<span class="badge badge-warning">Available</span>'
+            action_btn = (
+                f"<button type='button' class='btn btn-sm btn-primary' "
+                f"onclick='installAdapter(\"{adapter['id']}\")'>Install</button>"
+                if ctx.is_admin
+                else ""
+            )
+        else:
+            state_badge = '<span class="badge badge-danger">Unavailable</span>'
+            action_btn = ""
+
+        requirement_line = ""
+        if req_text:
+            requirement_line = (
+                "<div style='font-size:0.82em;"
+                + ("color:var(--danger);" if not adapter.get("requirements_met", True) else "color:var(--text-muted);")
+                + "margin-top:0.35rem'"
+                + (f" title=\"{escape_html(req_hover)}\"" if req_hover else "")
+                + ">"
+                + escape_html(req_text)
+                + "</div>"
+            )
+
+        adapter_cards += f"""
+        <div class='connector-type-card' data-adapter-card data-search-text="{escape_html((adapter.get("display_name", "") or "") + " " + (adapter.get("description", "") or "") + " " + adapter.get("version", "") + " " + adapter.get("source_kind", "") + " " + req_text)}">
+          <div style="padding:0 0 0.5rem">
+            <div class='connector-type-name' style="margin:0">{escape_html(adapter["display_name"])}</div>
+            <div style="font-size:0.8em;color:var(--text-muted);margin-top:0.1rem">
+              {escape_html(adapter["version"])} &middot; {source_label}
+            </div>
+            <div class='connector-type-desc' style="margin-top:0.35rem">{escape_html(adapter.get("description", "") or "")}</div>
+            {requirement_line}
+          </div>
+          <div class='connector-type-footer' style="margin-top:auto; display:flex; flex-direction:column; gap:8px; align-items:stretch;">
+            <div style="display:flex;align-items:center;gap:0.4rem;">{state_badge}</div>
+            <div style="display:flex;gap:0.4rem;align-items:center;justify-content:flex-end;">
+              {action_btn}
+            </div>
+          </div>
+        </div>"""
+    return adapter_cards
 
 
 @router.get("/connectors")
@@ -200,7 +275,7 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
         provider_type = ct.get("provider_type") or "openapi"
         if provider_type == "mcp":
             type_chip = '<span style="display:inline-block;font-size:0.72em;font-weight:600;line-height:1;padding:3px 8px;border-radius:10px;background:#7c3aed;color:#fff;letter-spacing:0.03em;white-space:nowrap">MCP</span>'
-        elif provider_type == "generic_http":
+        elif provider_type == "generic_http" or ct.get("backend_type") == "generic_http":
             type_chip = '<span style="display:inline-block;font-size:0.72em;font-weight:600;line-height:1;padding:3px 8px;border-radius:10px;background:rgba(80,200,120,0.15);color:var(--success);letter-spacing:0.03em;white-space:nowrap">HTTP</span>'
         elif provider_type == "builtin":
             type_chip = '<span style="display:inline-block;font-size:0.72em;font-weight:600;line-height:1;padding:3px 8px;border-radius:10px;background:#6b7280;color:#fff;letter-spacing:0.03em;white-space:nowrap">Built-in</span>'
@@ -259,6 +334,7 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
       <div class="page-actions">
         <a class="btn btn-secondary" href="/credentials">+ New Credential</a>
         <a class="btn btn-secondary" href="/connectors/directory">Browse API Directory</a>
+        <a class="btn btn-secondary" href="/connectors/adapters">Browse Adapters</a>
         <div class="dropdown" style="display:inline-block;position:relative">
           <button class="btn btn-secondary" onclick="toggleDropdown(this)" type="button">+ Add <span style="font-size:0.8em">&#9662;</span></button>
           <div class="dropdown-menu" style="display:none;position:absolute;right:0;top:100%;background:#fff;border:1px solid #ddd;border-radius:4px;box-shadow:0 2px 8px rgba(0,0,0,0.15);z-index:1000;min-width:200px;text-align:left">
@@ -289,7 +365,7 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
         <li>Test the binding, then ask an agent to use it through MCP.</li>
       </ol>
     </div>
- 
+
      <div class="card" id="service-catalog">
       <div class="section-header" style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px">
         <div>
@@ -988,6 +1064,31 @@ async function addHttpConnector(e) {
   location.reload();
 }
 
+async function installAdapter(adapterId) {
+  const j = await apiFetch('/api/connector-types/adapters/' + adapterId + '/install', {
+    method: 'POST',
+    body: JSON.stringify({})
+  });
+  if (!j.ok) {
+    showToast(j.error?.message || 'Failed to install adapter', 'danger');
+    return;
+  }
+  showToast('Installed ' + (j.data.adapter?.connector_type?.display_name || adapterId), 'success');
+  location.reload();
+}
+
+async function uninstallAdapter(adapterId) {
+  const j = await apiFetch('/api/connector-types/adapters/' + adapterId + '/install', {
+    method: 'DELETE'
+  });
+  if (!j.ok) {
+    showToast(j.error?.message || 'Failed to uninstall adapter', 'danger');
+    return;
+  }
+  showToast('Uninstalled ' + adapterId, 'success');
+  location.reload();
+}
+
 let actionsState = { ctId: null, offset: 0, all: [] };
 
 async function viewActions(ctId, displayName, totalCount) {
@@ -1112,6 +1213,86 @@ window.onAgentCoreEvent = function(event) {
     js = js.replace("window.onAgentCoreEvent", "window." + JS_WINDOW_EVENT)
 
     return render_page("Connectors", body, "/connectors", js, session=session)
+
+
+@router.get("/connectors/adapters")
+async def connectors_adapters_page(
+    request: Request,
+    session: dict = Depends(require_auth),
+):
+    ctx = build_user_context(session)
+    adapter_entries = adapter_loader.list_available_adapters()
+    adapter_cards = _render_adapter_cards(adapter_entries, ctx)
+
+    body = f"""
+    <div class="page-header">
+      <div>
+        <h1>Browse Adapters</h1>
+        <p class="text-muted" style="max-width:760px;margin-top:8px">
+          Built-in adapter templates and user-local adapter folders available to install into the
+          service catalog.
+        </p>
+      </div>
+      <div class="page-actions">
+        <a class="btn btn-secondary" href="/connectors">&larr; Back to Connectors</a>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="section-header" style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px">
+        <div>
+          <h3>Browse Adapters</h3>
+          <div class="section-note">Install one into the service catalog, then bind it like any other connector.</div>
+        </div>
+        <div class="section-note">{len(adapter_entries)} available</div>
+      </div>
+      <div class="directory-controls" style="margin-bottom:12px">
+        <input type="text" id="adapter-search" placeholder="Search by name, description, or source..." class="dir-search-input" />
+      </div>
+      <div id="adapter-grid" class="connector-types-grid">{adapter_cards or "<div class='empty'>No adapters available yet.</div>"}</div>
+    </div>
+    """
+
+    js = """
+<script>
+async function installAdapter(adapterId) {
+  const j = await apiFetch('/api/connector-types/adapters/' + adapterId + '/install', {
+    method: 'POST',
+    body: JSON.stringify({})
+  });
+  if (!j.ok) {
+    showToast(j.error?.message || 'Failed to install adapter', 'danger');
+    return;
+  }
+  showToast('Installed ' + (j.data.adapter?.connector_type?.display_name || adapterId), 'success');
+  location.reload();
+}
+
+async function uninstallAdapter(adapterId) {
+  const j = await apiFetch('/api/connector-types/adapters/' + adapterId + '/install', {
+    method: 'DELETE'
+  });
+  if (!j.ok) {
+    showToast(j.error?.message || 'Failed to uninstall adapter', 'danger');
+    return;
+  }
+  showToast('Uninstalled ' + adapterId, 'success');
+  location.reload();
+}
+
+function filterAdapters() {
+  const q = (document.getElementById('adapter-search').value || '').trim().toLowerCase();
+  document.querySelectorAll('[data-adapter-card]').forEach(function(card) {
+    const hay = (card.dataset.searchText || '').toLowerCase();
+    card.style.display = !q || hay.includes(q) ? '' : 'none';
+  });
+}
+
+document.getElementById('adapter-search').addEventListener('input', filterAdapters);
+</script>"""
+
+    body = body.replace("Agent Core", APP_NAME)
+    return render_page("Browse Adapters", body, "/connectors", js, session=session)
 
 
 @router.get("/credentials")

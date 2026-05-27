@@ -267,6 +267,19 @@ CREATE TABLE IF NOT EXISTS connector_types (
 
 CREATE INDEX IF NOT EXISTS idx_connector_types_active ON connector_types(is_active);
 
+-- Adapter installation state table
+CREATE TABLE IF NOT EXISTS adapter_installations (
+    adapter_id TEXT PRIMARY KEY,
+    source_kind TEXT NOT NULL CHECK (source_kind IN ('system', 'user', 'git')),
+    source_path TEXT NOT NULL,
+    installed_connector_type_id TEXT NOT NULL,
+    installed_version TEXT,
+    installed_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_adapter_installations_source ON adapter_installations(source_kind, adapter_id);
+
 -- Connector bindings table
 CREATE TABLE IF NOT EXISTS connector_bindings (
     id TEXT PRIMARY KEY,
@@ -360,6 +373,7 @@ def create_schema(conn) -> None:
     _ensure_activity_columns(conn)
     _ensure_memory_metadata_columns(conn)
     _ensure_connector_type_provider_columns(conn)
+    _ensure_adapter_installations_table(conn)
     conn.execute(
         """
         INSERT OR IGNORE INTO workspace_collaborators
@@ -506,6 +520,31 @@ def _ensure_connector_type_backend_columns(conn) -> None:
                 """
             )
     conn.commit()
+
+
+def _ensure_adapter_installations_table(conn) -> None:
+    tables = {
+        row["name"]
+        for row in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'"
+        ).fetchall()
+    }
+    if "adapter_installations" not in tables:
+        conn.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS adapter_installations (
+                adapter_id TEXT PRIMARY KEY,
+                source_kind TEXT NOT NULL CHECK (source_kind IN ('system', 'user', 'git')),
+                source_path TEXT NOT NULL,
+                installed_connector_type_id TEXT NOT NULL,
+                installed_version TEXT,
+                installed_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE INDEX IF NOT EXISTS idx_adapter_installations_source ON adapter_installations(source_kind, adapter_id);
+            """
+        )
+        conn.commit()
 
 
 def _ensure_inbound_webhook_table(conn) -> None:

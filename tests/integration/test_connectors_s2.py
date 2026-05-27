@@ -61,6 +61,108 @@ class TestConnectorMCPTools:
         assert result["data"]["connector_type_id"] == "generic_http"
         assert "call_endpoint" in result["data"]["actions"]
 
+    def test_generic_http_backend_type_uses_generic_http_executor(
+        self, test_client, admin_token, monkeypatch
+    ):
+        from app.connectors.generic_http import GenericHttpConnector
+        from app.services import connector_service
+
+        connector_service.create_connector_type(
+            connector_type_id="openrouter-test",
+            display_name="OpenRouter Test",
+            provider_type="builtin",
+            auth_type="bearer",
+            supported_actions=[],
+            endpoint_url="https://openrouter.ai/api/v1",
+            capabilities_json='{"auth_type":"bearer"}',
+            backend_type="generic_http",
+        )
+        credential_r = test_client.post(
+            "/api/credentials/entries",
+            headers={"Authorization": f"Bearer {admin_token}"},
+            json={
+                "scope": "workspace:test",
+                "name": "openrouter-token",
+                "value": "or_test_secret",
+            },
+        )
+        credential = credential_r.json()["data"]["entry"]
+        binding_r = test_client.post(
+            "/api/connector-bindings",
+            headers={"Authorization": f"Bearer {admin_token}"},
+            json={
+                "connector_type_id": "openrouter-test",
+                "name": "openrouter-test-binding",
+                "scope": "workspace:test",
+                "credential_id": credential["id"],
+                "config_json": '{"base_url":"https://openrouter.ai/api/v1","test_url":"https://openrouter.ai/api/v1","test_method":"GET"}',
+            },
+        )
+        binding = binding_r.json()["data"]["binding"]
+
+        def fake_call(self, credential, config, params):
+            assert credential == "or_test_secret"
+            assert config["base_url"] == "https://openrouter.ai/api/v1"
+            assert params["url"] == "https://openrouter.ai/api/v1"
+            assert params["method"] == "GET"
+            return {"success": True, "status": 200, "body_preview": "{}"}
+
+        monkeypatch.setattr(GenericHttpConnector, "_call", fake_call)
+
+        result = connector_service.test_binding(binding["id"])
+        assert result["success"] is True
+        assert result["status"] == 200
+
+    def test_generic_http_binding_uses_connector_base_url_when_config_missing(
+        self, test_client, admin_token, monkeypatch
+    ):
+        from app.connectors.generic_http import GenericHttpConnector
+        from app.services import connector_service
+
+        connector_service.create_connector_type(
+            connector_type_id="openrouter-fallback",
+            display_name="OpenRouter Fallback",
+            provider_type="builtin",
+            auth_type="bearer",
+            supported_actions=[],
+            endpoint_url="https://openrouter.ai/api/v1",
+            capabilities_json='{"auth_type":"bearer"}',
+            backend_type="generic_http",
+        )
+        credential_r = test_client.post(
+            "/api/credentials/entries",
+            headers={"Authorization": f"Bearer {admin_token}"},
+            json={
+                "scope": "workspace:test",
+                "name": "openrouter-token-fallback",
+                "value": "or_test_secret",
+            },
+        )
+        credential = credential_r.json()["data"]["entry"]
+        binding_r = test_client.post(
+            "/api/connector-bindings",
+            headers={"Authorization": f"Bearer {admin_token}"},
+            json={
+                "connector_type_id": "openrouter-fallback",
+                "name": "openrouter-fallback-binding",
+                "scope": "workspace:test",
+                "credential_id": credential["id"],
+            },
+        )
+        binding = binding_r.json()["data"]["binding"]
+
+        def fake_call(self, credential, config, params):
+            assert credential == "or_test_secret"
+            assert config["base_url"] == "https://openrouter.ai/api/v1"
+            assert params["url"] == "https://openrouter.ai/api/v1"
+            return {"success": True, "status": 200, "body_preview": "{}"}
+
+        monkeypatch.setattr(GenericHttpConnector, "_call", fake_call)
+
+        result = connector_service.test_binding(binding["id"])
+        assert result["success"] is True
+        assert result["status"] == 200
+
     def test_disabled_actions_are_hidden_from_tools_by_default(self, test_client, admin_token):
         disable_r = test_client.put(
             "/api/connector-types/generic_http/actions",

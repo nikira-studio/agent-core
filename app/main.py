@@ -177,7 +177,7 @@ def create_app() -> FastAPI:
 
         discover_and_seed_adapters()
     except Exception as exc:
-        logging.exception("Failed to load adapters from data/adapters/: %s", exc)
+        logging.exception("Failed to restore installed adapters: %s", exc)
 
     return app
 

@@ -1,0 +1,234 @@
+{
+  "spec_version": "1.0",
+  "id": "transmission",
+  "display_name": "Transmission",
+  "version": "1.0.0",
+  "author": "agent-core team",
+  "description": "Transmission BitTorrent RPC — manage torrents and session stats. Supports session-handshake retry, per-action schemas, and destructive flags.",
+  "credential_schema": {
+    "fields": [
+      { "name": "username", "type": "string", "secret": false, "required": true },
+      { "name": "password", "type": "string", "secret": true, "required": true }
+    ]
+  },
+  "requires": { "config": ["base_url"] },
+  "actions": [
+    {
+      "name": "list_torrents",
+      "description": "List torrents with id, name, status, progress, uploadRatio.",
+      "side_effect": "read",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "ids": {
+            "type": "array",
+            "items": { "type": "integer" },
+            "description": "Optional torrent ids; omit for all."
+          }
+        }
+      }
+    },
+    {
+      "name": "add_torrent",
+      "description": "Add a torrent by URL or file path.",
+      "side_effect": "write",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "filename": {
+            "type": "string",
+            "description": "URL or path to the .torrent file"
+          },
+          "download_dir": {
+            "type": "string",
+            "description": "Optional directory to download to"
+          }
+        },
+        "required": ["filename"]
+      }
+    },
+    {
+      "name": "start_torrent",
+      "description": "Start torrent(s) by id.",
+      "side_effect": "write",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "ids": {
+            "type": "array",
+            "items": { "type": "integer" },
+            "description": "Torrent ids to start"
+          }
+        },
+        "required": ["ids"]
+      }
+    },
+    {
+      "name": "stop_torrent",
+      "description": "Stop (pause) torrent(s) by id.",
+      "side_effect": "write",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "ids": {
+            "type": "array",
+            "items": { "type": "integer" },
+            "description": "Torrent ids to stop"
+          }
+        },
+        "required": ["ids"]
+      }
+    },
+    {
+      "name": "remove_torrent",
+      "description": "Remove torrent(s). Optionally delete local data.",
+      "side_effect": "destructive",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "ids": {
+            "type": "array",
+            "items": { "type": "integer" },
+            "description": "Torrent ids to remove"
+          },
+          "delete_data": {
+            "type": "boolean",
+            "description": "Also delete local downloaded data"
+          }
+        },
+        "required": ["ids"]
+      }
+    },
+    {
+      "name": "get_session_stats",
+      "description": "Get Transmission session statistics.",
+      "side_effect": "read",
+      "input_schema": {
+        "type": "object",
+        "properties": {}
+      }
+    }
+  ],
+  "backend": {
+    "type": "http",
+    "base_url": { "from": "config", "field": "base_url" },
+    "auth": {
+      "type": "basic",
+      "apply": {
+        "target": "request_header",
+        "name": "Authorization",
+        "template": "Basic {{ cred.base64_credentials }}"
+      }
+    },
+    "session": {
+      "type": "challenge_retry",
+      "trigger": { "http_status": 409 },
+      "capture": {
+        "source": "response_header",
+        "name": "X-Transmission-Session-Id",
+        "as": "session_id"
+      },
+      "apply": {
+        "target": "request_header",
+        "name": "X-Transmission-Session-Id",
+        "from": "session_id"
+      },
+      "max_retries": 1
+    },
+    "requests": {
+      "list_torrents": {
+        "method": "POST",
+        "path": "/transmission/rpc",
+        "body": {
+          "template": {
+            "method": "torrent-get",
+            "arguments": {
+              "fields": ["id", "name", "status", "percentDone", "uploadRatio"],
+              "ids": "{{ params.ids | default([], as=list) }}"
+            }
+          }
+        },
+        "response": {
+          "success_when": "$.result == 'success'",
+          "extract": "$.arguments.torrents"
+        }
+      },
+      "add_torrent": {
+        "method": "POST",
+        "path": "/transmission/rpc",
+        "body": {
+          "template": {
+            "method": "torrent-add",
+            "arguments": {
+              "filename": "{{ params.filename }}",
+              "download-dir": "{{ params.download_dir | default('', as=str) }}"
+            }
+          }
+        },
+        "response": {
+          "success_when": "$.result == 'success'"
+        }
+      },
+      "start_torrent": {
+        "method": "POST",
+        "path": "/transmission/rpc",
+        "body": {
+          "template": {
+            "method": "torrent-start",
+            "arguments": {
+              "ids": "{{ params.ids }}"
+            }
+          }
+        },
+        "response": {
+          "success_when": "$.result == 'success'"
+        }
+      },
+      "stop_torrent": {
+        "method": "POST",
+        "path": "/transmission/rpc",
+        "body": {
+          "template": {
+            "method": "torrent-stop",
+            "arguments": {
+              "ids": "{{ params.ids }}"
+            }
+          }
+        },
+        "response": {
+          "success_when": "$.result == 'success'"
+        }
+      },
+      "remove_torrent": {
+        "method": "POST",
+        "path": "/transmission/rpc",
+        "body": {
+          "template": {
+            "method": "torrent-remove",
+            "arguments": {
+              "ids": "{{ params.ids }}",
+              "delete-local-data": "{{ params.delete_data | default(false, as=bool) }}"
+            }
+          }
+        },
+        "response": {
+          "success_when": "$.result == 'success'"
+        }
+      },
+      "get_session_stats": {
+        "method": "POST",
+        "path": "/transmission/rpc",
+        "body": {
+          "template": {
+            "method": "session-stats",
+            "arguments": {}
+          }
+        },
+        "response": {
+          "success_when": "$.result == 'success'",
+          "extract": "$.arguments"
+        }
+      }
+    }
+  }
+}

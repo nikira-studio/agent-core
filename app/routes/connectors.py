@@ -11,6 +11,7 @@ from app.services import (
     audit_service,
     openapi_service,
     mcp_provider_service,
+    adapter_loader,
 )
 from app.branding import APP_USER_AGENT
 from app.security.dependencies import get_request_context
@@ -83,6 +84,14 @@ class ActionSettingsRequest(BaseModel):
 class ConnectorHealthCheckRequest(BaseModel):
     connector_type_id: Optional[str] = None
     scope: Optional[str] = None
+
+
+class AdapterInstallRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    # Reserved for future use if the library eventually exposes multiple
+    # sources for one adapter id.
+    source_kind: Optional[str] = None
 
 
 @router.get("")
@@ -766,6 +775,78 @@ async def import_spec(
     )
 
 
+@connector_types_router.get("/adapters")
+async def list_adapter_library(
+    ctx: RequestContext = Depends(get_request_context),
+):
+    entries = adapter_loader.list_available_adapters()
+    return success_response({"adapters": entries, "total": len(entries)})
+
+
+@connector_types_router.post("/adapters/{adapter_id}/install")
+async def install_adapter(
+    adapter_id: str,
+    body: AdapterInstallRequest | None = None,
+    ctx: RequestContext = Depends(get_request_context),
+):
+    if not ctx.is_admin:
+        return error_response("FORBIDDEN", "Admin access required to install adapters", 403)
+
+    try:
+        result = adapter_loader.install_adapter(
+            adapter_id,
+            source_kind=body.source_kind if body else None,
+        )
+    except adapter_loader.AdapterInstallError as e:
+        return error_response("INSTALL_FAILED", str(e), 400)
+    except Exception as e:
+        return error_response("INSTALL_FAILED", f"Unexpected error: {e}", 500)
+
+    audit_service.write_event(
+        actor_type=ctx.actor_type,
+        actor_id=ctx.actor_id,
+        action="adapter_installed",
+        resource_type="adapter",
+        resource_id=adapter_id,
+        result="success",
+        details={
+            "source_kind": result["source_kind"],
+            "source_path": result["source_path"],
+        },
+    )
+    return success_response({"adapter": result}, status_code=201)
+
+
+@connector_types_router.delete("/adapters/{adapter_id}/install")
+async def uninstall_adapter(
+    adapter_id: str,
+    ctx: RequestContext = Depends(get_request_context),
+):
+    if not ctx.is_admin:
+        return error_response("FORBIDDEN", "Admin access required to uninstall adapters", 403)
+
+    ct = connector_service.get_connector_type(adapter_id)
+    if not ct:
+        return error_response("NOT_FOUND", "Installed adapter not found", 404)
+
+    try:
+        ok = adapter_loader.uninstall_adapter(adapter_id)
+    except Exception as e:
+        return error_response("UNINSTALL_FAILED", f"Unexpected error: {e}", 500)
+    if not ok:
+        return error_response("UNINSTALL_FAILED", "Unable to uninstall adapter", 400)
+
+    audit_service.write_event(
+        actor_type=ctx.actor_type,
+        actor_id=ctx.actor_id,
+        action="adapter_uninstalled",
+        resource_type="adapter",
+        resource_id=adapter_id,
+        result="success",
+    )
+    return success_response({"message": "Adapter uninstalled"})
+
+
 @connector_types_router.post("/preview")
 async def preview_spec(
     body: ImportSpecRequest,
@@ -857,12 +938,13 @@ async def create_http_connector(
         connector_type_id=connector_type_id,
         display_name=body.display_name,
         description=f"Generic HTTP connector for {body.base_url}",
-        provider_type="generic_http",
+        provider_type="builtin",
         auth_type=body.auth_type if body.auth_type != "none" else "none",
         supported_actions=[],
         required_credential_fields=[],
         endpoint_url=body.base_url,
         capabilities_json=json.dumps(config),
+        backend_type="generic_http",
     )
 
     audit_service.write_event(

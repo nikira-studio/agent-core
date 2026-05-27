@@ -132,11 +132,27 @@ class Manifest:
         self.backend: dict = data["backend"]
 
     def to_connector_type_row(self) -> dict:
+        credential_fields = []
+        if isinstance(self.credential_schema, dict):
+            for field in self.credential_schema.get("fields", []) or []:
+                name = field.get("name")
+                if name:
+                    credential_fields.append(name)
+        backend_auth = self.backend.get("auth") if isinstance(self.backend, dict) else None
+        if isinstance(backend_auth, dict):
+            auth_type = backend_auth.get("type") or "none"
+        elif credential_fields:
+            auth_type = "api_key"
+        else:
+            auth_type = "none"
         return {
             "id": self.id,
             "display_name": self.display_name or self.id,
             "description": self.description or "",
             "version": self.version,
+            "provider_type": "builtin",
+            "auth_type": auth_type,
+            "required_credential_fields_json": json.dumps(credential_fields),
             "supported_actions_json": json.dumps(self.actions),
             "backend_type": self.backend.get("type"),
             "backend_json": json.dumps(self.backend),

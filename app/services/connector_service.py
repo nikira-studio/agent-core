@@ -12,6 +12,8 @@ logger = logging.getLogger(__name__)
 
 
 def list_connector_types(include_inactive: bool = False) -> list[dict]:
+    from app.services import adapter_loader
+
     with get_db() as conn:
         query = """
             SELECT id, display_name, description, provider_type, auth_type,
@@ -26,7 +28,14 @@ def list_connector_types(include_inactive: bool = False) -> list[dict]:
             query += " WHERE is_active = 1"
         query += " ORDER BY display_name"
         rows = conn.execute(query).fetchall()
-        return [_row_to_connector_type(dict(row)) for row in rows]
+        connector_types = []
+        for row in rows:
+            ct = _row_to_connector_type(dict(row))
+            adapter_entry = adapter_loader.get_adapter_library_entry(ct["id"])
+            if adapter_entry and not adapter_entry.get("installed"):
+                continue
+            connector_types.append(ct)
+        return connector_types
 
 
 def get_connector_type(connector_type_id: str) -> Optional[dict]:
@@ -357,6 +366,11 @@ def _resolve_executor(connector_type: dict):
 
     backend = connector_type.get("backend_type") or _infer_backend_type(connector_type)
 
+    if backend == "generic_http" or connector_type.get("provider_type") == "generic_http":
+        from app.connectors.generic_http import GenericHttpConnector
+
+        return GenericHttpConnector()
+
     if backend == "http":
         from app.connectors.http_engine import HttpEngine
 
@@ -387,6 +401,10 @@ def _build_executor_config(binding: dict, connector_type: dict) -> str:
             config["_operations_json"] = json.loads(connector_type["operations_json"])
         except json.JSONDecodeError:
             pass
+    if connector_type.get("backend_type") == "generic_http" or connector_type.get(
+        "provider_type"
+    ) == "generic_http":
+        config.setdefault("base_url", connector_type.get("endpoint_url"))
     return json.dumps(config) if config else None
 
 
@@ -777,6 +795,9 @@ def _validate_action_for_connector(connector_type: dict, action: str) -> Optiona
     if action in disabled_actions:
         return "DISABLED_ACTION"
 
+    if connector_type.get("backend_type") == "generic_http":
+        return None
+
     if connector_type.get("provider_type") == "mcp":
         snapshot = connector_type.get("tool_snapshot_json")
         if snapshot:
@@ -1104,6 +1125,8 @@ def create_connector_type(
     tool_snapshot_json: Optional[str] = None,
     spec_url: Optional[str] = None,
     operations_json: Optional[str] = None,
+    backend_type: Optional[str] = None,
+    backend_json: Optional[str] = None,
 ) -> dict:
     with get_db() as conn:
         conn.execute(
@@ -1112,8 +1135,9 @@ def create_connector_type(
             (id, display_name, description, provider_type, auth_type,
              supported_actions_json, required_credential_fields_json,
              disabled_actions_json, endpoint_url, transport_type,
-             capabilities_json, tool_snapshot_json, spec_url, operations_json)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             capabilities_json, tool_snapshot_json, spec_url, operations_json,
+             backend_type, backend_json)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 connector_type_id,
@@ -1130,6 +1154,8 @@ def create_connector_type(
                 tool_snapshot_json,
                 spec_url,
                 operations_json,
+                backend_type,
+                backend_json,
             ),
         )
         conn.commit()
@@ -1151,6 +1177,8 @@ def update_connector_type(connector_type_id: str, **fields) -> bool:
         "tool_snapshot_json",
         "spec_url",
         "operations_json",
+        "backend_type",
+        "backend_json",
         "is_active",
     )
     updates = []

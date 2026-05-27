@@ -34,6 +34,42 @@ class HttpEngine(BaseConnector):
             self.spec = raw
         self.needs_session = "session" in self.spec or "refresh" in self.spec
 
+    def test_connection(self, credential: Credential, config_json: Optional[str]) -> dict:
+        requests = self.spec.get("requests") or {}
+        if not isinstance(requests, dict) or not requests:
+            return {"success": False, "error": "No requests defined for this adapter"}
+
+        preferred_actions = (
+            self.spec.get("test_action"),
+            "get_session_stats",
+            "healthcheck",
+            "test_connection",
+            "ping",
+        )
+        action = next((name for name in preferred_actions if name in requests), None)
+        if not action:
+            action = next(iter(requests.keys()))
+
+        try:
+            result = self.execute(action, {}, credential, config_json, session=None)
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+        if result.get("success"):
+            output = {"success": True}
+            if "status" in result:
+                output["status"] = result["status"]
+            if "body_preview" in result:
+                output["body_preview"] = result["body_preview"]
+            elif "body" in result:
+                body = result["body"]
+                if isinstance(body, str):
+                    output["body_preview"] = body[:500]
+                else:
+                    output["body_preview"] = json.dumps(body)[:500]
+            return output
+        return result
+
     def execute(
         self,
         action: str,

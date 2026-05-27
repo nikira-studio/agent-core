@@ -109,8 +109,8 @@ class TestInstallFromGit:
         mock_run.side_effect = fake_run
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            with patch("app.services.adapter_loader.settings") as mock_settings:
-                mock_settings.data_dir = tmpdir
+            with patch("app.adapter_paths.settings") as mock_settings:
+                mock_settings.data_dir = Path(tmpdir)
 
                 result = install_from_git("git:owner/repo@main")
 
@@ -143,8 +143,8 @@ class TestInstallFromGit:
         mock_run.side_effect = fake_run
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            with patch("app.services.adapter_loader.settings") as mock_settings:
-                mock_settings.data_dir = tmpdir
+            with patch("app.adapter_paths.settings") as mock_settings:
+                mock_settings.data_dir = Path(tmpdir)
 
                 with pytest.raises(AdapterInstallError) as exc_info:
                     install_from_git("git:owner/repo@main")
@@ -159,8 +159,8 @@ class TestInstallFromGit:
             adapter_dir = Path(tmpdir) / "owner_repo"
             adapter_dir.mkdir()
 
-            with patch("app.services.adapter_loader.settings") as mock_settings:
-                mock_settings.data_dir = tmpdir
+            with patch("app.adapter_paths.settings") as mock_settings:
+                mock_settings.data_dir = Path(tmpdir)
 
                 with pytest.raises(AdapterInstallError) as exc_info:
                     install_from_git("git:owner/repo@main")
