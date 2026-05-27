@@ -2,12 +2,16 @@
 
 import json
 import logging
+import re
 import shutil
+import subprocess
+import tempfile
 from pathlib import Path
 
 from app.config import settings
 from app.connectors.manifest import Manifest, load_and_validate
 from app.database import get_db
+from app.security.dangerous_pattern_scanner import validate_adapter_source
 
 logger = logging.getLogger(__name__)
 
@@ -150,3 +154,77 @@ def _load_connector_engine(manifest: Manifest) -> None:
     backend_type = manifest.backend.get("type")
     if backend_type == "http":
         return
+
+
+GIT_SOURCE_RE = re.compile(r"^git:(?P<owner>[^/]+)/(?P<repo>[^@]+)@(?P<ref>.+)$")
+
+
+class AdapterInstallError(Exception):
+    pass
+
+
+def install_from_git(source: str, adapters_dir: Path | None = None) -> str:
+    """Install an adapter from a git source.
+
+    Args:
+        source: Format 'git:owner/repo@ref' (e.g., 'git:acme/github@main')
+        adapters_dir: Optional override for data/adapters/ directory
+
+    Returns:
+        adapter_id of the installed adapter
+
+    Raises:
+        AdapterInstallError: If source is invalid, clone fails, or dangerous
+            patterns are detected in the adapter manifest.
+    """
+    if adapters_dir is None:
+        adapters_dir = Path(settings.data_dir) / "adapters"
+
+    match = GIT_SOURCE_RE.match(source)
+    if not match:
+        raise AdapterInstallError(
+            f"Invalid git source format: {source!r}. Expected 'git:owner/repo@ref'"
+        )
+
+    owner = match.group("owner")
+    repo = match.group("repo")
+    ref = match.group("ref")
+    repo_url = f"https://github.com/{owner}/{repo}.git"
+    adapter_id = f"{owner}_{repo}"
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmp_path = Path(tmpdir)
+        try:
+            subprocess.run(
+                ["git", "clone", "--depth", "1", "-b", ref, repo_url, str(tmp_path)],
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=60,
+            )
+        except subprocess.TimeoutExpired:
+            raise AdapterInstallError(f"Git clone timed out for {repo_url}")
+        except subprocess.CalledProcessError as e:
+            raise AdapterInstallError(f"Git clone failed for {repo_url}: {e.stderr}")
+
+        manifest_path = tmp_path / "adapter.json"
+        if not manifest_path.exists():
+            manifest_path = tmp_path / "data" / "adapters" / adapter_id / "adapter.json"
+
+        if not manifest_path.exists():
+            raise AdapterInstallError(f"adapter.json not found in {owner}/{repo}@{ref}")
+
+        with open(manifest_path) as f:
+            adapter_json_content = f.read()
+
+        is_safe, dangerous_patterns = validate_adapter_source(adapter_json_content)
+        if not is_safe:
+            raise AdapterInstallError(
+                f"Dangerous patterns detected in {adapter_id}: {dangerous_patterns}"
+            )
+
+        adapter_target_dir = adapters_dir / adapter_id
+        shutil.copytree(tmp_path, adapter_target_dir, dirs_exist_ok=True)
+
+    logger.info("Installed adapter %s from %s", adapter_id, source)
+    return adapter_id

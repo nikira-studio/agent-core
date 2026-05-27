@@ -500,6 +500,33 @@ function localDt(utc, style) {
 }
 window.localDt = localDt;
 
+// ============================================================
+// Dropdown Menu (globally accessible for onclick handlers)
+// ============================================================
+
+function toggleDropdown(btn) {
+  var menu = btn.nextElementSibling;
+  if (!menu || !menu.classList.contains('dropdown-menu')) return;
+  var isOpen = menu.style.display !== 'none';
+  closeAllDropdowns();
+  if (!isOpen) {
+    menu.style.display = 'block';
+  }
+}
+window.toggleDropdown = toggleDropdown;
+
+function closeAllDropdowns() {
+  var menus = document.querySelectorAll('.dropdown-menu');
+  menus.forEach(function(m) { m.style.display = 'none'; });
+}
+window.closeAllDropdowns = closeAllDropdowns;
+
+document.addEventListener('click', function(e) {
+  if (!e.target.closest('.dropdown')) {
+    closeAllDropdowns();
+  }
+});
+
 document.addEventListener('DOMContentLoaded', function() {
   if (!window.AC_USER_TZ) {
     var detected = 'UTC';
@@ -517,32 +544,7 @@ document.addEventListener('DOMContentLoaded', function() {
   }
   applyLocalTimes(document);
 
-  // ============================================================
-// Dropdown Menu
-// ============================================================
-
-function toggleDropdown(btn) {
-  var menu = btn.nextElementSibling;
-  if (!menu || !menu.classList.contains('dropdown-menu')) return;
-  var isOpen = menu.style.display !== 'none';
-  closeAllDropdowns();
-  if (!isOpen) {
-    menu.style.display = 'block';
-  }
-}
-
-function closeAllDropdowns() {
-  var menus = document.querySelectorAll('.dropdown-menu');
-  menus.forEach(function(m) { m.style.display = 'none'; });
-}
-
-document.addEventListener('click', function(e) {
-  if (!e.target.closest('.dropdown')) {
-    closeAllDropdowns();
-  }
-});
-
-// Convert any timestamps inserted later by client-side rendering.
+  // Convert any timestamps inserted later by client-side rendering.
   if (window.MutationObserver) {
     var observer = new MutationObserver(function(mutations) {
       for (var i = 0; i < mutations.length; i++) {
