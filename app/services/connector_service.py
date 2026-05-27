@@ -367,6 +367,11 @@ def _resolve_executor(connector_type: dict):
 
         return OpenApiExecutor()
 
+    if backend == "cli":
+        from app.connectors.cli_engine import CliEngine
+
+        return CliEngine(connector_type)
+
     return None
 
 

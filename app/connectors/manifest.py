@@ -80,6 +80,13 @@ ADAPTER_MANIFEST_SCHEMA = {
                 "session": {"type": "object"},
                 "refresh": {"type": "object"},
                 "requests": {"type": "object"},
+                "bin": {"type": "string"},
+                "timeout": {"type": "integer"},
+                "env": {
+                    "type": "object",
+                    "additionalProperties": {"type": "string"},
+                },
+                "commands": {"type": "object"},
             },
         },
     },
