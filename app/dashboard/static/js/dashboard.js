@@ -517,7 +517,32 @@ document.addEventListener('DOMContentLoaded', function() {
   }
   applyLocalTimes(document);
 
-  // Convert any timestamps inserted later by client-side rendering.
+  // ============================================================
+// Dropdown Menu
+// ============================================================
+
+function toggleDropdown(btn) {
+  var menu = btn.nextElementSibling;
+  if (!menu || !menu.classList.contains('dropdown-menu')) return;
+  var isOpen = menu.style.display !== 'none';
+  closeAllDropdowns();
+  if (!isOpen) {
+    menu.style.display = 'block';
+  }
+}
+
+function closeAllDropdowns() {
+  var menus = document.querySelectorAll('.dropdown-menu');
+  menus.forEach(function(m) { m.style.display = 'none'; });
+}
+
+document.addEventListener('click', function(e) {
+  if (!e.target.closest('.dropdown')) {
+    closeAllDropdowns();
+  }
+});
+
+// Convert any timestamps inserted later by client-side rendering.
   if (window.MutationObserver) {
     var observer = new MutationObserver(function(mutations) {
       for (var i = 0; i < mutations.length; i++) {

@@ -7,7 +7,13 @@ from app.services import credential_service
 from app.services import workspace_service
 from app.services import connector_service
 from app.services.agent_service import list_agents
-from app.routes.dashboard import render_page, escape_html, require_auth, get_icon, local_dt
+from app.routes.dashboard import (
+    render_page,
+    escape_html,
+    require_auth,
+    get_icon,
+    local_dt,
+)
 
 router = APIRouter()
 
@@ -101,7 +107,8 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
     ct_health = {}
     for ct in connector_types:
         enabled = [
-            b for b in visible_bindings
+            b
+            for b in visible_bindings
             if b["connector_type_id"] == ct["id"] and b.get("enabled")
         ]
         failed = [b for b in enabled if b.get("last_error")]
@@ -120,14 +127,18 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
         ct = next(
             (c for c in connector_types if c["id"] == b["connector_type_id"]), None
         )
-        text_style = "text-decoration:line-through;opacity:0.62;" if not b.get("enabled") else ""
+        text_style = (
+            "text-decoration:line-through;opacity:0.62;" if not b.get("enabled") else ""
+        )
         if b.get("enabled") and not b.get("last_error"):
             status_cls = "status-ok"
             status_text = "Enabled" if b.get("enabled") else "Disabled"
         else:
             status_cls = "status-error"
             status_text = (
-                "Error" if b.get("last_error") else ("Disabled" if not b.get("enabled") else "OK")
+                "Error"
+                if b.get("last_error")
+                else ("Disabled" if not b.get("enabled") else "OK")
             )
         if b.get("last_error"):
             status_text = f"Error: {str(b['last_error'])[:40]}"
@@ -143,7 +154,7 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
             <button type='button' class='btn btn-sm btn-secondary' onclick='editBinding("{b["id"]}")'>Edit</button>
             <button type='button' class='btn btn-sm btn-secondary' onclick='viewExecutions("{b["id"]}")'>History</button>
             <button type='button' class='btn btn-sm btn-secondary' onclick='testBinding("{b["id"]}")'>Test</button>
-            <button type='button' class='btn btn-sm btn-danger icon-delete-btn' onclick='deleteBinding("{b["id"]}")' title='Delete binding' aria-label='Delete binding'>{get_icon('delete')}</button>
+            <button type='button' class='btn btn-sm btn-danger icon-delete-btn' onclick='deleteBinding("{b["id"]}")' title='Delete binding' aria-label='Delete binding'>{get_icon("delete")}</button>
           </td>
         </tr>"""
 
@@ -196,15 +207,20 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
         else:
             type_chip = '<span style="display:inline-block;font-size:0.72em;font-weight:600;line-height:1;padding:3px 8px;border-radius:10px;background:#2563eb;color:#fff;letter-spacing:0.03em;white-space:nowrap">API</span>'
         action_count = len(supported_actions)
-        enabled_action_count = max(action_count - len([a for a in disabled_actions if a in supported_actions]), 0)
+        enabled_action_count = max(
+            action_count - len([a for a in disabled_actions if a in supported_actions]),
+            0,
+        )
         view_actions_btn = (
             f'<button type="button" class="btn btn-sm btn-secondary" onclick=\'viewActions("{ct["id"]}", "{escape_html(ct["display_name"])}", {action_count})\'>View Actions</button>'
             if action_count
             else ""
         )
-        binding_action_line = f'{binding_counts.get(ct["id"], 0)} binding(s)'
+        binding_action_line = f"{binding_counts.get(ct['id'], 0)} binding(s)"
         if action_count:
-            binding_action_line += f' &middot; {enabled_action_count}/{action_count} actions'
+            binding_action_line += (
+                f" &middot; {enabled_action_count}/{action_count} actions"
+            )
         health_state, health_n = ct_health.get(ct["id"], ("none", 0))
         if health_state == "issues":
             health_badge = f'<span class="badge badge-danger" title="Enabled bindings whose last health check failed">{health_n} issue(s)</span>'
@@ -226,7 +242,7 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
             <div style="display:flex;gap:0.4rem;align-items:center;justify-content:flex-end;">
               {view_actions_btn}
               <button type='button' class='btn btn-sm btn-secondary' onclick='openNewBinding("{ct["id"]}")'>Bind</button>
-              <button type='button' class='btn btn-sm btn-danger icon-delete-btn' onclick='deleteConnectorType("{ct["id"]}")' title='Delete connector type' aria-label='Delete connector type'>{get_icon('delete')}</button>
+              <button type='button' class='btn btn-sm btn-danger icon-delete-btn' onclick='deleteConnectorType("{ct["id"]}")' title='Delete connector type' aria-label='Delete connector type'>{get_icon("delete")}</button>
             </div>
           </div>
         </div>"""
@@ -243,9 +259,14 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
       <div class="page-actions">
         <a class="btn btn-secondary" href="/credentials">+ New Credential</a>
         <a class="btn btn-secondary" href="/connectors/directory">Browse API Directory</a>
-        <button class="btn btn-secondary" onclick="resetImportPreview();openModal('import-spec-modal')">+ Import API Spec</button>
-        <button class="btn btn-secondary" onclick="openModal('import-mcp-modal')">+ Import MCP Server</button>
-        <button class="btn btn-secondary" onclick="openModal('add-http-modal')">+ Add HTTP Connector</button>
+        <div class="dropdown" style="display:inline-block;position:relative">
+          <button class="btn btn-secondary" onclick="toggleDropdown(this)" type="button">+ Add <span style="font-size:0.8em">&#9662;</span></button>
+          <div class="dropdown-menu" style="display:none;position:absolute;right:0;top:100%;background:#fff;border:1px solid #ddd;border-radius:4px;box-shadow:0 2px 8px rgba(0,0,0,0.15);z-index:1000;min-width:200px;text-align:left">
+            <button class="dropdown-item" style="display:block;width:100%;padding:10px 16px;border:none;background:none;text-align:left;cursor:pointer;font-size:14px" onclick="resetImportPreview();openModal('import-spec-modal');closeAllDropdowns()">Import API Spec</button>
+            <button class="dropdown-item" style="display:block;width:100%;padding:10px 16px;border:none;background:none;text-align:left;cursor:pointer;font-size:14px" onclick="openModal('import-mcp-modal');closeAllDropdowns()">Import MCP Server</button>
+            <button class="dropdown-item" style="display:block;width:100%;padding:10px 16px;border:none;background:none;text-align:left;cursor:pointer;font-size:14px" onclick="openModal('add-http-modal');closeAllDropdowns()">Add HTTP Connector</button>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -1142,7 +1163,7 @@ async def credentials_page(request: Request, session: dict = Depends(require_aut
           <td><code>{escape_html(e.get("reference_name", ""))}</code></td>
           <td class='actions-cell'>
             <button type='button' class='btn btn-sm btn-secondary' onclick='editCredential("{e["id"]}")'>Edit</button>
-            <button type='button' class='btn btn-sm btn-danger icon-delete-btn' onclick='deleteCredential("{e["id"]}")' title='Delete credential' aria-label='Delete credential'>{get_icon('delete')}</button>
+            <button type='button' class='btn btn-sm btn-danger icon-delete-btn' onclick='deleteCredential("{e["id"]}")' title='Delete credential' aria-label='Delete credential'>{get_icon("delete")}</button>
           </td>
         </tr>"""
 
@@ -1375,8 +1396,13 @@ async def connectors_directory_page(
       <h1>API Directory</h1>
         <div class="page-actions">
         <a class="btn btn-secondary" href="/connectors">&larr; Back to Connectors</a>
-        <button class="btn btn-secondary" onclick="resetImportPreview();openModal('import-spec-modal')">+ Import API Spec</button>
-        <button class="btn btn-secondary" onclick="openModal('directory-import-mcp-modal')">+ Import MCP Server</button>
+        <div class="dropdown" style="display:inline-block;position:relative">
+          <button class="btn btn-secondary" onclick="toggleDropdown(this)" type="button">+ Add <span style="font-size:0.8em">&#9662;</span></button>
+          <div class="dropdown-menu" style="display:none;position:absolute;right:0;top:100%;background:#fff;border:1px solid #ddd;border-radius:4px;box-shadow:0 2px 8px rgba(0,0,0,0.15);z-index:1000;min-width:200px;text-align:left">
+            <button class="dropdown-item" style="display:block;width:100%;padding:10px 16px;border:none;background:none;text-align:left;cursor:pointer;font-size:14px" onclick="resetImportPreview();openModal('import-spec-modal');closeAllDropdowns()">Import API Spec</button>
+            <button class="dropdown-item" style="display:block;width:100%;padding:10px 16px;border:none;background:none;text-align:left;cursor:pointer;font-size:14px" onclick="openModal('directory-import-mcp-modal');closeAllDropdowns()">Import MCP Server</button>
+          </div>
+        </div>
       </div>
     </div>
     <div class="card">
