@@ -60,7 +60,7 @@ class TestTransmissionAdapterManifest:
                                             "percentDone",
                                             "uploadRatio",
                                         ],
-                                        "ids": "{{ params.ids | default([], as=list) }}",
+                                        "ids": "{{ params.ids | default('', as=omit) }}",
                                     },
                                 }
                             },
@@ -139,6 +139,61 @@ class TestTransmissionAdapterManifest:
         assert body["method"] == "torrent-get"
         assert body["arguments"]["ids"] == [1, 2]
         assert "Basic " in call["headers"]["Authorization"]
+
+    def test_transmission_list_torrents_omits_ids_when_not_supplied(self):
+        engine = HttpEngine(
+            make_ct(
+                {
+                    "base_url": {"from": "config", "field": "base_url"},
+                    "auth": {"type": "basic"},
+                    "requests": {
+                        "list_torrents": {
+                            "method": "POST",
+                            "path": "/transmission/rpc",
+                            "body": {
+                                "template": {
+                                    "method": "torrent-get",
+                                    "arguments": {
+                                        "fields": ["id"],
+                                        "ids": "{{ params.ids | default('', as=omit) }}",
+                                    },
+                                }
+                            },
+                            "response": {
+                                "success_when": "$.result == 'success'",
+                                "extract": "$.arguments.torrents",
+                            },
+                        }
+                    },
+                }
+            )
+        )
+
+        calls = []
+        engine._send = MagicMock(
+            side_effect=lambda req, config: calls.append(req)
+            or MagicMock(
+                status=200,
+                read=MagicMock(
+                    return_value=json.dumps(
+                        {"result": "success", "arguments": {"torrents": []}}
+                    ).encode()
+                ),
+            )
+        )
+        engine._raise_on_errors = MagicMock()
+
+        engine.execute(
+            "list_torrents",
+            {},
+            Credential(raw=None, fields={"username": "admin", "password": "secret"}),
+            '{"base_url": "http://localhost:9091"}',
+            session=None,
+        )
+
+        body = calls[0]["body"]
+        assert body["method"] == "torrent-get"
+        assert "ids" not in body["arguments"]
 
     def test_transmission_remove_torrent_destructive(self):
         engine = HttpEngine(
@@ -309,7 +364,7 @@ class TestTransmissionAdapterManifest:
                                     "method": "torrent-add",
                                     "arguments": {
                                         "filename": "{{ params.filename }}",
-                                        "download-dir": "{{ params.download_dir | default('', as=str) }}",
+                                        "download-dir": "{{ params.download_dir | default('', as=omit) }}",
                                     },
                                 }
                             },

@@ -231,43 +231,49 @@ def discover_mcp_server(
     if headers:
         client_headers.update(headers)
 
-    with httpx.Client(
-        timeout=timeout_seconds, headers=client_headers, follow_redirects=False
-    ) as client:
-        init_result = _mcp_initialize(client, endpoint_url)
+    try:
+        with httpx.Client(
+            timeout=timeout_seconds, headers=client_headers, follow_redirects=False
+        ) as client:
+            init_result = _mcp_initialize(client, endpoint_url)
 
-        tools = discover_all_tools(
-            endpoint_url,
-            timeout_ms=timeout_ms,
-            headers=headers,
-            client=client,
-            validate_url=False,
-        )
+            tools = discover_all_tools(
+                endpoint_url,
+                timeout_ms=timeout_ms,
+                headers=headers,
+                client=client,
+                validate_url=False,
+            )
+    except httpx.HTTPError as e:
+        # An unreachable or misbehaving target is a client/upstream condition,
+        # not an internal error. Surface it as a ValueError so callers map it to
+        # a 4xx instead of a 500.
+        raise ValueError(f"Could not reach MCP server at {endpoint_url}: {e}") from e
 
-        server_info = {}
-        if isinstance(init_result, dict):
-            server_info = init_result.get("serverInfo") or {}
+    server_info = {}
+    if isinstance(init_result, dict):
+        server_info = init_result.get("serverInfo") or {}
 
-        server_name = (
-            (server_info or {}).get("name")
-            or urlparse(endpoint_url).hostname
-            or "mcp-server"
-        )
-        protocol_version = (
-            (init_result or {}).get("protocolVersion")
-            or DEFAULT_MCP_PROTOCOL_VERSION
-        )
+    server_name = (
+        (server_info or {}).get("name")
+        or urlparse(endpoint_url).hostname
+        or "mcp-server"
+    )
+    protocol_version = (
+        (init_result or {}).get("protocolVersion")
+        or DEFAULT_MCP_PROTOCOL_VERSION
+    )
 
-        capabilities = {}
-        if isinstance(init_result, dict):
-            capabilities = init_result.get("capabilities") or {}
+    capabilities = {}
+    if isinstance(init_result, dict):
+        capabilities = init_result.get("capabilities") or {}
 
-        return MCPDiscoveryResult(
-            server_name=server_name,
-            protocol_version=protocol_version,
-            capabilities=capabilities if isinstance(capabilities, dict) else {},
-            tools=tools,
-        )
+    return MCPDiscoveryResult(
+        server_name=server_name,
+        protocol_version=protocol_version,
+        capabilities=capabilities if isinstance(capabilities, dict) else {},
+        tools=tools,
+    )
 
 
 def _normalize_tool(tool: Any) -> dict[str, Any]:

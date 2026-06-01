@@ -1,13 +1,9 @@
 # Adapters
 
-Adapters are the unified way to add **any** external service to Agent Core. One manifest file describes what the service is, what credentials it needs, what actions it exposes, and how Agent Core should call it — Agent Core's built-in engines do the rest. No Python is added to your installation, adapters survive upgrades, and the same adapter file works on any other person's Agent Core when you share it.
-
-This guide has two parts:
+One manifest file adds any external service to Agent Core. It describes what the service is, what credentials it needs, what actions it exposes, and how Agent Core should call it. The built-in engines handle the rest. No Python is added to your installation. Adapters survive upgrades, and the same file works on any other Agent Core instance when you share it.
 
 - **[Part 1: Using adapters](#part-1-using-adapters)** — installing, binding credentials, calling actions
 - **[Part 2: Building adapters](#part-2-building-adapters)** — the manifest spec, the three backends, templating, auth/refresh/sessions, testing, sharing
-
-If you just want to enable Gmail or Transmission, Part 1 is enough. If you want to add a service that isn't shipped, Part 2 walks through everything.
 
 ---
 
@@ -22,7 +18,7 @@ Use an adapter when you want to add a service that **doesn't fit the simpler pat
 | **Add HTTP Connector** | one-off authenticated HTTP, no per-action schemas needed |
 | **Adapter** | session handshakes, OAuth refresh, multi-field credentials, CLI tools, named actions with schemas, anything you want to share with others |
 
-Adapters cost a bit more upfront (you write a manifest) and give you a lot more in return: per-action input schemas the agent can introspect, automatic OAuth refresh, session-handshake retry, request templating, response extraction, and a shareable artifact that survives upgrades.
+You write one manifest; the engine handles per-action input schemas, OAuth refresh, session-handshake retry, request templating, response extraction, and produces a shareable artifact that survives upgrades.
 
 ---
 
@@ -37,7 +33,7 @@ Agent Core has a **two-tier adapter library**:
 | **System** | `app/adapter_templates/<id>/adapter.json` | shipped with Agent Core, maintained by the project | replaced on each upgrade — it *is* the product |
 | **User** | `data/adapters/<id>/adapter.json` | adapters you installed or wrote yourself | **yes**, lives in the data dir alongside the DB |
 
-The Browse Adapters page at **`/connectors/adapters`** lists adapters from both libraries. Installing a system adapter copies it into the user library, so any local edits you make persist across upgrades and you keep the version you tested. The `adapter_installations` DB table is the source of truth for *which* adapters are active in the connector catalog; a restart re-seeds them from there.
+The Browse Adapters page at **`/connectors/adapters`** lists adapters from both libraries. Installing a system adapter copies it into the user library, so any local edits you make persist across upgrades and you keep the version you tested. If the shipped template later changes, the same page shows **Update** for the installed copy; updating replaces the installed adapter files in place and keeps bindings attached to the same connector type id. The `adapter_installations` DB table is the source of truth for *which* adapters are active in the connector catalog; a restart re-seeds them from there.
 
 ## Install an adapter (3 ways)
 
@@ -45,7 +41,7 @@ The Browse Adapters page at **`/connectors/adapters`** lists adapters from both 
 
 1. Go to **`/connectors`** → click **Browse Adapters** (or visit `/connectors/adapters` directly).
 2. Pick an adapter from the list. Each entry shows its description, version, backend (`http`/`mcp`/`cli`), and whether its `requires` (binaries, env vars) are satisfied.
-3. Click **Install**. If it's a system adapter, Agent Core copies it from `app/adapter_templates/` into `data/adapters/`, seeds the connector type, and records the installation. If it's already in `data/adapters/`, the install just seeds and records.
+3. Click **Install**. If it's a system adapter, Agent Core copies it from `app/adapter_templates/` into `data/adapters/`, seeds the connector type, and records the installation. If it's already in `data/adapters/`, the install just seeds and records. If the page later shows **Update**, clicking it refreshes the installed copy in place without changing bindings.
 4. The new connector type now shows in your `/connectors` catalog.
 
 For `mcp` and `cli` adapters, a **dangerous-pattern scan** runs first and surfaces anything suspicious in the manifest before enabling. `http` adapters are pure data and don't need scanning.
@@ -85,7 +81,7 @@ Adapters use the same binding model as every other connector type:
    )
    ```
 
-Per-action input schemas are exposed via `connectors_actions_list`, so the agent can introspect what each action accepts. The raw credential is resolved server-side and never reaches the agent.
+`connectors_actions_list` exposes per-action input schemas so the agent can introspect what each action accepts. Agent Core resolves the raw credential server-side and never surfaces it to the agent.
 
 ## Uninstall an adapter
 
@@ -93,9 +89,10 @@ From the Browse Adapters page, click **Uninstall** on an installed adapter. This
 
 - Removes the adapter's connector type from the catalog (its bindings become orphaned).
 - Clears the install record.
-- **Leaves the file in `data/adapters/`** so you can reinstall later with one click — uninstall is non-destructive of user data.
+- If the installed adapter came from the system library, removes the installed copy from `data/adapters/` so the system template remains the reinstall source.
+- If the adapter already lived in `data/adapters/`, leaves the file there so you can reinstall later with one click — uninstall is non-destructive of user-authored adapter files.
 
-System adapters can be reinstalled from the system library; user-only adapters stay in `data/adapters/` and reinstall from there.
+System adapters can be reinstalled from the system library. User-only adapters stay in `data/adapters/` and reinstall from there. If an installed adapter has a newer bundled template available, the Browse Adapters page shows **Update** instead of making you uninstall/reinstall.
 
 ## The requires gating model
 
@@ -175,7 +172,7 @@ Agent Core's built-in engines interpret the `backend` block. Pick one based on w
 | **`mcp`** | the service is (or has) a native MCP server you already run | external server, out-of-process |
 | **`cli`** | the service has a local CLI you want to drive (e.g. `gh`, `rclone`) | external binary, out-of-process |
 
-In-process Python is never required.
+Every backend runs out-of-process or as pure data.
 
 ## `http` backend
 
@@ -409,7 +406,7 @@ After rendering, `active` is a JSON boolean, not the string `"true"`.
 
 ## Testing your adapter
 
-Wire-level tests are the single most valuable thing you can write. They mock the transport layer (HTTP or subprocess) and assert the **actual** rendered request matches what the service expects.
+Write wire-level tests that mock the transport layer (HTTP or subprocess) and assert the rendered request matches what the service expects. These catch template errors that unit tests miss because they verify the actual bytes leaving the adapter.
 
 For an `http` adapter:
 
@@ -467,9 +464,9 @@ A future agent-core registry would make this `agent-core adapters install <slug>
 
 | Adapter | Backend | What it demonstrates |
 |---|---|---|
-| `transmission` | `http` | session-handshake (`challenge_retry`), multi-field basic auth, destructive actions |
+| `transmission` | `http` | session-handshake (`challenge_retry`), multi-field basic auth, destructive actions, optional-field omission for `list_torrents`/`add_torrent` |
 | `google_gmail` | `http` | OAuth2 refresh, refresh-token rotation persistence, per-binding refresh lock, RFC822 message construction via the `rfc822_base64url` filter |
-| `github_cli` | `cli` | subprocess execution, `requires.bins` gating, JSON output parsing, env-var token injection |
+| `github_cli` | `cli` | subprocess execution, `requires.bins` gating, JSON output parsing, env-var token injection, optional CLI-flag omission |
 
 Browse their manifests in `app/adapter_templates/<id>/adapter.json` for working, tested examples of every feature.
 
@@ -497,7 +494,9 @@ Browse their manifests in `app/adapter_templates/<id>/adapter.json` for working,
 
 **Session handshake**: copy the `auth` and `session` blocks from `app/adapter_templates/transmission/adapter.json`; change the trigger status, header names, and `requests`.
 
-**CLI wrapper**: copy the `backend` and `requires.bins` from `app/adapter_templates/github_cli/adapter.json`; change `bin`, `env`, `commands`.
+For Transmission specifically, keep `base_url` at the server root, such as `http://HOST:PORT`. The adapter already appends `/transmission/rpc` in its request definitions. For `list_torrents`, omitting `ids` returns the full list; for `add_torrent`, `download_dir` must be an absolute path if you provide one.
+
+**CLI wrapper**: copy the `backend` and `requires.bins` from `app/adapter_templates/github_cli/adapter.json`; change `bin`, `env`, `commands`. Optional CLI flags should use the `default('', as=omit)` pattern so the CLI engine can drop the flag entirely when the parameter is omitted.
 
 ---
 
@@ -519,7 +518,7 @@ Browse their manifests in `app/adapter_templates/<id>/adapter.json` for working,
 
 ## Design notes (for the curious)
 
-The adapter module system is the result of one explicit design choice: **distributable adapters never add code to a user's Agent Core instance.** Every install path produces a manifest in `data/adapters/`, never a Python file in `app/connectors/`. This is what makes adapters safe to share and what makes them survive Agent Core upgrades.
+The adapter module system rests on one explicit choice: **distributable adapters never add code to a user's Agent Core instance.** Every install path produces a manifest in `data/adapters/`, never a Python file in `app/connectors/`. That choice keeps adapters safe to share and upgrade-proof.
 
 `app/connectors/` (the engines) is maintainer territory and is replaced on upgrade — it's the product itself. `app/adapter_templates/` ships the curated catalog. `data/adapters/` is yours. The boundary is the same one OpenClaw skills, OpenAPI specs, and MCP servers already use: data and external processes can be shared safely; in-process code cannot.
 

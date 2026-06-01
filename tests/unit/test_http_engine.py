@@ -1,6 +1,8 @@
 """Unit tests for the declarative HTTP engine."""
 
+import io
 import json
+import urllib.error
 from unittest.mock import MagicMock
 
 import pytest
@@ -43,6 +45,15 @@ class TestHttpEngineTemplating:
         engine = HttpEngine(make_ct({"requests": {}}))
         result = engine._render("ids={{ params.ids | default([], as=list) }}", {}, {})
         assert result == "ids=[]"
+
+    def test_render_params_default_omit(self):
+        engine = HttpEngine(make_ct({"requests": {}}))
+        result = engine._render(
+            "{{ params.ids | default('', as=omit) }}",
+            {},
+            {},
+        )
+        assert result == "__AGENT_CORE_OMIT__"
 
     def test_render_params_default_int(self):
         engine = HttpEngine(make_ct({"requests": {}}))
@@ -119,6 +130,28 @@ class TestHttpEngineTemplating:
             {},
         )
         assert "exec" not in result
+
+    def test_render_dict_omits_marked_fields(self):
+        engine = HttpEngine(make_ct({"requests": {}}))
+        result = engine._build_request(
+            {
+                "method": "POST",
+                "path": "/rpc",
+                "body": {
+                    "template": {
+                        "method": "torrent-get",
+                        "arguments": {
+                            "fields": ["id"],
+                            "ids": "{{ params.ids | default('', as=omit) }}",
+                        },
+                    }
+                },
+            },
+            {},
+            {"base_url": "http://example.com"},
+            make_cred(raw="", fields={"username": "user", "password": "pass"}),
+        )
+        assert "ids" not in result["body"]["arguments"]
 
 
 # ─── Auth Application ─────────────────────────────────────────────────────────
@@ -297,6 +330,48 @@ class TestHttpEngineSessionChallenge:
         )
         resp = MagicMock(status=200)
         assert engine._is_session_challenge(resp) is False
+
+    def test_send_wraps_http_409(self, monkeypatch):
+        engine = HttpEngine(
+            make_ct(
+                {
+                    "base_url": {"from": "config", "field": "base_url"},
+                    "session": {"type": "challenge_retry", "trigger": {"http_status": 409}},
+                    "requests": {
+                        "list_torrents": {
+                            "method": "POST",
+                            "path": "/transmission/rpc",
+                            "body": {"template": {"method": "torrent-get", "arguments": {}}},
+                        }
+                    },
+                }
+            )
+        )
+
+        def fake_safe_urlopen(req, timeout=30):
+            raise urllib.error.HTTPError(
+                req.full_url,
+                409,
+                "Conflict",
+                {"X-Transmission-Session-Id": "abc123"},
+                io.BytesIO(b'{"result":"session-id-required"}'),
+            )
+
+        monkeypatch.setattr("app.connectors.http_engine.safe_urlopen", fake_safe_urlopen)
+
+        resp = engine._send(
+            {
+                "method": "POST",
+                "url": "http://localhost:9091/transmission/rpc",
+                "headers": {},
+                "body": {"method": "torrent-get", "arguments": {}},
+            },
+            {},
+        )
+
+        assert resp.status == 409
+        assert resp.headers.get("X-Transmission-Session-Id") == "abc123"
+        assert b"session-id-required" in resp.read()
 
 
 # ─── needs_session ─────────────────────────────────────────────────────────────

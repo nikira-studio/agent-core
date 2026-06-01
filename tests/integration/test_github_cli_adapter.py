@@ -132,6 +132,35 @@ class TestGitHubCliAdapterWireLevel:
         assert "--owner" not in argv
 
     @patch("app.connectors.cli_engine.subprocess.run")
+    def test_create_issue_omits_body_when_not_provided(self, mock_run):
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout=json.dumps(
+                {"url": "https://github.com/owner/repo/issues/6", "number": 6}
+            ).encode(),
+            stderr=b"",
+        )
+        manifest_path = Path(
+            "/srv/docker-data/projects/Apps/agent-core/data/adapters/github_cli/adapter.json"
+        )
+        m, err = load_and_validate(manifest_path)
+        assert err is None
+
+        engine = CliEngine({"id": "github_cli", "backend_json": json.dumps(m.backend)})
+
+        result = engine.execute(
+            "create_issue",
+            {"repo": "owner/repo", "title": "Simple issue"},
+            make_gh_cred(),
+            "{}",
+            None,
+        )
+
+        assert result["success"] is True
+        argv = mock_run.call_args[0][0]
+        assert "--body" not in argv
+
+    @patch("app.connectors.cli_engine.subprocess.run")
     def test_list_repos_passes_token_via_env(self, mock_run):
         mock_run.return_value = MagicMock(returncode=0, stdout=b"[]", stderr=b"")
         manifest_path = Path(

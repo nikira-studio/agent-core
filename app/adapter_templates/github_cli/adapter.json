@@ -2,7 +2,7 @@
   "spec_version": "1.0",
   "id": "github_cli",
   "display_name": "GitHub CLI",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "author": "agent-core team",
   "description": "GitHub API via the gh CLI. Supports listing repositories, listing issues, and creating issues using structured JSON output.",
   "credential_schema": {
@@ -95,7 +95,7 @@
         "args": [
           "repo", "list",
           "--json", "name,url,visibility",
-          "--owner", "{{ params.owner | default(\"\", as=str) }}",
+          "--owner", "{{ params.owner | default('', as=omit) }}",
           "--limit", "{{ params.limit | default(30, as=int) }}"
         ],
         "parse": {
@@ -122,7 +122,7 @@
           "issue", "create",
           "--json", "url,number",
           "--title", "{{ params.title }}",
-          "--body", "{{ params.body | default('', as=str) }}",
+          "--body", "{{ params.body | default('', as=omit) }}",
           "--repo", "{{ params.repo }}"
         ],
         "parse": {

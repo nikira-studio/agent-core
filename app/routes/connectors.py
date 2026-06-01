@@ -522,7 +522,9 @@ async def update_connector_type_actions(
     if not ct:
         return error_response("NOT_FOUND", "Connector type not found", 404)
 
-    valid_actions = set(ct.get("supported_actions") or [])
+    valid_actions = set(
+        connector_service.normalize_action_names(ct.get("supported_actions"))
+    )
     disabled_actions = []
     for action in body.disabled_actions or []:
         if action not in valid_actions:
@@ -817,6 +819,38 @@ async def install_adapter(
     return success_response({"adapter": result}, status_code=201)
 
 
+@connector_types_router.post("/adapters/{adapter_id}/update")
+async def update_adapter(
+    adapter_id: str,
+    ctx: RequestContext = Depends(get_request_context),
+):
+    if not ctx.is_admin:
+        return error_response("FORBIDDEN", "Admin access required to update adapters", 403)
+
+    try:
+        result = adapter_loader.update_adapter(adapter_id)
+    except adapter_loader.AdapterInstallError as e:
+        return error_response("UPDATE_FAILED", str(e), 400)
+    except Exception as e:
+        return error_response("UPDATE_FAILED", f"Unexpected error: {e}", 500)
+
+    audit_service.write_event(
+        actor_type=ctx.actor_type,
+        actor_id=ctx.actor_id,
+        action="adapter_updated",
+        resource_type="adapter",
+        resource_id=adapter_id,
+        result="success",
+        details={
+            "source_kind": result["source_kind"],
+            "source_path": result["source_path"],
+            "previous_version": result.get("previous_version"),
+            "installed_version": result.get("installed_version"),
+        },
+    )
+    return success_response({"adapter": result})
+
+
 @connector_types_router.delete("/adapters/{adapter_id}/install")
 async def uninstall_adapter(
     adapter_id: str,
@@ -825,16 +859,12 @@ async def uninstall_adapter(
     if not ctx.is_admin:
         return error_response("FORBIDDEN", "Admin access required to uninstall adapters", 403)
 
-    ct = connector_service.get_connector_type(adapter_id)
-    if not ct:
-        return error_response("NOT_FOUND", "Installed adapter not found", 404)
-
     try:
         ok = adapter_loader.uninstall_adapter(adapter_id)
     except Exception as e:
         return error_response("UNINSTALL_FAILED", f"Unexpected error: {e}", 500)
     if not ok:
-        return error_response("UNINSTALL_FAILED", "Unable to uninstall adapter", 400)
+        return error_response("NOT_FOUND", "Installed adapter not found", 404)
 
     audit_service.write_event(
         actor_type=ctx.actor_type,
@@ -1179,6 +1209,24 @@ async def delete_connector_type(
     ct = connector_service.get_connector_type(connector_type_id)
     if not ct:
         return error_response("NOT_FOUND", "Connector type not found", 404)
+
+    # Adapter-backed connector types should behave like uninstall, not a raw
+    # catalog delete, so the Browse Adapters page and service catalog stay in
+    # sync. Generic connector types keep the direct delete path.
+    if adapter_loader.get_adapter_library_entry(connector_type_id):
+        ok = adapter_loader.uninstall_adapter(connector_type_id)
+        if not ok:
+            return error_response("NOT_FOUND", "Installed adapter not found", 404)
+        audit_service.write_event(
+            actor_type=ctx.actor_type,
+            actor_id=ctx.actor_id,
+            action="adapter_uninstalled",
+            resource_type="adapter",
+            resource_id=connector_type_id,
+            result="success",
+        )
+        return success_response({"message": "Adapter uninstalled"})
+
     connector_service.delete_connector_type(connector_type_id)
     audit_service.write_event(
         actor_type=ctx.actor_type,

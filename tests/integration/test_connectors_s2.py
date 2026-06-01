@@ -470,7 +470,14 @@ class TestConnectorMCPTools:
         assert data["supported_actions"] == ["items_list"]
         assert connector_service.get_connector_type("preview-api") is None
 
-    def test_import_mcp_server_rejects_private_urls(self, test_client, admin_token):
+    def test_import_mcp_server_rejects_private_urls_when_blocked(
+        self, test_client, admin_token, monkeypatch
+    ):
+        # Internal hosts are allowed by default; the SSRF guard only rejects
+        # private/loopback targets when BLOCK_INTERNAL_HOSTS is enabled.
+        from app.config import settings
+
+        monkeypatch.setattr(settings, "BLOCK_INTERNAL_HOSTS", True, raising=False)
         r = test_client.post(
             "/api/connector-types/import-mcp",
             headers={"Authorization": f"Bearer {admin_token}"},

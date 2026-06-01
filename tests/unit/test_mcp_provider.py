@@ -86,3 +86,24 @@ def test_execute_mcp_tool_establishes_session(mock_mcp):
     result = m.execute_mcp_tool(URL, "do_thing", {}, transport_type="streamable_http")
     assert result.success is True
     assert result.body["content"][0]["text"] == "ok"
+
+
+def test_discover_mcp_server_maps_transport_error_to_valueerror(monkeypatch):
+    # An unreachable target must surface as a ValueError (→ 4xx at the route),
+    # not propagate as a raw httpx error that the API turns into a 500.
+    monkeypatch.setattr(m, "validate_mcp_server_url", lambda u: u.rstrip("/"))
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("connection refused")
+
+    transport = httpx.MockTransport(handler)
+    original = httpx.Client
+
+    def factory(*args, **kwargs):
+        kwargs["transport"] = transport
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(m.httpx, "Client", factory)
+
+    with pytest.raises(ValueError, match="Could not reach MCP server"):
+        m.discover_mcp_server(URL)

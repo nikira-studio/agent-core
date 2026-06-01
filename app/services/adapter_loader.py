@@ -6,6 +6,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+import uuid
 from pathlib import Path
 
 from app.adapter_paths import SYSTEM_ADAPTER_DIR, get_user_adapter_dir
@@ -29,6 +30,46 @@ def _load_manifest(path: Path) -> tuple[Manifest | None, str | None]:
     if err:
         return None, err.message
     return manifest, None
+
+
+def _stage_tree(source: Path, target: Path) -> Path:
+    """Copy a directory tree into a sibling staging directory."""
+
+    target.parent.mkdir(parents=True, exist_ok=True)
+    staging = Path(
+        tempfile.mkdtemp(prefix=f".{target.name}.staging-", dir=str(target.parent))
+    )
+    shutil.copytree(source, staging, dirs_exist_ok=True)
+    return staging
+
+
+def _swap_tree(staging: Path, target: Path) -> Path | None:
+    """Swap a validated staging tree into place and return any backup path."""
+
+    backup = None
+    if target.exists():
+        backup = target.with_name(f".{target.name}.backup-{uuid.uuid4().hex}")
+        target.rename(backup)
+    staging.rename(target)
+    return backup
+
+
+def _restore_tree(target: Path, staging: Path | None, backup: Path | None) -> None:
+    """Best-effort rollback for a failed tree swap."""
+
+    try:
+        if target.exists():
+            shutil.rmtree(target, ignore_errors=True)
+    finally:
+        if backup and backup.exists() and not target.exists():
+            try:
+                backup.rename(target)
+            except Exception:
+                logger.exception("Failed to restore adapter tree backup for %s", target)
+        if staging and staging.exists():
+            shutil.rmtree(staging, ignore_errors=True)
+        if backup and backup.exists() and target.exists():
+            shutil.rmtree(backup, ignore_errors=True)
 
 
 def _scan_root(adapter_root: Path, source_kind: str) -> list[dict]:
@@ -278,6 +319,18 @@ def list_available_adapters() -> list[dict]:
             if connector_type
             else None
         )
+        source_version = chosen["version"]
+        if install_record and install_record.get("source_kind") == "system":
+            source_entry = system_by_id.get(adapter_id)
+            if source_entry:
+                source_version = source_entry["version"]
+        chosen["available_version"] = source_version
+        chosen["update_available"] = bool(
+            chosen["installed"]
+            and chosen["installed_version"]
+            and source_version
+            and chosen["installed_version"] != source_version
+        )
         chosen["installed_at"] = install_record.get("installed_at") if install_record else None
         chosen["installed_source_kind"] = (
             install_record.get("source_kind") if install_record else None
@@ -332,27 +385,47 @@ def install_adapter(adapter_id: str, source_kind: str | None = None) -> dict:
     source_kind = library_entry["source_kind"]
     source_path = Path(library_entry["source_path"])
     install_path = get_user_adapter_dir() / adapter_id
+    staging = None
+    backup = None
+    previous_manifest = None
     if source_kind == "system":
-        install_path.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copytree(source_path, install_path, dirs_exist_ok=True)
+        previous_manifest_path = install_path / "adapter.json"
+        if previous_manifest_path.exists():
+            previous_manifest, _ = _load_manifest(previous_manifest_path)
+        staging = _stage_tree(source_path, install_path)
+        manifest_path = staging / "adapter.json"
     else:
         install_path = source_path
+        manifest_path = install_path / "adapter.json"
 
-    manifest_path = install_path / "adapter.json"
     manifest, err = load_and_validate(manifest_path)
     if err:
+        if staging:
+            shutil.rmtree(staging, ignore_errors=True)
         raise AdapterInstallError(f"Unable to validate adapter after install: {err}")
     assert manifest is not None
 
     manifest_json = manifest_path.read_text()
     _dangerous_scan_if_needed(manifest_json, manifest)
-    ct = _upsert_connector_type(manifest)
-    _upsert_install_record(
-        adapter_id=adapter_id,
-        source_kind=source_kind,
-        source_path=str(install_path),
-        installed_version=manifest.version,
-    )
+    if staging:
+        backup = _swap_tree(staging, install_path)
+    try:
+        ct = _upsert_connector_type(manifest)
+        _upsert_install_record(
+            adapter_id=adapter_id,
+            source_kind=source_kind,
+            source_path=str(install_path),
+            installed_version=manifest.version,
+        )
+    except Exception:
+        if source_kind == "system":
+            if previous_manifest:
+                _upsert_connector_type(previous_manifest)
+            else:
+                connector_service.delete_connector_type(adapter_id)
+        if staging or backup:
+            _restore_tree(install_path, staging, backup)
+        raise
     logger.info("Installed adapter %s from %s", adapter_id, source_kind)
     return {
         "adapter_id": adapter_id,
@@ -362,9 +435,92 @@ def install_adapter(adapter_id: str, source_kind: str | None = None) -> dict:
     }
 
 
+def update_adapter(adapter_id: str) -> dict:
+    record = _get_install_record(adapter_id)
+    if not record:
+        raise AdapterInstallError(f"Installed adapter not found: {adapter_id}")
+
+    source_kind = record.get("source_kind")
+    install_path = Path(record["source_path"])
+    previous_version = record.get("installed_version")
+    previous_manifest = None
+
+    if source_kind == "system":
+        source_path = SYSTEM_ADAPTER_DIR / adapter_id
+        if not source_path.is_dir():
+            raise AdapterInstallError(
+                f"Bundled adapter template not found for {adapter_id}"
+            )
+        previous_manifest, _ = _load_manifest(install_path / "adapter.json")
+        staging = _stage_tree(source_path, install_path)
+    else:
+        if not install_path.is_dir():
+            raise AdapterInstallError(
+                f"Installed adapter source missing for {adapter_id}: {install_path}"
+            )
+        staging = None
+
+    manifest_path = (staging or install_path) / "adapter.json"
+    manifest, err = load_and_validate(manifest_path)
+    if err:
+        if staging:
+            shutil.rmtree(staging, ignore_errors=True)
+        raise AdapterInstallError(f"Unable to validate adapter after update: {err}")
+    assert manifest is not None
+
+    manifest_json = manifest_path.read_text()
+    _dangerous_scan_if_needed(manifest_json, manifest)
+    backup = None
+    if staging:
+        backup = _swap_tree(staging, install_path)
+    try:
+        ct = _upsert_connector_type(manifest)
+        _upsert_install_record(
+            adapter_id=adapter_id,
+            source_kind=source_kind,
+            source_path=str(install_path),
+            installed_version=manifest.version,
+        )
+    except Exception:
+        if source_kind == "system" and previous_manifest:
+            _upsert_connector_type(previous_manifest)
+        if staging or backup:
+            _restore_tree(install_path, staging, backup)
+        raise
+    logger.info(
+        "Updated adapter %s from %s to %s",
+        adapter_id,
+        previous_version or "unknown",
+        manifest.version,
+    )
+    return {
+        "adapter_id": adapter_id,
+        "source_kind": source_kind,
+        "source_path": str(install_path),
+        "previous_version": previous_version,
+        "installed_version": manifest.version,
+        "connector_type": ct,
+    }
+
+
 def uninstall_adapter(adapter_id: str) -> bool:
+    record = _get_install_record(adapter_id)
+    removed_any = False
+    if record:
+        source_kind = record.get("source_kind")
+        source_path = record.get("source_path")
+        # System adapters are installed as a user-local copy under data/adapters.
+        # Remove that installed copy on uninstall so the browse page falls back to
+        # the shipped template and the adapter can be installed again cleanly.
+        if source_kind == "system" and source_path:
+            installed_path = Path(source_path)
+            if installed_path.exists():
+                shutil.rmtree(installed_path)
+        removed_any = True
+
     _clear_install_record(adapter_id)
-    return connector_service.delete_connector_type(adapter_id)
+    removed_any = connector_service.delete_connector_type(adapter_id) or removed_any
+    return removed_any
 
 
 def sync_installed_adapters() -> None:

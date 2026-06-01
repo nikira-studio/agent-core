@@ -374,7 +374,7 @@ Import an MCP server:
 
 The MCP import stores the server URL and transport alongside the discovered tool snapshot. Use `streamable_http` for HTTP-native MCP servers. If your MCP server only speaks stdio, run it behind a small HTTP bridge/proxy and point Agent Core at that bridge instead. Refreshing an MCP connector type re-discovers the tool list and updates the snapshot in place.
 
-For OpenAPI-backed connector bindings, `config_json` can override the target base URL with `base_url` and can suppress auth injection with `auth_mode: "none"` when the imported spec expects auth but the actual deployment does not. That is the supported way to bind a published spec to a trusted internal deployment without disabling SSRF protection for arbitrary URLs. If the target hostname is private or internal, add it to `AGENT_CORE_ALLOWED_INTERNAL_HOSTS` in the Agent Core deployment environment so the validator can recognize it as operator-trusted.
+For OpenAPI-backed connector bindings, `config_json` can override the target base URL with `base_url` and can suppress auth injection with `auth_mode: "none"` when the imported spec expects auth but the actual deployment does not. Internal hosts are allowed by default; if you want to block local probing, set `AGENT_CORE_BLOCK_INTERNAL_HOSTS=true` and add trusted names to `AGENT_CORE_ALLOWED_INTERNAL_HOSTS` as exceptions.
 
 ---
 

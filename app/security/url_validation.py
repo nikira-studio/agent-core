@@ -3,9 +3,6 @@ import socket
 import urllib.parse
 
 
-_BLOCKED_HOSTS = {"127.0.0.1", "0.0.0.0", "localhost", "::1"}
-
-
 def _is_blocked_ip(
     ip: ipaddress.IPv4Address | ipaddress.IPv6Address,
 ) -> bool:
@@ -31,16 +28,16 @@ def validate_public_url(url: str) -> None:
         raise ValueError("URL must include a host")
     if host.lower() in settings.allowed_internal_host_set:
         return
-    if host.lower() in _BLOCKED_HOSTS:
-        raise ValueError(f"Blocked host: {host}")
+    block_internal = bool(getattr(settings, "BLOCK_INTERNAL_HOSTS", False))
 
     try:
         ip = ipaddress.ip_address(host)
-        if _is_blocked_ip(ip):
+    except ValueError:
+        ip = None
+    if ip is not None:
+        if block_internal and _is_blocked_ip(ip):
             raise ValueError(f"Blocked private network host: {host}")
         return
-    except ValueError:
-        pass
 
     try:
         infos = socket.getaddrinfo(host, None, type=socket.SOCK_STREAM)
@@ -48,6 +45,7 @@ def validate_public_url(url: str) -> None:
         raise ValueError(f"Failed to resolve host: {host}") from e
 
     resolved = set()
+    blocked_resolved = []
     for family, _, _, _, sockaddr in infos:
         if not sockaddr:
             continue
@@ -57,8 +55,13 @@ def validate_public_url(url: str) -> None:
         except ValueError:
             continue
         if _is_blocked_ip(ip):
-            raise ValueError(f"Blocked private network host: {host} -> {addr}")
+            blocked_resolved.append(addr)
+            if block_internal:
+                raise ValueError(f"Blocked private network host: {host} -> {addr}")
         resolved.add(addr)
 
     if not resolved:
         raise ValueError(f"Failed to validate host: {host}")
+
+    if block_internal and blocked_resolved:
+        raise ValueError(f"Blocked private network host: {host} -> {blocked_resolved[0]}")

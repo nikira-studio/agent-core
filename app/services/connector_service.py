@@ -11,6 +11,22 @@ from app.services import mcp_provider_service
 logger = logging.getLogger(__name__)
 
 
+def normalize_action_names(actions: Optional[list]) -> list[str]:
+    names: list[str] = []
+    seen: set[str] = set()
+    for action in actions or []:
+        if isinstance(action, str):
+            name = action
+        elif isinstance(action, dict):
+            name = action.get("name")
+        else:
+            name = None
+        if name and name not in seen:
+            names.append(name)
+            seen.add(name)
+    return names
+
+
 def list_connector_types(include_inactive: bool = False) -> list[dict]:
     from app.services import adapter_loader
 
@@ -551,6 +567,9 @@ def generate_connector_type_tools(
     disabled_set = {
         action for action in (disabled_actions or []) if isinstance(action, str)
     }
+    supported_action_names = normalize_action_names(
+        connector_type.get("supported_actions")
+    )
     tools = [
         {
             "name": action,
@@ -560,7 +579,7 @@ def generate_connector_type_tools(
             "description": "",
             "enabled": action not in disabled_set,
         }
-        for action in connector_type.get("supported_actions", [])
+        for action in supported_action_names
     ]
     if query:
         q = query.lower()
@@ -812,12 +831,18 @@ def _validate_action_for_connector(connector_type: dict, action: str) -> Optiona
                     return "INVALID_ACTION"
             except json.JSONDecodeError:
                 pass
-        elif action not in connector_type.get("supported_actions", []):
+        elif action not in normalize_action_names(
+            connector_type.get("supported_actions")
+        ):
             return "INVALID_ACTION"
         return None
 
     if connector_type.get("provider_type") == "generic_http":
         return None
+
+    supported_actions = set(
+        normalize_action_names(connector_type.get("supported_actions"))
+    )
 
     ops_meta = None
     if connector_type.get("operations_json"):
@@ -830,7 +855,7 @@ def _validate_action_for_connector(connector_type: dict, action: str) -> Optiona
         valid_actions = {op["operation_id"] for op in ops_meta.get("operations", [])}
         if action not in valid_actions:
             return "INVALID_ACTION"
-    elif action not in connector_type.get("supported_actions", []):
+    elif action not in supported_actions:
         return "INVALID_ACTION"
     return None
 

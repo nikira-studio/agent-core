@@ -277,7 +277,7 @@ def test_get_directory_marks_grouped_variants_installed(monkeypatch):
     assert group["variants"][1]["installed"] is True
 
 
-def test_import_spec_rejects_private_server_url():
+def test_import_spec_allows_private_server_url_by_default():
     raw_spec = json.dumps(
         {
             "openapi": "3.0.0",
@@ -287,36 +287,58 @@ def test_import_spec_rejects_private_server_url():
         }
     )
 
-    try:
-        import_spec(raw_spec, is_url=False)
-        assert False, "Expected import_spec to reject private server URL"
-    except ValueError as e:
-        assert "Blocked private network host" in str(e)
+    result = import_spec(raw_spec, is_url=False)
+    assert result["connector_type_id"] == "private-api"
+    assert result["auth_type"] == "none"
 
 
-def test_generic_http_rejects_private_url():
+def test_generic_http_allows_private_url_by_default(monkeypatch):
     connector = GenericHttpConnector()
+    captured = {}
+
+    class FakeResponse:
+        status = 200
+
+        def __init__(self):
+            self.headers = {}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def read(self):
+            return json.dumps({"ok": True}).encode()
+
+    def fake_safe_urlopen(req, timeout=30):
+        captured["url"] = req.full_url
+        return FakeResponse()
+
+    monkeypatch.setattr("app.connectors.generic_http.safe_urlopen", fake_safe_urlopen)
     result = connector._call(
         credential="token",
         config={},
         params={"url": "http://169.254.169.254/latest/meta-data/"},
     )
-    assert result["success"] is False
-    assert "Blocked private network host" in result["error"]
+    assert result["success"] is True
+    assert captured["url"] == "http://169.254.169.254/latest/meta-data/"
 
 
-def test_validate_public_url_rejects_dns_rebinding(monkeypatch):
+def test_validate_public_url_blocks_dns_rebinding_when_disabled(monkeypatch):
     import socket
+    from app.config import settings
 
     def fake_getaddrinfo(host, *_args, **_kwargs):
         return [
             (socket.AF_INET, None, None, None, ("10.0.0.5", 0)),
         ]
 
+    monkeypatch.setattr(settings, "BLOCK_INTERNAL_HOSTS", True, raising=False)
     monkeypatch.setattr("app.security.url_validation.socket.getaddrinfo", fake_getaddrinfo)
 
     try:
         validate_public_url("https://example.test")
-        assert False, "Expected validate_public_url to reject private resolution"
+        assert False, "Expected validate_public_url to reject private resolution when blocked"
     except ValueError as e:
         assert "Blocked private network host" in str(e)

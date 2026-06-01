@@ -121,6 +121,38 @@ class TestConnectorActionsSchema:
             }
         assert "backend_json" in columns
 
+    def test_update_connector_type_actions_accepts_structured_actions(
+        self, clean_db, test_client, admin_token
+    ):
+        from app.services import connector_service
+
+        connector_service.create_connector_type(
+            connector_type_id="structured_actions_test",
+            display_name="Structured Actions Test",
+            supported_actions=[
+                {
+                    "name": "list_items",
+                    "description": "List items",
+                    "input_schema": {"type": "object", "properties": {}},
+                },
+                {
+                    "name": "delete_item",
+                    "description": "Delete item",
+                    "input_schema": {"type": "object", "properties": {}},
+                },
+            ],
+            provider_type="openapi",
+        )
+
+        r = test_client.put(
+            "/api/connector-types/structured_actions_test/actions",
+            headers={"Authorization": f"Bearer {admin_token}"},
+            json={"disabled_actions": ["delete_item"]},
+        )
+        assert r.status_code == 200, r.text
+        data = r.json()["data"]["connector_type"]
+        assert data["disabled_actions"] == ["delete_item"]
+
 
 class TestTransmissionActionsSchema:
     def test_transmission_adapter_actions_have_schemas(self, clean_db):
@@ -166,3 +198,27 @@ class TestTransmissionActionsSchema:
 
         assert tools["start_torrent"]["side_effect"] == "write"
         assert tools["stop_torrent"]["side_effect"] == "write"
+
+    def test_transmission_adapter_actions_validate_from_structured_manifest(
+        self, clean_db
+    ):
+        from pathlib import Path
+        from app.services import adapter_loader
+        from app.services import connector_service
+
+        real_adapters_dir = Path(
+            "/srv/docker-data/projects/Apps/agent-core/data/adapters"
+        )
+        adapter_loader.discover_and_seed_adapters(adapters_dir=real_adapters_dir)
+
+        ct = connector_service.get_connector_type("transmission")
+        assert ct is not None
+
+        assert (
+            connector_service._validate_action_for_connector(ct, "list_torrents")
+            is None
+        )
+        assert (
+            connector_service._validate_action_for_connector(ct, "get_session_stats")
+            is None
+        )

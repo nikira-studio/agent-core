@@ -23,6 +23,8 @@ _RE_TEMPLATE = re.compile(
     r"\{\{\s*(params|cred|config)(?:\.(\w+?))?\s*(?:\s+\|\s*(\w+)(?:\(([^)]*)\))?)?\s*\}\}"
 )
 
+_OMIT = "__AGENT_CORE_OMIT__"
+
 
 class HttpEngine(BaseConnector):
     def __init__(self, connector_type: dict):
@@ -243,6 +245,7 @@ class HttpEngine(BaseConnector):
                         "float": 0.0,
                         "bool": False,
                         "list": [],
+                        "omit": _OMIT,
                     }
                     fallback_str = ""
                     type_arg = filter_arg
@@ -250,6 +253,8 @@ class HttpEngine(BaseConnector):
                         parts = filter_arg.split(", as=", 1)
                         fallback_str = parts[0]
                         type_arg = parts[1] if len(parts) > 1 else ""
+                    if type_arg == "omit":
+                        return _OMIT
                     if fallback_str:
                         try:
                             return str(json.loads(fallback_str))
@@ -539,7 +544,10 @@ class HttpEngine(BaseConnector):
         method = req.get("method", "GET")
         request = urllib.request.Request(url, method=method, headers=headers, data=body)
         timeout = float(config.get("timeout", 30))
-        return safe_urlopen(request, timeout=timeout)
+        try:
+            return safe_urlopen(request, timeout=timeout)
+        except urllib.error.HTTPError as e:
+            return _HTTPErrorResponse(e)
 
     def _raise_on_errors(self, resp) -> None:
         if resp.status == 429:
@@ -610,6 +618,23 @@ class HttpEngine(BaseConnector):
         return body
 
 
+class _HTTPErrorResponse:
+    """Minimal urllib response wrapper for HTTPError status responses.
+
+    Transmission-style challenge flows return HTTP 409 with a session token in a
+    response header. The engine needs to inspect that response like a normal
+    response instead of crashing on urllib's exception path.
+    """
+
+    def __init__(self, error: urllib.error.HTTPError):
+        self.status = error.code
+        self.headers = error.headers
+        self._body = error.read()
+
+    def read(self) -> bytes:
+        return self._body
+
+
 def _parse_json(config_json: Optional[str]) -> dict:
     if not config_json:
         return {}
@@ -624,11 +649,19 @@ def _render_dict(
     template: Any, params: dict, config: dict, cred: Optional[Credential] = None
 ) -> Any:
     if isinstance(template, dict):
-        return {k: _render_dict(v, params, config, cred) for k, v in template.items()}
+        rendered_dict = {}
+        for k, v in template.items():
+            rendered = _render_dict(v, params, config, cred)
+            if rendered == _OMIT:
+                continue
+            rendered_dict[k] = rendered
+        return rendered_dict
     if isinstance(template, list):
         rendered_items = []
         for item in template:
             rendered = _render_dict(item, params, config, cred)
+            if rendered == _OMIT:
+                continue
             try:
                 rendered_items.append(json.loads(rendered))
             except (json.JSONDecodeError, TypeError):
@@ -638,6 +671,8 @@ def _render_dict(
         rendered = _RE_TEMPLATE.sub(
             lambda m: _render_value(m, params, config, cred), template
         )
+        if rendered == _OMIT:
+            return _OMIT
         try:
             return json.loads(rendered)
         except (json.JSONDecodeError, TypeError):
@@ -670,6 +705,7 @@ def _render_value(
                 "float": 0.0,
                 "bool": False,
                 "list": [],
+                "omit": _OMIT,
             }
             fallback_str = ""
             type_arg = filter_arg
@@ -677,6 +713,8 @@ def _render_value(
                 parts = filter_arg.split(", as=", 1)
                 fallback_str = parts[0]
                 type_arg = parts[1] if len(parts) > 1 else ""
+            if type_arg == "omit":
+                return _OMIT
             if type_arg and type_arg in type_map:
                 return str(type_map[type_arg])
             if fallback_str:

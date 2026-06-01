@@ -75,6 +75,7 @@ AUDIT_ACTIONS = (
     "connector_type_actions_updated",
     "connector_type_deleted",
     "adapter_installed",
+    "adapter_updated",
     "adapter_uninstalled",
     "connector_action_executed",
     "webhook_created",

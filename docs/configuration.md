@@ -34,7 +34,8 @@ These control how long dashboard logins stay active.
 | --- | --- | --- |
 | `AGENT_CORE_CORS_ORIGINS` | *(empty)* | Comma-separated list of allowed browser origins. Only needed if a separate web frontend needs to make authenticated requests. Example: `http://localhost:5173` |
 | `AGENT_CORE_ALLOWED_IPS` | *(empty)* | Comma-separated IPs or CIDR ranges. When set, requests from any IP not on this list are rejected with `403`. Useful if Agent Core is reachable on a LAN and you want to limit who can connect |
-| `AGENT_CORE_ALLOWED_INTERNAL_HOSTS` | *(empty)* | Comma-separated hostnames that are trusted for connector imports and binding overrides even if they resolve to private addresses. Use this only for operator-managed internal services such as `firecrawl` or `searxng` |
+| `AGENT_CORE_BLOCK_INTERNAL_HOSTS` | `false` | Set to `true` to block connector bindings/imports from reaching private, loopback, or link-local hosts. Use this if you want to disable local probing by default |
+| `AGENT_CORE_ALLOWED_INTERNAL_HOSTS` | *(empty)* | Comma-separated hostnames that are always allowed even when `AGENT_CORE_BLOCK_INTERNAL_HOSTS=true`. Useful for operator-managed internal services such as `firecrawl` or `searxng` |
 
 ---
 
@@ -125,7 +126,8 @@ curl http://localhost:3500/health
 For a local setup, the defaults are usually fine. Here's what's actually worth looking at:
 
 - **`AGENT_CORE_ALLOWED_IPS`** — set this if Agent Core will be accessible to other machines on your network
-- **`AGENT_CORE_ALLOWED_INTERNAL_HOSTS`** — set this if you need connector bindings to talk to named internal services like `firecrawl` or `searxng` without weakening the default SSRF guard for arbitrary URLs
+- **`AGENT_CORE_BLOCK_INTERNAL_HOSTS`** — set this to `true` if you want to block connector bindings/imports from private, loopback, or link-local hosts.
+- **`AGENT_CORE_ALLOWED_INTERNAL_HOSTS`** — use this only as an exception list when `AGENT_CORE_BLOCK_INTERNAL_HOSTS=true`, for trusted internal services like `firecrawl` or `searxng`
 - **`AGENT_CORE_CORS_ORIGINS`** — set this if you're building a separate web app that needs to make authenticated requests
 - **`AGENT_CORE_COOKIE_SECURE`** — set to `true` if serving over HTTPS
 - **`AGENT_CORE_ENCRYPTION_KEY`** — leave as `auto` unless you have a specific reason to manage the key yourself

@@ -95,7 +95,7 @@
         "args": [
           "repo", "list",
           "--json", "name,url,visibility",
-          "--owner", "{{ params.owner | default(\"\", as=str) }}",
+          "--owner", "{{ params.owner | default('', as=omit) }}",
           "--limit", "{{ params.limit | default(30, as=int) }}"
         ],
         "parse": {
@@ -122,7 +122,7 @@
           "issue", "create",
           "--json", "url,number",
           "--title", "{{ params.title }}",
-          "--body", "{{ params.body | default('', as=str) }}",
+          "--body", "{{ params.body | default('', as=omit) }}",
           "--repo", "{{ params.repo }}"
         ],
         "parse": {

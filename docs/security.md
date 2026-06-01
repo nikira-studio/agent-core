@@ -177,7 +177,7 @@ Outbound webhooks let external systems receive signed notifications when events 
 
 **Delivery is fire-and-log-only (v1).** If a receiver is down or slow, the failure is recorded in the delivery log and no retry is attempted. Keep receiver endpoints fast and reliable.
 
-**SSRF protection.** Webhook URLs are validated against the same SSRF guard as other outbound URLs. Private network addresses (RFC 1918, loopback, link-local) are blocked unless explicitly allowed via `AGENT_CORE_ALLOWED_INTERNAL_HOSTS`.
+**SSRF protection.** Webhook URLs are validated against the same SSRF guard as other outbound URLs. Private network addresses (RFC 1918, loopback, link-local) are allowed by default for local and operator-managed deployments. If you want to block them, set `AGENT_CORE_BLOCK_INTERNAL_HOSTS=true` and use `AGENT_CORE_ALLOWED_INTERNAL_HOSTS` as an exception list.
 
 **Signature verification.** Every delivery includes `X-Agent-Core-Signature: sha256=<hex>`. Receivers should verify this before acting on the payload:
 

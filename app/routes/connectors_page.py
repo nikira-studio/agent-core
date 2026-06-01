@@ -1,3 +1,5 @@
+import json
+
 from fastapi import APIRouter, Depends, Request
 from app.branding import APP_NAME, JS_WINDOW_EVENT
 from app.security.context import build_user_context
@@ -19,41 +21,109 @@ from app.routes.dashboard import (
 router = APIRouter()
 
 
+def _binding_guidance_for_connector_type(ct: dict) -> dict:
+    credential_fields = list(ct.get("required_credential_fields") or [])
+    config_fields: list[str] = []
+    backend_json = ct.get("backend_json")
+    backend = None
+    if backend_json:
+        try:
+            backend = json.loads(backend_json)
+        except Exception:
+            backend = None
+
+    def visit(value):
+        if isinstance(value, dict):
+            if value.get("from") == "config" and value.get("field"):
+                field = value["field"]
+                if field not in config_fields:
+                    config_fields.append(field)
+            for child in value.values():
+                visit(child)
+        elif isinstance(value, list):
+            for child in value:
+                visit(child)
+
+    if isinstance(backend, dict):
+        visit(backend)
+
+    if (
+        ct.get("backend_type") == "generic_http"
+        or ct.get("provider_type") == "generic_http"
+    ) and "base_url" not in config_fields:
+        config_fields.append("base_url")
+
+    display_name = ct.get("display_name") or ct.get("id") or "Binding"
+    return {
+        "suggested_binding_name": display_name,
+        "suggested_credential_name": f"{display_name} credentials",
+        "credential_fields": credential_fields,
+        "config_fields": config_fields,
+    }
+
+
+def _binding_recipe_line(guidance: dict) -> str:
+    bits = [f"Suggested binding: {guidance.get('suggested_binding_name') or ''}".strip()]
+    credential_fields = guidance.get("credential_fields") or []
+    config_fields = guidance.get("config_fields") or []
+    if credential_fields:
+        bits.append("Credential JSON fields: " + ", ".join(credential_fields))
+    if config_fields:
+        bits.append("Config JSON fields: " + ", ".join(config_fields))
+    return " · ".join([b for b in bits if b and b != "Suggested binding: "])
+
+
 def _render_adapter_cards(adapter_entries: list[dict], ctx) -> str:
     adapter_cards = ""
     for adapter in adapter_entries:
         source_label = "System" if adapter["source_kind"] == "system" else "Local"
         installed = bool(adapter.get("installed"))
         installable = bool(adapter.get("installable"))
+        update_available = bool(adapter.get("update_available"))
         req = adapter.get("requirements_summary") or {}
         missing_bins = req.get("bins") or []
         missing_env = req.get("env") or []
         required_config = req.get("config") or []
         credential_fields = req.get("credential_fields") or []
+        source_version = adapter.get("available_version") or adapter.get("version")
+        installed_version = adapter.get("installed_version")
+        guidance = {
+            "suggested_binding_name": adapter.get("display_name") or adapter.get("id") or "Binding",
+            "credential_fields": credential_fields,
+            "config_fields": required_config,
+        }
         req_bits = []
         if missing_bins:
             req_bits.append("Requires binary: " + ", ".join(missing_bins))
         if missing_env:
             req_bits.append("Requires env: " + ", ".join(missing_env))
         if credential_fields:
-            req_bits.append("Credential fields: " + ", ".join(credential_fields))
+            req_bits.append("Credential JSON fields: " + ", ".join(credential_fields))
         if required_config:
-            req_bits.append("Binding config: " + ", ".join(required_config))
+            req_bits.append("Binding config JSON: " + ", ".join(required_config))
+        recipe_line = _binding_recipe_line(guidance)
         req_text = " · ".join(req_bits)
         req_hover = " | ".join(req_bits)
         if installed:
             state_badge = '<span class="badge badge-success">Installed</span>'
-            action_btn = (
-                f"<button type='button' class='btn btn-sm btn-danger' "
-                f"onclick='uninstallAdapter(\"{adapter['id']}\")'>Uninstall</button>"
-                if ctx.is_admin
-                else ""
-            )
+            if update_available:
+                state_badge += ' <span class="badge badge-warning">Update available</span>'
+            action_btn = ""
+            if ctx.is_admin:
+                if update_available:
+                    action_btn += (
+                        f"<button type='button' class='btn btn-sm btn-primary' "
+                        f"onclick='updateAdapter(this, \"{adapter['id']}\")'>Update</button>"
+                    )
+                action_btn += (
+                    f"<button type='button' class='btn btn-sm btn-danger' "
+                    f"onclick='uninstallAdapter(this, \"{adapter['id']}\")'>Uninstall</button>"
+                )
         elif installable:
             state_badge = '<span class="badge badge-warning">Available</span>'
             action_btn = (
                 f"<button type='button' class='btn btn-sm btn-primary' "
-                f"onclick='installAdapter(\"{adapter['id']}\")'>Install</button>"
+                f"onclick='installAdapter(this, \"{adapter['id']}\")'>Install</button>"
                 if ctx.is_admin
                 else ""
             )
@@ -72,16 +142,37 @@ def _render_adapter_cards(adapter_entries: list[dict], ctx) -> str:
                 + escape_html(req_text)
                 + "</div>"
             )
+        binding_recipe_line = ""
+        if recipe_line:
+            binding_recipe_line = (
+                "<div style='font-size:0.8em;color:var(--text-muted);margin-top:0.25rem'>"
+                + escape_html(recipe_line)
+                + "</div>"
+            )
+        version_line = (
+            f"{escape_html(str(source_version))} &middot; {source_label}"
+            if source_version
+            else source_label
+        )
+        installed_version_line = ""
+        if installed and installed_version and installed_version != source_version:
+            installed_version_line = (
+                "<div style='font-size:0.75em;color:var(--text-muted);margin-top:0.1rem'>"
+                + f"Installed {escape_html(str(installed_version))}"
+                + "</div>"
+            )
 
         adapter_cards += f"""
-        <div class='connector-type-card' data-adapter-card data-search-text="{escape_html((adapter.get("display_name", "") or "") + " " + (adapter.get("description", "") or "") + " " + adapter.get("version", "") + " " + adapter.get("source_kind", "") + " " + req_text)}">
+        <div class='connector-type-card' data-adapter-card data-search-text="{escape_html((adapter.get("display_name", "") or "") + " " + (adapter.get("description", "") or "") + " " + (source_version or "") + " " + (installed_version or "") + " " + adapter.get("source_kind", "") + " " + req_text)}">
           <div style="padding:0 0 0.5rem">
             <div class='connector-type-name' style="margin:0">{escape_html(adapter["display_name"])}</div>
             <div style="font-size:0.8em;color:var(--text-muted);margin-top:0.1rem">
-              {escape_html(adapter["version"])} &middot; {source_label}
+              {version_line}
             </div>
+            {installed_version_line}
             <div class='connector-type-desc' style="margin-top:0.35rem">{escape_html(adapter.get("description", "") or "")}</div>
             {requirement_line}
+            {binding_recipe_line}
           </div>
           <div class='connector-type-footer' style="margin-top:auto; display:flex; flex-direction:column; gap:8px; align-items:stretch;">
             <div style="display:flex;align-items:center;gap:0.4rem;">{state_badge}</div>
@@ -105,6 +196,12 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
     )
 
     connector_types = connector_service.list_connector_types()
+    available_adapters = {
+        entry["id"]: entry for entry in adapter_loader.list_available_adapters()
+    }
+    binding_guidance = {
+        ct["id"]: _binding_guidance_for_connector_type(ct) for ct in connector_types
+    }
 
     all_bindings = connector_service.list_bindings()
     visible_bindings = [b for b in all_bindings if enforcer.can_read(b["scope"])]
@@ -161,10 +258,15 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
     )
 
     connector_type_opts = "".join(
-        f'<option value="{ct["id"]}">{escape_html(ct["display_name"])}</option>'
+        (
+            f'<option value="{ct["id"]}" '
+            f'data-display-name="{escape_html(ct["display_name"])}" '
+            f'data-guidance="{escape_html(json.dumps(binding_guidance.get(ct["id"], {})))}">'
+            f'{escape_html(ct["display_name"])}'
+            f'</option>'
+        )
         for ct in connector_types
     )
-
     credential_opts = "".join(
         f'<option value="{e["id"]}">{escape_html(e.get("name", e["id"]))} ({escape_html(e.get("scope", ""))} / {escape_html(e.get("reference_name", ""))})</option>'
         for e in credential_entries
@@ -271,6 +373,9 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
     ct_cards = ""
     for ct in connector_types:
         supported_actions = ct.get("supported_actions", [])
+        supported_action_names = connector_service.normalize_action_names(
+            supported_actions
+        )
         disabled_actions = ct.get("disabled_actions") or []
         provider_type = ct.get("provider_type") or "openapi"
         if provider_type == "mcp":
@@ -281,9 +386,10 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
             type_chip = '<span style="display:inline-block;font-size:0.72em;font-weight:600;line-height:1;padding:3px 8px;border-radius:10px;background:#6b7280;color:#fff;letter-spacing:0.03em;white-space:nowrap">Built-in</span>'
         else:
             type_chip = '<span style="display:inline-block;font-size:0.72em;font-weight:600;line-height:1;padding:3px 8px;border-radius:10px;background:#2563eb;color:#fff;letter-spacing:0.03em;white-space:nowrap">API</span>'
-        action_count = len(supported_actions)
+        action_count = len(supported_action_names)
         enabled_action_count = max(
-            action_count - len([a for a in disabled_actions if a in supported_actions]),
+            action_count
+            - len([a for a in disabled_actions if a in supported_action_names]),
             0,
         )
         view_actions_btn = (
@@ -305,19 +411,44 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
             health_badge = f'<span class="badge badge-warning" title="Enabled bindings not yet health-checked">{health_n} untested</span>'
         else:
             health_badge = ""
+        guidance = binding_guidance.get(ct["id"], {})
+        recipe_line = _binding_recipe_line(guidance)
+        adapter_entry = available_adapters.get(ct["id"])
+        adapter_installed = bool(adapter_entry and adapter_entry.get("installed"))
+        adapter_update_available = bool(
+            adapter_entry and adapter_entry.get("update_available")
+        )
+        adapter_badges = ""
+        if adapter_installed:
+            adapter_badges = '<span class="badge badge-success">Installed</span>'
+            if adapter_update_available:
+                adapter_badges += ' <span class="badge badge-warning">Update available</span>'
+        update_btn = ""
+        if adapter_update_available and ctx.is_admin:
+            update_btn = (
+                f"<button type='button' class='btn btn-sm btn-primary' "
+                f"onclick='updateAdapter(this, \"{ct['id']}\")'>Update</button>"
+            )
+        binding_recipe_line = (
+            f'<div style="font-size:0.8em;color:var(--text-muted);margin-top:0.25rem">{escape_html(recipe_line)}</div>'
+            if recipe_line
+            else ""
+        )
         ct_cards += f"""
         <div class='connector-type-card'>
           <div style="padding:0 0 0.5rem">
             <div class='connector-type-name' style="margin:0">{escape_html(ct["display_name"])}</div>
             <div style="font-size:0.8em;color:var(--text-muted);margin-top:0.1rem">{binding_action_line}</div>
             <div class='connector-type-desc' style="margin-top:0.35rem">{escape_html(ct.get("description", "") or "")}</div>
+            {binding_recipe_line}
           </div>
           <div class='connector-type-footer' style="margin-top:auto; display:flex; flex-direction:column; gap:8px; align-items:stretch;">
-            <div style="display:flex;align-items:center;gap:0.4rem;">{type_chip}{health_badge}</div>
+            <div style="display:flex;align-items:center;gap:0.4rem;">{type_chip}{health_badge}{adapter_badges}</div>
             <div style="display:flex;gap:0.4rem;align-items:center;justify-content:flex-end;">
               {view_actions_btn}
-              <button type='button' class='btn btn-sm btn-secondary' onclick='openNewBinding("{ct["id"]}")'>Bind</button>
-              <button type='button' class='btn btn-sm btn-danger icon-delete-btn' onclick='deleteConnectorType("{ct["id"]}")' title='Delete connector type' aria-label='Delete connector type'>{get_icon("delete")}</button>
+              <button type='button' class='btn btn-sm btn-secondary' onclick='openNewBinding("{ct["id"]}", "{escape_html(ct["display_name"])}")'>Bind</button>
+              {update_btn}
+              <button type='button' class='btn btn-sm btn-danger icon-delete-btn' onclick='deleteConnectorType("{ct["id"]}")' title='{ "Uninstall adapter" if adapter_installed else "Delete connector type" }' aria-label='{ "Uninstall adapter" if adapter_installed else "Delete connector type" }'>{ "Uninstall" if adapter_installed else get_icon("delete") }</button>
             </div>
           </div>
         </div>"""
@@ -351,7 +482,7 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
       <a class="stat-card stat-link" href="#bindings"><div class="value">{visible_binding_count}</div><div class="label">Visible Bindings</div></a>
       <a class="stat-card stat-link" href="#bindings"><div class="value">{enabled_binding_count}</div><div class="label">Enabled Bindings</div></a>
       <a class="stat-card stat-link" href="#executions"><div class="value">{failed_binding_count}</div><div class="label">Bindings with Errors</div></a>
-      <a class="stat-card stat-link" href="#service-catalog"><div class="value">{sum(len(ct.get("supported_actions") or []) - len(ct.get("disabled_actions") or []) for ct in connector_types)}</div><div class="label">Enabled Actions</div></a>
+      <a class="stat-card stat-link" href="#service-catalog"><div class="value">{sum(max(len(connector_service.normalize_action_names(ct.get("supported_actions"))) - len(ct.get("disabled_actions") or []), 0) for ct in connector_types)}</div><div class="label">Enabled Actions</div></a>
     </div>
 
     <div class="card">
@@ -400,10 +531,13 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
         <form id="create-binding-form" onsubmit="createBinding(event)">
           <div class="form-group">
             <label>Connector Type *</label>
-            <select id="binding-connector-type" required>
+            <select id="binding-connector-type" required onchange="updateBindingFormContext()">
               <option value="">-- Select --</option>
               {connector_type_opts}
             </select>
+          </div>
+          <div class="form-group">
+            <div id="binding-recipe" class="form-hint">Choose a connector type to see the required credential and config fields.</div>
           </div>
           <div class="form-group">
             <label>Name *</label>
@@ -434,10 +568,7 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
               <label>Credential Name *</label>
               <input type="text" id="binding-new-credential-name" placeholder="e.g. service-token" autocomplete="off">
             </div>
-            <div class="form-group">
-              <label>Secret Value *</label>
-              <input type="password" id="binding-new-credential-value" autocomplete="new-password">
-            </div>
+            <div id="binding-new-credential-editor"></div>
           </div>
           <div class="form-group">
             <label>Config (JSON, optional)</label>
@@ -446,6 +577,8 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
               Optional non-secret settings for this binding, such as <code>base_url</code>,
               <code>default_params</code>, <code>auth_header</code>, or <code>test_url</code>.
               Leave it blank if the credential and connector type are enough.
+              For adapters with their own request paths, point <code>base_url</code> at the
+              service root, not the final RPC endpoint.
             </div>
           </div>
           <div class="form-group">
@@ -489,6 +622,8 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
               Optional non-secret settings for this binding, such as <code>base_url</code>,
               <code>default_params</code>, <code>auth_header</code>, or <code>test_url</code>.
               Leave it blank if the credential and connector type are enough.
+              For adapters with their own request paths, point <code>base_url</code> at the
+              service root, not the final RPC endpoint.
             </div>
           </div>
           <div class="form-group">
@@ -664,11 +799,154 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
 
     js = """
 <script>
+function parseBindingGuidance() {
+  const select = document.getElementById('binding-connector-type');
+  if (!select || select.selectedIndex < 0) return {};
+  const option = select.options[select.selectedIndex];
+  const raw = option?.dataset?.guidance || '{}';
+  try {
+    return JSON.parse(raw) || {};
+  } catch (e) {
+    return {};
+  }
+}
+
+function bindingPlaceholderForField(field, kind) {
+  const name = String(field || '').trim();
+  const lower = name.toLowerCase();
+
+  if (kind === 'config') {
+    if (lower === 'base_url' || lower === 'url' || lower.endsWith('_url')) {
+      return lower === 'base_url' ? 'http://HOST:PORT' : 'https://example.com';
+    }
+    if (lower.includes('host')) return 'HOST';
+    if (lower.includes('port')) return 'PORT';
+    if (lower.includes('path')) return '/path';
+    return 'your-' + name.replace(/_/g, '-');
+  }
+
+  if (lower === 'username') return 'your-username';
+  if (lower.includes('password')) return 'your-password';
+  if (lower.includes('token') || lower.includes('secret') || lower.includes('key')) {
+    return 'YOUR_' + name.toUpperCase().replace(/[^A-Z0-9]+/g, '_');
+  }
+  return 'your-' + name.replace(/_/g, '-');
+}
+
+function buildBindingJsonTemplate(fields, kind) {
+  const out = {};
+  (Array.isArray(fields) ? fields : []).forEach(function(field) {
+    out[field] = bindingPlaceholderForField(field, kind);
+  });
+  return JSON.stringify(out, null, 2);
+}
+
+function clearBindingTemplateFlag(el) {
+  if (!el || !el.dataset) return;
+  el.dataset.template = 'false';
+}
+
+function prefillBindingConfig(guidance) {
+  const configEl = document.getElementById('binding-config');
+  if (!configEl) return;
+  const fields = Array.isArray(guidance?.config_fields) ? guidance.config_fields : [];
+  if (!fields.length) {
+    configEl.dataset.template = 'false';
+    return;
+  }
+  if (configEl.value.trim() && configEl.dataset.template !== 'true') return;
+  configEl.value = buildBindingJsonTemplate(fields, 'config');
+  configEl.dataset.template = 'true';
+  if (!configEl.dataset.templateListenerAttached) {
+    configEl.addEventListener('input', function() {
+      clearBindingTemplateFlag(configEl);
+    });
+    configEl.dataset.templateListenerAttached = 'true';
+  }
+}
+
+function renderBindingCredentialEditor(guidance) {
+  const wrap = document.getElementById('binding-new-credential-editor');
+  if (!wrap) return;
+  const fields = Array.isArray(guidance?.credential_fields) ? guidance.credential_fields : [];
+  if (!fields.length) {
+    wrap.dataset.template = 'false';
+    wrap.innerHTML = '<div class="form-hint">This connector does not declare a credential payload. Use a stored credential if one exists.</div>';
+    return;
+  }
+
+  const isMulti = fields.length > 1;
+  const hint = isMulti
+    ? 'Store the credential as one JSON object with these fields: ' + fields.join(', ')
+    : 'Store the single secret value for ' + fields[0];
+
+  if (isMulti) {
+    const template = buildBindingJsonTemplate(fields, 'credential');
+    wrap.innerHTML =
+      '<div class="form-group">' +
+        '<label>Credential JSON *</label>' +
+        '<textarea id="binding-new-credential-value" rows="5" autocomplete="off" data-template="true" placeholder=' +
+          '"Replace the placeholders before saving"' +
+        '></textarea>' +
+      '</div>' +
+      '<div class="form-hint">' + escapeHtml(hint) + ' The template is prefilled below.</div>';
+    const valueEl = document.getElementById('binding-new-credential-value');
+    if (valueEl) {
+      valueEl.value = template;
+      valueEl.addEventListener('input', function() {
+        clearBindingTemplateFlag(valueEl);
+      }, { once: true });
+    }
+    return;
+  }
+
+  const single = fields[0];
+  const looksSecret = /password|secret|token|key/i.test(single);
+  wrap.innerHTML =
+    '<div class="form-group">' +
+      '<label>Credential Value *</label>' +
+      '<input type="' + (looksSecret ? 'password' : 'text') + '" id="binding-new-credential-value" autocomplete="new-password" placeholder="e.g. ' + escapeHtml(single) + '">' +
+    '</div>' +
+    '<div class="form-hint">' + escapeHtml(hint) + '</div>';
+}
+
+function updateBindingFormContext(defaultName) {
+  const guidance = parseBindingGuidance();
+  const recipe = document.getElementById('binding-recipe');
+  const nameEl = document.getElementById('binding-name');
+  const credNameEl = document.getElementById('binding-new-credential-name');
+
+  if (recipe) {
+    const bits = [];
+    if (guidance?.suggested_binding_name) {
+      bits.push('Suggested binding: ' + guidance.suggested_binding_name);
+    }
+    if (Array.isArray(guidance?.credential_fields) && guidance.credential_fields.length) {
+      bits.push('Credential JSON fields: ' + guidance.credential_fields.join(', '));
+    }
+    if (Array.isArray(guidance?.config_fields) && guidance.config_fields.length) {
+      bits.push('Config JSON fields: ' + guidance.config_fields.join(', '));
+    }
+    recipe.textContent = bits.length ? bits.join(' · ') : 'No extra binding requirements declared.';
+  }
+
+  if (nameEl && !nameEl.value) {
+    nameEl.value = defaultName || guidance?.suggested_binding_name || '';
+  }
+  if (credNameEl && !credNameEl.value) {
+    credNameEl.value = guidance?.suggested_credential_name || '';
+  }
+
+  renderBindingCredentialEditor(guidance);
+  prefillBindingConfig(guidance);
+}
+
 async function createBinding(e) {
   e.preventDefault();
   let credentialId = document.getElementById('binding-credential').value || null;
   const credentialMode = document.getElementById('binding-credential-mode').value;
   const bindingScope = document.getElementById('binding-scope').value;
+  const guidance = parseBindingGuidance();
 
   if (credentialMode === 'new') {
     const credentialName = document.getElementById('binding-new-credential-name').value;
@@ -680,6 +958,27 @@ async function createBinding(e) {
     if (!credentialName || !credentialValue) {
       showToast('Credential name and secret value are required', 'danger');
       return;
+    }
+    if ((guidance.credential_fields || []).length > 1) {
+      let parsed = null;
+      try {
+        parsed = JSON.parse(credentialValue);
+      } catch (err) {
+        showToast('Enter valid JSON for ' + guidance.credential_fields.join(', '), 'danger');
+        return;
+      }
+      const missing = (guidance.credential_fields || []).filter(function(field) {
+        return parsed[field] === undefined || parsed[field] === null || parsed[field] === '';
+      });
+      if (missing.length) {
+        showToast('Credential JSON must include: ' + missing.join(', '), 'danger');
+        return;
+      }
+      const credentialEl = document.getElementById('binding-new-credential-value');
+      if (credentialEl && credentialEl.dataset.template === 'true') {
+        showToast('Replace the credential template values before saving', 'danger');
+        return;
+      }
     }
     const credentialBody = {
       name: credentialName,
@@ -693,6 +992,38 @@ async function createBinding(e) {
       return;
     }
     credentialId = credentialResult.data.entry.id;
+  }
+
+  if ((guidance.credential_fields || []).length && !credentialId) {
+    showToast('This adapter needs a credential for: ' + guidance.credential_fields.join(', '), 'danger');
+    return;
+  }
+
+  if ((guidance.config_fields || []).length) {
+    const configEl = document.getElementById('binding-config');
+    let configValue = (configEl && configEl.value ? configEl.value.trim() : '');
+    if (!configValue) {
+      showToast('This adapter needs binding config JSON with: ' + guidance.config_fields.join(', '), 'danger');
+      return;
+    }
+    let parsedConfig = null;
+    try {
+      parsedConfig = JSON.parse(configValue);
+    } catch (err) {
+      showToast('Binding config must be valid JSON', 'danger');
+      return;
+    }
+    const missingConfig = (guidance.config_fields || []).filter(function(field) {
+      return parsedConfig[field] === undefined || parsedConfig[field] === null || parsedConfig[field] === '';
+    });
+    if (missingConfig.length) {
+      showToast('Binding config must include: ' + missingConfig.join(', '), 'danger');
+      return;
+    }
+    if (configEl && configEl.dataset.template === 'true') {
+      showToast('Replace the config template values before saving', 'danger');
+      return;
+    }
   }
 
   const body = {
@@ -719,6 +1050,7 @@ function toggleBindingCredentialMode() {
   const mode = document.getElementById('binding-credential-mode').value;
   document.getElementById('binding-existing-credential-fields').style.display = mode === 'existing' ? '' : 'none';
   document.getElementById('binding-new-credential-fields').style.display = mode === 'new' ? '' : 'none';
+  updateBindingFormContext();
 }
 
 async function editBinding(id) {
@@ -838,10 +1170,16 @@ function escapeHtml(s) {
   });
 }
 
-function openNewBinding(typeId) {
+function openNewBinding(typeId, defaultName) {
   const el = document.getElementById('binding-connector-type');
   if (el) {
     el.value = typeId;
+  }
+  updateBindingFormContext(defaultName);
+  const guidance = parseBindingGuidance();
+  const credentialMode = document.getElementById('binding-credential-mode');
+  if (credentialMode && Array.isArray(guidance?.credential_fields) && guidance.credential_fields.length > 1) {
+    credentialMode.value = 'new';
   }
   toggleBindingCredentialMode();
   openModal('create-binding-modal');
@@ -1064,12 +1402,23 @@ async function addHttpConnector(e) {
   location.reload();
 }
 
-async function installAdapter(adapterId) {
+function setAdapterButtonState(btn, label) {
+  if (!btn) return;
+  if (!btn.dataset.originalLabel) {
+    btn.dataset.originalLabel = btn.textContent || '';
+  }
+  btn.disabled = label !== null;
+  btn.textContent = label === null ? (btn.dataset.originalLabel || btn.textContent || '') : label;
+}
+
+async function installAdapter(btn, adapterId) {
+  setAdapterButtonState(btn, 'Installing...');
   const j = await apiFetch('/api/connector-types/adapters/' + adapterId + '/install', {
     method: 'POST',
     body: JSON.stringify({})
   });
   if (!j.ok) {
+    setAdapterButtonState(btn, null);
     showToast(j.error?.message || 'Failed to install adapter', 'danger');
     return;
   }
@@ -1077,11 +1426,28 @@ async function installAdapter(adapterId) {
   location.reload();
 }
 
-async function uninstallAdapter(adapterId) {
+async function updateAdapter(btn, adapterId) {
+  setAdapterButtonState(btn, 'Updating...');
+  const j = await apiFetch('/api/connector-types/adapters/' + adapterId + '/update', {
+    method: 'POST',
+    body: JSON.stringify({})
+  });
+  if (!j.ok) {
+    setAdapterButtonState(btn, null);
+    showToast(j.error?.message || 'Failed to update adapter', 'danger');
+    return;
+  }
+  showToast('Updated ' + (j.data.adapter?.connector_type?.display_name || adapterId), 'success');
+  location.reload();
+}
+
+async function uninstallAdapter(btn, adapterId) {
+  setAdapterButtonState(btn, 'Uninstalling...');
   const j = await apiFetch('/api/connector-types/adapters/' + adapterId + '/install', {
     method: 'DELETE'
   });
   if (!j.ok) {
+    setAdapterButtonState(btn, null);
     showToast(j.error?.message || 'Failed to uninstall adapter', 'danger');
     return;
   }
@@ -1255,12 +1621,23 @@ async def connectors_adapters_page(
 
     js = """
 <script>
-async function installAdapter(adapterId) {
+function setAdapterButtonState(btn, label) {
+  if (!btn) return;
+  if (!btn.dataset.originalLabel) {
+    btn.dataset.originalLabel = btn.textContent || '';
+  }
+  btn.disabled = label !== null;
+  btn.textContent = label === null ? (btn.dataset.originalLabel || btn.textContent || '') : label;
+}
+
+async function installAdapter(btn, adapterId) {
+  setAdapterButtonState(btn, 'Installing...');
   const j = await apiFetch('/api/connector-types/adapters/' + adapterId + '/install', {
     method: 'POST',
     body: JSON.stringify({})
   });
   if (!j.ok) {
+    setAdapterButtonState(btn, null);
     showToast(j.error?.message || 'Failed to install adapter', 'danger');
     return;
   }
@@ -1268,11 +1645,28 @@ async function installAdapter(adapterId) {
   location.reload();
 }
 
-async function uninstallAdapter(adapterId) {
+async function updateAdapter(btn, adapterId) {
+  setAdapterButtonState(btn, 'Updating...');
+  const j = await apiFetch('/api/connector-types/adapters/' + adapterId + '/update', {
+    method: 'POST',
+    body: JSON.stringify({})
+  });
+  if (!j.ok) {
+    setAdapterButtonState(btn, null);
+    showToast(j.error?.message || 'Failed to update adapter', 'danger');
+    return;
+  }
+  showToast('Updated ' + (j.data.adapter?.connector_type?.display_name || adapterId), 'success');
+  location.reload();
+}
+
+async function uninstallAdapter(btn, adapterId) {
+  setAdapterButtonState(btn, 'Uninstalling...');
   const j = await apiFetch('/api/connector-types/adapters/' + adapterId + '/install', {
     method: 'DELETE'
   });
   if (!j.ok) {
+    setAdapterButtonState(btn, null);
     showToast(j.error?.message || 'Failed to uninstall adapter', 'danger');
     return;
   }

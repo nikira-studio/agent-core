@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     TRUSTED_PROXIES: str = ""
     STALE_THRESHOLD_MINUTES: int = 5
     COOKIE_SECURE: bool = False
+    BLOCK_INTERNAL_HOSTS: bool = False
     ALLOWED_INTERNAL_HOSTS: str = ""
 
     @property

@@ -1,6 +1,6 @@
 # Integrations
 
-Agent Core exposes memory, credentials, connector actions, and activity tracking over **MCP** (Model Context Protocol) and **REST**. It doesn't schedule or orchestrate — it gives agents services to call when they need them.
+Agent Core exposes memory, credentials, connector actions, and activity tracking over **MCP** (Model Context Protocol) and **REST**. It doesn't schedule or orchestrate. Agents call it when they need memory, credentials, connectors, or activity tracking.
 
 The dashboard **Integrations** page at `/integrations` generates ready-to-paste configs for specific tools and is usually the fastest path. This doc explains what's happening under the hood and covers cases the generator doesn't handle. The current presets include Claude Code, Codex, Cursor, Windsurf, Antigravity, and a generic MCP/REST path.
 
@@ -13,7 +13,7 @@ The dashboard **Connectors** page at `/connectors` is where you register externa
 
 OpenAPI imports and MCP server registrations both become first-class connector types in the same catalog. The difference is only how the connector type was discovered and how Agent Core executes it later.
 
-For operator-managed internal services on your own network, keep the default SSRF guard in place and opt in only through deployment config. Set `AGENT_CORE_ALLOWED_INTERNAL_HOSTS` for trusted hostnames like `firecrawl` or `searxng`, then use binding `config_json` overrides such as `{"base_url":"http://firecrawl:3002/v1","auth_mode":"none"}` when you need an imported OpenAPI spec to talk to that internal deployment.
+For operator-managed internal services on your own network, internal hosts are allowed by default. If you want to block local probing, set `AGENT_CORE_BLOCK_INTERNAL_HOSTS=true`; if you do that, add trusted names to `AGENT_CORE_ALLOWED_INTERNAL_HOSTS` as exceptions. You can still use binding `config_json` overrides such as `{"base_url":"http://firecrawl:3002/v1","auth_mode":"none"}` when you need an imported OpenAPI spec to talk to that internal deployment.
 
 ---
 
@@ -82,7 +82,7 @@ Once connected, these tools are available in any session:
 | `connectors_summary` | Summarize visible connector types, bindings, credentials, actions, and health state |
 | `connectors_run` | Run one connector action server-side using a binding |
 
-This is the pattern throughout Agent Core: agents connect, discover what they’re allowed to use, and call what they need. Agent Core provides the capabilities and logs the results — it doesn’t act as a workflow engine.
+Agents connect, discover authorized tools, and call what they need. Agent Core provides the capabilities and logs the results. It is not a workflow engine.
 
 For memory writes, `slot_key` can make a preference deterministic by keeping one active value per slot, and `valid_from`, `valid_to`, and `last_confirmed_at` are optional freshness hints.
 
@@ -97,7 +97,16 @@ Agent Core uses a small set of scope types with different purposes:
 - `workspace:<id>` is the normal collaboration scope for shared project work and handoffs.
 - `shared` / `global` is a cross-user shared access path, not just a visibility toggle.
 
-When you generate reusable instructions, keep those distinctions in mind. For assistant-style agents, use the authenticated/default user scope when no workspace is selected, and include a workspace scope only when the user explicitly chose one. Treat user scope as read-only owner context unless user-scope write access is explicitly enabled; otherwise keep facts and decisions in the default shared scope, meaning the workspace scope when one is selected or the owner context when no workspace is selected.
+When you generate reusable instructions, keep those distinctions in mind:
+
+| Situation | Scope to use |
+|---|---|
+| No workspace selected | authenticated/default user scope |
+| Workspace explicitly selected | workspace scope for facts and decisions |
+| User-scope write enabled | write stable preferences to user scope |
+| Otherwise | keep preferences in workspace scope (or owner context if no workspace) |
+
+Treat user scope as read-only owner context unless user-scope write access is explicitly enabled.
 
 ## Connector Setup in Agent Core
 
@@ -134,7 +143,7 @@ Example: for a local Firecrawl deployment, import the public spec from GitHub, t
 }
 ```
 
-And set `AGENT_CORE_ALLOWED_INTERNAL_HOSTS=firecrawl` in the Agent Core environment. That keeps the imported spec public while routing execution to your trusted internal Firecrawl instance.
+If you enable `AGENT_CORE_BLOCK_INTERNAL_HOSTS=true`, add `AGENT_CORE_ALLOWED_INTERNAL_HOSTS=firecrawl` in the Agent Core environment. That keeps the imported spec public while routing execution to your trusted internal Firecrawl instance.
 
 ### HTTP Connector
 
@@ -174,7 +183,7 @@ Agent Core injects the credential server-side, calls the external service, and r
 
 #### Test connection behavior
 
-The binding test in the dashboard hits the base URL directly (e.g. `GET https://openrouter.ai/api/v1`). Many REST APIs return HTML documentation pages or a 404 at their base URL, which the test reports as a failure. This is expected — it does not mean the binding is broken. Verify the binding works by running an actual action with `connectors_run` or `connectors_bindings_test` is reliable only for APIs that return a valid response at the base URL (like health check endpoints).
+The binding test in the dashboard hits the base URL directly (e.g. `GET https://openrouter.ai/api/v1`). Many REST APIs return HTML or a 404 at their base URL. The test reports failure in those cases. That's normal and doesn't mean the binding is broken. Verify the binding works by running an actual action with `connectors_run` or `connectors_bindings_test` is reliable only for APIs that return a valid response at the base URL (like health check endpoints).
 
 #### Example: OpenRouter
 
@@ -236,11 +245,17 @@ The MCP import is server-side only: it discovers and stores the tool list in Age
 
 Adapters are the fourth way to add a connector — for services that don't fit OpenAPI/MCP cleanly (OAuth refresh, session handshakes, multi-field credentials, CLI wrappers). An adapter is a single JSON **manifest** that describes a service's actions, auth, and request shape; Agent Core's built-in engines interpret it at runtime, so installing one adds no Python and survives upgrades.
 
-**Quick install:** go to `/connectors` → **Browse Adapters** → pick one (e.g. `transmission`, `google_gmail`, `github_cli`) → click **Install** → bind a credential and call actions like any other connector.
+**Quick install:** go to `/connectors` → **Browse Adapters** → pick one (e.g. `transmission`, `google_gmail`, `github_cli`) → click **Install** → bind a credential and call actions like any other connector. If a newer bundled template is available later, the same page shows **Update** and refreshes the installed copy in place without changing bindings.
+
+The adapter and service cards show a binding recipe so you know what to create next: a suggested binding name, the required credential fields, and any non-secret config fields. If an adapter needs more than one credential field, store those fields as one JSON secret and create the credential from the binding flow with the keys the card shows (for example, `username` and `password` for Transmission). Optional request fields are omitted when blank instead of being sent as empty placeholder values.
+
+For adapters that define their own request path, set `base_url` to the service root, not the final RPC endpoint. Transmission is the common example: use `http://HOST:PORT`, and the adapter appends `/transmission/rpc` itself. If you omit `ids` from `list_torrents`, Transmission returns the full torrent list. If you supply `download_dir` to `add_torrent`, it must be an absolute path.
 
 **Three backends** the engine understands: `http` (declarative requests with session/refresh support), `mcp` (point at an external MCP server), `cli` (drive a local binary). All run out-of-process or as pure data — adapters never inject Python into your Agent Core process.
 
 **Three install paths:** the Browse Adapters page (system templates + already-dropped-in user adapters), a drop-in into `data/adapters/<id>/adapter.json`, or `git:owner/repo@ref` for adapters shared from a git repo. Code-bearing backends (`mcp`/`cli`) get a dangerous-pattern scan before enabling.
+
+Uninstall behavior is split by source: system adapters remove the installed copy from `data/adapters/` and clear the catalog entry; user-dropped adapters clear the catalog entry but leave the local file in place so you can reinstall without re-downloading. Updates keep the connector type id stable and preserve bindings.
 
 **👉 For the complete guide — installing, building your own, the manifest schema, templating, OAuth/session patterns, testing, and sharing — see [docs/adapters.md](adapters.md).**
 
@@ -279,7 +294,7 @@ For servers using a custom header name (e.g. `CONTEXT7_API_KEY`):
   ```
   The empty `auth_scheme` tells Agent Core to inject the raw credential value without a `Bearer ` prefix.
 
-MCP bindings can also carry `timeout_ms` in config JSON for slow servers. The endpoint URL must still pass the URL guard; register internal hostnames in `AGENT_CORE_ALLOWED_INTERNAL_HOSTS`.
+MCP bindings can also carry `timeout_ms` in config JSON for slow servers. The endpoint URL must still pass the URL guard; if you enable `AGENT_CORE_BLOCK_INTERNAL_HOSTS=true`, register trusted internal hostnames in `AGENT_CORE_ALLOWED_INTERNAL_HOSTS`.
 
 **OpenCode note:** if you use deny-by-default permissions in OpenCode, allow the MCP tool prefixes explicitly or the server may connect but the tools will stay hidden. The working prefixes for this workspace are `agent-core_*` and `agent-browser_*`.
 
@@ -616,7 +631,7 @@ If you want Agent Core itself to call an imported OpenAPI spec or another servic
 The current flow is:
 
 1. Import an OpenAPI spec for the service you want, or use the built-in `generic_http` connector for a quick one-off endpoint.
-2. Create or pick a stored credential. You can create credentials directly on the Connectors page or inline while creating a binding.
+2. Create or pick a stored credential. You can create credentials directly on the Connectors page or inline while creating a binding. If the connector needs multiple credential fields, the binding form will show the exact field names and expects them as one JSON secret.
 3. Create a connector binding for the imported connector type.
 4. Bind that connector to a scope like `workspace:<id>`, `user:<id>`, or `shared`.
 5. Test the binding from the dashboard.
@@ -655,14 +670,14 @@ If you're importing a spec and using a PAT or other bearer token, the flow is si
 
 ### The Right Mental Model
 
-Think of Agent Core less like an orchestrator and more like a building of services:
+Agent Core is a service layer, not an orchestrator:
 
-- **Memory** is the shared reference room.
-- **Credentials** are the secured service keys.
-- **Connectors** are the service counters agents can walk up to.
-- **Activity** is the live status board and handoff mailroom.
+- **Memory** stores shared facts and decisions.
+- **Credentials** hold secrets agents never see directly.
+- **Connectors** are callable service actions with server-side credential injection.
+- **Activity** tracks what's running and what's waiting for handoff.
 
-Agents decide when to use a service. Agent Core makes the service available, enforces scope, and logs what happened. It does not schedule work for them.
+Agents decide when to use a service. Agent Core makes the service available, enforces scope, and logs what happened.
 
 ---
 
@@ -748,7 +763,7 @@ The practical flow is:
 
 This isn't automatic orchestration — it's a durable handoff trail and mailroom. A different agent picks up where the last one stopped, with full context, instead of starting blind.
 
-If work needs to cross users or workspaces, make that explicit in the activity scope and briefing trail. The safest pattern is: leave the task in the correct workspace, have the receiving agent check for assigned work in that workspace, then claim it. If a broad memory search returns nothing, retry with exact topic values, specific words from prior records, or a known record ID — conceptual queries can miss when embeddings aren't available.
+If work needs to cross users or workspaces, make that explicit in the activity scope and briefing trail. The safest pattern is: leave the task in the correct workspace, have the receiving agent check for assigned work in that workspace, then claim it. If a broad memory search returns nothing, retry with exact topic values, specific words from prior records, or a known record ID. Conceptual queries miss when embeddings aren't available.
 
 ---
 

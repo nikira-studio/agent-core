@@ -113,7 +113,7 @@ class CliEngine(BaseConnector):
         argv = []
         for item in args_tpl:
             rendered = self._render(item, params, config, cred)
-            if rendered == "":
+            if rendered == "" or rendered == _OMIT_SENTINEL:
                 argv.append(_OMIT_SENTINEL)
             else:
                 argv.append(rendered)
@@ -170,6 +170,7 @@ class CliEngine(BaseConnector):
                         "float": 0.0,
                         "bool": False,
                         "list": [],
+                        "omit": _OMIT_SENTINEL,
                     }
                     fallback_str = ""
                     type_arg = filter_arg
@@ -177,6 +178,8 @@ class CliEngine(BaseConnector):
                         parts = filter_arg.split(", as=", 1)
                         fallback_str = parts[0]
                         type_arg = parts[1] if len(parts) > 1 else ""
+                    if type_arg == "omit":
+                        return _OMIT_SENTINEL
                     if fallback_str:
                         try:
                             return str(json.loads(fallback_str))

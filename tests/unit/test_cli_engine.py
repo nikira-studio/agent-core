@@ -66,6 +66,16 @@ class TestCliEngineTemplating:
         result = engine._render("count={{ params.count | default(0, as=int) }}", {}, {})
         assert result == "count=0"
 
+    def test_render_params_default_omit(self):
+        engine = CliEngine(make_ct({"bin": "gh", "commands": {}}))
+        result = engine._render("{{ params.owner | default('', as=omit) }}", {}, {})
+        assert result == "__OMIT__"
+
+    def test_render_params_default_omit(self):
+        engine = CliEngine(make_ct({"bin": "gh", "commands": {}}))
+        result = engine._render("{{ params.owner | default('', as=omit) }}", {}, {})
+        assert result == "__OMIT__"
+
     def test_render_cred_raw(self):
         engine = CliEngine(make_ct({"bin": "gh", "commands": {}}))
         cred = make_cred(raw="secret-token")
@@ -123,7 +133,7 @@ class TestOmitSentinel:
     def test_omit_sentinel_drops_flag_when_value_is_empty(self):
         engine = CliEngine(make_ct({"bin": "gh", "commands": {}}))
         argv = engine._build_argv(
-            {"args": ["--owner", '{{ params.owner | default("", as=str) }}']},
+            {"args": ["--owner", "{{ params.owner | default('', as=omit) }}"]},
             {},
             {},
             None,
@@ -335,7 +345,7 @@ class TestCliEngineExecute:
                                 "--json",
                                 "name",
                                 "--owner",
-                                '{{ params.owner | default("", as=str) }}',
+                                "{{ params.owner | default('', as=omit) }}",
                                 "--limit",
                                 "30",
                             ],

@@ -2,7 +2,7 @@
   "spec_version": "1.0",
   "id": "transmission",
   "display_name": "Transmission",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "author": "agent-core team",
   "description": "Transmission BitTorrent RPC — manage torrents and session stats. Supports session-handshake retry, per-action schemas, and destructive flags.",
   "credential_schema": {
@@ -144,7 +144,7 @@
             "method": "torrent-get",
             "arguments": {
               "fields": ["id", "name", "status", "percentDone", "uploadRatio"],
-              "ids": "{{ params.ids | default([], as=list) }}"
+              "ids": "{{ params.ids | default('', as=omit) }}"
             }
           }
         },
@@ -161,7 +161,7 @@
             "method": "torrent-add",
             "arguments": {
               "filename": "{{ params.filename }}",
-              "download-dir": "{{ params.download_dir | default('', as=str) }}"
+            "download-dir": "{{ params.download_dir | default('', as=omit) }}"
             }
           }
         },
