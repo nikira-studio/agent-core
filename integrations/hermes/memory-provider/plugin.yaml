@@ -1,0 +1,6 @@
+name: agent_core
+version: 1.0.0
+description: "Agent Core — prefetch-only HTTP memory recall. Searches agent-core memory_search before every turn and injects the top hits as <memory-context>."
+pip_dependencies: []
+requires_env:
+  - AGENT_CORE_API_KEY
