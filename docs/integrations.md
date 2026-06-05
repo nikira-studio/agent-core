@@ -101,12 +101,12 @@ When you generate reusable instructions, keep those distinctions in mind:
 
 | Situation | Scope to use |
 |---|---|
-| No workspace selected | authenticated/default user scope |
-| Workspace explicitly selected | workspace scope for facts and decisions |
-| User-scope write enabled | write stable preferences to user scope |
-| Otherwise | keep preferences in workspace scope (or owner context if no workspace) |
+| Reading owner context | authenticated/default user scope (read-only by default) |
+| Workspace explicitly selected | workspace scope for facts, decisions, and durable writes |
+| No workspace selected | the agent's own scope (`agent:<id>`) for durable writes — it is the only writable durable scope unless user/workspace write was granted |
+| User-scope write explicitly enabled | may write stable preferences to user scope |
 
-Treat user scope as read-only owner context unless user-scope write access is explicitly enabled.
+Treat user scope as read-only owner context unless user-scope write access is explicitly enabled. Agents are not granted user-scope or workspace write by default, so an assistant with no workspace selected uses its own `agent:<id>` scope as its durable store, not just for scratch.
 
 ## Connector Setup in Agent Core
 
@@ -485,7 +485,7 @@ Restart Cursor after saving.
 
 ### Assistants
 
-Use this section for assistant-style agents that manage their own MCP configuration. The agent should update its own config, reload or restart as supported, and verify Agent Core before doing work. Treat user scope as read-only owner context unless the agent is explicitly granted user-scope write access; otherwise keep preferences in the default shared scope and keep facts and decisions in workspace scope when a workspace is selected.
+Use this section for assistant-style agents that manage their own MCP configuration. The agent should update its own config, reload or restart as supported, and verify Agent Core before doing work. Treat user scope as read-only owner context unless the agent is explicitly granted user-scope write access. Durable writes go to the selected workspace scope when one is chosen, otherwise to the agent's own `agent:<id>` scope — which, for an assistant with no workspace, is its durable store, not just scratch.
 If you want a fresh bearer token for the generated prompt, use the one-time key button for this output the same way you would for MCP config or environment variables.
 If a workspace is selected in the Integrations page, the generated prompt includes a workspace scope line. Otherwise it stays workspace-free and uses the authenticated/default user scope as the shared context.
 
@@ -522,9 +522,9 @@ Setup instructions:
 
 Scope guidance:
 - Use the authenticated/default user scope as read-only owner context when you have user-scope read access.
-- If user-scope write access is explicitly available, you may store stable user preferences there; otherwise keep preferences in the default shared scope, which means the workspace scope when selected or owner context when no workspace is selected.
-- If a workspace was selected in the Integrations page, include that workspace scope for facts, decisions, and shared collaboration context.
-- Use the agent's private scope only for temporary scratch notes.
+- Write durable memory to the selected workspace scope when one is chosen, otherwise to your own agent scope (`agent:<id>`). Agents are not granted user-scope or workspace write by default, so with no workspace your agent scope is your durable store, not just scratch.
+- Store stable user preferences in the user scope only if user-scope write was explicitly granted; otherwise write them to your durable scope (workspace, or your agent scope when no workspace).
+- To revise a fact or decision, write the new record with `supersedes_id`; use a `slot_key` to keep one active value per slot for `preference` records (slot_key is valid for the preference class only).
 
 When writing the config, use the MCP URL and bearer token from the connection values section above. Do not duplicate them elsewhere in the prompt.
 

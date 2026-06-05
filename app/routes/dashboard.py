@@ -5586,13 +5586,13 @@ At the start of a meaningful task:
 1. Start or refresh the activity record using `activity_update`.
 2. Search `{default_scope}` with 2-3 focused queries for relevant architecture, decisions, prior bugs, and current project state. If the search returns little or nothing, retry with exact topic values, exact keywords from prior records, or a known record id. When embeddings are unavailable, broad conceptual queries can miss; exact tokens and known ids are more reliable.
 3. Search `{user_scope}` only when you have user-scope read access and user preferences or personal workflow may matter.
-4. Use `memory_get` for a known record id; otherwise prefer `memory_search`.
+4. Use `memory_get` with a scope to list or read records; use `memory_search` to find records by query, topic, or class (there is no fetch-by-id).
 
 Write memory only when it will help a future session:
 
 - `decision` in `{default_scope}` for durable choices, tradeoffs, rejected options, and why they were chosen.
 - `fact` in `{default_scope}` for stable implementation facts, integration details, constraints, and verified behavior.
-- `preference` in `{user_scope}` for stable user preferences when user-scope write access is available; otherwise keep preferences in `{default_scope}` and treat user scope as read-only owner context.
+- `preference` in the authenticated/default user scope only if your key has user-scope write; otherwise treat the user scope as read-only owner context and write the preference to `{default_scope}` instead.
 - `scratchpad` in `{agent_scope}` for temporary private notes, or in `{default_scope}` only for short-lived workspace handoff notes.
 
 Do not write memory for routine progress, command output, facts already obvious from files, secrets, raw credentials, or noisy transient debugging notes. Use concise content, add domain/topic when useful for exact filtering, set confidence to match certainty, and set importance higher only for information likely to matter later.
@@ -5639,13 +5639,13 @@ At the start of a meaningful task:
 1. Start or refresh the activity record using the Activity Tracking workflow below.
 2. Search `{default_scope}` with 2-3 focused queries for relevant architecture, decisions, prior bugs, and current project state. If the search returns little or nothing, retry with exact topic values, exact keywords from prior records, or a known record id. When embeddings are unavailable, broad conceptual queries can miss; exact tokens and known ids are more reliable.
 3. Search the authenticated/default user scope only when you have user-scope read access and user preferences or personal workflow may matter.
-4. Use `memory_get` for a known record id; otherwise prefer `memory_search`.
+4. Use `memory_get` with a scope to list or read records; use `memory_search` to find records by query, topic, or class (there is no fetch-by-id).
 
 Write memory only when it will help a future session:
 
 - `decision` in `{default_scope}` for durable choices, tradeoffs, rejected options, and why they were chosen.
 - `fact` in `{default_scope}` for stable implementation facts, integration details, constraints, and verified behavior.
-- `preference` in the authenticated/default user scope for stable user preferences when user-scope write access is available; otherwise keep preferences in `{default_scope}` and treat user scope as read-only owner context.
+- `preference` in the authenticated/default user scope only if your key has user-scope write; otherwise treat the user scope as read-only owner context and write the preference to `{default_scope}` instead.
 - `scratchpad` in the authenticated private agent scope for temporary private notes, or in `{default_scope}` only for short-lived workspace handoff notes.
 
 Do not write memory for routine progress, command output, facts already obvious from files, secrets, raw credentials, or noisy transient debugging notes.
@@ -5759,13 +5759,13 @@ At the start of a meaningful task:
 3. Search `{default_scope}` with 2-3 focused queries for relevant architecture, decisions, prior bugs, and current project state. If the search returns little or nothing, retry with exact topic values, exact keywords from prior records, or a known record id. When embeddings are unavailable, broad conceptual queries can miss; exact tokens and known ids are more reliable.
 4. If this is a handoff, resume, or review of prior work, inspect the recent activity trail and any generated briefing before making changes.
 5. Search the authenticated/default user scope only when you have user-scope read access and user preferences or personal workflow may matter.
-6. Use `memory_get` for a known record id; otherwise prefer `memory_search`.
+6. Use `memory_get` with a scope to list or read records; use `memory_search` to find records by query, topic, or class (there is no fetch-by-id).
 
 Write memory only when it will help a future session:
 
 - `decision` in `{default_scope}` for durable choices, tradeoffs, rejected options, and why they were chosen.
 - `fact` in `{default_scope}` for stable implementation facts, integration details, constraints, and verified behavior.
-- `preference` in the authenticated/default user scope for stable user preferences when user-scope write access is available; otherwise keep preferences in `{default_scope}` and treat user scope as read-only owner context.
+- `preference` in the authenticated/default user scope only if your key has user-scope write; otherwise treat the user scope as read-only owner context and write the preference to `{default_scope}` instead.
 - `scratchpad` in the authenticated private agent scope for temporary private notes, or in `{default_scope}` only for short-lived workspace handoff notes.
 
 Do not write memory for routine progress, command output, facts already obvious from files, secrets, raw credentials, or noisy transient debugging notes.
@@ -5797,9 +5797,19 @@ This file is the manual fallback when the client has no lifecycle hook or plugin
 
 
 def _build_assistants_md(base_url, user_scope, workspace_scope, agent_scope, api_key=None):
-    default_scope = (
-        workspace_scope
-        or f"the authenticated/default user scope from your {APP_NAME} connection"
+    # Durable writes go to the writable scope an agent actually has: the selected
+    # workspace when one is chosen, otherwise the agent's own scope. Agents are not
+    # granted user-scope or workspace write by default, so the user scope is for
+    # reads only unless write was explicitly granted.
+    durable_scope = workspace_scope or agent_scope
+    durable_note = (
+        " This is the selected workspace scope; use it for shared collaboration."
+        if workspace_scope
+        else (
+            " With no workspace selected this is your own agent scope, which is your"
+            " durable private store (not just scratch) because agents are not granted"
+            " user-scope or workspace write by default."
+        )
     )
     connection_key = _connection_key_value(api_key)
     workspace_context_line = (
@@ -5828,11 +5838,9 @@ If your host defers tool availability, run its tool discovery/load step first so
 
 ## Memory Scope Guidance
 
-Default memory scope for this setup is `{default_scope}`.
-Read the authenticated/default user scope from your {APP_NAME} connection for stable personal preferences and owner-context details when you have user-scope read access.
-Use your authenticated {APP_NAME} private scope, usually `agent:<your-agent-id>`, for temporary private scratch notes only.
+Write your durable memory to `{durable_scope}`.{durable_note}
+Read `{user_scope}` for stable owner preferences and owner-context details. Treat the user scope as read-only unless your key was explicitly granted user-scope write.
 Use full prefixed scope names exactly as shown. Do not use plain workspace IDs or agent IDs as memory scopes.
-If a workspace was selected in the Integrations page, include that workspace scope in shared context. Otherwise use the authenticated/default user scope.
 
 ## Setup
 
@@ -5848,7 +5856,7 @@ Activity records are operational task tracking, not durable memory.
 At the start of every meaningful task, call `activity_update` immediately with:
 
 - `task_description`: a concise description of the current task
-- `memory_scope`: `{default_scope}`
+- `memory_scope`: `{durable_scope}`
 - `status`: `active`
 
 While actively working, call `activity_update` again every 1-2 minutes as a heartbeat. Use `task_note` for interim progress updates and update `task_description` if the task changes materially.
@@ -5857,16 +5865,17 @@ If the session reloads, a handoff begins, or no active activity exists yet, open
 
 At the start of a meaningful task:
 
-1. Search `{default_scope}` with focused queries for relevant architecture, decisions, prior bugs, and current project state. If the search returns little or nothing, retry with exact topic values, exact keywords from prior records, or a known record id. When embeddings are unavailable, exact tokens and known ids are more reliable.
+1. Search `{durable_scope}` with focused queries for relevant context, prior decisions, and current state, and search `{user_scope}` for owner preferences and context. If a search returns little, retry with exact topic values or exact keywords from prior records.
 2. If this is a handoff, resume, or review of prior work, inspect `activity_list` and `briefing_list` before making changes.
-3. Use `memory_get` for a known record id; otherwise prefer `memory_search`.
+3. Use `memory_get` with a scope to list or read records; use `memory_search` to find records by query, topic, or class. There is no fetch-by-id.
 
 Write memory only when it will help a future session:
 
-- `decision` in `{default_scope}` for durable choices, tradeoffs, rejected options, and why they were chosen.
-- `fact` in `{default_scope}` for stable implementation facts, integration details, constraints, and verified behavior.
-- `preference` in the authenticated/default user scope for stable user preferences when user-scope write access is available; otherwise keep preferences in `{default_scope}` and treat user scope as read-only owner context.
-- `scratchpad` in the authenticated private agent scope for temporary private notes.
+- `decision` in `{durable_scope}` for durable choices, tradeoffs, rejected options, and why they were chosen.
+- `fact` in `{durable_scope}` for stable implementation facts, integration details, constraints, and verified behavior.
+- `preference` in `{user_scope}` only if your key has user-scope write; otherwise write it to `{durable_scope}`. Preferences support `slot_key` to keep one active value per slot (`slot_key` is valid for the `preference` class only).
+- `scratchpad` in your agent scope `{agent_scope}` for temporary private notes.
+- To revise a `fact` or `decision`, write the new record with `supersedes_id` set to the prior record's id; reserve `memory_retract` for records that are simply wrong.
 
 Do not write memory for routine progress, command output, facts already obvious from files, secrets, raw credentials, or noisy transient debugging notes.
 
