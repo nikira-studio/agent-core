@@ -1,6 +1,5 @@
 name: agent_core
-version: 1.0.0
-description: "Agent Core — prefetch-only HTTP memory recall. Searches agent-core memory_search before every turn and injects the top hits as <memory-context>."
+version: 1.1.0
+description: "Agent Core — prefetch-only HTTP memory recall. Searches agent-core memory_search before every turn and injects the top hits as <memory-context>. Reuses the existing mcp_servers.agent_core bearer from config.yaml if no env token is set."
 pip_dependencies: []
-requires_env:
-  - AGENT_CORE_API_KEY
+requires_env: []

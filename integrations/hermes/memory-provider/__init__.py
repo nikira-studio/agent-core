@@ -25,18 +25,26 @@ Design
   (Write-back can be added in v2.)
 * Fails safe. Any error in ``prefetch()`` returns ``""`` and logs at debug — a
   missing or broken Agent Core never breaks the agent loop. ``is_available()``
-  returns ``False`` when no bearer token is configured, so the loader skips the
+  returns ``False`` when no bearer token can be found, so the loader skips the
   provider cleanly.
 
-Config (environment variables — keep secrets out of config.yaml)
-----------------------------------------------------------------
-* ``AGENT_CORE_URL``      Base URL of the Agent Core instance.
-                          Default: ``http://core.veditz.com``
-* ``AGENT_CORE_API_KEY``  Bearer token (required). ``AGENT_CORE_BEARER`` is
-                          accepted as an alias.
+Where the URL + token come from (first match wins)
+--------------------------------------------------
+1. Environment: ``AGENT_CORE_URL`` and ``AGENT_CORE_API_KEY``
+   (``AGENT_CORE_BEARER`` accepted as a token alias).
+2. The Hermes config's existing Agent Core MCP server block —
+   ``mcp_servers.agent_core`` in ``$HERMES_HOME/config.yaml`` (or
+   ``~/.hermes/config.yaml``). The token is read from
+   ``headers.Authorization`` (``Bearer `` stripped) and the REST base URL is
+   derived from ``url`` (a trailing ``/mcp`` or ``/sse`` is removed).
+
+This means you do NOT have to duplicate the bearer: if Agent Core is already
+wired as an MCP server, the provider reuses that same single source of truth.
+
+Other config (environment variables)
+------------------------------------
 * ``AGENT_CORE_SCOPE``    Reserved for v2 write-back. NOT used for recall —
-                          prefetch searches every scope the token can read
-                          (agent + owner user context + workspaces).
+                          prefetch searches every scope the token can read.
                           Default: ``agent:clawdia``
 * ``AGENT_CORE_LIMIT``    Max records injected per turn. Default: ``5``
 * ``AGENT_CORE_TIMEOUT``  HTTP timeout in seconds. Default: ``4``
@@ -54,7 +62,7 @@ import logging
 import os
 import urllib.error
 import urllib.request
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from agent.memory_provider import MemoryProvider
 
@@ -70,12 +78,81 @@ def _env(*names: str, default: str = "") -> str:
     return default
 
 
+def _hermes_config_path() -> Optional[str]:
+    """Locate the active Hermes config.yaml."""
+    candidates = []
+    home = os.environ.get("HERMES_HOME")
+    if home:
+        candidates.append(os.path.join(home, "config.yaml"))
+    candidates.append(os.path.expanduser("~/.hermes/config.yaml"))
+    for c in candidates:
+        if c and os.path.isfile(c):
+            return c
+    return None
+
+
+def _agent_core_mcp_block() -> Dict[str, Any]:
+    """Read ``mcp_servers.agent_core`` (or ``agent-core``) from the Hermes config.
+
+    Lets the provider reuse the existing Agent Core MCP server's URL + bearer as
+    a single source of truth instead of duplicating the secret. Returns {} on any
+    problem (missing file, no yaml, no block) — the caller then falls back to
+    env/defaults and, if still no token, is_available() returns False.
+    """
+    path = _hermes_config_path()
+    if not path:
+        return {}
+    try:
+        import yaml  # PyYAML ships with Hermes
+        with open(path, encoding="utf-8") as f:
+            cfg = yaml.safe_load(f) or {}
+    except Exception:
+        return {}
+    servers = cfg.get("mcp_servers") if isinstance(cfg, dict) else None
+    if not isinstance(servers, dict):
+        return {}
+    for key in ("agent_core", "agent-core"):
+        block = servers.get(key)
+        if isinstance(block, dict):
+            return block
+    return {}
+
+
+def _strip_bearer(value: str) -> str:
+    value = (value or "").strip()
+    if value.lower().startswith("bearer "):
+        return value[7:].strip()
+    return value
+
+
+def _rest_base_from_mcp_url(url: str) -> str:
+    url = (url or "").strip().rstrip("/")
+    for suffix in ("/mcp", "/sse"):
+        if url.endswith(suffix):
+            return url[: -len(suffix)]
+    return url
+
+
 class AgentCoreMemoryProvider(MemoryProvider):
     """Prefetch-only memory provider backed by Agent Core's REST memory_search."""
 
     def __init__(self) -> None:
-        self._url = _env("AGENT_CORE_URL", default="http://core.veditz.com").rstrip("/")
-        self._token = _env("AGENT_CORE_API_KEY", "AGENT_CORE_BEARER")
+        url = _env("AGENT_CORE_URL")
+        token = _env("AGENT_CORE_API_KEY", "AGENT_CORE_BEARER")
+
+        # Fall back to the existing Agent Core MCP server block in the Hermes
+        # config so the bearer isn't duplicated across files.
+        if not url or not token:
+            block = _agent_core_mcp_block()
+            if not token:
+                headers = block.get("headers") or block.get("http_headers") or {}
+                if isinstance(headers, dict):
+                    token = _strip_bearer(str(headers.get("Authorization", "")))
+            if not url:
+                url = _rest_base_from_mcp_url(str(block.get("url", "")))
+
+        self._url = (url or "http://core.veditz.com").rstrip("/")
+        self._token = token
         try:
             self._limit = max(1, min(20, int(_env("AGENT_CORE_LIMIT", default="5"))))
         except (TypeError, ValueError):
@@ -93,7 +170,7 @@ class AgentCoreMemoryProvider(MemoryProvider):
 
     def is_available(self) -> bool:
         # Config-only check, no network calls (per the ABC contract). The loader
-        # skips the provider cleanly when there is no token.
+        # skips the provider cleanly when no token can be resolved.
         return bool(self._url and self._token)
 
     def initialize(self, session_id: str, **kwargs) -> None:

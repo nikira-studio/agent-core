@@ -42,20 +42,32 @@ memory:
 
 Only one external memory provider runs at a time; this becomes it.
 
-## Configure (environment variables — keep the token out of config.yaml)
+## Configure
+
+The URL and bearer are resolved in this order (first match wins):
+
+1. **Environment** — `AGENT_CORE_URL` and `AGENT_CORE_API_KEY` (`AGENT_CORE_BEARER`
+   accepted as a token alias).
+2. **The existing MCP server block** — if Agent Core is already wired as an MCP
+   server in `$HERMES_HOME/config.yaml`, the provider reuses it:
+   `mcp_servers.agent_core.headers.Authorization` (the `Bearer ` prefix is
+   stripped) for the token, and `mcp_servers.agent_core.url` (a trailing `/mcp`
+   or `/sse` is removed) for the REST base URL.
+
+So in a deployment where Agent Core is already an MCP server, **no extra config
+is needed** — the provider reuses that single source of truth for the secret.
 
 | Variable | Required | Default | Purpose |
 |---|---|---|---|
-| `AGENT_CORE_API_KEY` | **yes** | – | Bearer token for Agent Core. `AGENT_CORE_BEARER` is accepted as an alias. |
-| `AGENT_CORE_URL` | no | `http://core.veditz.com` | Base URL of the Agent Core instance. |
+| `AGENT_CORE_API_KEY` | no¹ | from `mcp_servers.agent_core` | Bearer token. `AGENT_CORE_BEARER` is an alias. |
+| `AGENT_CORE_URL` | no | from `mcp_servers.agent_core.url`, else `http://core.veditz.com` | Base URL of the Agent Core instance. |
 | `AGENT_CORE_SCOPE` | no | `agent:clawdia` | **Reserved for v2 write-back only.** Not used for recall — prefetch searches every scope the token can read. |
 | `AGENT_CORE_LIMIT` | no | `5` | Max records injected per turn. |
 | `AGENT_CORE_TIMEOUT` | no | `4` | HTTP timeout (seconds). |
 
-The token must be present **in the environment the Hermes agent process sees**
-(the same place the gateway injects the Agent Core MCP bearer). If it is unset,
-`is_available()` returns `False` and the loader skips this provider — Hermes runs
-exactly as before.
+¹ Required only if Agent Core is **not** configured as an MCP server. If no token
+can be resolved from env or config, `is_available()` returns `False` and the
+loader skips this provider — Hermes runs exactly as before.
 
 No pip dependencies — uses only the Python standard library (`urllib`).
 
