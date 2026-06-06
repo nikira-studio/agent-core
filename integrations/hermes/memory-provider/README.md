@@ -17,12 +17,17 @@ $HERMES_HOME/plugins/agent_core/
 For this deployment `HERMES_HOME=/opt/data`, so:
 
 ```
-/opt/data/plugins/agent_core/
-  ├── __init__.py
-  ├── plugin.yaml
-  ├── README.md
-  └── verify_agent_core_provider.py
+/opt/data/plugins/
+  ├── agent_core/                       # the loadable provider package
+  │   ├── __init__.py
+  │   ├── plugin.yaml
+  │   └── README.md
+  └── verify_agent_core_provider.py     # sibling, NOT inside the package
 ```
+
+The verifier lives beside the package, not in it: the memory loader globs `*.py`
+inside the provider dir and imports each as a submodule, so stray scripts stay
+out of `agent_core/`.
 
 This is the **user-installed** provider location Hermes' loader scans
 (`plugins/memory/__init__.py` → bundled *and* `$HERMES_HOME/plugins/`). It is
@@ -73,17 +78,24 @@ No pip dependencies — uses only the Python standard library (`urllib`).
 
 ## Verify
 
-After dropping the files in and exporting `AGENT_CORE_API_KEY`, run from the
-Hermes repo root (where the `agent` and `plugins` packages import):
+When Agent Core is already an MCP server, the token auto-resolves from
+`mcp_servers.agent_core` — no env token needed. Point `HERMES_HOME` at the Hermes
+home and make the Hermes packages importable via `PYTHONPATH`:
 
 ```bash
-HERMES_HOME=/opt/data AGENT_CORE_API_KEY=... \
-  python verify_agent_core_provider.py "how often do you check email"
+HERMES_HOME=/opt/data PYTHONPATH=/opt/hermes \
+  /opt/hermes/.venv/bin/python3 \
+  /opt/data/plugins/verify_agent_core_provider.py "how often do you check email"
 ```
 
 It exercises the real discovery → load → `is_available()` → `prefetch()` path and
-prints the raw context block the model would receive. Success = the relevant
-record (e.g. the inbox-cron record) appears in the output.
+prints the raw context block the model would receive. Success = `is_available()=True`
+and the relevant record (e.g. the inbox-cron record) appears in the output.
+
+> Activating on the live gateway needs a gateway restart so the conversation loop
+> reloads `memory.provider`. Do that from **outside** the agent session
+> (`docker restart <container>` or `s6-rc -t change gateway-default`) — restarting
+> from inside an active session deadlocks on drain.
 
 ## Design notes
 
