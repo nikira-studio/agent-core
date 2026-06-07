@@ -174,6 +174,7 @@ Agent or session authentication accepted, with scope enforcement on every operat
 | `POST` | `/api/memory/search` | Search memory (FTS5 + optional semantic hybrid search) |
 | `POST` | `/api/memory/get` | List records by scope |
 | `POST` | `/api/memory/retract` | Soft-delete a record |
+| `POST` | `/api/memory/move` | Atomically relocate an active record to a new scope (write access to both scopes required) |
 | `POST` | `/api/memory/restore` | Restore a retracted record |
 | `GET` | `/api/memory/{record_id}` | Get one record |
 | `GET` | `/api/memory/{record_id}/chain` | Get the supersession chain for a record |
@@ -402,8 +403,23 @@ If the connector and credential are enough on their own, leave `config_json` emp
 | `DELETE` | `/api/connector-bindings/{binding_id}` | Agent/session | Delete a binding |
 | `POST` | `/api/connector-bindings/{binding_id}/test` | Agent/session | Test the binding using the stored credential |
 | `POST` | `/api/connector-bindings/{binding_id}/run` | Agent/session | Run a binding action directly through the REST API |
+| `POST` | `/api/connectors/{binding_id}/run` | Agent/session | Alias of the line above (intuitive path for plug-in scripts) |
 | `GET` | `/api/connector-bindings/{binding_id}/tools` | Agent/session | List the actions exposed by this binding |
 | `GET` | `/api/connector-bindings/{binding_id}/executions` | Agent/session | List execution history for a binding |
+
+### Running a connector action directly over REST
+
+Plug-in scripts (e.g. a `no_agent` cron) that don't go through MCP call the binding's `run` endpoint themselves:
+
+```bash
+curl -sS -X POST \
+  -H "Authorization: Bearer $AGENT_CORE_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"action": "add_torrent", "params": {"filename": "magnet:?xt=..."}}' \
+  http://core.example.com/api/connector-bindings/<binding_id>/run
+```
+
+Body shape is `{"action": "...", "params": {...}}`. The canonical path is `/api/connector-bindings/{binding_id}/run`; `/api/connectors/{binding_id}/run` is accepted as an alias so the intuitive path doesn't 404. Note the **MCP `connectors_run` tool dispatches server-side and is not the same as this direct REST path** — testing only through MCP will not surface a wrong REST URL.
 
 Create:
 ```json
@@ -552,6 +568,7 @@ Dispatch:
 | `memory_get` | List records in an authorized scope. `view='compact'` surveys a scope (metadata + content preview, no full bodies); defaults to compact for large pages, full for small. Supports `limit`/`offset` |
 | `memory_write` | Write a memory record |
 | `memory_retract` | Soft-delete a memory record |
+| `memory_move` | Atomically relocate an active record to a new scope (preserves content/class/topic + lineage; write access to both scopes required) |
 | `credential_get` | Get an `AC_SECRET_*` reference for a credential entry |
 | `credential_list` | List credential metadata and references in authorized scopes |
 | `activity_update` | Create or update an activity record, including progress notes and completion result |

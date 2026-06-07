@@ -30,6 +30,7 @@ AUDIT_ACTIONS = (
     "memory_import",
     "memory_search",
     "memory_retract",
+    "memory_move",
     "memory_restore",
     "memory_delete",
     "retrieval_degraded",

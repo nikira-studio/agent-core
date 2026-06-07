@@ -392,6 +392,23 @@ async def run_binding(
     return success_response({"result": result})
 
 
+# Intuitive-path alias for direct REST callers (plug-in scripts). The canonical
+# bindings router is mounted at /api/connector-bindings, but scripts naturally
+# reach for /api/connectors/{id}/run; without this alias that path 404s while
+# dry-runs and the MCP connectors_run tool (which dispatches server-side) both
+# work — the exact footgun that broke the watchlist cron on its first live tick.
+connector_compat_router = APIRouter(prefix="/api/connectors", tags=["connector_bindings"])
+
+
+@connector_compat_router.post("/{binding_id}/run")
+async def run_binding_compat(
+    binding_id: str,
+    body: dict,
+    ctx: RequestContext = Depends(get_request_context),
+):
+    return await run_binding(binding_id, body, ctx)
+
+
 @router.get("/{binding_id}/executions")
 async def list_binding_executions(
     binding_id: str,

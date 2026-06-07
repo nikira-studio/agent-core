@@ -67,6 +67,7 @@ Once connected, these tools are available in any session:
 | `memory_get` | List records in a specific scope. `view='compact'` surveys a scope (metadata + preview); defaults to compact for large pages, full for small |
 | `memory_write` | Save a memory record (automatically checks for PII on shared scopes) |
 | `memory_retract` | Soft-delete a memory record |
+| `memory_move` | Atomically move an active record to a new scope (write access to both scopes required) |
 | `credential_get` | Get an `AC_SECRET_*` reference for a stored credential |
 | `credential_list` | List credential entries the agent can access (metadata and references only — no raw values) |
 | `activity_update` | Create or update an activity record, including progress notes and a completion result |
@@ -185,6 +186,20 @@ connectors_run(
 Agent Core injects the credential server-side, calls the external service, and returns the response. The raw API key never reaches the agent.
 
 **Do not use `credential_get` for this.** HTTP connector bindings handle auth automatically. `credential_get` is for local tools that need to inject the secret themselves — it is not the right path when a connector binding exists.
+
+#### Calling a connector action directly over REST (plug-in scripts)
+
+A non-agent plug-in (e.g. a cron script) that isn't speaking MCP runs a binding action by POSTing to the binding's `run` endpoint:
+
+```bash
+curl -sS -X POST \
+  -H "Authorization: Bearer $AGENT_CORE_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"action": "add_torrent", "params": {"filename": "magnet:?xt=..."}}' \
+  http://core.example.com/api/connector-bindings/<binding_id>/run
+```
+
+The body is `{"action": "...", "params": {...}}`. The canonical path is `/api/connector-bindings/{binding_id}/run`; `/api/connectors/{binding_id}/run` is accepted as an alias so the intuitive path doesn't 404. **The MCP `connectors_run` tool is not the same URL** — it dispatches server-side, so testing only through MCP won't catch a wrong REST path in a script.
 
 #### Test connection behavior
 

@@ -126,6 +126,28 @@ MANIFEST = {
             },
         },
         {
+            "name": "memory_move",
+            "description": (
+                "Atomically relocate an active memory record to a new scope: copies "
+                "content/class/topic/slot_key into new_scope (stamping moved_from + "
+                "supersedes_id lineage) and retracts the original. Requires write "
+                "access to BOTH scopes. Returns the new record."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "record_id": {"type": "string"},
+                    "new_scope": {"type": "string"},
+                    "source_kind": {
+                        "type": "string",
+                        "enum": list(SOURCE_KINDS),
+                        "default": "agent_inference",
+                    },
+                },
+                "required": ["record_id", "new_scope"],
+            },
+        },
+        {
             "name": "credential_get",
             "description": "Get a credential reference name by entry ID",
             "inputSchema": {
@@ -823,6 +845,58 @@ async def _handle_custom_mcp_tool(body: dict, ctx: RequestContext):
         )
         return JSONResponse(
             content={"ok": True, "data": {"message": "Memory record retracted"}}
+        )
+
+    elif tool == "memory_move":
+        record = memory_service.get_memory_record(params["record_id"])
+        if not record:
+            return _mcp_error("NOT_FOUND", "Memory record not found", 404)
+        new_scope = params["new_scope"]
+        # A move both removes from the source and creates in the destination, so
+        # the caller must be able to write BOTH scopes.
+        if not enforcer.can_write(record["scope"]):
+            return _mcp_error("SCOPE_DENIED", "Access denied to source scope", 403)
+        if not enforcer.can_write(new_scope):
+            return _mcp_error(
+                "SCOPE_DENIED", "Access denied to destination scope", 403
+            )
+        source_kind = params.get("source_kind", "agent_inference")
+        if source_kind not in SOURCE_KINDS:
+            return _mcp_error(
+                "INVALID_SOURCE_KIND", f"source_kind must be one of {SOURCE_KINDS}", 400
+            )
+        new_record, err = memory_service.move_memory(
+            record_id=params["record_id"],
+            new_scope=new_scope,
+            provenance_json=_memory_provenance(ctx, source_kind, new_scope),
+        )
+        if err == "NOT_FOUND":
+            return _mcp_error("NOT_FOUND", "Memory record not found", 404)
+        if err == "NOT_ACTIVE":
+            return _mcp_error("INVALID_STATE", "Only an active record can be moved", 400)
+        if err == "SAME_SCOPE":
+            return _mcp_error("INVALID_INPUT", "Record is already in that scope", 400)
+        if err == "PII_DETECTED":
+            return _mcp_error(
+                "PII_DETECTED",
+                "Content contains PII and cannot be moved to a shared scope",
+                422,
+            )
+        audit_service.write_event(
+            actor_type="agent",
+            actor_id=ctx.agent_id,
+            action="memory_move",
+            resource_type="memory_record",
+            resource_id=new_record["id"],
+            result="success",
+            details={
+                "source_record_id": record["id"],
+                "moved_from": record["scope"],
+                "moved_to": new_record["scope"],
+            },
+        )
+        return JSONResponse(
+            content={"ok": True, "data": {"record": new_record}}, status_code=201
         )
 
     elif tool == "credential_get":

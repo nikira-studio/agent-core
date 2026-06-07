@@ -577,6 +577,88 @@ async def retract_memory(
     return success_response({"message": "Memory record retracted"})
 
 
+@router.post("/move")
+async def move_memory(
+    request: Request,
+    ctx: RequestContext = Depends(get_request_context),
+):
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    if not isinstance(body, dict):
+        body = {}
+    record_id = request.query_params.get("record_id") or body.get("record_id")
+    new_scope = request.query_params.get("new_scope") or body.get("new_scope")
+    source_kind = body.get("source_kind") or "agent_inference"
+    if not record_id:
+        return error_response("MISSING_RECORD_ID", "record_id is required", 400)
+    if not new_scope:
+        return error_response("MISSING_NEW_SCOPE", "new_scope is required", 400)
+    if source_kind not in SOURCE_KINDS:
+        return error_response(
+            "INVALID_SOURCE_KIND", f"source_kind must be one of {SOURCE_KINDS}", 400
+        )
+
+    record = memory_service.get_memory_record(record_id)
+    if not record:
+        return error_response("NOT_FOUND", "Memory record not found", 404)
+
+    enforcer = ScopeEnforcer(
+        ctx.read_scopes,
+        ctx.write_scopes,
+        ctx.agent_id,
+        is_admin=ctx.is_admin,
+        active_workspace_ids=ctx.active_workspace_ids,
+    )
+    if not enforcer.can_write(record["scope"]):
+        return error_response("SCOPE_DENIED", "Access denied to source scope", 403)
+    if not enforcer.can_write(new_scope):
+        return error_response("SCOPE_DENIED", "Access denied to destination scope", 403)
+
+    new_record, err = memory_service.move_memory(
+        record_id=record_id,
+        new_scope=new_scope,
+        provenance_json=memory_service.build_provenance(
+            actor_type=ctx.actor_type,
+            actor_id=ctx.actor_id,
+            channel="api",
+            source_kind=source_kind,
+            scope=new_scope,
+            user_id=ctx.user_id,
+            agent_id=ctx.agent_id,
+            extras={"route": "/api/memory/move"},
+        ),
+    )
+    if err == "NOT_FOUND":
+        return error_response("NOT_FOUND", "Memory record not found", 404)
+    if err == "NOT_ACTIVE":
+        return error_response("INVALID_STATE", "Only an active record can be moved", 400)
+    if err == "SAME_SCOPE":
+        return error_response("INVALID_INPUT", "Record is already in that scope", 400)
+    if err == "PII_DETECTED":
+        return error_response(
+            "PII_DETECTED",
+            "Content contains PII and cannot be moved to a shared scope",
+            422,
+        )
+
+    audit_service.write_event(
+        actor_type=ctx.actor_type,
+        actor_id=ctx.actor_id,
+        action="memory_move",
+        resource_type="memory_record",
+        resource_id=new_record["id"],
+        result="success",
+        details={
+            "source_record_id": record_id,
+            "moved_from": record["scope"],
+            "moved_to": new_record["scope"],
+        },
+    )
+    return success_response({"record": new_record}, status_code=201)
+
+
 @router.delete("/{record_id}")
 async def delete_memory_record(
     record_id: str,
