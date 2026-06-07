@@ -165,6 +165,11 @@ async def spec(
             "inputSchema": {"record_id": "string"},
         },
         {
+            "name": "memory_move",
+            "description": "Atomically relocate an active record to a new scope (write access to both scopes required)",
+            "inputSchema": {"record_id": "string", "new_scope": "string", "source_kind": "string?"},
+        },
+        {
             "name": "credential_get",
             "description": "Get a credential reference name by entry ID",
             "inputSchema": {"entry_id": "string"},

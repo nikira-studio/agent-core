@@ -14,6 +14,7 @@ from app.routes.dashboard_api import router as dashboard_api_router
 from app.routes.backup import router as backup_router
 from app.routes.connectors import router as connector_router
 from app.routes.connectors import connector_types_router
+from app.routes.connectors import connector_compat_router
 from app.routes.connectors_page import router as connectors_page_router
 from app.routes.events import router as events_router
 from app.routes.webhooks import router as webhooks_router
@@ -35,6 +36,7 @@ __all__ = [
     "backup_router",
     "connector_router",
     "connector_types_router",
+    "connector_compat_router",
     "connectors_page_router",
     "events_router",
     "webhooks_router",

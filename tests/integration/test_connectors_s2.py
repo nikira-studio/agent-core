@@ -1154,3 +1154,55 @@ class TestConnectorExecutionLogging:
         assert last_exec["action"] == "call_endpoint"
         assert last_exec["result_status"] == "failure"
         assert last_exec["duration_ms"] is not None
+
+
+class TestConnectorRunRestAlias:
+    """Phase 3: /api/connectors/{id}/run is an alias of the canonical
+    /api/connector-bindings/{id}/run, so plug-in scripts reaching for the
+    intuitive path don't 404."""
+
+    def _create_binding(self):
+        from app.services import connector_service, credential_service
+
+        credential = credential_service.create_credential(
+            scope="agent:testagent",
+            name="alias-token",
+            value_plaintext="alias-secret",
+        )
+        return connector_service.create_binding(
+            connector_type_id="generic_http",
+            name="alias-binding",
+            scope="agent:testagent",
+            credential_id=credential["id"],
+        )
+
+    def test_alias_path_hits_our_handler_not_a_404_route(self, test_client, agent_token):
+        # A missing binding must return OUR NOT_FOUND error shape on both paths,
+        # proving the alias route exists and forwards (a missing FastAPI route
+        # would return the default {"detail": "Not Found"} instead).
+        for path in (
+            "/api/connector-bindings/does-not-exist/run",
+            "/api/connectors/does-not-exist/run",
+        ):
+            r = test_client.post(
+                path,
+                headers={"Authorization": f"Bearer {agent_token}"},
+                json={"action": "call_endpoint", "params": {}},
+            )
+            assert r.status_code == 404, (path, r.text)
+            body = r.json()
+            assert body["ok"] is False
+            assert body["error"]["code"] == "NOT_FOUND"
+
+    def test_alias_and_canonical_behave_identically(self, test_client, agent_token):
+        binding = self._create_binding()
+
+        # Missing action -> 400 INVALID_REQUEST on both paths.
+        for prefix in ("/api/connector-bindings", "/api/connectors"):
+            r = test_client.post(
+                f"{prefix}/{binding['id']}/run",
+                headers={"Authorization": f"Bearer {agent_token}"},
+                json={"params": {}},
+            )
+            assert r.status_code == 400, (prefix, r.text)
+            assert r.json()["error"]["code"] == "INVALID_REQUEST"

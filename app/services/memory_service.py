@@ -353,6 +353,124 @@ def retract_memory(record_id: str) -> bool:
         return cursor.rowcount > 0
 
 
+def move_memory(
+    record_id: str,
+    new_scope: str,
+    provenance_json: Optional[str] = None,
+    allow_pii_shared: bool = False,
+) -> tuple[Optional[dict], Optional[str]]:
+    """Atomically relocate an active record to ``new_scope``.
+
+    In one transaction: write the record's content into the destination scope
+    (preserving class/domain/topic/slot_key/confidence/importance, stamping
+    ``moved_from`` provenance and ``supersedes_id`` = original) and retract the
+    original (``moved_to`` provenance + ``superseded_by_id`` = new record).
+
+    Returns ``(new_record, None)`` on success, or ``(None|{}, error_code)`` where
+    error_code is one of NOT_FOUND, NOT_ACTIVE, SAME_SCOPE, PII_DETECTED.
+    """
+    old = get_memory_record(record_id)
+    if not old:
+        return None, "NOT_FOUND"
+    if old.get("record_status") != "active":
+        return None, "NOT_ACTIVE"
+
+    normalized_new_scope = _normalize_scope(new_scope)
+    if normalized_new_scope == old["scope"]:
+        return None, "SAME_SCOPE"
+
+    if normalized_new_scope == "shared" and not allow_pii_shared:
+        if contains_pii(old.get("content") or ""):
+            return {}, "PII_DETECTED"
+
+    new_id = secrets.token_urlsafe(16)
+    now = utc_now_iso()
+
+    new_prov: dict = {}
+    if provenance_json:
+        try:
+            new_prov = json.loads(provenance_json)
+        except (TypeError, ValueError):
+            new_prov = {}
+    new_prov["moved_from"] = {
+        "record_id": old["id"],
+        "scope": old["scope"],
+        "moved_at": now,
+    }
+    new_provenance_json = json.dumps(new_prov)
+
+    old_prov: dict = {}
+    if old.get("provenance_json"):
+        try:
+            old_prov = json.loads(old["provenance_json"])
+        except (TypeError, ValueError):
+            old_prov = {}
+    old_prov["moved_to"] = {
+        "record_id": new_id,
+        "scope": normalized_new_scope,
+        "moved_at": now,
+    }
+    old_provenance_json = json.dumps(old_prov)
+
+    with get_db() as conn:
+        # Re-check the source is still active inside the transaction (race guard).
+        row = conn.execute(
+            "SELECT record_status FROM memory_records WHERE id = ?",
+            (old["id"],),
+        ).fetchone()
+        if not row or row["record_status"] != "active":
+            return None, "NOT_ACTIVE"
+
+        conn.execute(
+            """
+            INSERT INTO memory_records
+            (id, content, memory_class, scope, domain, topic, confidence, importance,
+             source_kind, event_time, created_at, record_status, supersedes_id,
+             provenance_json, slot_key, valid_from, valid_to, last_confirmed_at, expires_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                new_id,
+                old["content"],
+                old["memory_class"],
+                normalized_new_scope,
+                old.get("domain"),
+                old.get("topic"),
+                old.get("confidence"),
+                old.get("importance"),
+                old.get("source_kind"),
+                old.get("event_time") or now,
+                now,
+                old["id"],
+                new_provenance_json,
+                old.get("slot_key"),
+                old.get("valid_from"),
+                old.get("valid_to"),
+                old.get("last_confirmed_at"),
+                old.get("expires_at"),
+            ),
+        )
+        conn.execute(
+            "UPDATE memory_records SET record_status = 'retracted', "
+            "superseded_by_id = ?, provenance_json = ? "
+            "WHERE id = ? AND record_status = 'active'",
+            (new_id, old_provenance_json, old["id"]),
+        )
+        conn.commit()
+
+    if _EMBEDDING_AVAILABLE and vector_settings_service.is_vector_search_enabled():
+        try:
+            vector_bytes, _ = embedding_service.generate_embedding(old["content"])
+            if vector_bytes is not None:
+                vector_service.store_embedding(new_id, vector_bytes)
+        except Exception as e:
+            logger.warning(
+                "Vector embedding failed for memory move %s: %s", new_id, e
+            )
+
+    return get_memory_record(new_id), None
+
+
 def restore_memory(record_id: str) -> bool:
     with get_db() as conn:
         cursor = conn.execute(
