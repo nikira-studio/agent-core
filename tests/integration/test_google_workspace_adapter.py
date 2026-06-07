@@ -88,3 +88,26 @@ class TestRenderFixes:
         req = _req("append_values", {"spreadsheet_id": "S", "range": "Sheet1!A1", "values": [["a", "b"]]})
         assert req["url"].startswith("https://sheets.googleapis.com/v4/spreadsheets/S/values/Sheet1!A1:append")
         assert req["body"]["values"] == [["a", "b"]]
+
+
+def _decode_raw(raw_b64: str) -> str:
+    import base64
+    return base64.urlsafe_b64decode(raw_b64 + "=" * (-len(raw_b64) % 4)).decode("utf-8")
+
+
+class TestRfc822Builder:
+    def test_cc_bcc_render_as_headers_before_body(self):
+        # regression: cc/bcc used to be appended *after* the body (invalid)
+        body = _req("send_email", {"to": ["a@b.c"], "cc": ["c@d.e"], "bcc": ["f@g.h"],
+                                    "subject": "Hi", "body": "the body"})["body"]
+        raw = _decode_raw(body["raw"])
+        head, _, msg = raw.partition("\r\n\r\n")
+        assert "Cc: c@d.e" in head and "Bcc: f@g.h" in head
+        assert msg == "the body" and "Cc:" not in msg
+
+    def test_reply_sets_thread_and_in_reply_to(self):
+        req = _req("reply", {"to": ["a@b.c"], "subject": "Re: x", "body": "hi",
+                             "thread_id": "T123", "in_reply_to": "<msg@id>"})
+        assert req["body"]["threadId"] == "T123"
+        head = _decode_raw(req["body"]["raw"]).partition("\r\n\r\n")[0]
+        assert "In-Reply-To: <msg@id>" in head and "References: <msg@id>" in head

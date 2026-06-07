@@ -92,6 +92,128 @@
       }
     },
     {
+      "name": "reply",
+      "description": "Gmail: reply within a thread (sets In-Reply-To + threadId).",
+      "side_effect": "write",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "to": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Recipients"
+          },
+          "subject": {
+            "type": "string",
+            "description": "Subject (usually 'Re: ...')"
+          },
+          "body": {
+            "type": "string",
+            "description": "Reply body"
+          },
+          "thread_id": {
+            "type": "string",
+            "description": "Gmail threadId to reply into"
+          },
+          "in_reply_to": {
+            "type": "string",
+            "description": "Original message's Message-ID header"
+          },
+          "references": {
+            "type": "string",
+            "description": "References header (optional)"
+          },
+          "cc": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "bcc": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "to",
+          "subject",
+          "body",
+          "thread_id",
+          "in_reply_to"
+        ]
+      }
+    },
+    {
+      "name": "create_draft",
+      "description": "Gmail: create a draft email.",
+      "side_effect": "write",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "to": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Recipients"
+          },
+          "subject": {
+            "type": "string"
+          },
+          "body": {
+            "type": "string"
+          },
+          "cc": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "bcc": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "to",
+          "subject",
+          "body"
+        ]
+      }
+    },
+    {
+      "name": "list_labels",
+      "description": "Gmail: list the mailbox's labels.",
+      "side_effect": "read",
+      "input_schema": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "get_thread",
+      "description": "Gmail: get a full thread (all messages) by threadId.",
+      "side_effect": "read",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "thread_id": {
+            "type": "string",
+            "description": "Gmail threadId"
+          }
+        },
+        "required": [
+          "thread_id"
+        ]
+      }
+    },
+    {
       "name": "list_messages",
       "description": "Gmail: list messages in a label or inbox.",
       "side_effect": "read",
@@ -269,6 +391,36 @@
       }
     },
     {
+      "name": "update_event",
+      "description": "Calendar: update an event's title/description/location.",
+      "side_effect": "write",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "calendar_id": {
+            "type": "string",
+            "description": "Calendar id. Defaults to 'primary'."
+          },
+          "event_id": {
+            "type": "string",
+            "description": "Event id"
+          },
+          "summary": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "location": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "event_id"
+        ]
+      }
+    },
+    {
       "name": "delete_event",
       "description": "Calendar: delete an event by ID.",
       "side_effect": "destructive",
@@ -371,6 +523,36 @@
         },
         "required": [
           "name"
+        ]
+      }
+    },
+    {
+      "name": "share",
+      "description": "Drive: share a file with a user/group/domain/anyone.",
+      "side_effect": "write",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "file_id": {
+            "type": "string",
+            "description": "Drive file id"
+          },
+          "role": {
+            "type": "string",
+            "description": "reader | writer | commenter | owner"
+          },
+          "type": {
+            "type": "string",
+            "description": "user | group | domain | anyone (default user)"
+          },
+          "email_address": {
+            "type": "string",
+            "description": "Email for user/group shares"
+          }
+        },
+        "required": [
+          "file_id",
+          "role"
         ]
       }
     },
@@ -484,6 +666,27 @@
           "spreadsheet_id",
           "range",
           "values"
+        ]
+      }
+    },
+    {
+      "name": "clear_values",
+      "description": "Sheets: clear values in a range.",
+      "side_effect": "destructive",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "spreadsheet_id": {
+            "type": "string"
+          },
+          "range": {
+            "type": "string",
+            "description": "A1 range to clear"
+          }
+        },
+        "required": [
+          "spreadsheet_id",
+          "range"
         ]
       }
     },
@@ -638,6 +841,53 @@
           "extract": "$.id"
         }
       },
+      "reply": {
+        "method": "POST",
+        "path": "https://gmail.googleapis.com/gmail/v1/users/me/messages/send",
+        "body": {
+          "template": {
+            "raw": "{{ params | rfc822_base64url }}",
+            "threadId": "{{ params.thread_id }}"
+          }
+        },
+        "response": {
+          "success_when": "$.status >= 200 and $.status < 300",
+          "extract": "$.id"
+        }
+      },
+      "create_draft": {
+        "method": "POST",
+        "path": "https://gmail.googleapis.com/gmail/v1/users/me/drafts",
+        "body": {
+          "template": {
+            "message": {
+              "raw": "{{ params | rfc822_base64url }}"
+            }
+          }
+        },
+        "response": {
+          "success_when": "$.status >= 200 and $.status < 300",
+          "extract": "$.id"
+        }
+      },
+      "list_labels": {
+        "method": "GET",
+        "path": "https://gmail.googleapis.com/gmail/v1/users/me/labels",
+        "response": {
+          "success_when": "$.status >= 200 and $.status < 300",
+          "extract": "$.labels"
+        }
+      },
+      "get_thread": {
+        "method": "GET",
+        "path": "https://gmail.googleapis.com/gmail/v1/users/me/threads/{{ params.thread_id }}",
+        "query_params": {
+          "format": "full"
+        },
+        "response": {
+          "success_when": "$.status >= 200 and $.status < 300"
+        }
+      },
       "list_messages": {
         "method": "GET",
         "path": "https://gmail.googleapis.com/gmail/v1/users/me/messages",
@@ -729,6 +979,20 @@
           "extract": "$.id"
         }
       },
+      "update_event": {
+        "method": "PATCH",
+        "path": "/calendar/v3/calendars/{{ params.calendar_id | default(\"primary\", as=str) }}/events/{{ params.event_id }}",
+        "body": {
+          "template": {
+            "summary": "{{ params.summary | default(\"\", as=omit) }}",
+            "description": "{{ params.description | default(\"\", as=omit) }}",
+            "location": "{{ params.location | default(\"\", as=omit) }}"
+          }
+        },
+        "response": {
+          "success_when": "$.status >= 200 and $.status < 300"
+        }
+      },
       "delete_event": {
         "method": "DELETE",
         "path": "/calendar/v3/calendars/{{ params.calendar_id | default(\"primary\", as=str) }}/events/{{ params.event_id }}",
@@ -783,6 +1047,21 @@
             "name": "{{ params.name }}",
             "mimeType": "application/vnd.google-apps.folder",
             "parents": "{{ params.parents | default([], as=omit) }}"
+          }
+        },
+        "response": {
+          "success_when": "$.status >= 200 and $.status < 300",
+          "extract": "$.id"
+        }
+      },
+      "share": {
+        "method": "POST",
+        "path": "/drive/v3/files/{{ params.file_id }}/permissions",
+        "body": {
+          "template": {
+            "role": "{{ params.role }}",
+            "type": "{{ params.type | default(\"user\", as=str) }}",
+            "emailAddress": "{{ params.email_address | default(\"\", as=omit) }}"
           }
         },
         "response": {
@@ -851,6 +1130,16 @@
             "majorDimension": "ROWS",
             "values": "{{ params.values }}"
           }
+        },
+        "response": {
+          "success_when": "$.status >= 200 and $.status < 300"
+        }
+      },
+      "clear_values": {
+        "method": "POST",
+        "path": "https://sheets.googleapis.com/v4/spreadsheets/{{ params.spreadsheet_id }}/values/{{ params.range }}:clear",
+        "body": {
+          "template": {}
         },
         "response": {
           "success_when": "$.status >= 200 and $.status < 300"

@@ -272,32 +272,19 @@ class HttpEngine(BaseConnector):
                 import base64
 
                 def make_rfc822(p: dict) -> str:
-                    lines = []
-                    to_list = p.get("to", [])
-                    if isinstance(to_list, list):
-                        lines.append(f"To: {', '.join(to_list)}")
-                    else:
-                        lines.append(f"To: {to_list}")
-                    subject = p.get("subject", "")
-                    if subject:
-                        lines.append(f"Subject: {subject}")
-                    body = p.get("body", "")
-                    if body:
-                        lines.append("")
-                        lines.append(body)
-                    cc_list = p.get("cc", [])
-                    if cc_list:
-                        if isinstance(cc_list, list):
-                            lines.append(f"Cc: {', '.join(cc_list)}")
-                        else:
-                            lines.append(f"Cc: {cc_list}")
-                    bcc_list = p.get("bcc", [])
-                    if bcc_list:
-                        if isinstance(bcc_list, list):
-                            lines.append(f"Bcc: {', '.join(bcc_list)}")
-                        else:
-                            lines.append(f"Bcc: {bcc_list}")
-                    raw = "\r\n".join(lines).encode("utf-8")
+                    def _addr(v):
+                        return ", ".join(v) if isinstance(v, list) else str(v)
+                    headers = [f"To: {_addr(p.get('to', []))}"]
+                    if p.get("cc"):
+                        headers.append(f"Cc: {_addr(p['cc'])}")
+                    if p.get("bcc"):
+                        headers.append(f"Bcc: {_addr(p['bcc'])}")
+                    if p.get("subject"):
+                        headers.append(f"Subject: {p['subject']}")
+                    if p.get("in_reply_to"):
+                        headers.append(f"In-Reply-To: {p['in_reply_to']}")
+                        headers.append(f"References: {p.get('references') or p['in_reply_to']}")
+                    raw = ("\r\n".join(headers) + "\r\n\r\n" + (p.get("body", "") or "")).encode("utf-8")
                     return base64.urlsafe_b64encode(raw).rstrip(b"=").decode("utf-8")
 
                 return make_rfc822(params) if isinstance(params, dict) else m.group(0)
@@ -752,32 +739,19 @@ def _render_value(
         import base64
 
         def make_rfc822(p: dict) -> str:
-            lines = []
-            to_list = p.get("to", [])
-            if isinstance(to_list, list):
-                lines.append(f"To: {', '.join(to_list)}")
-            else:
-                lines.append(f"To: {to_list}")
-            subject = p.get("subject", "")
-            if subject:
-                lines.append(f"Subject: {subject}")
-            body_text = p.get("body", "")
-            if body_text:
-                lines.append("")
-                lines.append(body_text)
-            cc_list = p.get("cc", [])
-            if cc_list:
-                if isinstance(cc_list, list):
-                    lines.append(f"Cc: {', '.join(cc_list)}")
-                else:
-                    lines.append(f"Cc: {cc_list}")
-            bcc_list = p.get("bcc", [])
-            if bcc_list:
-                if isinstance(bcc_list, list):
-                    lines.append(f"Bcc: {', '.join(bcc_list)}")
-                else:
-                    lines.append(f"Bcc: {bcc_list}")
-            raw = "\r\n".join(lines).encode("utf-8")
+            def _addr(v):
+                return ", ".join(v) if isinstance(v, list) else str(v)
+            headers = [f"To: {_addr(p.get('to', []))}"]
+            if p.get("cc"):
+                headers.append(f"Cc: {_addr(p['cc'])}")
+            if p.get("bcc"):
+                headers.append(f"Bcc: {_addr(p['bcc'])}")
+            if p.get("subject"):
+                headers.append(f"Subject: {p['subject']}")
+            if p.get("in_reply_to"):
+                headers.append(f"In-Reply-To: {p['in_reply_to']}")
+                headers.append(f"References: {p.get('references') or p['in_reply_to']}")
+            raw = ("\r\n".join(headers) + "\r\n\r\n" + (p.get("body", "") or "")).encode("utf-8")
             return base64.urlsafe_b64encode(raw).rstrip(b"=").decode("utf-8")
 
         return make_rfc822(val) if isinstance(val, dict) else m.group(0)
