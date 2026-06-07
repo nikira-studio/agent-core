@@ -131,11 +131,13 @@ async def spec(
         },
         {
             "name": "memory_get",
-            "description": "Get memory records by scope or list active records",
+            "description": "Get memory records by scope or list active records; view='compact' surveys a scope (metadata + preview), defaults compact for large pages",
             "inputSchema": {
                 "scope": "string?",
                 "record_status": "string?",
+                "view": "string?",
                 "limit": "integer?",
+                "offset": "integer?",
             },
         },
         {
@@ -201,8 +203,8 @@ async def spec(
         },
         {
             "name": "connectors_list",
-            "description": "List available connector types",
-            "inputSchema": {},
+            "description": "List installed connector types as lean summaries (no full specs); use connectors_actions_list for a type's actions",
+            "inputSchema": {"limit": "integer?", "offset": "integer?"},
         },
         {
             "name": "connectors_actions_list",

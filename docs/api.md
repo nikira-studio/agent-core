@@ -549,7 +549,7 @@ Dispatch:
 | Tool | What it does |
 | --- | --- |
 | `memory_search` | Search authorized memory by query |
-| `memory_get` | List records in an authorized scope |
+| `memory_get` | List records in an authorized scope. `view='compact'` surveys a scope (metadata + content preview, no full bodies); defaults to compact for large pages, full for small. Supports `limit`/`offset` |
 | `memory_write` | Write a memory record |
 | `memory_retract` | Soft-delete a memory record |
 | `credential_get` | Get an `AC_SECRET_*` reference for a credential entry |
@@ -560,7 +560,7 @@ Dispatch:
 | `activity_pickup` | Claim the next active work item assigned to this agent in authorized scopes |
 | `get_briefing` | Fetch a briefing |
 | `briefing_list` | List briefings visible to the current caller |
-| `connectors_list` | List available connector types |
+| `connectors_list` | List installed connector types as lean summaries (id, name, auth/backend type, action_count; no full specs). Supports `limit`/`offset`; use `connectors_actions_list` for a type's actions |
 | `connectors_bindings_list` | List connector bindings in authorized scopes |
 | `connectors_bindings_test` | Test a binding using its stored credential |
 | `connectors_actions_list` | List actions supported by a connector type |

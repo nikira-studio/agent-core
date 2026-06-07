@@ -64,7 +64,7 @@ Once connected, these tools are available in any session:
 | Tool | What it does |
 | --- | --- |
 | `memory_search` | Search all memory the agent has access to, by natural language query |
-| `memory_get` | List records in a specific scope |
+| `memory_get` | List records in a specific scope. `view='compact'` surveys a scope (metadata + preview); defaults to compact for large pages, full for small |
 | `memory_write` | Save a memory record (automatically checks for PII on shared scopes) |
 | `memory_retract` | Soft-delete a memory record |
 | `credential_get` | Get an `AC_SECRET_*` reference for a stored credential |
@@ -75,7 +75,7 @@ Once connected, these tools are available in any session:
 | `activity_pickup` | Claim the next active work item a human assigned to this agent in authorized scopes |
 | `get_briefing` | Pull a briefing when taking over from another agent |
 | `briefing_list` | List generated briefings visible to the current agent or user |
-| `connectors_list` | List available connector types |
+| `connectors_list` | List installed connector types as lean summaries (no full specs); supports `limit`/`offset`. Use `connectors_actions_list` for a type's actions |
 | `connectors_bindings_list` | List connector bindings in authorized scopes |
 | `connectors_bindings_test` | Test a binding using the stored credential |
 | `connectors_actions_list` | List actions supported by a connector type |

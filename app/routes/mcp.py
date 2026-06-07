@@ -68,13 +68,21 @@ MANIFEST = {
         },
         {
             "name": "memory_get",
-            "description": "Get memory records by scope or list active records",
+            "description": (
+                "Get memory records by scope or list active records. Use "
+                "view='compact' to survey/audit a scope (metadata + a short content "
+                "preview, no full bodies); then memory_search or "
+                "memory_get(view='full', limit=…) for full content. Defaults to "
+                "compact for large pages, full for small ones."
+            ),
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "scope": {"type": "string"},
                     "record_status": {"type": "string"},
+                    "view": {"type": "string", "enum": ["full", "compact"]},
                     "limit": {"type": "integer", "default": 50},
+                    "offset": {"type": "integer", "default": 0},
                 },
             },
         },
@@ -211,10 +219,18 @@ MANIFEST = {
         },
         {
             "name": "connectors_list",
-            "description": "List available connector types",
+            "description": (
+                "List installed connector types as lean summaries (id, name, "
+                "auth/backend type, action_count) — no full specs. Use "
+                "connectors_actions_list for a type's actions, or connectors_summary "
+                "for a capability overview."
+            ),
             "inputSchema": {
                 "type": "object",
-                "properties": {},
+                "properties": {
+                    "limit": {"type": "integer", "default": 50},
+                    "offset": {"type": "integer", "default": 0},
+                },
             },
         },
         {
@@ -405,6 +421,71 @@ def _activity_audit_details(activity: dict, **extra) -> dict:
         details["assigned_agent_id"] = activity.get("assigned_agent_id")
     details.update({k: v for k, v in extra.items() if v is not None})
     return details
+
+
+# Number of records past which memory_get defaults to a compact projection
+# (full bodies for a large page blow the MCP tool-output token budget).
+_MEMORY_COMPACT_THRESHOLD = 25
+_MEMORY_PREVIEW_CHARS = 200
+
+
+def _connector_action_count(ct: dict) -> int:
+    """Best-effort action count for a connector type without serializing its spec."""
+    actions = ct.get("supported_actions")
+    if isinstance(actions, list) and actions:
+        return len(actions)
+    ops = ct.get("operations_json")
+    if ops:
+        try:
+            data = json.loads(ops)
+        except (TypeError, ValueError):
+            return 0
+        if isinstance(data, dict):
+            for key in ("operations", "actions", "paths"):
+                val = data.get(key)
+                if isinstance(val, (list, dict)):
+                    return len(val)
+        elif isinstance(data, list):
+            return len(data)
+    return 0
+
+
+def _connector_summary(ct: dict) -> dict:
+    """Lean projection of a connector type for list responses (no spec body)."""
+    description = ct.get("description") or ""
+    return {
+        "connector_type_id": ct.get("id"),
+        "display_name": ct.get("display_name"),
+        "description": description[:300],
+        "provider_type": ct.get("provider_type"),
+        "backend_type": ct.get("backend_type"),
+        "auth_type": ct.get("auth_type"),
+        "action_count": _connector_action_count(ct),
+    }
+
+
+def _compact_memory_record(record: dict) -> dict:
+    """Compact projection of a memory record: metadata + a short content preview,
+    dropping the full content body and verbose provenance_json."""
+    content = record.get("content") or ""
+    preview = content[:_MEMORY_PREVIEW_CHARS]
+    if len(content) > _MEMORY_PREVIEW_CHARS:
+        preview += "…"
+    return {
+        "id": record.get("id"),
+        "memory_class": record.get("memory_class"),
+        "scope": record.get("scope"),
+        "domain": record.get("domain"),
+        "topic": record.get("topic"),
+        "slot_key": record.get("slot_key"),
+        "record_status": record.get("record_status"),
+        "confidence": record.get("confidence"),
+        "importance": record.get("importance"),
+        "supersedes_id": record.get("supersedes_id"),
+        "superseded_by_id": record.get("superseded_by_id"),
+        "created_at": record.get("created_at"),
+        "content_preview": preview,
+    }
 
 
 @router.get("/mcp")
@@ -601,12 +682,20 @@ async def _handle_custom_mcp_tool(body: dict, ctx: RequestContext):
         )
 
     elif tool == "memory_get":
+        # Compact view (lean metadata + content preview) so a whole scope can be
+        # surveyed inline without blowing the tool-output budget. In compact view
+        # rows are tiny, so allow a higher cap.
+        view = params.get("view")
+        if view not in (None, "full", "compact"):
+            return _mcp_error(
+                "INVALID_PARAMS", "view must be 'full' or 'compact'", 400
+            )
         if params.get("scope"):
             if not enforcer.can_read(params["scope"]):
                 return _mcp_error("SCOPE_DENIED", "Access denied to this scope", 403)
             records = memory_service.get_memory_by_scope(
                 scope=params["scope"],
-                limit=min(params.get("limit", 50), 100),
+                limit=min(params.get("limit", 50), 200),
                 offset=params.get("offset", 0),
                 record_status=params.get("record_status"),
             )
@@ -614,12 +703,26 @@ async def _handle_custom_mcp_tool(body: dict, ctx: RequestContext):
             allowed = enforcer.filter_readable_scopes(ctx.read_scopes)
             records = memory_service.get_memory_by_scopes(
                 scopes=allowed,
-                limit=params.get("limit", 50),
+                limit=min(params.get("limit", 50), 200),
                 offset=params.get("offset", 0),
                 record_status=params.get("record_status"),
             )
+        if view is None:
+            # Auto: compact for large pages, full for small (back-compat for
+            # callers reading a handful of records).
+            view = (
+                "compact" if len(records) > _MEMORY_COMPACT_THRESHOLD else "full"
+            )
+        out = (
+            [_compact_memory_record(r) for r in records]
+            if view == "compact"
+            else records
+        )
         return JSONResponse(
-            content={"ok": True, "data": {"records": records, "total": len(records)}}
+            content={
+                "ok": True,
+                "data": {"records": out, "total": len(records), "view": view},
+            }
         )
 
     elif tool == "memory_write":
@@ -990,7 +1093,30 @@ async def _handle_custom_mcp_tool(body: dict, ctx: RequestContext):
         from app.services import connector_service
 
         types = connector_service.list_connector_types()
-        return JSONResponse(content={"ok": True, "data": {"connectors": types}})
+        total = len(types)
+        try:
+            limit = int(params.get("limit", 50) or 50)
+        except (TypeError, ValueError):
+            limit = 50
+        limit = max(1, min(limit, 200))
+        try:
+            offset = int(params.get("offset", 0) or 0)
+        except (TypeError, ValueError):
+            offset = 0
+        offset = max(0, offset)
+        page = types[offset : offset + limit]
+        connectors = [_connector_summary(t) for t in page]
+        return JSONResponse(
+            content={
+                "ok": True,
+                "data": {
+                    "connectors": connectors,
+                    "total": total,
+                    "limit": limit,
+                    "offset": offset,
+                },
+            }
+        )
 
     elif tool == "connectors_bindings_list":
         from app.services import connector_service
