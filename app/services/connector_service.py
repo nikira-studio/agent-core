@@ -285,6 +285,9 @@ def delete_binding(binding_id: str) -> bool:
         conn.execute(
             "DELETE FROM connector_executions WHERE binding_id = ?", (binding_id,)
         )
+        conn.execute(
+            "DELETE FROM connector_oauth_states WHERE binding_id = ?", (binding_id,)
+        )
         cursor = conn.execute(
             "DELETE FROM connector_bindings WHERE id = ?", (binding_id,)
         )

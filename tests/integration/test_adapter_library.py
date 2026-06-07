@@ -75,6 +75,12 @@ class TestAdapterLibrary:
         ]
         github_cli = next(a for a in adapters if a["id"] == "github_cli")
         assert github_cli["requirements_summary"]["bins"] == ["gh"]
+        gmail = next(a for a in adapters if a["id"] == "google_gmail")
+        assert gmail["requirements_summary"]["credential_fields"] == [
+            "client_id",
+            "client_secret",
+        ]
+        assert "Authorize OAuth" in gmail["setup"]["instructions"]
 
     def test_install_and_uninstall_builtin_adapter(
         self, test_client, admin_token, monkeypatch, tmp_path

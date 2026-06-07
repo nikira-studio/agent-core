@@ -44,6 +44,10 @@ class TestLoadAndValidate:
             "display_name": "Full Test",
             "version": "1.0.0",
             "description": "A test manifest",
+            "setup": {
+                "instructions": "Create credentials in the provider console.",
+                "documentation_url": "https://example.com/setup",
+            },
             "credential_schema": {
                 "fields": [
                     {
@@ -126,6 +130,7 @@ class TestLoadAndValidate:
             assert err is None
             assert m.id == "full_test"
             assert m.display_name == "Full Test"
+            assert m.setup["documentation_url"] == "https://example.com/setup"
             assert len(m.actions) == 2
             assert m.backend["type"] == "http"
             assert m.backend["auth"]["type"] == "basic"
@@ -336,6 +341,22 @@ class TestManifestToRow:
         assert len(actions) == 2
         assert actions[0]["name"] == "list"
         assert actions[1]["side_effect"] == "destructive"
+
+    def test_to_connector_type_row_only_requires_required_credential_fields(self):
+        data = {
+            "spec_version": "1.0",
+            "id": "oauth_connector",
+            "version": "1.0.0",
+            "credential_schema": {
+                "fields": [
+                    {"name": "client_id", "required": True},
+                    {"name": "access_token", "required": False},
+                ]
+            },
+            "backend": {"type": "http", "auth": {"type": "oauth2"}},
+        }
+        row = Manifest(data).to_connector_type_row()
+        assert json.loads(row["required_credential_fields_json"]) == ["client_id"]
 
     def test_to_connector_type_row_minimal(self):
         data = {

@@ -53,7 +53,11 @@ class HttpEngine(BaseConnector):
             action = next(iter(requests.keys()))
 
         try:
-            result = self.execute(action, {}, credential, config_json, session=None)
+            session = None
+            if self.spec.get("refresh"):
+                refreshed = self.refresh_session(credential, config_json, None)
+                session = refreshed.get("session")
+            result = self.execute(action, {}, credential, config_json, session=session)
         except Exception as e:
             return {"success": False, "error": str(e)}
 
@@ -113,7 +117,7 @@ class HttpEngine(BaseConnector):
                 resp = self._send(req, config)
                 attempts += 1
 
-        self._raise_on_errors(resp)
+        self._raise_on_errors(resp, credential)
         return self._extract(resp, request_def, config)
 
     def _capture_from_response(self, resp, session_spec: dict) -> dict:
@@ -459,7 +463,7 @@ class HttpEngine(BaseConnector):
         trigger = refresh_spec.get("trigger", {})
         if trigger.get("http_status") == resp.status:
             return True
-        cred_expires_at = credential.get("expires_at")
+        cred_expires_at = credential.get("expires_at") if credential else None
         if cred_expires_at and trigger.get("or_expired") == "cred.expires_at":
             try:
                 expires_ts = float(cred_expires_at)
@@ -503,8 +507,15 @@ class HttpEngine(BaseConnector):
             with safe_urlopen(req, timeout=30) as resp:
                 raw = resp.read()
                 token_resp = json.loads(raw.decode("utf-8"))
+        except urllib.error.HTTPError as e:
+            try:
+                error_data = json.loads(e.read().decode("utf-8"))
+            except Exception:
+                error_data = {}
+            message = error_data.get("error_description") or error_data.get("error") or str(e)
+            raise AuthExpiredError(f"OAuth refresh failed: {message}") from e
         except Exception as e:
-            return {"error": str(e)}
+            raise AuthExpiredError(f"OAuth refresh failed: {e}") from e
 
         new_session = {**(current_session or {})}
         credential_update = {}
@@ -524,6 +535,12 @@ class HttpEngine(BaseConnector):
         for from_key, to_key in persist.items():
             if from_key == "refresh_token" and token_resp.get("refresh_token"):
                 credential_update["refresh_token"] = token_resp["refresh_token"]
+
+        if not new_session.get("access_token"):
+            message = token_resp.get("error_description") or token_resp.get("error")
+            raise AuthExpiredError(
+                f"OAuth refresh failed: {message or 'provider did not return an access token'}"
+            )
 
         return {"session": new_session, "credential_update": credential_update}
 
@@ -549,7 +566,7 @@ class HttpEngine(BaseConnector):
         except urllib.error.HTTPError as e:
             return _HTTPErrorResponse(e)
 
-    def _raise_on_errors(self, resp) -> None:
+    def _raise_on_errors(self, resp, credential: Optional[Credential] = None) -> None:
         if resp.status == 429:
             retry_after = None
             ra = resp.headers.get("Retry-After")
@@ -561,7 +578,7 @@ class HttpEngine(BaseConnector):
             raise RateLimitedError(retry_after=retry_after)
         if self.spec.get("session") and self._is_session_challenge(resp):
             raise SessionExpiredError()
-        if self.spec.get("refresh") and self._is_auth_expired(resp, None, None):
+        if self.spec.get("refresh") and self._is_auth_expired(resp, None, credential):
             raise AuthExpiredError()
 
     def _extract(self, resp, request_def: dict, config: dict) -> dict:

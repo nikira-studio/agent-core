@@ -15,6 +15,31 @@ def test_credential_create_entry(test_client, agent_token):
     assert data["entry"]["reference_name"].startswith(f"{CREDENTIAL_PREFIX}TEST_API_KEY_")
 
 
+def test_credential_create_entry_rejects_duplicate_name(test_client, agent_token):
+    first = test_client.post(
+        "/api/credentials/entries",
+        headers={"Authorization": f"Bearer {agent_token}"},
+        json={
+            "scope": "agent:testagent",
+            "name": "duplicate-test",
+            "value": "first-secret",
+        },
+    )
+    assert first.status_code == 201, first.json()
+
+    second = test_client.post(
+        "/api/credentials/entries",
+        headers={"Authorization": f"Bearer {agent_token}"},
+        json={
+            "scope": "agent:testagent",
+            "name": "duplicate-test",
+            "value": "second-secret",
+        },
+    )
+    assert second.status_code == 409, second.text
+    assert second.json()["error"]["code"] == "DUPLICATE_CREDENTIAL"
+
+
 def test_credential_rejects_empty_name_on_update(test_client, agent_token):
     create_r = test_client.post(
         "/api/credentials/entries",

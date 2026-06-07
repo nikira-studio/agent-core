@@ -1,7 +1,9 @@
 import json
 import time
 import threading
-from fastapi import APIRouter, Depends
+import urllib.parse
+from fastapi import APIRouter, Depends, Request
+from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, ConfigDict, Field
 from typing import Optional
 
@@ -12,6 +14,7 @@ from app.services import (
     openapi_service,
     mcp_provider_service,
     adapter_loader,
+    connector_oauth_service,
 )
 from app.branding import APP_USER_AGENT
 from app.security.dependencies import get_request_context
@@ -21,6 +24,15 @@ from app.security.response_helpers import success_response, error_response
 
 
 router = APIRouter(prefix="/api/connector-bindings", tags=["connector_bindings"])
+
+
+def _public_base_url(request: Request) -> str:
+    forwarded_proto = (request.headers.get("x-forwarded-proto") or "").split(",")[0].strip()
+    forwarded_host = (request.headers.get("x-forwarded-host") or "").split(",")[0].strip()
+    host = forwarded_host or request.headers.get("host") or ""
+    if forwarded_proto and host:
+        return f"{forwarded_proto}://{host}".rstrip("/")
+    return str(request.base_url).rstrip("/")
 
 
 class ImportSpecRequest(BaseModel):
@@ -165,6 +177,56 @@ async def create_binding(
         result="success",
     )
     return success_response({"binding": binding}, status_code=201)
+
+
+@router.post("/{binding_id}/oauth/start")
+async def start_binding_oauth(
+    binding_id: str,
+    request: Request,
+    ctx: RequestContext = Depends(get_request_context),
+):
+    binding = connector_service.get_binding(binding_id)
+    if not binding:
+        return error_response("NOT_FOUND", "Binding not found", 404)
+    enforcer = ScopeEnforcer(
+        ctx.read_scopes,
+        ctx.write_scopes,
+        ctx.agent_id,
+        is_admin=ctx.is_admin,
+        active_workspace_ids=ctx.active_workspace_ids,
+    )
+    if not enforcer.can_write(binding["scope"]):
+        return error_response("SCOPE_DENIED", "Access denied to this binding", 403)
+    redirect_uri = f"{_public_base_url(request)}/api/connector-bindings/oauth/callback"
+    try:
+        authorization_url = connector_oauth_service.build_authorization_url(
+            binding_id, ctx.user_id, redirect_uri
+        )
+    except connector_oauth_service.ConnectorOAuthError as exc:
+        return error_response("OAUTH_SETUP_FAILED", str(exc), 400)
+    return success_response(
+        {"authorization_url": authorization_url, "callback_url": redirect_uri}
+    )
+
+
+@router.get("/oauth/callback", name="connector_oauth_callback")
+async def connector_oauth_callback(
+    state: str,
+    code: Optional[str] = None,
+    error: Optional[str] = None,
+    ctx: RequestContext = Depends(get_request_context),
+):
+    if error:
+        return RedirectResponse(f"/connectors?oauth_error={urllib.parse.quote(error)}")
+    if not code:
+        return RedirectResponse("/connectors?oauth_error=Missing%20authorization%20code")
+    try:
+        connector_oauth_service.exchange_callback(state, code, ctx.user_id)
+    except connector_oauth_service.ConnectorOAuthError as exc:
+        return RedirectResponse(
+            f"/connectors?oauth_error={urllib.parse.quote(str(exc))}"
+        )
+    return RedirectResponse("/connectors?oauth_success=1")
 
 
 @router.get("/{binding_id}")

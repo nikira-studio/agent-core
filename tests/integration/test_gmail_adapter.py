@@ -59,7 +59,7 @@ class TestGmailAdapterWireLevel:
         call = captured[0]
 
         assert "gmail.googleapis.com" in call["url"]
-        assert "/gmail/v1/messages/send" in call["url"]
+        assert "/gmail/v1/users/me/messages/send" in call["url"]
 
         body = json.loads(json.dumps(call["body"]))
         assert "raw" in body
@@ -323,6 +323,22 @@ class TestGmailAdapterManifest:
         assert apply_spec.get("target") == "request_header"
         assert apply_spec.get("name") == "Authorization"
         assert "{{ cred.access_token }}" in apply_spec.get("template", "")
+
+    def test_gmail_setup_guidance_and_required_fields(self):
+        manifest_path = Path(
+            "/srv/docker-data/projects/Apps/agent-core/data/adapters/google_gmail/adapter.json"
+        )
+        m, err = load_and_validate(manifest_path)
+        assert err is None
+        assert "Authorize OAuth" in m.setup["instructions"]
+        assert m.backend["auth"]["authorization"]["scopes"] == [
+            "https://www.googleapis.com/auth/gmail.modify"
+        ]
+        assert m.backend["test_action"] == "list_messages"
+        assert json.loads(m.to_connector_type_row()["required_credential_fields_json"]) == [
+            "client_id",
+            "client_secret",
+        ]
 
 
 class TestGmailAdapterOAuthFlow:

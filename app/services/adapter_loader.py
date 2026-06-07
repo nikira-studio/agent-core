@@ -91,6 +91,7 @@ def _scan_root(adapter_root: Path, source_kind: str) -> list[dict]:
                 "id": manifest.id,
                 "display_name": manifest.display_name or manifest.id,
                 "description": manifest.description or "",
+                "setup": manifest.setup or {},
                 "version": manifest.version,
                 "backend_type": manifest.backend.get("type"),
                 "actions": manifest.actions,
@@ -137,7 +138,7 @@ def _requirements_summary(manifest: Manifest) -> dict:
     if isinstance(manifest.credential_schema, dict):
         for field in manifest.credential_schema.get("fields", []) or []:
             name = field.get("name")
-            if name:
+            if name and field.get("required", True):
                 credential_fields.append(name)
 
     return {

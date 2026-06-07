@@ -1,3 +1,5 @@
+import sqlite3
+
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from typing import Optional
@@ -99,15 +101,22 @@ async def create_entry(
     if not enforcer.can_write(body.scope):
         return error_response("SCOPE_DENIED", "Access denied to this scope", 403)
 
-    entry = credential_service.create_credential(
-        scope=body.scope,
-        name=body.name,
-        value_plaintext=body.value,
-        label=body.label,
-        metadata_json=body.metadata_json,
-        expires_at=body.expires_at,
-        created_by=ctx.user_id,
-    )
+    try:
+        entry = credential_service.create_credential(
+            scope=body.scope,
+            name=body.name,
+            value_plaintext=body.value,
+            label=body.label,
+            metadata_json=body.metadata_json,
+            expires_at=body.expires_at,
+            created_by=ctx.user_id,
+        )
+    except sqlite3.IntegrityError:
+        return error_response(
+            "DUPLICATE_CREDENTIAL",
+            "A credential with that name already exists in this scope. Use the stored credential instead of creating a new one.",
+            409,
+        )
 
     audit_service.write_event(
         actor_type=ctx.actor_type,

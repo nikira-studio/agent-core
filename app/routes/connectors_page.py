@@ -21,7 +21,9 @@ from app.routes.dashboard import (
 router = APIRouter()
 
 
-def _binding_guidance_for_connector_type(ct: dict) -> dict:
+def _binding_guidance_for_connector_type(
+    ct: dict, adapter_entry: dict | None = None
+) -> dict:
     credential_fields = list(ct.get("required_credential_fields") or [])
     config_fields: list[str] = []
     backend_json = ct.get("backend_json")
@@ -54,11 +56,14 @@ def _binding_guidance_for_connector_type(ct: dict) -> dict:
         config_fields.append("base_url")
 
     display_name = ct.get("display_name") or ct.get("id") or "Binding"
+    setup = (adapter_entry or {}).get("setup") or {}
     return {
         "suggested_binding_name": display_name,
         "suggested_credential_name": f"{display_name} credentials",
         "credential_fields": credential_fields,
         "config_fields": config_fields,
+        "setup_instructions": setup.get("instructions") or "",
+        "documentation_url": setup.get("documentation_url") or "",
     }
 
 
@@ -200,7 +205,10 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
         entry["id"]: entry for entry in adapter_loader.list_available_adapters()
     }
     binding_guidance = {
-        ct["id"]: _binding_guidance_for_connector_type(ct) for ct in connector_types
+        ct["id"]: _binding_guidance_for_connector_type(
+            ct, available_adapters.get(ct["id"])
+        )
+        for ct in connector_types
     }
 
     all_bindings = connector_service.list_bindings()
@@ -268,7 +276,9 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
         for ct in connector_types
     )
     credential_opts = "".join(
-        f'<option value="{e["id"]}">{escape_html(e.get("name", e["id"]))} ({escape_html(e.get("scope", ""))} / {escape_html(e.get("reference_name", ""))})</option>'
+        f'<option value="{e["id"]}" data-credential-name="{escape_html(e.get("name", e["id"]))}" data-credential-scope="{escape_html(e.get("scope", ""))}">'
+        f'{escape_html(e.get("name", e["id"]))} ({escape_html(e.get("scope", ""))} / {escape_html(e.get("reference_name", ""))})'
+        f'</option>'
         for e in credential_entries
     )
 
@@ -321,6 +331,17 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
             status_text = f"Error: {str(b['last_error'])[:40]}"
         elif b.get("last_tested_at"):
             status_text = f"OK ({b['last_tested_at'][:10]})"
+        oauth_button = ""
+        if ct and ct.get("auth_type") == "oauth2":
+            oauth_label = (
+                "Authorize Google"
+                if ct.get("id") == "google_gmail"
+                else "Authorize OAuth"
+            )
+            oauth_button = (
+                f"<button type='button' class='btn btn-sm btn-primary' "
+                f"onclick='authorizeBindingOAuth(\"{b['id']}\")'>{oauth_label}</button>"
+            )
         bindings_rows += f"""
         <tr data-binding-id="{b["id"]}">
           <td style="{text_style}">{escape_html(b.get("name", ""))}</td>
@@ -328,6 +349,7 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
           <td style="{text_style}"><code>{escape_html(b.get("scope", ""))}</code></td>
           <td class="{status_cls}" style="{text_style}">{escape_html(status_text)}</td>
           <td class='actions-cell'>
+            {oauth_button}
             <button type='button' class='btn btn-sm btn-secondary' onclick='editBinding("{b["id"]}")'>Edit</button>
             <button type='button' class='btn btn-sm btn-secondary' onclick='viewExecutions("{b["id"]}")'>History</button>
             <button type='button' class='btn btn-sm btn-secondary' onclick='testBinding("{b["id"]}")'>Test</button>
@@ -538,6 +560,10 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
           </div>
           <div class="form-group">
             <div id="binding-recipe" class="form-hint">Choose a connector type to see the required credential and config fields.</div>
+          </div>
+          <div class="form-group" id="binding-setup-group" style="display:none">
+            <label>Setup Instructions</label>
+            <div id="binding-setup" class="form-hint" style="white-space:pre-line"></div>
           </div>
           <div class="form-group">
             <label>Name *</label>
@@ -787,6 +813,24 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
       </div>
     </div>
 
+    <!-- OAuth Redirect Modal -->
+    <div class="modal-overlay" id="oauth-redirect-modal" style="display:none">
+      <div class="modal" style="max-width:760px">
+        <h3>Google OAuth Redirect URI</h3>
+        <div class="form-hint" style="margin-bottom:8px">
+          Add this exact URL to the Google OAuth client’s Authorized redirect URIs.
+        </div>
+        <div class="form-group">
+          <textarea id="oauth-redirect-url" rows="3" readonly style="width:100%;font-family:monospace;white-space:pre-wrap"></textarea>
+        </div>
+        <div style="display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap">
+          <button type="button" class="btn btn-secondary" onclick="copyOAuthRedirectUrl()">Copy URL</button>
+          <button type="button" class="btn btn-secondary" onclick="closeModal('oauth-redirect-modal')">Cancel</button>
+          <button type="button" class="btn btn-primary" onclick="continueOAuthAuthorization()">Continue to Google</button>
+        </div>
+      </div>
+    </div>
+
     <!-- Binding Executions Modal -->
     <div class="modal-overlay" id="executions-modal" style="display:none">
       <div class="modal" style="max-width:700px">
@@ -831,6 +875,26 @@ function bindingPlaceholderForField(field, kind) {
     return 'YOUR_' + name.toUpperCase().replace(/[^A-Z0-9]+/g, '_');
   }
   return 'your-' + name.replace(/_/g, '-');
+}
+
+function findMatchingCredentialOption(name, scope) {
+  const select = document.getElementById('binding-credential');
+  if (!select) return null;
+  const targetName = String(name || '').trim().toLowerCase();
+  const targetScope = String(scope || '').trim();
+  const options = Array.from(select.options || []);
+  let exact = null;
+  let nameOnly = null;
+  for (const option of options) {
+    if (!option.value) continue;
+    const optionName = String(option.dataset?.credentialName || option.textContent || '').trim().toLowerCase();
+    const optionScope = String(option.dataset?.credentialScope || '').trim();
+    if (!optionName || optionName !== targetName) continue;
+    if (targetScope && optionScope === targetScope) return option;
+    if (!nameOnly) nameOnly = option;
+    if (optionScope === targetScope) exact = option;
+  }
+  return exact || nameOnly;
 }
 
 function buildBindingJsonTemplate(fields, kind) {
@@ -910,9 +974,13 @@ function renderBindingCredentialEditor(guidance) {
     '<div class="form-hint">' + escapeHtml(hint) + '</div>';
 }
 
+let pendingOAuthAuthorizationUrl = null;
+
 function updateBindingFormContext(defaultName) {
   const guidance = parseBindingGuidance();
   const recipe = document.getElementById('binding-recipe');
+  const setupGroup = document.getElementById('binding-setup-group');
+  const setupEl = document.getElementById('binding-setup');
   const nameEl = document.getElementById('binding-name');
   const credNameEl = document.getElementById('binding-new-credential-name');
 
@@ -930,11 +998,51 @@ function updateBindingFormContext(defaultName) {
     recipe.textContent = bits.length ? bits.join(' · ') : 'No extra binding requirements declared.';
   }
 
+  if (setupGroup && setupEl) {
+    const instructions = String(guidance?.setup_instructions || '').trim();
+    const documentationUrl = String(guidance?.documentation_url || '').trim();
+    const hasDocumentationUrl = documentationUrl.startsWith('https://');
+    setupGroup.style.display = instructions || hasDocumentationUrl ? '' : 'none';
+    setupEl.innerHTML = '';
+    if (instructions) {
+      setupEl.appendChild(document.createTextNode(instructions));
+    }
+    if (hasDocumentationUrl) {
+      if (instructions) setupEl.appendChild(document.createTextNode('\\n'));
+      const link = document.createElement('a');
+      link.href = documentationUrl;
+      link.target = '_blank';
+      link.rel = 'noopener noreferrer';
+      link.textContent = 'Open setup documentation';
+      setupEl.appendChild(link);
+    }
+  }
+
   if (nameEl && !nameEl.value) {
     nameEl.value = defaultName || guidance?.suggested_binding_name || '';
   }
   if (credNameEl && !credNameEl.value) {
     credNameEl.value = guidance?.suggested_credential_name || '';
+  }
+
+  const credentialSelect = document.getElementById('binding-credential');
+  const credentialMode = document.getElementById('binding-credential-mode');
+  const bindingScope = document.getElementById('binding-scope');
+  if (
+    credentialSelect &&
+    credentialMode &&
+    credentialMode.value === 'existing' &&
+    bindingScope &&
+    bindingScope.value &&
+    guidance?.suggested_credential_name
+  ) {
+    const match = findMatchingCredentialOption(
+      guidance.suggested_credential_name,
+      bindingScope.value
+    );
+    if (match) {
+      credentialSelect.value = match.value;
+    }
   }
 
   renderBindingCredentialEditor(guidance);
@@ -959,39 +1067,44 @@ async function createBinding(e) {
       showToast('Credential name and secret value are required', 'danger');
       return;
     }
-    if ((guidance.credential_fields || []).length > 1) {
-      let parsed = null;
-      try {
-        parsed = JSON.parse(credentialValue);
-      } catch (err) {
-        showToast('Enter valid JSON for ' + guidance.credential_fields.join(', '), 'danger');
+    const existingCredential = findMatchingCredentialOption(credentialName, bindingScope);
+    if (existingCredential) {
+      credentialId = existingCredential.value;
+    } else {
+      if ((guidance.credential_fields || []).length > 1) {
+        let parsed = null;
+        try {
+          parsed = JSON.parse(credentialValue);
+        } catch (err) {
+          showToast('Enter valid JSON for ' + guidance.credential_fields.join(', '), 'danger');
+          return;
+        }
+        const missing = (guidance.credential_fields || []).filter(function(field) {
+          return parsed[field] === undefined || parsed[field] === null || parsed[field] === '';
+        });
+        if (missing.length) {
+          showToast('Credential JSON must include: ' + missing.join(', '), 'danger');
+          return;
+        }
+        const credentialEl = document.getElementById('binding-new-credential-value');
+        if (credentialEl && credentialEl.dataset.template === 'true') {
+          showToast('Replace the credential template values before saving', 'danger');
+          return;
+        }
+      }
+      const credentialBody = {
+        name: credentialName,
+        label: credentialName,
+        scope: bindingScope,
+        value: credentialValue,
+      };
+      const credentialResult = await apiFetch('/api/credentials/entries', { method: 'POST', body: JSON.stringify(credentialBody) });
+      if (!credentialResult.ok) {
+        showToast(credentialResult.error?.message || 'Failed to create credential', 'danger');
         return;
       }
-      const missing = (guidance.credential_fields || []).filter(function(field) {
-        return parsed[field] === undefined || parsed[field] === null || parsed[field] === '';
-      });
-      if (missing.length) {
-        showToast('Credential JSON must include: ' + missing.join(', '), 'danger');
-        return;
-      }
-      const credentialEl = document.getElementById('binding-new-credential-value');
-      if (credentialEl && credentialEl.dataset.template === 'true') {
-        showToast('Replace the credential template values before saving', 'danger');
-        return;
-      }
+      credentialId = credentialResult.data.entry.id;
     }
-    const credentialBody = {
-      name: credentialName,
-      label: credentialName,
-      scope: bindingScope,
-      value: credentialValue,
-    };
-    const credentialResult = await apiFetch('/api/credentials/entries', { method: 'POST', body: JSON.stringify(credentialBody) });
-    if (!credentialResult.ok) {
-      showToast(credentialResult.error?.message || 'Failed to create credential', 'danger');
-      return;
-    }
-    credentialId = credentialResult.data.entry.id;
   }
 
   if ((guidance.credential_fields || []).length && !credentialId) {
@@ -1110,6 +1223,57 @@ async function testBinding(id) {
     showToast(j.error?.message || 'Failed to test binding', 'danger');
   }
 }
+
+async function authorizeBindingOAuth(id) {
+  const j = await apiFetch('/api/connector-bindings/' + id + '/oauth/start', { method: 'POST' });
+  if (!j.ok) {
+    showToast(j.error?.message || 'Failed to start OAuth authorization', 'danger');
+    return;
+  }
+  const callbackUrl = j.data.callback_url;
+  pendingOAuthAuthorizationUrl = j.data.authorization_url;
+  const urlEl = document.getElementById('oauth-redirect-url');
+  if (urlEl) urlEl.value = callbackUrl;
+  openModal('oauth-redirect-modal');
+}
+
+async function copyOAuthRedirectUrl() {
+  const urlEl = document.getElementById('oauth-redirect-url');
+  const text = urlEl ? urlEl.value : '';
+  if (!text) return;
+  try {
+    await navigator.clipboard.writeText(text);
+    showToast('Redirect URI copied', 'success');
+  } catch (err) {
+    if (urlEl) {
+      urlEl.focus();
+      urlEl.select();
+      document.execCommand('copy');
+      showToast('Redirect URI copied', 'success');
+    }
+  }
+}
+
+function continueOAuthAuthorization() {
+  if (!pendingOAuthAuthorizationUrl) {
+    showToast('OAuth authorization URL is missing', 'danger');
+    return;
+  }
+  closeModal('oauth-redirect-modal');
+  window.location.href = pendingOAuthAuthorizationUrl;
+}
+
+(function showOAuthResult() {
+  const success = getUrlParam('oauth_success');
+  const error = getUrlParam('oauth_error');
+  if (success) {
+    showToast('OAuth authorization completed. The binding is ready to test.', 'success');
+    setUrlParam('oauth_success', null);
+  } else if (error) {
+    showToast('OAuth authorization failed: ' + error, 'danger');
+    setUrlParam('oauth_error', null);
+  }
+})();
 
 function renderHealthResult(data) {
   const total = data.total || 0;

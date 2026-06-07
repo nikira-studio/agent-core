@@ -87,8 +87,31 @@ def test_connectors_page_surfaces_credentials_workflow(authenticated_client):
     assert "/api/credentials/entries" in html
     assert "Create new credential" in html
     assert "Use stored credential" in html
+    assert "oauth-redirect-modal" in html
+    assert "Copy URL" in html
     assert "import-spec-preview" in html
     assert "import-spec-import-btn" in html
+    assert "Setup Instructions" in html
+
+
+def test_binding_guidance_includes_adapter_setup_metadata():
+    from app.routes.connectors_page import _binding_guidance_for_connector_type
+
+    guidance = _binding_guidance_for_connector_type(
+        {
+            "id": "example",
+            "display_name": "Example",
+            "required_credential_fields": ["token"],
+        },
+        {
+            "setup": {
+                "instructions": "Create a token in the provider console.",
+                "documentation_url": "https://example.com/setup",
+            }
+        },
+    )
+    assert guidance["setup_instructions"] == "Create a token in the provider console."
+    assert guidance["documentation_url"] == "https://example.com/setup"
 
 
 def test_credentials_page_surfaces_credential_forms(authenticated_client):

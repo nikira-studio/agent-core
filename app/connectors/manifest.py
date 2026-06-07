@@ -18,6 +18,16 @@ ADAPTER_MANIFEST_SCHEMA = {
         "display_name": {"type": "string"},
         "version": {"type": "string", "pattern": r"^\d+\.\d+\.\d+$"},
         "description": {"type": "string"},
+        "setup": {
+            "type": "object",
+            "properties": {
+                "instructions": {"type": "string"},
+                "documentation_url": {
+                    "type": "string",
+                    "pattern": "^https://",
+                },
+            },
+        },
         "credential_schema": {
             "type": "object",
             "properties": {
@@ -77,6 +87,7 @@ ADAPTER_MANIFEST_SCHEMA = {
                     ]
                 },
                 "auth": {"type": "object"},
+                "test_action": {"type": "string"},
                 "session": {"type": "object"},
                 "refresh": {"type": "object"},
                 "requests": {"type": "object"},
@@ -126,6 +137,7 @@ class Manifest:
         self.display_name: Optional[str] = data.get("display_name")
         self.version: str = data["version"]
         self.description: Optional[str] = data.get("description")
+        self.setup: Optional[dict] = data.get("setup")
         self.credential_schema: Optional[dict] = data.get("credential_schema")
         self.requires: Optional[dict] = data.get("requires")
         self.actions: list[dict] = data.get("actions", [])
@@ -136,7 +148,7 @@ class Manifest:
         if isinstance(self.credential_schema, dict):
             for field in self.credential_schema.get("fields", []) or []:
                 name = field.get("name")
-                if name:
+                if name and field.get("required", True):
                     credential_fields.append(name)
         backend_auth = self.backend.get("auth") if isinstance(self.backend, dict) else None
         if isinstance(backend_auth, dict):

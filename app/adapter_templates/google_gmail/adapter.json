@@ -5,11 +5,15 @@
   "version": "1.0.0",
   "author": "agent-core team",
   "description": "Gmail API via OAuth2. Supports send_email, list_messages, get_message, search_messages with automatic token refresh and refresh_token rotation.",
+  "setup": {
+    "instructions": "Create a Google OAuth client once, then let Agent Core complete authorization and store tokens automatically.\n\n1. In Google Cloud Console, enable the Gmail API, configure the OAuth consent screen, and add the Gmail account as a test user if the app is in Testing status.\n2. Create an OAuth 2.0 Client ID with application type Web application.\n3. Create the binding with only client_id and client_secret in the credential JSON.\n4. Click Authorize OAuth on the binding. Agent Core will show the callback URL that must be added to the Google client's authorized redirect URIs, then open Google's approval page.\n\nExternal apps left in Testing status receive Gmail refresh tokens that expire after 7 days.",
+    "documentation_url": "https://developers.google.com/identity/protocols/oauth2/web-server"
+  },
   "credential_schema": {
     "fields": [
       { "name": "client_id", "type": "string", "secret": false, "required": true },
       { "name": "client_secret", "type": "string", "secret": true, "required": true },
-      { "name": "refresh_token", "type": "string", "secret": true, "required": true },
+      { "name": "refresh_token", "type": "string", "secret": true, "required": false },
       { "name": "access_token", "type": "string", "secret": true, "required": false },
       { "name": "expires_at", "type": "string", "secret": false, "required": false }
     ]
@@ -89,6 +93,14 @@
     "base_url": "https://gmail.googleapis.com",
     "auth": {
       "type": "oauth2",
+      "authorization": {
+        "url": "https://accounts.google.com/o/oauth2/v2/auth",
+        "scopes": ["https://www.googleapis.com/auth/gmail.modify"],
+        "params": {
+          "access_type": "offline",
+          "prompt": "consent"
+        }
+      },
       "apply": {
         "target": "request_header",
         "name": "Authorization",
@@ -110,10 +122,11 @@
         "refresh_token": "credential_if_present.refresh_token"
       }
     },
+    "test_action": "list_messages",
     "requests": {
       "send_email": {
         "method": "POST",
-        "path": "/gmail/v1/messages/send",
+        "path": "/gmail/v1/users/me/messages/send",
         "body": {
           "template": {
             "raw": "{{ params | rfc822_base64url }}"

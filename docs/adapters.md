@@ -122,6 +122,10 @@ A minimal adapter is a single `adapter.json` file. The structure has two parts: 
   "version": "1.0.0",
   "author": "your name",
   "description": "One-line summary for the catalog and Browse page.",
+  "setup": {
+    "instructions": "Explain where the operator obtains the credential values.",
+    "documentation_url": "https://example.com/setup"
+  },
   "credential_schema": {
     "fields": [
       { "name": "api_key", "type": "string", "secret": true, "required": true }
@@ -161,6 +165,8 @@ A minimal adapter is a single `adapter.json` file. The structure has two parts: 
 - `input_schema` — real JSON Schema for the params. Lets the agent know what to pass without trial and error.
 
 **`credential_schema.fields[]`** — each field declares `name`, `type`, `secret` (true = redacted in UI/logs), `required`. The UI uses this to build the credential entry form. For single-secret connectors (one `api_key` field), the stored value is the secret string. For multi-field credentials, the stored value is a JSON object with those field names as keys.
+
+**`setup`** — optional human-readable binding guidance. `instructions` appears in the New Binding modal, and `documentation_url` must be an HTTPS link. Use it for provider-console steps, OAuth scopes, redirect URIs, and an explanation of which credential fields are optional.
 
 ## The three backends
 
@@ -227,7 +233,7 @@ Six common shapes:
 | `none` | (none) | omit `apply` |
 | `api_key` / `bearer` | single secret string in `cred.raw` | `"template": "Bearer {{ cred.raw }}"` in `request_header: Authorization` |
 | `basic` | JSON `{username, password}` in `cred.fields` | `"template": "Basic {{ cred.base64_credentials }}"` (built-in helper that base64-encodes `username:password`) |
-| `oauth2` | JSON `{client_id, client_secret, refresh_token, access_token, expires_at}` | `"template": "Bearer {{ cred.access_token }}"` — pair with a `refresh` block |
+| `oauth2` | JSON `{client_id, client_secret, refresh_token, access_token, expires_at}` | `"template": "Bearer {{ cred.access_token }}"` — pair with a `refresh` block; an `auth.authorization` block enables the dashboard OAuth flow |
 | `custom_header` | single token | `"name": "X-API-Token", "template": "{{ cred.raw }}"` |
 | (anything else) | adapter-internal | the engine just resolves the template — describe whatever wire shape you need |
 
@@ -260,6 +266,8 @@ On a triggering response, the engine captures the value from the source, re-issu
 ### `refresh` (OAuth2)
 
 For services with access-token expiry, declare a `refresh` block. The engine refreshes under a per-binding lock (concurrent calls won't double-refresh) and retries the action once after the new token lands:
+
+For browser-based authorization, also declare `auth.authorization.url`, `auth.authorization.scopes`, and optional `auth.authorization.params`. The dashboard then exposes an **Authorize OAuth** button and stores the returned access and refresh tokens in the linked credential.
 
 ```json
 "refresh": {

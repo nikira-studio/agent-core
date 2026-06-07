@@ -303,6 +303,19 @@ CREATE INDEX IF NOT EXISTS idx_bindings_scope ON connector_bindings(scope, enabl
 CREATE INDEX IF NOT EXISTS idx_bindings_connector ON connector_bindings(connector_type_id);
 CREATE INDEX IF NOT EXISTS idx_bindings_credential ON connector_bindings(credential_id);
 
+-- Short-lived OAuth authorization state shared across app workers
+CREATE TABLE IF NOT EXISTS connector_oauth_states (
+    state TEXT PRIMARY KEY,
+    binding_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    redirect_uri TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (binding_id) REFERENCES connector_bindings(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_connector_oauth_states_expires ON connector_oauth_states(expires_at);
+
 -- Connector executions table
 CREATE TABLE IF NOT EXISTS connector_executions (
     id TEXT PRIMARY KEY,
