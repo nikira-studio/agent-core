@@ -90,23 +90,28 @@ If one agent needs to hand work to another, write the durable state into the sha
 
 ### Scope Model
 
-Agent Core uses a small set of scope types with different purposes:
+Agent Core uses a few scope types, each with a distinct purpose and audience. The guiding rule:
 
-- `agent:<id>` is the agent's private scope for scratch notes and agent-local state.
-- `user:<id>` is the authenticated owner's personal scope. In the current UI, creator user read is automatic so agents can see owner-level preferences and user-scoped bindings, while user write remains an explicit advanced choice.
-- `workspace:<id>` is the normal collaboration scope for shared project work and handoffs.
-- `shared` / `global` is a cross-user shared access path, not just a visibility toggle.
+**Anything that is shared among agents or tools by default, or that conceptually belongs to a project, domain, or the owner rather than to one agent, belongs in a `workspace:<id>`.** Workspaces are the unit of shared knowledge — create one per domain (a project's development workspace, a personal-knowledge workspace, and so on). They are cheap; make a new one rather than overloading an existing workspace with unrelated facts.
 
-When you generate reusable instructions, keep those distinctions in mind:
+- `agent:<id>` — the agent's **own** scope: its scratch notes, operational state, and self-knowledge. Private by default, but shareable — grant another agent read by adding this scope to its read scopes. What does *not* belong here is knowledge that conceptually belongs to the owner rather than the agent, or that several agents should see by default; put that in a workspace (a shared workspace is a cleaner grant than handing out per-agent scope access). Records here survive a rebuild that reuses the same scope name, but a hard purge of the agent deletes them. Don't treat it as the default handoff channel.
+- `user:<id>` — the **human owner's** personal context and preferences. Agents read it for owner context (creator read is automatic in the current UI); write is an explicit, off-by-default grant. It is for facts about the owner, not a general shared store.
+- `workspace:<id>` — the **shared, durable home** for facts, decisions, and handoffs that multiple agents or tools rely on, or that must outlive any single agent. This is the default home for durable memory.
+- `shared` / `global` — a cross-user shared-access path, not just a visibility toggle.
+
+Worked example: an assistant that learns durable facts about its owner's contacts should write them to a dedicated workspace (for example a `personal` workspace the owner created and granted it write on) — not to `agent:<assistant>` (siloed and non-portable) and not to a project's development workspace (an unrelated domain).
+
+When you generate reusable instructions, keep these distinctions in mind:
 
 | Situation | Scope to use |
 |---|---|
-| Reading owner context | authenticated/default user scope (read-only by default) |
-| Workspace explicitly selected | workspace scope for facts, decisions, and durable writes |
-| No workspace selected | the agent's own scope (`agent:<id>`) for durable writes — it is the only writable durable scope unless user/workspace write was granted |
-| User-scope write explicitly enabled | may write stable preferences to user scope |
+| Reading owner context | the owner's user scope (read-only by default) |
+| Durable facts/decisions shared among agents or tools | a `workspace:<id>` dedicated to that domain |
+| Owner preferences, with user-scope write granted | the owner's user scope (`preference` class) |
+| Genuinely agent-local scratch | the agent's own `agent:<id>` scope |
+| You have durable/shared knowledge but no workspace is selected | a setup gap — have the owner create or select a workspace and grant write, rather than using `agent:<id>` as a stand-in |
 
-Treat user scope as read-only owner context unless user-scope write access is explicitly enabled. Agents are not granted user-scope or workspace write by default, so an assistant with no workspace selected uses its own `agent:<id>` scope as its durable store, not just for scratch.
+Agents are not granted user-scope or workspace write by default. If an assistant has no workspace and needs to store durable, shareable knowledge, the fix is to assign it a workspace — not to repurpose its private `agent:<id>` scope as the durable store.
 
 ## Connector Setup in Agent Core
 

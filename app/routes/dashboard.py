@@ -5797,18 +5797,29 @@ This file is the manual fallback when the client has no lifecycle hook or plugin
 
 
 def _build_assistants_md(base_url, user_scope, workspace_scope, agent_scope, api_key=None):
-    # Durable writes go to the writable scope an agent actually has: the selected
-    # workspace when one is chosen, otherwise the agent's own scope. Agents are not
-    # granted user-scope or workspace write by default, so the user scope is for
-    # reads only unless write was explicitly granted.
+    # Operational writes (activity tracking, searches) go to the writable scope an
+    # agent actually has: the selected workspace when one is chosen, otherwise its
+    # own agent scope. Durable, shareable KNOWLEDGE is different: it belongs in a
+    # workspace, never in the private agent scope. Agents are not granted user-scope
+    # or workspace write by default, so the user scope is read-only unless granted.
     durable_scope = workspace_scope or agent_scope
-    durable_note = (
-        " This is the selected workspace scope; use it for shared collaboration."
+    # Where the prompt tells the agent to put durable facts/decisions. With a
+    # workspace, that is the workspace. Without one, we must NOT present the private
+    # agent scope as a durable store (that mistake silos owner knowledge); we point
+    # the agent at requesting a workspace instead.
+    durable_label = (
+        f"`{workspace_scope}`"
+        if workspace_scope
+        else "your assigned workspace (ask the owner to create or grant one — not your private agent scope)"
+    )
+    durable_guidance = (
+        f"Write durable, shareable memory to `{workspace_scope}` (the selected workspace)."
         if workspace_scope
         else (
-            " With no workspace selected this is your own agent scope, which is your"
-            " durable private store (not just scratch) because agents are not granted"
-            " user-scope or workspace write by default."
+            f"No workspace is selected, so you have no shared durable store yet. Ask the"
+            f" owner to create or select a workspace and grant you write before storing"
+            f" shared or owner-facing facts; keep only your own agent-local notes in"
+            f" `{agent_scope}` until then."
         )
     )
     connection_key = _connection_key_value(api_key)
@@ -5838,8 +5849,10 @@ If your host defers tool availability, run its tool discovery/load step first so
 
 ## Memory Scope Guidance
 
-Write your durable memory to `{durable_scope}`.{durable_note}
-Read `{user_scope}` for stable owner preferences and owner-context details. Treat the user scope as read-only unless your key was explicitly granted user-scope write.
+The guiding rule: anything that is shared across agents or tools by default, or that belongs to the owner or a shared domain rather than to you, belongs in a `workspace:<id>`. Your `{agent_scope}` scope is for your own scratch, operational state, and self-knowledge; it is private by default (another agent can read it only if granted that scope), so it is not the home for the owner's personal facts or for knowledge several agents should share.
+
+{durable_guidance}
+Read `{user_scope}` for stable owner preferences and owner-context details. Treat the user scope as read-only unless your key was explicitly granted user-scope write; it is for facts about the owner, not a general shared store.
 Use full prefixed scope names exactly as shown. Do not use plain workspace IDs or agent IDs as memory scopes.
 
 ## Setup
@@ -5871,9 +5884,9 @@ At the start of a meaningful task:
 
 Write memory only when it will help a future session:
 
-- `decision` in `{durable_scope}` for durable choices, tradeoffs, rejected options, and why they were chosen.
-- `fact` in `{durable_scope}` for stable implementation facts, integration details, constraints, and verified behavior.
-- `preference` in `{user_scope}` only if your key has user-scope write; otherwise write it to `{durable_scope}`. Preferences support `slot_key` to keep one active value per slot (`slot_key` is valid for the `preference` class only).
+- `decision` in {durable_label} for durable choices, tradeoffs, rejected options, and why they were chosen.
+- `fact` in {durable_label} for stable implementation facts, integration details, constraints, and verified behavior.
+- `preference` in `{user_scope}` only if your key has user-scope write; otherwise write it to {durable_label}. Preferences support `slot_key` to keep one active value per slot (`slot_key` is valid for the `preference` class only).
 - `scratchpad` in your agent scope `{agent_scope}` for temporary private notes.
 - To revise a `fact` or `decision`, write the new record with `supersedes_id` set to the prior record's id; reserve `memory_retract` for records that are simply wrong.
 
