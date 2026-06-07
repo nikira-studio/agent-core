@@ -1,0 +1,523 @@
+{
+  "spec_version": "1.0",
+  "id": "google_workspace",
+  "display_name": "Google Workspace",
+  "version": "1.0.0",
+  "author": "agent-core team",
+  "description": "Unified Google Workspace connector over one OAuth2 client: Gmail, Calendar, Drive, Contacts (People), Sheets, and Docs. Authorize once for the scopes you want; disable any actions you don't use. Automatic token refresh with refresh_token rotation.",
+  "setup": {
+    "instructions": "Create one Google OAuth client, enable the APIs for the services you want, then let Agent Core complete authorization.\n\n1. In Google Cloud Console, enable the APIs you intend to use: Gmail, Google Calendar, Google Drive, People (Contacts), Google Sheets, Google Docs.\n2. Configure the OAuth consent screen and add the scopes for those services. Add your account as a test user if the app is in Testing status.\n3. Create an OAuth 2.0 Client ID, application type Web application.\n4. Create the binding with client_id and client_secret in the credential JSON.\n5. Click Authorize OAuth on the binding. Agent Core shows the callback URL to add to the client's authorized redirect URIs, then opens Google's approval page where you grant the scopes.\n\nIf you only want some services, you can still authorize all scopes and disable the unused actions on the connector, or narrow the scopes here and disable the actions whose APIs you didn't enable. External apps left in Testing status receive refresh tokens that expire after 7 days; publish the consent screen to Production for durable tokens.",
+    "documentation_url": "https://developers.google.com/identity/protocols/oauth2/web-server"
+  },
+  "credential_schema": {
+    "fields": [
+      { "name": "client_id", "type": "string", "secret": false, "required": true },
+      { "name": "client_secret", "type": "string", "secret": true, "required": true },
+      { "name": "refresh_token", "type": "string", "secret": true, "required": false },
+      { "name": "access_token", "type": "string", "secret": true, "required": false },
+      { "name": "expires_at", "type": "string", "secret": false, "required": false }
+    ]
+  },
+  "requires": { "config": [] },
+  "actions": [
+    {
+      "name": "send_email",
+      "description": "Gmail: send an email.",
+      "side_effect": "write",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "to": { "type": "array", "items": { "type": "string" }, "description": "Recipients" },
+          "subject": { "type": "string", "description": "Subject line" },
+          "body": { "type": "string", "description": "Email body (plain text)" },
+          "cc": { "type": "array", "items": { "type": "string" }, "description": "CC recipients" },
+          "bcc": { "type": "array", "items": { "type": "string" }, "description": "BCC recipients" }
+        },
+        "required": ["to", "subject", "body"]
+      }
+    },
+    {
+      "name": "list_messages",
+      "description": "Gmail: list messages in a label or inbox.",
+      "side_effect": "read",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "label": { "type": "string", "description": "Gmail label (e.g. INBOX). Defaults to INBOX." },
+          "max_results": { "type": "integer", "description": "Maximum messages (1-500)" }
+        }
+      }
+    },
+    {
+      "name": "get_message",
+      "description": "Gmail: get a message by ID.",
+      "side_effect": "read",
+      "input_schema": {
+        "type": "object",
+        "properties": { "message_id": { "type": "string", "description": "The message ID" } },
+        "required": ["message_id"]
+      }
+    },
+    {
+      "name": "search_messages",
+      "description": "Gmail: search messages using Gmail search syntax.",
+      "side_effect": "read",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "query": { "type": "string", "description": "Gmail search query" },
+          "max_results": { "type": "integer", "description": "Maximum messages (1-500)" }
+        },
+        "required": ["query"]
+      }
+    },
+    {
+      "name": "modify_labels",
+      "description": "Gmail: add or remove labels from a message.",
+      "side_effect": "write",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "message_id": { "type": "string", "description": "The message ID" },
+          "add_labels": { "type": "array", "items": { "type": "string" }, "description": "Label IDs to add" },
+          "remove_labels": { "type": "array", "items": { "type": "string" }, "description": "Label IDs to remove" }
+        },
+        "required": ["message_id"]
+      }
+    },
+    {
+      "name": "list_events",
+      "description": "Calendar: list upcoming events on a calendar.",
+      "side_effect": "read",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "calendar_id": { "type": "string", "description": "Calendar id. Defaults to 'primary'." },
+          "time_min": { "type": "string", "description": "RFC3339 lower bound (e.g. 2026-06-07T00:00:00Z)" },
+          "time_max": { "type": "string", "description": "RFC3339 upper bound" },
+          "query": { "type": "string", "description": "Free-text search" },
+          "max_results": { "type": "integer", "description": "Maximum events" }
+        }
+      }
+    },
+    {
+      "name": "get_event",
+      "description": "Calendar: get an event by ID.",
+      "side_effect": "read",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "calendar_id": { "type": "string", "description": "Calendar id. Defaults to 'primary'." },
+          "event_id": { "type": "string", "description": "Event id" }
+        },
+        "required": ["event_id"]
+      }
+    },
+    {
+      "name": "create_event",
+      "description": "Calendar: create an event. start/end are RFC3339 dateTimes.",
+      "side_effect": "write",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "calendar_id": { "type": "string", "description": "Calendar id. Defaults to 'primary'." },
+          "summary": { "type": "string", "description": "Event title" },
+          "start": { "type": "string", "description": "RFC3339 start dateTime" },
+          "end": { "type": "string", "description": "RFC3339 end dateTime" },
+          "description": { "type": "string", "description": "Event description" },
+          "location": { "type": "string", "description": "Event location" }
+        },
+        "required": ["summary", "start", "end"]
+      }
+    },
+    {
+      "name": "delete_event",
+      "description": "Calendar: delete an event by ID.",
+      "side_effect": "destructive",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "calendar_id": { "type": "string", "description": "Calendar id. Defaults to 'primary'." },
+          "event_id": { "type": "string", "description": "Event id" }
+        },
+        "required": ["event_id"]
+      }
+    },
+    {
+      "name": "list_calendars",
+      "description": "Calendar: list the user's calendars.",
+      "side_effect": "read",
+      "input_schema": { "type": "object", "properties": {} }
+    },
+    {
+      "name": "list_files",
+      "description": "Drive: list/search files.",
+      "side_effect": "read",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "query": { "type": "string", "description": "Drive query, e.g. \"name contains 'report'\"" },
+          "page_size": { "type": "integer", "description": "Max files to return" }
+        }
+      }
+    },
+    {
+      "name": "get_file",
+      "description": "Drive: get a file's metadata by ID.",
+      "side_effect": "read",
+      "input_schema": {
+        "type": "object",
+        "properties": { "file_id": { "type": "string", "description": "Drive file id" } },
+        "required": ["file_id"]
+      }
+    },
+    {
+      "name": "delete_file",
+      "description": "Drive: delete a file by ID (moves to trash semantics depend on the file).",
+      "side_effect": "destructive",
+      "input_schema": {
+        "type": "object",
+        "properties": { "file_id": { "type": "string", "description": "Drive file id" } },
+        "required": ["file_id"]
+      }
+    },
+    {
+      "name": "create_folder",
+      "description": "Drive: create a folder.",
+      "side_effect": "write",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string", "description": "Folder name" },
+          "parents": { "type": "array", "items": { "type": "string" }, "description": "Optional parent folder ids" }
+        },
+        "required": ["name"]
+      }
+    },
+    {
+      "name": "list_contacts",
+      "description": "Contacts: list the user's connections.",
+      "side_effect": "read",
+      "input_schema": {
+        "type": "object",
+        "properties": { "page_size": { "type": "integer", "description": "Max contacts to return" } }
+      }
+    },
+    {
+      "name": "search_contacts",
+      "description": "Contacts: search the user's connections by name/email/phone.",
+      "side_effect": "read",
+      "input_schema": {
+        "type": "object",
+        "properties": { "query": { "type": "string", "description": "Search text" } },
+        "required": ["query"]
+      }
+    },
+    {
+      "name": "get_values",
+      "description": "Sheets: read a range of values.",
+      "side_effect": "read",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "spreadsheet_id": { "type": "string", "description": "Spreadsheet id" },
+          "range": { "type": "string", "description": "A1 range, e.g. Sheet1!A1:C10" }
+        },
+        "required": ["spreadsheet_id", "range"]
+      }
+    },
+    {
+      "name": "update_values",
+      "description": "Sheets: overwrite a range with values (2D array of rows).",
+      "side_effect": "write",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "spreadsheet_id": { "type": "string", "description": "Spreadsheet id" },
+          "range": { "type": "string", "description": "A1 range" },
+          "values": { "type": "array", "items": { "type": "array" }, "description": "Rows of cell values" }
+        },
+        "required": ["spreadsheet_id", "range", "values"]
+      }
+    },
+    {
+      "name": "append_values",
+      "description": "Sheets: append rows after a range (2D array of rows).",
+      "side_effect": "write",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "spreadsheet_id": { "type": "string", "description": "Spreadsheet id" },
+          "range": { "type": "string", "description": "A1 range to append after" },
+          "values": { "type": "array", "items": { "type": "array" }, "description": "Rows of cell values" }
+        },
+        "required": ["spreadsheet_id", "range", "values"]
+      }
+    },
+    {
+      "name": "get_spreadsheet",
+      "description": "Sheets: get spreadsheet metadata (sheets, titles).",
+      "side_effect": "read",
+      "input_schema": {
+        "type": "object",
+        "properties": { "spreadsheet_id": { "type": "string", "description": "Spreadsheet id" } },
+        "required": ["spreadsheet_id"]
+      }
+    },
+    {
+      "name": "get_document",
+      "description": "Docs: get a document's content.",
+      "side_effect": "read",
+      "input_schema": {
+        "type": "object",
+        "properties": { "document_id": { "type": "string", "description": "Document id" } },
+        "required": ["document_id"]
+      }
+    },
+    {
+      "name": "create_document",
+      "description": "Docs: create a new document with a title.",
+      "side_effect": "write",
+      "input_schema": {
+        "type": "object",
+        "properties": { "title": { "type": "string", "description": "Document title" } },
+        "required": ["title"]
+      }
+    },
+    {
+      "name": "insert_text",
+      "description": "Docs: insert text into a document at an index (default 1, start of body).",
+      "side_effect": "write",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "document_id": { "type": "string", "description": "Document id" },
+          "text": { "type": "string", "description": "Text to insert" },
+          "index": { "type": "integer", "description": "Insert index (default 1)" }
+        },
+        "required": ["document_id", "text"]
+      }
+    }
+  ],
+  "backend": {
+    "type": "http",
+    "base_url": "https://www.googleapis.com",
+    "auth": {
+      "type": "oauth2",
+      "authorization": {
+        "url": "https://accounts.google.com/o/oauth2/v2/auth",
+        "scopes": [
+          "https://www.googleapis.com/auth/gmail.modify",
+          "https://www.googleapis.com/auth/calendar",
+          "https://www.googleapis.com/auth/drive",
+          "https://www.googleapis.com/auth/contacts.readonly",
+          "https://www.googleapis.com/auth/spreadsheets",
+          "https://www.googleapis.com/auth/documents"
+        ],
+        "params": { "access_type": "offline", "prompt": "consent" }
+      },
+      "apply": {
+        "target": "request_header",
+        "name": "Authorization",
+        "template": "Bearer {{ cred.access_token }}"
+      }
+    },
+    "refresh": {
+      "trigger": { "http_status": 401, "or_expired": "cred.expires_at" },
+      "token_url": "https://oauth2.googleapis.com/token",
+      "grant": "refresh_token",
+      "response_map": { "access_token": "access_token", "expires_in": "expires_in" },
+      "persist": { "refresh_token": "credential_if_present.refresh_token" }
+    },
+    "test_action": "list_messages",
+    "requests": {
+      "send_email": {
+        "method": "POST",
+        "path": "https://gmail.googleapis.com/gmail/v1/users/me/messages/send",
+        "body": { "template": { "raw": "{{ params | rfc822_base64url }}" } },
+        "response": { "success_when": "$.status >= 200 and $.status < 300", "extract": "$.id" }
+      },
+      "list_messages": {
+        "method": "GET",
+        "path": "https://gmail.googleapis.com/gmail/v1/users/me/messages",
+        "query_params": {
+          "labelIds": "{{ params.label | default(\"INBOX\", as=str) }}",
+          "maxResults": "{{ params.max_results | default(10, as=int) }}"
+        },
+        "response": { "success_when": "$.status >= 200 and $.status < 300", "extract": "$.messages" }
+      },
+      "get_message": {
+        "method": "GET",
+        "path": "https://gmail.googleapis.com/gmail/v1/users/me/messages/{{ params.message_id }}",
+        "query_params": { "format": "full" },
+        "response": { "success_when": "$.status >= 200 and $.status < 300" }
+      },
+      "search_messages": {
+        "method": "GET",
+        "path": "https://gmail.googleapis.com/gmail/v1/users/me/messages",
+        "query_params": {
+          "q": "{{ params.query }}",
+          "maxResults": "{{ params.max_results | default(10, as=int) }}"
+        },
+        "response": { "success_when": "$.status >= 200 and $.status < 300", "extract": "$.messages" }
+      },
+      "modify_labels": {
+        "method": "POST",
+        "path": "https://gmail.googleapis.com/gmail/v1/users/me/messages/{{ params.message_id }}/modify",
+        "body": {
+          "template": {
+            "addLabelIds": "{{ params.add_labels | default([], as=list) }}",
+            "removeLabelIds": "{{ params.remove_labels | default([], as=list) }}"
+          }
+        },
+        "response": { "success_when": "$.status >= 200 and $.status < 300" }
+      },
+      "list_events": {
+        "method": "GET",
+        "path": "/calendar/v3/calendars/{{ params.calendar_id | default(\"primary\", as=str) }}/events",
+        "query_params": {
+          "timeMin": "{{ params.time_min | default(\"\", as=omit) }}",
+          "timeMax": "{{ params.time_max | default(\"\", as=omit) }}",
+          "q": "{{ params.query | default(\"\", as=omit) }}",
+          "maxResults": "{{ params.max_results | default(25, as=int) }}",
+          "singleEvents": "true",
+          "orderBy": "startTime"
+        },
+        "response": { "success_when": "$.status >= 200 and $.status < 300", "extract": "$.items" }
+      },
+      "get_event": {
+        "method": "GET",
+        "path": "/calendar/v3/calendars/{{ params.calendar_id | default(\"primary\", as=str) }}/events/{{ params.event_id }}",
+        "response": { "success_when": "$.status >= 200 and $.status < 300" }
+      },
+      "create_event": {
+        "method": "POST",
+        "path": "/calendar/v3/calendars/{{ params.calendar_id | default(\"primary\", as=str) }}/events",
+        "body": {
+          "template": {
+            "summary": "{{ params.summary }}",
+            "description": "{{ params.description | default(\"\", as=omit) }}",
+            "location": "{{ params.location | default(\"\", as=omit) }}",
+            "start": { "dateTime": "{{ params.start }}" },
+            "end": { "dateTime": "{{ params.end }}" }
+          }
+        },
+        "response": { "success_when": "$.status >= 200 and $.status < 300", "extract": "$.id" }
+      },
+      "delete_event": {
+        "method": "DELETE",
+        "path": "/calendar/v3/calendars/{{ params.calendar_id | default(\"primary\", as=str) }}/events/{{ params.event_id }}",
+        "response": { "success_when": "$.status >= 200 and $.status < 300" }
+      },
+      "list_calendars": {
+        "method": "GET",
+        "path": "/calendar/v3/users/me/calendarList",
+        "response": { "success_when": "$.status >= 200 and $.status < 300", "extract": "$.items" }
+      },
+      "list_files": {
+        "method": "GET",
+        "path": "/drive/v3/files",
+        "query_params": {
+          "q": "{{ params.query | default(\"\", as=omit) }}",
+          "pageSize": "{{ params.page_size | default(25, as=int) }}",
+          "fields": "files(id,name,mimeType,modifiedTime,size,owners)",
+          "orderBy": "modifiedTime desc"
+        },
+        "response": { "success_when": "$.status >= 200 and $.status < 300", "extract": "$.files" }
+      },
+      "get_file": {
+        "method": "GET",
+        "path": "/drive/v3/files/{{ params.file_id }}",
+        "query_params": { "fields": "id,name,mimeType,modifiedTime,size,parents,owners,webViewLink" },
+        "response": { "success_when": "$.status >= 200 and $.status < 300" }
+      },
+      "delete_file": {
+        "method": "DELETE",
+        "path": "/drive/v3/files/{{ params.file_id }}",
+        "response": { "success_when": "$.status >= 200 and $.status < 300" }
+      },
+      "create_folder": {
+        "method": "POST",
+        "path": "/drive/v3/files",
+        "body": {
+          "template": {
+            "name": "{{ params.name }}",
+            "mimeType": "application/vnd.google-apps.folder",
+            "parents": "{{ params.parents | default([], as=omit) }}"
+          }
+        },
+        "response": { "success_when": "$.status >= 200 and $.status < 300", "extract": "$.id" }
+      },
+      "list_contacts": {
+        "method": "GET",
+        "path": "https://people.googleapis.com/v1/people/me/connections",
+        "query_params": {
+          "personFields": "names,emailAddresses,phoneNumbers",
+          "pageSize": "{{ params.page_size | default(50, as=int) }}"
+        },
+        "response": { "success_when": "$.status >= 200 and $.status < 300", "extract": "$.connections" }
+      },
+      "search_contacts": {
+        "method": "GET",
+        "path": "https://people.googleapis.com/v1/people:searchContacts",
+        "query_params": {
+          "query": "{{ params.query }}",
+          "readMask": "names,emailAddresses,phoneNumbers"
+        },
+        "response": { "success_when": "$.status >= 200 and $.status < 300", "extract": "$.results" }
+      },
+      "get_values": {
+        "method": "GET",
+        "path": "https://sheets.googleapis.com/v4/spreadsheets/{{ params.spreadsheet_id }}/values/{{ params.range }}",
+        "response": { "success_when": "$.status >= 200 and $.status < 300", "extract": "$.values" }
+      },
+      "update_values": {
+        "method": "PUT",
+        "path": "https://sheets.googleapis.com/v4/spreadsheets/{{ params.spreadsheet_id }}/values/{{ params.range }}",
+        "query_params": { "valueInputOption": "USER_ENTERED" },
+        "body": { "template": { "range": "{{ params.range }}", "majorDimension": "ROWS", "values": "{{ params.values }}" } },
+        "response": { "success_when": "$.status >= 200 and $.status < 300" }
+      },
+      "append_values": {
+        "method": "POST",
+        "path": "https://sheets.googleapis.com/v4/spreadsheets/{{ params.spreadsheet_id }}/values/{{ params.range }}:append",
+        "query_params": { "valueInputOption": "USER_ENTERED" },
+        "body": { "template": { "range": "{{ params.range }}", "majorDimension": "ROWS", "values": "{{ params.values }}" } },
+        "response": { "success_when": "$.status >= 200 and $.status < 300" }
+      },
+      "get_spreadsheet": {
+        "method": "GET",
+        "path": "https://sheets.googleapis.com/v4/spreadsheets/{{ params.spreadsheet_id }}",
+        "response": { "success_when": "$.status >= 200 and $.status < 300" }
+      },
+      "get_document": {
+        "method": "GET",
+        "path": "https://docs.googleapis.com/v1/documents/{{ params.document_id }}",
+        "response": { "success_when": "$.status >= 200 and $.status < 300" }
+      },
+      "create_document": {
+        "method": "POST",
+        "path": "https://docs.googleapis.com/v1/documents",
+        "body": { "template": { "title": "{{ params.title }}" } },
+        "response": { "success_when": "$.status >= 200 and $.status < 300", "extract": "$.documentId" }
+      },
+      "insert_text": {
+        "method": "POST",
+        "path": "https://docs.googleapis.com/v1/documents/{{ params.document_id }}:batchUpdate",
+        "body": {
+          "template": {
+            "requests": [
+              {
+                "insertText": {
+                  "location": { "index": "{{ params.index | default(1, as=int) }}" },
+                  "text": "{{ params.text }}"
+                }
+              }
+            ]
+          }
+        },
+        "response": { "success_when": "$.status >= 200 and $.status < 300" }
+      }
+    }
+  }
+}

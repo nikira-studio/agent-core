@@ -176,7 +176,7 @@ class HttpEngine(BaseConnector):
                         req["headers"][param_name] = val
                     elif loc == "query_params" and isinstance(param_loc, str):
                         val = self._render(param_loc, params, config, cred)
-                        if val and not (
+                        if val and val != _OMIT and not (
                             val == param_loc and param_loc.startswith("{{")
                         ):
                             sep = (
@@ -338,6 +338,11 @@ class HttpEngine(BaseConnector):
     def _join_url(self, base: str, path: str) -> str:
         if not path:
             return base
+        # An absolute URL in the path overrides base_url, so one adapter can span
+        # multiple API hosts (e.g. Google Workspace: gmail.googleapis.com,
+        # sheets.googleapis.com, docs.googleapis.com, people.googleapis.com).
+        if path.startswith(("http://", "https://")):
+            return path
         return f"{base.rstrip('/')}/{path.lstrip('/')}"
 
     # ─── auth ────────────────────────────────────────────────────────────────
@@ -732,13 +737,15 @@ def _render_value(
                 type_arg = parts[1] if len(parts) > 1 else ""
             if type_arg == "omit":
                 return _OMIT
-            if type_arg and type_arg in type_map:
-                return str(type_map[type_arg])
+            # An explicit fallback wins over the type's zero-value, so
+            # default(1, as=int) yields 1 (not 0). (Matches HttpEngine._render.)
             if fallback_str:
                 try:
                     return str(json.loads(fallback_str))
                 except (json.JSONDecodeError, ValueError):
                     return fallback_str
+            if type_arg and type_arg in type_map:
+                return str(type_map[type_arg])
             return ""
         return _stringify_for_template(val)
     if filter_name == "rfc822_base64url":
