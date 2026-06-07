@@ -8,7 +8,7 @@ from app.services import connector_oauth_service, connector_service, credential_
 
 def _install_gmail_connector():
     manifest, err = load_and_validate(
-        Path("/srv/docker-data/projects/Apps/agent-core/data/adapters/google_gmail/adapter.json")
+        Path("/srv/docker-data/projects/Apps/agent-core/app/adapter_templates/google_workspace/adapter.json")
     )
     assert err is None
     row = manifest.to_connector_type_row()
@@ -35,7 +35,7 @@ def _create_gmail_binding():
         created_by="admin",
     )
     return connector_service.create_binding(
-        connector_type_id="google_gmail",
+        connector_type_id="google_workspace",
         name="Gmail OAuth",
         scope="user:admin",
         credential_id=credential["id"],

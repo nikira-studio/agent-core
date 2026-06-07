@@ -64,7 +64,7 @@ class TestAdapterLibrary:
         data = r.json()["data"]
         adapters = data["adapters"]
         ids = {a["id"] for a in adapters}
-        assert {"transmission", "google_gmail", "github_cli"}.issubset(ids)
+        assert {"transmission", "google_workspace", "github_cli"}.issubset(ids)
         transmission = next(a for a in adapters if a["id"] == "transmission")
         assert transmission["source_kind"] == "system"
         assert transmission["installed"] is False
@@ -75,12 +75,12 @@ class TestAdapterLibrary:
         ]
         github_cli = next(a for a in adapters if a["id"] == "github_cli")
         assert github_cli["requirements_summary"]["bins"] == ["gh"]
-        gmail = next(a for a in adapters if a["id"] == "google_gmail")
-        assert gmail["requirements_summary"]["credential_fields"] == [
+        workspace = next(a for a in adapters if a["id"] == "google_workspace")
+        assert workspace["requirements_summary"]["credential_fields"] == [
             "client_id",
             "client_secret",
         ]
-        assert "Authorize OAuth" in gmail["setup"]["instructions"]
+        assert "Authorize OAuth" in workspace["setup"]["instructions"]
 
     def test_install_and_uninstall_builtin_adapter(
         self, test_client, admin_token, monkeypatch, tmp_path

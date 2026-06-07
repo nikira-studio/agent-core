@@ -290,7 +290,7 @@ For browser-based authorization, also declare `auth.authorization.url`, `auth.au
 - `trigger` — what fires the refresh. `http_status` is reactive; `or_expired` is proactive (checks the named credential field against the current time before sending).
 - `token_url` + `grant` — where to POST and which OAuth grant type to use.
 - `response_map` — which response fields land where in the session.
-- `persist.refresh_token` — if the provider rotates the refresh token, persist the new one to the credential automatically. (Gmail does this; many others do not.)
+- `persist.refresh_token` — if the provider rotates the refresh token, persist the new one to the credential automatically. (Some providers do this; many do not.)
 
 ### `requests`
 
@@ -446,7 +446,7 @@ def test_my_adapter_renders_correct_request(self):
 
 For a `cli` adapter: patch `subprocess.run`, capture the `args` list, assert the rendered argv matches.
 
-See `tests/integration/test_transmission_adapter.py`, `tests/integration/test_gmail_adapter.py`, and `tests/integration/test_github_cli_adapter.py` for full examples shipping with Agent Core. The Gmail test, for example, decodes the rendered `raw` field to verify the RFC822 message contains the right subject and body — that's the level of rigor request-template tests should reach.
+See `tests/integration/test_transmission_adapter.py`, `tests/integration/test_google_workspace_adapter.py`, and `tests/integration/test_github_cli_adapter.py` for full examples shipping with Agent Core. The Google Workspace tests, for example, decode the rendered `raw` field to verify the RFC822 message headers and body, and assert each service's request reaches the right API host — that's the level of rigor request-template tests should reach.
 
 ## Sharing your adapter
 
@@ -473,7 +473,7 @@ A future agent-core registry would make this `agent-core adapters install <slug>
 | Adapter | Backend | What it demonstrates |
 |---|---|---|
 | `transmission` | `http` | session-handshake (`challenge_retry`), multi-field basic auth, destructive actions, optional-field omission for `list_torrents`/`add_torrent` |
-| `google_gmail` | `http` | OAuth2 refresh, refresh-token rotation persistence, per-binding refresh lock, RFC822 message construction via the `rfc822_base64url` filter |
+| `google_workspace` | `http` | one OAuth2 client spanning six Google services across different API hosts (absolute-URL request paths override `base_url`), token refresh, RFC822 message construction via the `rfc822_base64url` filter |
 | `github_cli` | `cli` | subprocess execution, `requires.bins` gating, JSON output parsing, env-var token injection, optional CLI-flag omission |
 
 Browse their manifests in `app/adapter_templates/<id>/adapter.json` for working, tested examples of every feature.
@@ -498,7 +498,7 @@ Browse their manifests in `app/adapter_templates/<id>/adapter.json` for working,
 }
 ```
 
-**OAuth2**: copy the `auth`, `refresh`, and `credential_schema` blocks from `app/adapter_templates/google_gmail/adapter.json`; change `token_url`, `base_url`, and the action `requests`.
+**OAuth2**: copy the `auth`, `refresh`, and `credential_schema` blocks from `app/adapter_templates/google_workspace/adapter.json`; change `token_url`, `base_url`, and the action `requests`. (A request `path` that is an absolute `https://…` URL overrides `base_url`, so one OAuth2 adapter can span multiple API hosts.)
 
 **Session handshake**: copy the `auth` and `session` blocks from `app/adapter_templates/transmission/adapter.json`; change the trigger status, header names, and `requests`.
 

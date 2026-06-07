@@ -335,7 +335,7 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
         if ct and ct.get("auth_type") == "oauth2":
             oauth_label = (
                 "Authorize Google"
-                if ct.get("id") == "google_gmail"
+                if ct.get("id", "").startswith("google_")
                 else "Authorize OAuth"
             )
             oauth_button = (

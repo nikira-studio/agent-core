@@ -250,7 +250,18 @@ The MCP import is server-side only: it discovers and stores the tool list in Age
 
 Adapters are the fourth way to add a connector — for services that don't fit OpenAPI/MCP cleanly (OAuth refresh, session handshakes, multi-field credentials, CLI wrappers). An adapter is a single JSON **manifest** that describes a service's actions, auth, and request shape; Agent Core's built-in engines interpret it at runtime, so installing one adds no Python and survives upgrades.
 
-**Quick install:** go to `/connectors` → **Browse Adapters** → pick one (e.g. `transmission`, `google_gmail`, `github_cli`) → click **Install** → bind a credential and call actions like any other connector. If a newer bundled template is available later, the same page shows **Update** and refreshes the installed copy in place without changing bindings.
+**Quick install:** go to `/connectors` → **Browse Adapters** → pick one (e.g. `transmission`, `google_workspace`, `github_cli`) → click **Install** → bind a credential and call actions like any other connector. If a newer bundled template is available later, the same page shows **Update** and refreshes the installed copy in place without changing bindings.
+
+#### Google Workspace (one connector for six Google services)
+
+The bundled **`google_workspace`** adapter is a single OAuth2 connector covering **Gmail, Calendar, Drive, Contacts (People), Sheets, and Docs** through one OAuth client and one consent — install it, bind your `client_id` + `client_secret`, click **Authorize Google**, and grant the scopes once.
+
+- **31 actions:** Gmail (`send_email`, `reply`, `create_draft`, `list_messages`, `get_message`, `search_messages`, `get_thread`, `list_labels`, `modify_labels`), Calendar (`list_events`, `get_event`, `create_event`, `update_event`, `delete_event`, `list_calendars`), Drive (`list_files`, `get_file`, `share`, `create_folder`, `delete_file`), Contacts (`list_contacts`, `search_contacts`), Sheets (`create_spreadsheet`, `get_values`, `update_values`, `append_values`, `clear_values`, `get_spreadsheet`), Docs (`get_document`, `create_document`, `insert_text`).
+- **Pick what you want:** authorize all scopes once, then disable the actions you don't use on the connector (`disabled_actions`). To narrow at the consent level, enable only the APIs/scopes you want in Google Cloud and disable the actions whose APIs you didn't enable.
+- **Scopes:** `gmail.modify`, `calendar`, `drive`, `contacts.readonly`, `spreadsheets`, `documents`.
+- **Setup:** create a **Web application** OAuth client; enable the Gmail/Calendar/Drive/People/Sheets/Docs APIs you intend to use; add their scopes to the consent screen; register Agent Core's per-binding callback URL (shown when you click Authorize) in the client's authorized redirect URIs. Tokens issued while the consent screen is in **Testing** expire after 7 days — publish to **Production** for durable refresh tokens.
+- **Not included:** Drive binary upload/download (binary content doesn't fit the declarative HTTP engine).
+- **Multi-host:** the services live on different API hosts; the adapter uses absolute-URL request paths (which override `base_url`) so one connector reaches `gmail`/`sheets`/`docs`/`people`.googleapis.com plus `www.googleapis.com` for Calendar/Drive.
 
 The adapter and service cards show a binding recipe so you know what to create next: a suggested binding name, the required credential fields, and any non-secret config fields. If an adapter needs more than one credential field, store those fields as one JSON secret and create the credential from the binding flow with the keys the card shows (for example, `username` and `password` for Transmission). Optional request fields are omitted when blank instead of being sent as empty placeholder values.
 
