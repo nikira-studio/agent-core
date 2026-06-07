@@ -43,7 +43,7 @@ class TestConnectorMCPTools:
         result = r.json()
         assert result["ok"] is True
         connectors = result["data"]["connectors"]
-        type_ids = [c["id"] for c in connectors]
+        type_ids = [c["connector_type_id"] for c in connectors]
         assert "generic_http" in type_ids
 
     def test_connectors_actions_list(self, test_client, admin_token):

@@ -492,3 +492,155 @@ def test_mcp_tool_memory_write_ignores_client_supplied_provenance(
     assert provenance["actor_id"] != "spoofed"
     assert provenance["channel"] == "mcp"
     assert provenance["route"] == "/mcp"
+
+
+def test_mcp_connectors_list_is_lean_and_paginated(test_client, agent_token):
+    """Phase 1: connectors_list returns lean summaries (no spec body) + pagination,
+    so one fat imported OpenAPI spec can't blow the tool-output budget."""
+    from app.services import connector_service
+
+    big_ops = json.dumps(
+        {"operations": [{"id": f"op{i}", "blob": "x" * 500} for i in range(80)]}
+    )
+    assert len(big_ops) > 40000  # a single fat spec, like github-v3-rest-api
+    connector_service.create_connector_type(
+        connector_type_id="bigspec_api",
+        display_name="Big Spec API",
+        description="d" * 1000,
+        provider_type="openapi",
+        auth_type="bearer",
+        operations_json=big_ops,
+        backend_type="openapi",
+    )
+
+    r = test_client.post(
+        "/mcp",
+        headers={"Authorization": f"Bearer {agent_token}"},
+        json={"tool": "connectors_list", "params": {}},
+    )
+    assert r.status_code == 200, r.json()
+    body = r.json()
+    assert body["ok"] is True
+    serialized = json.dumps(body)
+    # The giant spec body must not be echoed anywhere.
+    assert "operations_json" not in serialized
+    assert "x" * 500 not in serialized
+    assert len(serialized) < 8000
+
+    data = body["data"]
+    assert data["limit"] == 50
+    assert data["offset"] == 0
+    assert data["total"] >= 1
+    big = next(c for c in data["connectors"] if c["connector_type_id"] == "bigspec_api")
+    assert big["action_count"] == 80
+    assert len(big["description"]) <= 300
+    assert "operations_json" not in big
+    assert "backend_json" not in big
+    assert big["auth_type"] == "bearer"
+
+    # Pagination: limit=1 returns one entry but the full total.
+    r1 = test_client.post(
+        "/mcp",
+        headers={"Authorization": f"Bearer {agent_token}"},
+        json={"tool": "connectors_list", "params": {"limit": 1, "offset": 0}},
+    )
+    d1 = r1.json()["data"]
+    assert len(d1["connectors"]) == 1
+    assert d1["total"] == data["total"]
+    assert d1["limit"] == 1
+
+
+def test_mcp_connectors_actions_list_still_returns_full_detail(test_client, agent_token):
+    """Phase 1 regression: the detail path (connectors_actions_list) is unaffected."""
+    r = test_client.post(
+        "/mcp",
+        headers={"Authorization": f"Bearer {agent_token}"},
+        json={"tool": "connectors_actions_list", "params": {"connector_type_id": "generic_http"}},
+    )
+    assert r.status_code in (200, 404), r.json()
+
+
+def _seed_memory(scope, count):
+    from app.services import memory_service
+
+    for i in range(count):
+        rec, err = memory_service.write_memory(
+            content=f"record {i} " + ("y" * 400),
+            memory_class="fact",
+            scope=scope,
+            topic=f"topic-{i}",
+            provenance_json=json.dumps({"big": "z" * 500}),
+        )
+        assert err is None
+
+
+def test_mcp_memory_get_defaults_compact_for_large_scope(test_client, agent_token):
+    """Phase 2: a large scope auto-defaults to compact — small payload, no
+    provenance_json, content truncated to a preview."""
+    scope = "agent:testagent"
+    _seed_memory(scope, 30)
+
+    r = test_client.post(
+        "/mcp",
+        headers={"Authorization": f"Bearer {agent_token}"},
+        json={"tool": "memory_get", "params": {"scope": scope}},
+    )
+    assert r.status_code == 200, r.json()
+    data = r.json()["data"]
+    assert data["view"] == "compact"
+    serialized = json.dumps(data)
+    assert len(serialized) < 30000
+    assert "provenance_json" not in serialized
+    rec0 = data["records"][0]
+    assert "content_preview" in rec0
+    assert "content" not in rec0
+    assert rec0["content_preview"].endswith("…")
+    assert rec0["topic"] is not None
+    assert rec0["id"]
+
+
+def test_mcp_memory_get_full_view_returns_full_bodies(test_client, agent_token):
+    """Phase 2 parity: view=full returns whole records (content + provenance),
+    unchanged from prior behavior, even on a large scope."""
+    scope = "agent:testagent"
+    _seed_memory(scope, 30)
+
+    r = test_client.post(
+        "/mcp",
+        headers={"Authorization": f"Bearer {agent_token}"},
+        json={"tool": "memory_get", "params": {"scope": scope, "view": "full"}},
+    )
+    assert r.status_code == 200, r.json()
+    data = r.json()["data"]
+    assert data["view"] == "full"
+    rec0 = data["records"][0]
+    assert "content_preview" not in rec0
+    assert rec0["content"].startswith("record")
+    assert "y" * 400 in rec0["content"]
+    assert "provenance_json" in rec0
+
+
+def test_mcp_memory_get_small_scope_defaults_full(test_client, agent_token):
+    """Phase 2: a small page stays full (back-compat for callers reading a few records)."""
+    scope = "agent:testagent"
+    _seed_memory(scope, 3)
+
+    r = test_client.post(
+        "/mcp",
+        headers={"Authorization": f"Bearer {agent_token}"},
+        json={"tool": "memory_get", "params": {"scope": scope}},
+    )
+    data = r.json()["data"]
+    assert data["view"] == "full"
+    assert data["records"][0]["content"].startswith("record")
+
+
+def test_mcp_memory_get_rejects_bad_view(test_client, agent_token):
+    r = test_client.post(
+        "/mcp",
+        headers={"Authorization": f"Bearer {agent_token}"},
+        json={"tool": "memory_get", "params": {"scope": "agent:testagent", "view": "tiny"}},
+    )
+    body = r.json()
+    assert body["ok"] is False
+    assert body["error"]["code"] == "INVALID_PARAMS"
