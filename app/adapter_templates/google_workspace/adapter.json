@@ -11,14 +11,41 @@
   },
   "credential_schema": {
     "fields": [
-      { "name": "client_id", "type": "string", "secret": false, "required": true },
-      { "name": "client_secret", "type": "string", "secret": true, "required": true },
-      { "name": "refresh_token", "type": "string", "secret": true, "required": false },
-      { "name": "access_token", "type": "string", "secret": true, "required": false },
-      { "name": "expires_at", "type": "string", "secret": false, "required": false }
+      {
+        "name": "client_id",
+        "type": "string",
+        "secret": false,
+        "required": true
+      },
+      {
+        "name": "client_secret",
+        "type": "string",
+        "secret": true,
+        "required": true
+      },
+      {
+        "name": "refresh_token",
+        "type": "string",
+        "secret": true,
+        "required": false
+      },
+      {
+        "name": "access_token",
+        "type": "string",
+        "secret": true,
+        "required": false
+      },
+      {
+        "name": "expires_at",
+        "type": "string",
+        "secret": false,
+        "required": false
+      }
     ]
   },
-  "requires": { "config": [] },
+  "requires": {
+    "config": []
+  },
   "actions": [
     {
       "name": "send_email",
@@ -27,13 +54,41 @@
       "input_schema": {
         "type": "object",
         "properties": {
-          "to": { "type": "array", "items": { "type": "string" }, "description": "Recipients" },
-          "subject": { "type": "string", "description": "Subject line" },
-          "body": { "type": "string", "description": "Email body (plain text)" },
-          "cc": { "type": "array", "items": { "type": "string" }, "description": "CC recipients" },
-          "bcc": { "type": "array", "items": { "type": "string" }, "description": "BCC recipients" }
+          "to": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Recipients"
+          },
+          "subject": {
+            "type": "string",
+            "description": "Subject line"
+          },
+          "body": {
+            "type": "string",
+            "description": "Email body (plain text)"
+          },
+          "cc": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "CC recipients"
+          },
+          "bcc": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "BCC recipients"
+          }
         },
-        "required": ["to", "subject", "body"]
+        "required": [
+          "to",
+          "subject",
+          "body"
+        ]
       }
     },
     {
@@ -43,8 +98,14 @@
       "input_schema": {
         "type": "object",
         "properties": {
-          "label": { "type": "string", "description": "Gmail label (e.g. INBOX). Defaults to INBOX." },
-          "max_results": { "type": "integer", "description": "Maximum messages (1-500)" }
+          "label": {
+            "type": "string",
+            "description": "Gmail label (e.g. INBOX). Defaults to INBOX."
+          },
+          "max_results": {
+            "type": "integer",
+            "description": "Maximum messages (1-500)"
+          }
         }
       }
     },
@@ -54,8 +115,15 @@
       "side_effect": "read",
       "input_schema": {
         "type": "object",
-        "properties": { "message_id": { "type": "string", "description": "The message ID" } },
-        "required": ["message_id"]
+        "properties": {
+          "message_id": {
+            "type": "string",
+            "description": "The message ID"
+          }
+        },
+        "required": [
+          "message_id"
+        ]
       }
     },
     {
@@ -65,10 +133,18 @@
       "input_schema": {
         "type": "object",
         "properties": {
-          "query": { "type": "string", "description": "Gmail search query" },
-          "max_results": { "type": "integer", "description": "Maximum messages (1-500)" }
+          "query": {
+            "type": "string",
+            "description": "Gmail search query"
+          },
+          "max_results": {
+            "type": "integer",
+            "description": "Maximum messages (1-500)"
+          }
         },
-        "required": ["query"]
+        "required": [
+          "query"
+        ]
       }
     },
     {
@@ -78,11 +154,28 @@
       "input_schema": {
         "type": "object",
         "properties": {
-          "message_id": { "type": "string", "description": "The message ID" },
-          "add_labels": { "type": "array", "items": { "type": "string" }, "description": "Label IDs to add" },
-          "remove_labels": { "type": "array", "items": { "type": "string" }, "description": "Label IDs to remove" }
+          "message_id": {
+            "type": "string",
+            "description": "The message ID"
+          },
+          "add_labels": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Label IDs to add"
+          },
+          "remove_labels": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Label IDs to remove"
+          }
         },
-        "required": ["message_id"]
+        "required": [
+          "message_id"
+        ]
       }
     },
     {
@@ -92,11 +185,26 @@
       "input_schema": {
         "type": "object",
         "properties": {
-          "calendar_id": { "type": "string", "description": "Calendar id. Defaults to 'primary'." },
-          "time_min": { "type": "string", "description": "RFC3339 lower bound (e.g. 2026-06-07T00:00:00Z)" },
-          "time_max": { "type": "string", "description": "RFC3339 upper bound" },
-          "query": { "type": "string", "description": "Free-text search" },
-          "max_results": { "type": "integer", "description": "Maximum events" }
+          "calendar_id": {
+            "type": "string",
+            "description": "Calendar id. Defaults to 'primary'."
+          },
+          "time_min": {
+            "type": "string",
+            "description": "RFC3339 lower bound (e.g. 2026-06-07T00:00:00Z)"
+          },
+          "time_max": {
+            "type": "string",
+            "description": "RFC3339 upper bound"
+          },
+          "query": {
+            "type": "string",
+            "description": "Free-text search"
+          },
+          "max_results": {
+            "type": "integer",
+            "description": "Maximum events"
+          }
         }
       }
     },
@@ -107,10 +215,18 @@
       "input_schema": {
         "type": "object",
         "properties": {
-          "calendar_id": { "type": "string", "description": "Calendar id. Defaults to 'primary'." },
-          "event_id": { "type": "string", "description": "Event id" }
+          "calendar_id": {
+            "type": "string",
+            "description": "Calendar id. Defaults to 'primary'."
+          },
+          "event_id": {
+            "type": "string",
+            "description": "Event id"
+          }
         },
-        "required": ["event_id"]
+        "required": [
+          "event_id"
+        ]
       }
     },
     {
@@ -120,14 +236,36 @@
       "input_schema": {
         "type": "object",
         "properties": {
-          "calendar_id": { "type": "string", "description": "Calendar id. Defaults to 'primary'." },
-          "summary": { "type": "string", "description": "Event title" },
-          "start": { "type": "string", "description": "RFC3339 start dateTime" },
-          "end": { "type": "string", "description": "RFC3339 end dateTime" },
-          "description": { "type": "string", "description": "Event description" },
-          "location": { "type": "string", "description": "Event location" }
+          "calendar_id": {
+            "type": "string",
+            "description": "Calendar id. Defaults to 'primary'."
+          },
+          "summary": {
+            "type": "string",
+            "description": "Event title"
+          },
+          "start": {
+            "type": "string",
+            "description": "RFC3339 start dateTime"
+          },
+          "end": {
+            "type": "string",
+            "description": "RFC3339 end dateTime"
+          },
+          "description": {
+            "type": "string",
+            "description": "Event description"
+          },
+          "location": {
+            "type": "string",
+            "description": "Event location"
+          }
         },
-        "required": ["summary", "start", "end"]
+        "required": [
+          "summary",
+          "start",
+          "end"
+        ]
       }
     },
     {
@@ -137,17 +275,28 @@
       "input_schema": {
         "type": "object",
         "properties": {
-          "calendar_id": { "type": "string", "description": "Calendar id. Defaults to 'primary'." },
-          "event_id": { "type": "string", "description": "Event id" }
+          "calendar_id": {
+            "type": "string",
+            "description": "Calendar id. Defaults to 'primary'."
+          },
+          "event_id": {
+            "type": "string",
+            "description": "Event id"
+          }
         },
-        "required": ["event_id"]
+        "required": [
+          "event_id"
+        ]
       }
     },
     {
       "name": "list_calendars",
       "description": "Calendar: list the user's calendars.",
       "side_effect": "read",
-      "input_schema": { "type": "object", "properties": {} }
+      "input_schema": {
+        "type": "object",
+        "properties": {}
+      }
     },
     {
       "name": "list_files",
@@ -156,8 +305,14 @@
       "input_schema": {
         "type": "object",
         "properties": {
-          "query": { "type": "string", "description": "Drive query, e.g. \"name contains 'report'\"" },
-          "page_size": { "type": "integer", "description": "Max files to return" }
+          "query": {
+            "type": "string",
+            "description": "Drive query, e.g. \"name contains 'report'\""
+          },
+          "page_size": {
+            "type": "integer",
+            "description": "Max files to return"
+          }
         }
       }
     },
@@ -167,8 +322,15 @@
       "side_effect": "read",
       "input_schema": {
         "type": "object",
-        "properties": { "file_id": { "type": "string", "description": "Drive file id" } },
-        "required": ["file_id"]
+        "properties": {
+          "file_id": {
+            "type": "string",
+            "description": "Drive file id"
+          }
+        },
+        "required": [
+          "file_id"
+        ]
       }
     },
     {
@@ -177,8 +339,15 @@
       "side_effect": "destructive",
       "input_schema": {
         "type": "object",
-        "properties": { "file_id": { "type": "string", "description": "Drive file id" } },
-        "required": ["file_id"]
+        "properties": {
+          "file_id": {
+            "type": "string",
+            "description": "Drive file id"
+          }
+        },
+        "required": [
+          "file_id"
+        ]
       }
     },
     {
@@ -188,10 +357,21 @@
       "input_schema": {
         "type": "object",
         "properties": {
-          "name": { "type": "string", "description": "Folder name" },
-          "parents": { "type": "array", "items": { "type": "string" }, "description": "Optional parent folder ids" }
+          "name": {
+            "type": "string",
+            "description": "Folder name"
+          },
+          "parents": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Optional parent folder ids"
+          }
         },
-        "required": ["name"]
+        "required": [
+          "name"
+        ]
       }
     },
     {
@@ -200,7 +380,12 @@
       "side_effect": "read",
       "input_schema": {
         "type": "object",
-        "properties": { "page_size": { "type": "integer", "description": "Max contacts to return" } }
+        "properties": {
+          "page_size": {
+            "type": "integer",
+            "description": "Max contacts to return"
+          }
+        }
       }
     },
     {
@@ -209,8 +394,15 @@
       "side_effect": "read",
       "input_schema": {
         "type": "object",
-        "properties": { "query": { "type": "string", "description": "Search text" } },
-        "required": ["query"]
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "Search text"
+          }
+        },
+        "required": [
+          "query"
+        ]
       }
     },
     {
@@ -220,10 +412,19 @@
       "input_schema": {
         "type": "object",
         "properties": {
-          "spreadsheet_id": { "type": "string", "description": "Spreadsheet id" },
-          "range": { "type": "string", "description": "A1 range, e.g. Sheet1!A1:C10" }
+          "spreadsheet_id": {
+            "type": "string",
+            "description": "Spreadsheet id"
+          },
+          "range": {
+            "type": "string",
+            "description": "A1 range, e.g. Sheet1!A1:C10"
+          }
         },
-        "required": ["spreadsheet_id", "range"]
+        "required": [
+          "spreadsheet_id",
+          "range"
+        ]
       }
     },
     {
@@ -233,11 +434,27 @@
       "input_schema": {
         "type": "object",
         "properties": {
-          "spreadsheet_id": { "type": "string", "description": "Spreadsheet id" },
-          "range": { "type": "string", "description": "A1 range" },
-          "values": { "type": "array", "items": { "type": "array" }, "description": "Rows of cell values" }
+          "spreadsheet_id": {
+            "type": "string",
+            "description": "Spreadsheet id"
+          },
+          "range": {
+            "type": "string",
+            "description": "A1 range"
+          },
+          "values": {
+            "type": "array",
+            "items": {
+              "type": "array"
+            },
+            "description": "Rows of cell values"
+          }
         },
-        "required": ["spreadsheet_id", "range", "values"]
+        "required": [
+          "spreadsheet_id",
+          "range",
+          "values"
+        ]
       }
     },
     {
@@ -247,11 +464,44 @@
       "input_schema": {
         "type": "object",
         "properties": {
-          "spreadsheet_id": { "type": "string", "description": "Spreadsheet id" },
-          "range": { "type": "string", "description": "A1 range to append after" },
-          "values": { "type": "array", "items": { "type": "array" }, "description": "Rows of cell values" }
+          "spreadsheet_id": {
+            "type": "string",
+            "description": "Spreadsheet id"
+          },
+          "range": {
+            "type": "string",
+            "description": "A1 range to append after"
+          },
+          "values": {
+            "type": "array",
+            "items": {
+              "type": "array"
+            },
+            "description": "Rows of cell values"
+          }
         },
-        "required": ["spreadsheet_id", "range", "values"]
+        "required": [
+          "spreadsheet_id",
+          "range",
+          "values"
+        ]
+      }
+    },
+    {
+      "name": "create_spreadsheet",
+      "description": "Sheets: create a new spreadsheet.",
+      "side_effect": "write",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string",
+            "description": "Spreadsheet title"
+          }
+        },
+        "required": [
+          "title"
+        ]
       }
     },
     {
@@ -260,8 +510,15 @@
       "side_effect": "read",
       "input_schema": {
         "type": "object",
-        "properties": { "spreadsheet_id": { "type": "string", "description": "Spreadsheet id" } },
-        "required": ["spreadsheet_id"]
+        "properties": {
+          "spreadsheet_id": {
+            "type": "string",
+            "description": "Spreadsheet id"
+          }
+        },
+        "required": [
+          "spreadsheet_id"
+        ]
       }
     },
     {
@@ -270,8 +527,15 @@
       "side_effect": "read",
       "input_schema": {
         "type": "object",
-        "properties": { "document_id": { "type": "string", "description": "Document id" } },
-        "required": ["document_id"]
+        "properties": {
+          "document_id": {
+            "type": "string",
+            "description": "Document id"
+          }
+        },
+        "required": [
+          "document_id"
+        ]
       }
     },
     {
@@ -280,8 +544,15 @@
       "side_effect": "write",
       "input_schema": {
         "type": "object",
-        "properties": { "title": { "type": "string", "description": "Document title" } },
-        "required": ["title"]
+        "properties": {
+          "title": {
+            "type": "string",
+            "description": "Document title"
+          }
+        },
+        "required": [
+          "title"
+        ]
       }
     },
     {
@@ -291,11 +562,23 @@
       "input_schema": {
         "type": "object",
         "properties": {
-          "document_id": { "type": "string", "description": "Document id" },
-          "text": { "type": "string", "description": "Text to insert" },
-          "index": { "type": "integer", "description": "Insert index (default 1)" }
+          "document_id": {
+            "type": "string",
+            "description": "Document id"
+          },
+          "text": {
+            "type": "string",
+            "description": "Text to insert"
+          },
+          "index": {
+            "type": "integer",
+            "description": "Insert index (default 1)"
+          }
         },
-        "required": ["document_id", "text"]
+        "required": [
+          "document_id",
+          "text"
+        ]
       }
     }
   ],
@@ -314,7 +597,10 @@
           "https://www.googleapis.com/auth/spreadsheets",
           "https://www.googleapis.com/auth/documents"
         ],
-        "params": { "access_type": "offline", "prompt": "consent" }
+        "params": {
+          "access_type": "offline",
+          "prompt": "consent"
+        }
       },
       "apply": {
         "target": "request_header",
@@ -323,19 +609,34 @@
       }
     },
     "refresh": {
-      "trigger": { "http_status": 401, "or_expired": "cred.expires_at" },
+      "trigger": {
+        "http_status": 401,
+        "or_expired": "cred.expires_at"
+      },
       "token_url": "https://oauth2.googleapis.com/token",
       "grant": "refresh_token",
-      "response_map": { "access_token": "access_token", "expires_in": "expires_in" },
-      "persist": { "refresh_token": "credential_if_present.refresh_token" }
+      "response_map": {
+        "access_token": "access_token",
+        "expires_in": "expires_in"
+      },
+      "persist": {
+        "refresh_token": "credential_if_present.refresh_token"
+      }
     },
     "test_action": "list_messages",
     "requests": {
       "send_email": {
         "method": "POST",
         "path": "https://gmail.googleapis.com/gmail/v1/users/me/messages/send",
-        "body": { "template": { "raw": "{{ params | rfc822_base64url }}" } },
-        "response": { "success_when": "$.status >= 200 and $.status < 300", "extract": "$.id" }
+        "body": {
+          "template": {
+            "raw": "{{ params | rfc822_base64url }}"
+          }
+        },
+        "response": {
+          "success_when": "$.status >= 200 and $.status < 300",
+          "extract": "$.id"
+        }
       },
       "list_messages": {
         "method": "GET",
@@ -344,13 +645,20 @@
           "labelIds": "{{ params.label | default(\"INBOX\", as=str) }}",
           "maxResults": "{{ params.max_results | default(10, as=int) }}"
         },
-        "response": { "success_when": "$.status >= 200 and $.status < 300", "extract": "$.messages" }
+        "response": {
+          "success_when": "$.status >= 200 and $.status < 300",
+          "extract": "$.messages"
+        }
       },
       "get_message": {
         "method": "GET",
         "path": "https://gmail.googleapis.com/gmail/v1/users/me/messages/{{ params.message_id }}",
-        "query_params": { "format": "full" },
-        "response": { "success_when": "$.status >= 200 and $.status < 300" }
+        "query_params": {
+          "format": "full"
+        },
+        "response": {
+          "success_when": "$.status >= 200 and $.status < 300"
+        }
       },
       "search_messages": {
         "method": "GET",
@@ -359,7 +667,10 @@
           "q": "{{ params.query }}",
           "maxResults": "{{ params.max_results | default(10, as=int) }}"
         },
-        "response": { "success_when": "$.status >= 200 and $.status < 300", "extract": "$.messages" }
+        "response": {
+          "success_when": "$.status >= 200 and $.status < 300",
+          "extract": "$.messages"
+        }
       },
       "modify_labels": {
         "method": "POST",
@@ -370,7 +681,9 @@
             "removeLabelIds": "{{ params.remove_labels | default([], as=list) }}"
           }
         },
-        "response": { "success_when": "$.status >= 200 and $.status < 300" }
+        "response": {
+          "success_when": "$.status >= 200 and $.status < 300"
+        }
       },
       "list_events": {
         "method": "GET",
@@ -383,12 +696,17 @@
           "singleEvents": "true",
           "orderBy": "startTime"
         },
-        "response": { "success_when": "$.status >= 200 and $.status < 300", "extract": "$.items" }
+        "response": {
+          "success_when": "$.status >= 200 and $.status < 300",
+          "extract": "$.items"
+        }
       },
       "get_event": {
         "method": "GET",
         "path": "/calendar/v3/calendars/{{ params.calendar_id | default(\"primary\", as=str) }}/events/{{ params.event_id }}",
-        "response": { "success_when": "$.status >= 200 and $.status < 300" }
+        "response": {
+          "success_when": "$.status >= 200 and $.status < 300"
+        }
       },
       "create_event": {
         "method": "POST",
@@ -398,21 +716,33 @@
             "summary": "{{ params.summary }}",
             "description": "{{ params.description | default(\"\", as=omit) }}",
             "location": "{{ params.location | default(\"\", as=omit) }}",
-            "start": { "dateTime": "{{ params.start }}" },
-            "end": { "dateTime": "{{ params.end }}" }
+            "start": {
+              "dateTime": "{{ params.start }}"
+            },
+            "end": {
+              "dateTime": "{{ params.end }}"
+            }
           }
         },
-        "response": { "success_when": "$.status >= 200 and $.status < 300", "extract": "$.id" }
+        "response": {
+          "success_when": "$.status >= 200 and $.status < 300",
+          "extract": "$.id"
+        }
       },
       "delete_event": {
         "method": "DELETE",
         "path": "/calendar/v3/calendars/{{ params.calendar_id | default(\"primary\", as=str) }}/events/{{ params.event_id }}",
-        "response": { "success_when": "$.status >= 200 and $.status < 300" }
+        "response": {
+          "success_when": "$.status >= 200 and $.status < 300"
+        }
       },
       "list_calendars": {
         "method": "GET",
         "path": "/calendar/v3/users/me/calendarList",
-        "response": { "success_when": "$.status >= 200 and $.status < 300", "extract": "$.items" }
+        "response": {
+          "success_when": "$.status >= 200 and $.status < 300",
+          "extract": "$.items"
+        }
       },
       "list_files": {
         "method": "GET",
@@ -423,18 +753,27 @@
           "fields": "files(id,name,mimeType,modifiedTime,size,owners)",
           "orderBy": "modifiedTime desc"
         },
-        "response": { "success_when": "$.status >= 200 and $.status < 300", "extract": "$.files" }
+        "response": {
+          "success_when": "$.status >= 200 and $.status < 300",
+          "extract": "$.files"
+        }
       },
       "get_file": {
         "method": "GET",
         "path": "/drive/v3/files/{{ params.file_id }}",
-        "query_params": { "fields": "id,name,mimeType,modifiedTime,size,parents,owners,webViewLink" },
-        "response": { "success_when": "$.status >= 200 and $.status < 300" }
+        "query_params": {
+          "fields": "id,name,mimeType,modifiedTime,size,parents,owners,webViewLink"
+        },
+        "response": {
+          "success_when": "$.status >= 200 and $.status < 300"
+        }
       },
       "delete_file": {
         "method": "DELETE",
         "path": "/drive/v3/files/{{ params.file_id }}",
-        "response": { "success_when": "$.status >= 200 and $.status < 300" }
+        "response": {
+          "success_when": "$.status >= 200 and $.status < 300"
+        }
       },
       "create_folder": {
         "method": "POST",
@@ -446,7 +785,10 @@
             "parents": "{{ params.parents | default([], as=omit) }}"
           }
         },
-        "response": { "success_when": "$.status >= 200 and $.status < 300", "extract": "$.id" }
+        "response": {
+          "success_when": "$.status >= 200 and $.status < 300",
+          "extract": "$.id"
+        }
       },
       "list_contacts": {
         "method": "GET",
@@ -455,7 +797,10 @@
           "personFields": "names,emailAddresses,phoneNumbers",
           "pageSize": "{{ params.page_size | default(50, as=int) }}"
         },
-        "response": { "success_when": "$.status >= 200 and $.status < 300", "extract": "$.connections" }
+        "response": {
+          "success_when": "$.status >= 200 and $.status < 300",
+          "extract": "$.connections"
+        }
       },
       "search_contacts": {
         "method": "GET",
@@ -464,42 +809,94 @@
           "query": "{{ params.query }}",
           "readMask": "names,emailAddresses,phoneNumbers"
         },
-        "response": { "success_when": "$.status >= 200 and $.status < 300", "extract": "$.results" }
+        "response": {
+          "success_when": "$.status >= 200 and $.status < 300",
+          "extract": "$.results"
+        }
       },
       "get_values": {
         "method": "GET",
         "path": "https://sheets.googleapis.com/v4/spreadsheets/{{ params.spreadsheet_id }}/values/{{ params.range }}",
-        "response": { "success_when": "$.status >= 200 and $.status < 300", "extract": "$.values" }
+        "response": {
+          "success_when": "$.status >= 200 and $.status < 300",
+          "extract": "$.values"
+        }
       },
       "update_values": {
         "method": "PUT",
         "path": "https://sheets.googleapis.com/v4/spreadsheets/{{ params.spreadsheet_id }}/values/{{ params.range }}",
-        "query_params": { "valueInputOption": "USER_ENTERED" },
-        "body": { "template": { "range": "{{ params.range }}", "majorDimension": "ROWS", "values": "{{ params.values }}" } },
-        "response": { "success_when": "$.status >= 200 and $.status < 300" }
+        "query_params": {
+          "valueInputOption": "USER_ENTERED"
+        },
+        "body": {
+          "template": {
+            "range": "{{ params.range }}",
+            "majorDimension": "ROWS",
+            "values": "{{ params.values }}"
+          }
+        },
+        "response": {
+          "success_when": "$.status >= 200 and $.status < 300"
+        }
       },
       "append_values": {
         "method": "POST",
         "path": "https://sheets.googleapis.com/v4/spreadsheets/{{ params.spreadsheet_id }}/values/{{ params.range }}:append",
-        "query_params": { "valueInputOption": "USER_ENTERED" },
-        "body": { "template": { "range": "{{ params.range }}", "majorDimension": "ROWS", "values": "{{ params.values }}" } },
-        "response": { "success_when": "$.status >= 200 and $.status < 300" }
+        "query_params": {
+          "valueInputOption": "USER_ENTERED"
+        },
+        "body": {
+          "template": {
+            "range": "{{ params.range }}",
+            "majorDimension": "ROWS",
+            "values": "{{ params.values }}"
+          }
+        },
+        "response": {
+          "success_when": "$.status >= 200 and $.status < 300"
+        }
+      },
+      "create_spreadsheet": {
+        "method": "POST",
+        "path": "https://sheets.googleapis.com/v4/spreadsheets",
+        "body": {
+          "template": {
+            "properties": {
+              "title": "{{ params.title }}"
+            }
+          }
+        },
+        "response": {
+          "success_when": "$.status >= 200 and $.status < 300",
+          "extract": "$.spreadsheetId"
+        }
       },
       "get_spreadsheet": {
         "method": "GET",
         "path": "https://sheets.googleapis.com/v4/spreadsheets/{{ params.spreadsheet_id }}",
-        "response": { "success_when": "$.status >= 200 and $.status < 300" }
+        "response": {
+          "success_when": "$.status >= 200 and $.status < 300"
+        }
       },
       "get_document": {
         "method": "GET",
         "path": "https://docs.googleapis.com/v1/documents/{{ params.document_id }}",
-        "response": { "success_when": "$.status >= 200 and $.status < 300" }
+        "response": {
+          "success_when": "$.status >= 200 and $.status < 300"
+        }
       },
       "create_document": {
         "method": "POST",
         "path": "https://docs.googleapis.com/v1/documents",
-        "body": { "template": { "title": "{{ params.title }}" } },
-        "response": { "success_when": "$.status >= 200 and $.status < 300", "extract": "$.documentId" }
+        "body": {
+          "template": {
+            "title": "{{ params.title }}"
+          }
+        },
+        "response": {
+          "success_when": "$.status >= 200 and $.status < 300",
+          "extract": "$.documentId"
+        }
       },
       "insert_text": {
         "method": "POST",
@@ -509,14 +906,18 @@
             "requests": [
               {
                 "insertText": {
-                  "location": { "index": "{{ params.index | default(1, as=int) }}" },
+                  "location": {
+                    "index": "{{ params.index | default(1, as=int) }}"
+                  },
                   "text": "{{ params.text }}"
                 }
               }
             ]
           }
         },
-        "response": { "success_when": "$.status >= 200 and $.status < 300" }
+        "response": {
+          "success_when": "$.status >= 200 and $.status < 300"
+        }
       }
     }
   }
