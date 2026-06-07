@@ -392,15 +392,18 @@ class HttpEngine(BaseConnector):
         name = apply_spec.get("name", "Authorization")
         template = apply_spec.get("template", "Bearer {{ cred.access_token }}")
         if target == "request_header":
+            # The session's token (set by a refresh) must win over the stored
+            # credential token, which may be stale. Substitute access_token
+            # FIRST, then render any other cred.* placeholders — rendering the
+            # whole template first would bake in the old credential token and
+            # the later .replace would be a no-op (the placeholder is gone).
             access_token = (
                 session.get("access_token")
                 if session
                 else credential.get("access_token")
             )
-            rendered = self._render(template, {"_cred": credential.fields}, {})
-            req["headers"][name] = rendered.replace(
-                "{{ cred.access_token }}", str(access_token or "")
-            )
+            header = template.replace("{{ cred.access_token }}", str(access_token or ""))
+            req["headers"][name] = self._render(header, {"_cred": credential.fields}, {})
 
     # ─── session ─────────────────────────────────────────────────────────────
 
@@ -455,6 +458,12 @@ class HttpEngine(BaseConnector):
         trigger = refresh_spec.get("trigger", {})
         if trigger.get("http_status") == resp.status:
             return True
+        # This check runs AFTER the response. A 2xx means the token worked, so a
+        # stale local cred.expires_at must NOT flag it as expired — otherwise a
+        # successful retry (after a refresh) gets re-raised as AuthExpired and
+        # the call loops/fails once the original token's clock time passes.
+        if 200 <= resp.status < 300:
+            return False
         cred_expires_at = credential.get("expires_at") if credential else None
         if cred_expires_at and trigger.get("or_expired") == "cred.expires_at":
             try:

@@ -555,3 +555,45 @@ class TestHttpEngineExtract:
             resp, {"response": {"success_when": "$.result == 'success'"}}, {}
         )
         assert result["success"] is False
+
+
+OAUTH_BACKEND = {
+    "auth": {
+        "type": "oauth2",
+        "apply": {
+            "target": "request_header",
+            "name": "Authorization",
+            "template": "Bearer {{ cred.access_token }}",
+        },
+    },
+    "refresh": {"trigger": {"http_status": 401, "or_expired": "cred.expires_at"}},
+    "requests": {},
+}
+
+
+class TestOAuth2RefreshApplication:
+    """Regression: OAuth2 token refresh was fully broken once the first access
+    token's clock time passed. Two bugs: (1) the refreshed session token was not
+    applied (the stale credential token was rendered in instead); (2) a 2xx
+    response was re-flagged as auth-expired by the cred.expires_at check."""
+
+    def test_session_token_overrides_stale_credential(self):
+        engine = HttpEngine(make_ct(OAUTH_BACKEND))
+        req = {"headers": {}}
+        cred = make_cred(fields={"access_token": "OLD"})
+        engine._apply_oauth2(req, OAUTH_BACKEND["auth"], cred, {"access_token": "NEW"})
+        assert req["headers"]["Authorization"] == "Bearer NEW"
+
+    def test_credential_token_used_without_session(self):
+        engine = HttpEngine(make_ct(OAUTH_BACKEND))
+        req = {"headers": {}}
+        cred = make_cred(fields={"access_token": "TOK"})
+        engine._apply_oauth2(req, OAUTH_BACKEND["auth"], cred, None)
+        assert req["headers"]["Authorization"] == "Bearer TOK"
+
+    def test_successful_response_not_flagged_expired(self):
+        engine = HttpEngine(make_ct(OAUTH_BACKEND))
+        cred = make_cred(fields={"expires_at": "1"})  # far in the past
+        assert engine._is_auth_expired(MagicMock(status=200), None, cred) is False
+        # a real auth failure still triggers refresh
+        assert engine._is_auth_expired(MagicMock(status=401), None, cred) is True
