@@ -585,3 +585,71 @@ class TestTransmissionSessionRefresh:
         )
 
         assert result["session"]["session_id"] == "refreshed-session-abc"
+
+
+class TestTransmissionDestructiveActionSafety:
+    """Regression: a remove_torrent with a missing/empty/wrong-typed `ids` must be
+    rejected before execution. Transmission's torrent-remove treats an omitted
+    selector as 'remove ALL torrents', so a malformed ids once wiped the whole
+    queue. The guard is (1) ids declared required with minItems>=1 in the adapter
+    manifest, and (2) connector_service validating params against that schema."""
+
+    def test_manifest_marks_selector_actions_required_nonempty(self):
+        import os
+
+        path = os.path.join(
+            os.path.dirname(__file__),
+            "..", "..", "app", "adapter_templates", "transmission", "adapter.json",
+        )
+        manifest = json.load(open(path))
+        actions = {a["name"]: a for a in manifest["actions"]}
+        for name in ("remove_torrent", "start_torrent", "stop_torrent"):
+            schema = actions[name]["input_schema"]
+            assert "ids" in schema.get("required", []), f"{name}: ids must be required"
+            ids = schema["properties"]["ids"]
+            assert ids.get("type") == "array", f"{name}: ids must be an array"
+            assert ids.get("minItems", 0) >= 1, f"{name}: ids must have minItems>=1"
+
+    def test_validate_action_params_blocks_unsafe_remove(self):
+        from app.services import connector_service as cs
+
+        ct = {
+            "supported_actions": [
+                {
+                    "name": "remove_torrent",
+                    "input_schema": {
+                        "type": "object",
+                        "properties": {
+                            "ids": {
+                                "type": "array",
+                                "items": {"type": "integer"},
+                                "minItems": 1,
+                            },
+                            "delete_data": {"type": "boolean"},
+                        },
+                        "required": ["ids"],
+                    },
+                }
+            ]
+        }
+        # the exact malformed call that wiped the queue (object, not array)
+        assert (
+            cs._validate_action_params(ct, "remove_torrent", {"ids": {"item": "7"}})[
+                "error_code"
+            ]
+            == "INVALID_PARAMS"
+        )
+        # empty list would mean "all" to Transmission
+        assert (
+            cs._validate_action_params(ct, "remove_torrent", {"ids": []})["error_code"]
+            == "INVALID_PARAMS"
+        )
+        # missing required selector
+        assert (
+            cs._validate_action_params(ct, "remove_torrent", {"delete_data": False})[
+                "error_code"
+            ]
+            == "INVALID_PARAMS"
+        )
+        # a well-formed call passes
+        assert cs._validate_action_params(ct, "remove_torrent", {"ids": [7]}) is None

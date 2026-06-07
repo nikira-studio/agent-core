@@ -863,6 +863,45 @@ def _validate_action_for_connector(connector_type: dict, action: str) -> Optiona
     return None
 
 
+def _validate_action_params(
+    connector_type: dict, action: str, params: Optional[dict]
+) -> Optional[dict]:
+    """Validate caller params against the action's declared input_schema before
+    executing. Returns an error dict to abort, or None to proceed.
+
+    This is a safety gate: it stops malformed, missing, or empty required params
+    from ever reaching the connector. It matters most for destructive actions
+    whose backend treats an omitted/empty selector as "apply to ALL" (e.g.
+    Transmission torrent-remove with no ids removes the entire queue). Declaring
+    the selector required with minItems>=1 turns "remove all by accident" into a
+    rejected call.
+    """
+    meta = None
+    for a in connector_type.get("supported_actions") or []:
+        if isinstance(a, dict) and a.get("name") == action:
+            meta = a
+            break
+    schema = (meta or {}).get("input_schema")
+    if not isinstance(schema, dict) or not schema.get("properties"):
+        return None  # nothing declared to validate against
+    try:
+        import jsonschema
+
+        jsonschema.validate(instance=params or {}, schema=schema)
+    except jsonschema.ValidationError as e:
+        return {
+            "success": False,
+            "error": f"Invalid parameters for '{action}': {e.message}",
+            "error_code": "INVALID_PARAMS",
+        }
+    except Exception:
+        # A real ValidationError above always blocks. Only swallow validator
+        # infrastructure errors (e.g. a malformed schema) so they don't wedge
+        # every call, but log them loudly.
+        logger.exception("param schema validation failed to run for action %s", action)
+    return None
+
+
 def execute_binding_action(
     binding_id: str, action: str, params: Optional[dict] = None
 ) -> dict:
@@ -895,6 +934,10 @@ def execute_binding_action(
             "error": error_messages.get(action_error, "Action validation failed"),
             "error_code": action_error,
         }
+
+    param_error = _validate_action_params(connector_type, action, params)
+    if param_error:
+        return param_error
 
     binding_with_cred = get_binding_with_credential(binding_id)
     cred = binding_with_cred.get("credential")
