@@ -564,7 +564,7 @@ Dispatch:
 
 | Tool | What it does |
 | --- | --- |
-| `memory_search` | Search authorized memory by query |
+| `memory_search` | Search memory by query. No `scope` = your default recall scopes; pass `scope` to target one specific readable scope on demand |
 | `memory_get` | List records in an authorized scope. `view='compact'` surveys a scope (metadata + content preview, no full bodies); defaults to compact for large pages, full for small. Supports `limit`/`offset` |
 | `memory_write` | Write a memory record |
 | `memory_retract` | Soft-delete a memory record |

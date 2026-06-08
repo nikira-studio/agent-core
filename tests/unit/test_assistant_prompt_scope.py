@@ -60,3 +60,16 @@ def test_prompt_steers_other_project_scopes_to_on_demand():
         assert "do not fan recall across other workspaces" in low
         # And to only reach into another project when the request is about it.
         assert "explicitly about that project" in low or "explicitly about another project" in low
+
+
+def test_prompt_renders_configured_default_recall_set():
+    """When default_recall_scopes is configured, the prompt names the actual set
+    and points to the memory_search(scope=…) on-demand path."""
+    import json
+    md = _build_assistants_md(
+        BASE, USER, WORKSPACE, AGENT,
+        default_recall_scopes_json=json.dumps([AGENT, "workspace:home-network"]),
+    )
+    assert "configured default recall scopes are" in md
+    assert "workspace:home-network" in md
+    assert 'memory_search(scope="workspace:<id>")' in md

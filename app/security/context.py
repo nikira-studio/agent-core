@@ -10,6 +10,10 @@ class RequestContext:
     agent_id: Optional[str] = None
     read_scopes: list[str] = field(default_factory=list)
     write_scopes: list[str] = field(default_factory=list)
+    # Scopes an UNSCOPED memory_search/memory_get recalls from by default. A
+    # subset of read_scopes (scoped reads still use the full read_scopes). For
+    # users this equals read_scopes; for agents it can be narrowed.
+    default_recall_scopes: list[str] = field(default_factory=list)
     active_workspace_ids: frozenset[str] = field(default_factory=frozenset)
     is_admin: bool = False
 
@@ -37,6 +41,7 @@ def build_user_context(session: dict) -> RequestContext:
         is_admin=is_admin,
         read_scopes=[f"user:{user_id}"] + readable_workspace_scopes,
         write_scopes=[f"user:{user_id}"] + writable_workspace_scopes,
+        default_recall_scopes=[f"user:{user_id}"] + readable_workspace_scopes,
         active_workspace_ids=active_workspace_ids,
     )
 

@@ -63,7 +63,7 @@ Once connected, these tools are available in any session:
 
 | Tool | What it does |
 | --- | --- |
-| `memory_search` | Search all memory the agent has access to, by natural language query |
+| `memory_search` | Search memory by natural language query. No `scope` searches the agent's default recall scopes; pass `scope` to target one specific readable scope on demand |
 | `memory_get` | List records in a specific scope. `view='compact'` surveys a scope (metadata + preview); defaults to compact for large pages, full for small |
 | `memory_write` | Save a memory record (automatically checks for PII on shared scopes) |
 | `memory_retract` | Soft-delete a memory record |

@@ -27,6 +27,27 @@ def _with_own_scope(agent_id: str, scopes: list[str]) -> list[str]:
     return normalized
 
 
+# Sentinel distinguishing "leave default_recall_scopes unchanged" (default) from
+# "clear it back to NULL / Option A" (explicit None) in update_agent.
+_UNSET = object()
+
+
+def _constrain_recall(
+    agent_id: str, default_recall_scopes: list[str], read_scopes: list[str]
+) -> list[str]:
+    """Constrain a default-recall set to the subset invariant: only scopes the
+    agent can read, always including its own scope. Returned set is what gets
+    stored, so the two lists can never drift out of sync."""
+    own_scope = f"agent:{normalize_id(agent_id)}"
+    read_set = set(read_scopes)
+    constrained = [
+        s for s in _normalize_scopes(default_recall_scopes) if s in read_set
+    ]
+    if own_scope not in constrained:
+        constrained.insert(0, own_scope)
+    return constrained
+
+
 def generate_api_key() -> tuple[str, str]:
     plaintext = f"ac_sk_{secrets.token_urlsafe(32)}"
     key_hash = hashlib.sha256(plaintext.encode()).hexdigest()
@@ -56,6 +77,7 @@ def create_agent(
     default_user_id: Optional[str] = None,
     read_scopes: Optional[list[str]] = None,
     write_scopes: Optional[list[str]] = None,
+    default_recall_scopes: Optional[list[str]] = None,
 ) -> tuple[dict, str]:
     normalized_id = normalize_id(agent_id)
     api_key_plaintext, api_key_hash = generate_api_key()
@@ -78,16 +100,24 @@ def create_agent(
 
     read_scopes_json = json.dumps(read_scopes)
     write_scopes_json = json.dumps(write_scopes)
+    # NULL = Option A (unscoped recall fans all read_scopes). A provided set is
+    # constrained to the subset invariant before storage.
+    default_recall_scopes_json = (
+        json.dumps(_constrain_recall(normalized_id, default_recall_scopes, read_scopes))
+        if default_recall_scopes is not None
+        else None
+    )
 
     with get_db() as conn:
         conn.execute(
             """
             INSERT INTO agents (id, display_name, description, owner_user_id, default_user_id,
-                               read_scopes_json, write_scopes_json, api_key_hash)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                               read_scopes_json, write_scopes_json, default_recall_scopes_json,
+                               api_key_hash)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (normalized_id, display_name, description, owner_user_id, default_user_id,
-             read_scopes_json, write_scopes_json, api_key_hash),
+             read_scopes_json, write_scopes_json, default_recall_scopes_json, api_key_hash),
         )
         conn.commit()
 
@@ -99,6 +129,7 @@ def create_agent(
             "default_user_id": default_user_id,
             "read_scopes_json": read_scopes_json,
             "write_scopes_json": write_scopes_json,
+            "default_recall_scopes_json": default_recall_scopes_json,
             "is_active": True,
         }
 
@@ -110,7 +141,7 @@ def get_agent_by_id(agent_id: str) -> Optional[dict]:
         cursor = conn.execute(
             """
             SELECT id, display_name, description, owner_user_id, default_user_id,
-                   read_scopes_json, write_scopes_json, api_key_hash, is_active, created_at
+                   read_scopes_json, write_scopes_json, default_recall_scopes_json, api_key_hash, is_active, created_at
             FROM agents WHERE id = ?
             """,
             (agent_id,),
@@ -125,7 +156,7 @@ def get_agent_by_api_key(plaintext_key: str) -> Optional[dict]:
         cursor = conn.execute(
             """
             SELECT id, display_name, description, owner_user_id, default_user_id,
-                   read_scopes_json, write_scopes_json, api_key_hash, is_active, created_at
+                   read_scopes_json, write_scopes_json, default_recall_scopes_json, api_key_hash, is_active, created_at
             FROM agents WHERE api_key_hash = ?
             """,
             (key_hash,),
@@ -142,7 +173,7 @@ def is_agent_shared(agent: dict) -> bool:
 
 def list_agents(owner_user_id: Optional[str] = None, is_active: Optional[bool] = None) -> list[dict]:
     with get_db() as conn:
-        query = "SELECT id, display_name, description, owner_user_id, default_user_id, read_scopes_json, write_scopes_json, is_active, created_at FROM agents WHERE 1=1"
+        query = "SELECT id, display_name, description, owner_user_id, default_user_id, read_scopes_json, write_scopes_json, default_recall_scopes_json, is_active, created_at FROM agents WHERE 1=1"
         params = []
 
         if owner_user_id:
@@ -175,7 +206,12 @@ def update_agent(
     description: Optional[str] = None,
     read_scopes: Optional[list[str]] = None,
     write_scopes: Optional[list[str]] = None,
+    default_recall_scopes=_UNSET,
 ) -> bool:
+    current = get_agent_by_id(agent_id)
+    if current is None:
+        return False
+
     updates = []
     params = []
 
@@ -185,12 +221,36 @@ def update_agent(
     if description is not None:
         updates.append("description = ?")
         params.append(description)
-    if read_scopes is not None:
+
+    new_read = _with_own_scope(agent_id, read_scopes) if read_scopes is not None else None
+    if new_read is not None:
         updates.append("read_scopes_json = ?")
-        params.append(json.dumps(_with_own_scope(agent_id, read_scopes)))
+        params.append(json.dumps(new_read))
     if write_scopes is not None:
         updates.append("write_scopes_json = ?")
         params.append(json.dumps(_with_own_scope(agent_id, write_scopes)))
+
+    # Effective read set the default-recall subset is validated against.
+    effective_read = new_read if new_read is not None else parse_scopes(
+        current.get("read_scopes_json", "[]")
+    )
+    if default_recall_scopes is not _UNSET:
+        # Explicit change: None clears back to NULL (Option A); a list is stored
+        # constrained to the subset invariant.
+        if default_recall_scopes is None:
+            updates.append("default_recall_scopes_json = ?")
+            params.append(None)
+        else:
+            updates.append("default_recall_scopes_json = ?")
+            params.append(
+                json.dumps(_constrain_recall(agent_id, default_recall_scopes, effective_read))
+            )
+    elif new_read is not None and current.get("default_recall_scopes_json"):
+        # read_scopes changed and a default set exists: prune it to the new read
+        # set so the subset invariant can't drift.
+        stored = parse_scopes(current["default_recall_scopes_json"])
+        updates.append("default_recall_scopes_json = ?")
+        params.append(json.dumps(_constrain_recall(agent_id, stored, new_read)))
 
     if not updates:
         return False

@@ -20,6 +20,9 @@ class CreateAgentRequest(BaseModel):
     default_user_id: Optional[str] = None
     read_scopes: Optional[list[str]] = None
     write_scopes: Optional[list[str]] = None
+    # Subset of read_scopes the agent recalls from on an unscoped search. None =
+    # default (fan all read_scopes).
+    default_recall_scopes: Optional[list[str]] = None
 
 
 class UpdateAgentRequest(BaseModel):
@@ -27,6 +30,10 @@ class UpdateAgentRequest(BaseModel):
     description: Optional[str] = None
     read_scopes: Optional[list[str]] = None
     write_scopes: Optional[list[str]] = None
+    # None = leave unchanged. Provide a list to narrow; set reset flag to clear
+    # back to the default (fan all read_scopes).
+    default_recall_scopes: Optional[list[str]] = None
+    reset_default_recall_scopes: bool = False
 
 
 def get_agent_auth(authorization: str = "") -> tuple[str, str]:
@@ -117,6 +124,7 @@ async def list_agents(session: dict = Depends(get_current_session)):
             "default_user_id": agent.get("default_user_id"),
             "read_scopes_json": agent["read_scopes_json"],
             "write_scopes_json": agent["write_scopes_json"],
+            "default_recall_scopes_json": agent.get("default_recall_scopes_json"),
             "is_active": agent["is_active"],
             "is_shared": agent_service.is_agent_shared(agent),
             "created_at": agent["created_at"],
@@ -148,6 +156,9 @@ async def create_agent(
     scope_error = _validate_agent_scopes(body.write_scopes, session, agent_id=normalized_id, owner_user_id=owner_user_id, write=True)
     if scope_error:
         return scope_error
+    scope_error = _validate_agent_scopes(body.default_recall_scopes, session, agent_id=normalized_id, owner_user_id=owner_user_id)
+    if scope_error:
+        return scope_error
 
     agent, _api_key_plaintext = agent_service.create_agent(
         agent_id=body.id,
@@ -157,6 +168,7 @@ async def create_agent(
         default_user_id=body.default_user_id,
         read_scopes=body.read_scopes,
         write_scopes=body.write_scopes,
+        default_recall_scopes=body.default_recall_scopes,
     )
 
     audit_service.write_event(
@@ -177,6 +189,7 @@ async def create_agent(
             "default_user_id": agent.get("default_user_id"),
             "read_scopes_json": agent["read_scopes_json"],
             "write_scopes_json": agent["write_scopes_json"],
+            "default_recall_scopes_json": agent.get("default_recall_scopes_json"),
             "is_active": agent["is_active"],
         },
         "next_step": "Generate a one-time connection key and config from Integrations.",
@@ -201,6 +214,7 @@ async def get_agent(agent_id: str, session: dict = Depends(get_current_session))
             "default_user_id": agent.get("default_user_id"),
             "read_scopes_json": agent["read_scopes_json"],
             "write_scopes_json": agent["write_scopes_json"],
+            "default_recall_scopes_json": agent.get("default_recall_scopes_json"),
             "is_active": agent["is_active"],
             "created_at": agent["created_at"],
             "is_shared": agent_service.is_agent_shared(agent),
@@ -228,14 +242,23 @@ async def update_agent(
     scope_error = _validate_agent_scopes(body.write_scopes, session, agent_id=agent_id, owner_user_id=owner_user_id, write=True)
     if scope_error:
         return scope_error
+    scope_error = _validate_agent_scopes(body.default_recall_scopes, session, agent_id=agent_id, owner_user_id=owner_user_id)
+    if scope_error:
+        return scope_error
 
-    agent_service.update_agent(
-        agent_id,
+    update_kwargs = dict(
         display_name=body.display_name,
         description=body.description,
         read_scopes=body.read_scopes,
         write_scopes=body.write_scopes,
     )
+    # reset flag clears back to default (fan all read_scopes); otherwise a
+    # provided list narrows, and absence leaves it unchanged.
+    if body.reset_default_recall_scopes:
+        update_kwargs["default_recall_scopes"] = None
+    elif body.default_recall_scopes is not None:
+        update_kwargs["default_recall_scopes"] = body.default_recall_scopes
+    agent_service.update_agent(agent_id, **update_kwargs)
 
     audit_service.write_event(
         actor_type="user",

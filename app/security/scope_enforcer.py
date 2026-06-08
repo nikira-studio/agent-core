@@ -78,6 +78,23 @@ def build_agent_context(agent: dict) -> "RequestContext":
 
     read_scopes = agent_service.parse_scopes(agent["read_scopes_json"])
     write_scopes = agent_service.parse_scopes(agent["write_scopes_json"])
+
+    # Default recall set: NULL column = Option A (fan all read_scopes). When set,
+    # constrain to read_scopes and always include the agent's own scope, so an
+    # unscoped recall can never be stranded from its own memory or drift past
+    # read access regardless of how the row was edited.
+    read_set = set(read_scopes)
+    own_scope = f"agent:{agent['id']}"
+    recall_json = agent.get("default_recall_scopes_json")
+    if recall_json:
+        default_recall_scopes = [
+            s for s in agent_service.parse_scopes(recall_json) if s in read_set
+        ]
+    else:
+        default_recall_scopes = list(read_scopes)
+    if own_scope in read_set and own_scope not in default_recall_scopes:
+        default_recall_scopes.insert(0, own_scope)
+
     user_id = agent.get("default_user_id") or agent.get("owner_user_id")
     workspace_ids = {
         scope.split(":", 1)[1]
@@ -96,6 +113,7 @@ def build_agent_context(agent: dict) -> "RequestContext":
         agent_id=agent["id"],
         read_scopes=read_scopes,
         write_scopes=write_scopes,
+        default_recall_scopes=default_recall_scopes,
         active_workspace_ids=active_workspace_ids,
         is_admin=False,
     )
