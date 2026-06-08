@@ -50,11 +50,16 @@ MANIFEST = {
     "tools": [
         {
             "name": "memory_search",
-            "description": "Search memory records by text query within authorized scopes",
+            "description": (
+                "Search memory records by text query. With no scope, searches your "
+                "default recall scopes; pass scope to target one specific readable "
+                "scope on demand (e.g. another project)."
+            ),
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "query": {"type": "string"},
+                    "scope": {"type": "string"},
                     "domain": {"type": "string"},
                     "topic": {"type": "string"},
                     "memory_class": {"type": "string", "enum": list(MEMORY_CLASSES)},
@@ -628,7 +633,18 @@ async def _handle_custom_mcp_tool(body: dict, ctx: RequestContext):
             return _mcp_error(
                 "INVALID_CONFIDENCE", "min_confidence must be between 0.0 and 1.0", 400
             )
-        allowed = enforcer.filter_readable_scopes(ctx.read_scopes)
+        search_scope = params.get("scope")
+        if search_scope:
+            # On-demand: target one specific scope (e.g. another project), gated
+            # by full read access — this is how a narrowed agent reaches past its
+            # default recall set when the request is explicitly about that scope.
+            if not enforcer.can_read(search_scope):
+                return _mcp_error("SCOPE_DENIED", "Access denied to this scope", 403)
+            allowed = [search_scope]
+        else:
+            allowed = enforcer.filter_readable_scopes(
+                ctx.default_recall_scopes or ctx.read_scopes
+            )
         if not allowed:
             embedding_status = _embedding_backend_status()
             return JSONResponse(
@@ -722,7 +738,9 @@ async def _handle_custom_mcp_tool(body: dict, ctx: RequestContext):
                 record_status=params.get("record_status"),
             )
         else:
-            allowed = enforcer.filter_readable_scopes(ctx.read_scopes)
+            allowed = enforcer.filter_readable_scopes(
+                ctx.default_recall_scopes or ctx.read_scopes
+            )
             records = memory_service.get_memory_by_scopes(
                 scopes=allowed,
                 limit=min(params.get("limit", 50), 200),

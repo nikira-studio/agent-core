@@ -43,6 +43,7 @@ CREATE TABLE IF NOT EXISTS agents (
     default_user_id TEXT,
     read_scopes_json TEXT NOT NULL DEFAULT '[]',
     write_scopes_json TEXT NOT NULL DEFAULT '[]',
+    default_recall_scopes_json TEXT,
     api_key_hash TEXT NOT NULL,
     is_active INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0, 1)),
     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
@@ -384,6 +385,7 @@ CREATE TABLE IF NOT EXISTS connector_session_cache (
 def create_schema(conn) -> None:
     conn.executescript(SCHEMA_SQL)
     _ensure_activity_columns(conn)
+    _ensure_agents_default_recall_column(conn)
     _ensure_memory_metadata_columns(conn)
     _ensure_connector_type_provider_columns(conn)
     _ensure_adapter_installations_table(conn)
@@ -410,6 +412,15 @@ def create_schema(conn) -> None:
     _ensure_inbound_webhook_table(conn)
     _ensure_connector_session_cache_table(conn)
     _seed_connector_types(conn)
+
+
+def _ensure_agents_default_recall_column(conn) -> None:
+    columns = {
+        row["name"] for row in conn.execute("PRAGMA table_info(agents)").fetchall()
+    }
+    if "default_recall_scopes_json" not in columns:
+        conn.execute("ALTER TABLE agents ADD COLUMN default_recall_scopes_json TEXT")
+        conn.commit()
 
 
 def _ensure_activity_columns(conn) -> None:

@@ -117,9 +117,10 @@ async def spec(
     mcp_tools = [
         {
             "name": "memory_search",
-            "description": "Search memory records by text query within authorized scopes",
+            "description": "Search memory records by text query; no scope = your default recall scopes, scope = one specific readable scope on demand",
             "inputSchema": {
                 "query": "string",
+                "scope": "string?",
                 "domain": "string?",
                 "topic": "string?",
                 "memory_class": list(MEMORY_CLASSES),

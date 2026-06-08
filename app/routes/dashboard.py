@@ -932,6 +932,13 @@ async def agents_page(request: Request, session: dict = Depends(require_auth)):
                 f'<input type="checkbox" data-scope="user:{session["user_id"]}" checked disabled data-required-scope="true">'
                 f' <span>User <code>user:{session["user_id"]}</code> (owner context)</span></label>'
             )
+        elif prefix.endswith("recall"):
+            # Recall set may include the owner scope, but it is selectable (not required).
+            h += (
+                f'<label class="checkbox-label" data-scope-row="user:{session["user_id"]}">'
+                f'<input type="checkbox" data-scope="user:{session["user_id"]}">'
+                f' <span>User <code>user:{session["user_id"]}</code> (owner context)</span></label>'
+            )
         if all_workspaces:
             h += "<h4>Workspaces</h4>"
             for p in all_workspaces:
@@ -945,8 +952,10 @@ async def agents_page(request: Request, session: dict = Depends(require_auth)):
 
     ca_read_html = build_scope_list("ca-read")
     ca_write_html = build_scope_list("ca-write")
+    ca_recall_html = build_scope_list("ca-recall")
     edit_read_html = build_scope_list("edit-read")
     edit_write_html = build_scope_list("edit-write")
+    edit_recall_html = build_scope_list("edit-recall")
 
     def agent_row(a):
         active = a.get("is_active")
@@ -1079,9 +1088,21 @@ async def agents_page(request: Request, session: dict = Depends(require_auth)):
       const writeScopes = JSON.parse(a.write_scopes_json || '[]');
       setSelectedScopes('edit-read-scopes', readScopes);
       setSelectedScopes('edit-write-scopes', writeScopes);
+      // Default recall: null column => "all readable" (Option A); else the stored subset.
+      const recall = a.default_recall_scopes_json ? JSON.parse(a.default_recall_scopes_json) : null;
+      const recallAll = document.getElementById('edit-recall-all');
+      if (recall === null) {
+        if (recallAll) recallAll.checked = true;
+        setSelectedScopes('edit-recall-scopes', readScopes);
+      } else {
+        if (recallAll) recallAll.checked = false;
+        setSelectedScopes('edit-recall-scopes', recall);
+      }
+      if (recallAll) recallAll.disabled = Boolean(readOnly);
+      toggleRecallPicker('edit');
       setAgentModalReadOnly(Boolean(readOnly));
       // Hide and disable the agent's own scope row: self-access is implicit.
-      ['edit-read-scopes', 'edit-write-scopes'].forEach(containerId => {
+      ['edit-read-scopes', 'edit-write-scopes', 'edit-recall-scopes'].forEach(containerId => {
         document.querySelectorAll('#' + containerId + ' input').forEach(input => {
           const isOwnScope = input.dataset.scope === 'agent:' + a.id;
           input.disabled = Boolean(readOnly) || isOwnScope || input.dataset.requiredScope === 'true';
@@ -1102,6 +1123,11 @@ async def agents_page(request: Request, session: dict = Depends(require_auth)):
           i.checked = scopes.includes(i.dataset.scope);
         });
       }
+      function toggleRecallPicker(prefix) {
+        const all = document.getElementById(prefix + '-recall-all');
+        const wrap = document.getElementById(prefix + '-recall-wrap');
+        if (wrap) wrap.style.display = (all && all.checked) ? 'none' : '';
+      }
       function normalizeAgentId(value) {
         return (value || '').trim().toLowerCase();
       }
@@ -1121,6 +1147,14 @@ async def agents_page(request: Request, session: dict = Depends(require_auth)):
         body.read_scopes.push(ownScope);
         body.write_scopes.push(ownScope);
         if (!body.read_scopes.includes(userScope)) body.read_scopes.push(userScope);
+        const editRecallAll = document.getElementById('edit-recall-all');
+        if (editRecallAll && editRecallAll.checked) {
+          body.reset_default_recall_scopes = true;
+        } else {
+          const recall = getSelectedScopes('edit-recall-scopes');
+          recall.push(ownScope);
+          body.default_recall_scopes = recall;
+        }
         const j = await apiFetch('/api/agents/' + id, { method: 'PUT', body: JSON.stringify(body) });
         if (j.ok) { showToast('Agent updated'); closeModal('edit-agent-modal'); refreshAgents(); }
         else { showToast(j.error.message || 'Failed', 'danger'); }
@@ -1147,6 +1181,12 @@ async def agents_page(request: Request, session: dict = Depends(require_auth)):
         if (!body.read_scopes.includes(privateScope)) body.read_scopes.push(privateScope);
         if (!body.write_scopes.includes(privateScope)) body.write_scopes.push(privateScope);
         if (!body.read_scopes.includes(userScope)) body.read_scopes.push(userScope);
+        const caRecallAll = document.getElementById('ca-recall-all');
+        if (caRecallAll && !caRecallAll.checked) {
+          const recall = getSelectedScopes('ca-recall-scopes');
+          recall.push(privateScope);
+          body.default_recall_scopes = recall;
+        }
 
         try {
           const j = await apiFetch('/api/agents', { method: 'POST', body: JSON.stringify(body) });
@@ -1224,6 +1264,14 @@ async def agents_page(request: Request, session: dict = Depends(require_auth)):
             {ca_write_html}
             <p class="form-hint">Grant write access only where the agent should be allowed to save new memory or credentials. Use workspace scopes for multi-user collaboration. User write is available only as an explicit advanced choice.</p>
           </div>
+          <div class="form-group">
+            <label>Default Recall Scopes</label>
+            <label class="checkbox-label"><input type="checkbox" id="ca-recall-all" checked onchange="toggleRecallPicker('ca')"> <span>Recall from all readable scopes (default)</span></label>
+            <div id="ca-recall-wrap" style="display:none">
+              {ca_recall_html}
+              <p class="form-hint">When narrowed, an unscoped <code>memory_search</code>/<code>memory_get</code> recalls only these scopes; other readable scopes stay reachable on demand via <code>memory_search(scope=…)</code>. The agent's own scope is always included.</p>
+            </div>
+          </div>
           <div id="create-agent-error" class="alert alert-danger" style="display:none"></div>
           <div class="modal-footer">
             <button type="button" class="btn btn-secondary" onclick="closeModal('create-agent-modal')">Cancel</button>
@@ -1265,6 +1313,14 @@ async def agents_page(request: Request, session: dict = Depends(require_auth)):
             <label>Can Write To</label>
             {edit_write_html}
             <p class="form-hint">Checked items are extra places this agent can save to.</p>
+          </div>
+          <div class="form-group">
+            <label>Default Recall Scopes</label>
+            <label class="checkbox-label"><input type="checkbox" id="edit-recall-all" onchange="toggleRecallPicker('edit')"> <span>Recall from all readable scopes (default)</span></label>
+            <div id="edit-recall-wrap">
+              {edit_recall_html}
+              <p class="form-hint">When narrowed, an unscoped <code>memory_search</code>/<code>memory_get</code> recalls only these scopes; other readable scopes stay reachable on demand via <code>memory_search(scope=…)</code>. The agent's own scope is always included.</p>
+            </div>
           </div>
           <div class="modal-footer">
             <button type="button" class="btn btn-secondary" onclick="closeModal('edit-agent-modal')">Cancel</button>
@@ -5336,7 +5392,8 @@ def _build_agent_setup_output(
     elif output_type == "assistants_md":
         label = "Assistants — paste into the assistant's onboarding or instruction field"
         content = _build_assistants_md(
-            base_url, user_scope, workspace_scope, agent_scope, api_key=api_key
+            base_url, user_scope, workspace_scope, agent_scope, api_key=api_key,
+            default_recall_scopes_json=agent.get("default_recall_scopes_json"),
         )
     elif output_type == "mcp_json":
         label = "MCP Config"
@@ -5796,7 +5853,7 @@ This file is the manual fallback when the client has no lifecycle hook or plugin
 """
 
 
-def _build_assistants_md(base_url, user_scope, workspace_scope, agent_scope, api_key=None):
+def _build_assistants_md(base_url, user_scope, workspace_scope, agent_scope, api_key=None, default_recall_scopes_json=None):
     # Operational writes (activity tracking, searches) go to the writable scope an
     # agent actually has: the selected workspace when one is chosen, otherwise its
     # own agent scope. Durable, shareable KNOWLEDGE is different: it belongs in a
@@ -5822,6 +5879,25 @@ def _build_assistants_md(base_url, user_scope, workspace_scope, agent_scope, api
             f" `{agent_scope}` until then."
         )
     )
+    recall_list = None
+    if default_recall_scopes_json:
+        try:
+            parsed_recall = json.loads(default_recall_scopes_json)
+            if isinstance(parsed_recall, list) and parsed_recall:
+                recall_list = parsed_recall
+        except (TypeError, ValueError):
+            recall_list = None
+    if recall_list:
+        recall_intro = (
+            "Default vs on-demand recall: your configured default recall scopes are "
+            + ", ".join(f"`{s}`" for s in recall_list)
+            + " — an unscoped `memory_search`/`memory_get` recalls only these."
+        )
+    else:
+        recall_intro = (
+            f"Default vs on-demand recall: your everyday recall scopes are `{durable_scope}` "
+            f"(your own working store) and `{user_scope}` (owner facts)."
+        )
     connection_key = _connection_key_value(api_key)
     workspace_context_line = (
         f"- Workspace scope: `{workspace_scope}` (use this for shared collaboration in the selected workspace)."
@@ -5855,7 +5931,7 @@ The guiding rule: anything that is shared across agents or tools by default, or 
 Read `{user_scope}` for stable owner preferences and owner-context details. Treat the user scope as read-only unless your key was explicitly granted user-scope write; it is for facts about the owner, not a general shared store.
 Use full prefixed scope names exactly as shown. Do not use plain workspace IDs or agent IDs as memory scopes.
 
-Default vs on-demand recall: your everyday recall scopes are `{durable_scope}` (your own working store) and `{user_scope}` (owner facts). Your key may ALSO be granted read access to other workspaces — other projects, or other agents' work. Do NOT search those by default. When the owner asks you something general, answer only from your default scopes. Reach into another workspace ONLY when the request is explicitly about that project or topic, and name that `workspace:<id>` directly in `memory_search`/`memory_get`. Note: an unscoped `memory_search` fans across every scope your key can read and will mix unrelated projects into your answer — so scope your searches, and treat other-project access as on-demand, never the default.
+{recall_intro} Your key may ALSO be granted read access to other workspaces — other projects, or other agents' work — but those are NOT in your default recall. When the owner asks you something general, answer only from your default scopes. Reach into another scope ONLY when the request is explicitly about that project or topic, by naming it: `memory_search(scope="workspace:<id>")` or `memory_get(scope="workspace:<id>")`. Treat other-project access as on-demand, never the default — an unscoped search deliberately will not return them.
 
 ## Setup
 

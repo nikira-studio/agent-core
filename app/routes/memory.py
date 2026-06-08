@@ -387,7 +387,9 @@ async def search_memory(
                 return error_response("SCOPE_DENIED", "Access denied to this scope", 403)
             allowed_scopes = [body.scope]
         else:
-            allowed_scopes = enforcer.filter_readable_scopes(ctx.read_scopes)
+            allowed_scopes = enforcer.filter_readable_scopes(
+                ctx.default_recall_scopes or ctx.read_scopes
+            )
         if not allowed_scopes:
             embedding_status = _embedding_backend_status()
             return success_response_with_headers({
@@ -475,7 +477,9 @@ async def get_memory(
             record_status=body.record_status,
         )
     else:
-        allowed_scopes = enforcer.filter_readable_scopes(ctx.read_scopes)
+        allowed_scopes = enforcer.filter_readable_scopes(
+            ctx.default_recall_scopes or ctx.read_scopes
+        )
         records = memory_service.get_memory_by_scopes(
             scopes=allowed_scopes,
             limit=min(body.limit, 100),
