@@ -42,3 +42,21 @@ def test_workspace_prompt_directs_durable_writes_to_the_workspace():
     assert f"`fact` in `{WORKSPACE}`" in md
     # Even with a workspace, durable knowledge is never the private agent scope.
     assert f"`decision` in `{AGENT}`" not in md
+
+
+def test_prompt_steers_other_project_scopes_to_on_demand():
+    """Scope-routing guidance: a key with read access to other workspaces must be
+    told to recall from its default scopes by default and reach into other
+    projects only on demand (the cross-project recall-bleed fix)."""
+    for md in (
+        _build_assistants_md(BASE, USER, None, AGENT),
+        _build_assistants_md(BASE, USER, WORKSPACE, AGENT),
+    ):
+        low = md.lower()
+        # Names the failure mode explicitly.
+        assert "unscoped" in low
+        assert "on-demand" in low or "on demand" in low
+        # Tells it not to fan recall across other readable workspaces by default.
+        assert "do not fan recall across other workspaces" in low
+        # And to only reach into another project when the request is about it.
+        assert "explicitly about that project" in low or "explicitly about another project" in low
