@@ -1092,8 +1092,11 @@ async def agents_page(request: Request, session: dict = Depends(require_auth)):
       const recall = a.default_recall_scopes_json ? JSON.parse(a.default_recall_scopes_json) : null;
       const recallAll = document.getElementById('edit-recall-all');
       if (recall === null) {
+        // Never configured: box checked (= all read). Underneath, start blank —
+        // only the locked own-scope — so unchecking shows a clean slate, not a
+        // pre-filled suggestion that looks like an existing default.
         if (recallAll) recallAll.checked = true;
-        setSelectedScopes('edit-recall-scopes', readScopes);
+        setSelectedScopes('edit-recall-scopes', []);
       } else {
         if (recallAll) recallAll.checked = false;
         setSelectedScopes('edit-recall-scopes', recall);
@@ -1103,11 +1106,23 @@ async def agents_page(request: Request, session: dict = Depends(require_auth)):
       setAgentModalReadOnly(Boolean(readOnly));
       // Hide and disable the agent's own scope row: self-access is implicit.
       ['edit-read-scopes', 'edit-write-scopes', 'edit-recall-scopes'].forEach(containerId => {
+        const isRecall = containerId === 'edit-recall-scopes';
         document.querySelectorAll('#' + containerId + ' input').forEach(input => {
           const isOwnScope = input.dataset.scope === 'agent:' + a.id;
           input.disabled = Boolean(readOnly) || isOwnScope || input.dataset.requiredScope === 'true';
           const label = input.closest('label');
-          if (label) {
+          if (!label) return;
+          if (isOwnScope && isRecall) {
+            // Show the agent's own scope as the always-on recall baseline:
+            // visible, checked, locked — so the floor is obvious, not hidden.
+            input.checked = true;
+            label.hidden = false;
+            label.classList.add('implicit-own-scope');
+            if (!label.dataset.alwaysTag) {
+              label.insertAdjacentHTML('beforeend', ' <span class="text-muted">(always included)</span>');
+              label.dataset.alwaysTag = '1';
+            }
+          } else {
             label.hidden = isOwnScope;
             label.classList.toggle('implicit-own-scope', isOwnScope);
           }
@@ -1266,10 +1281,10 @@ async def agents_page(request: Request, session: dict = Depends(require_auth)):
           </div>
           <div class="form-group">
             <label>Default Recall Scopes</label>
-            <label class="checkbox-label"><input type="checkbox" id="ca-recall-all" checked onchange="toggleRecallPicker('ca')"> <span>Recall from all readable scopes (default)</span></label>
+            <label class="checkbox-label"><input type="checkbox" id="ca-recall-all" checked onchange="toggleRecallPicker('ca')"> <span>Recall from <strong>all</strong> scopes this agent can read</span></label>
             <div id="ca-recall-wrap" style="display:none">
               {ca_recall_html}
-              <p class="form-hint">When narrowed, an unscoped <code>memory_search</code>/<code>memory_get</code> recalls only these scopes; other readable scopes stay reachable on demand via <code>memory_search(scope=…)</code>. The agent's own scope is always included.</p>
+              <p class="form-hint"><strong>Checked</strong> = recall from everything the agent can read (the default — same as before this setting existed). <strong>Uncheck</strong> to recall only the scopes ticked below. The agent's own scope is always included, and any other readable scope stays reachable on demand via <code>memory_search(scope=…)</code>.</p>
             </div>
           </div>
           <div id="create-agent-error" class="alert alert-danger" style="display:none"></div>
@@ -1316,10 +1331,10 @@ async def agents_page(request: Request, session: dict = Depends(require_auth)):
           </div>
           <div class="form-group">
             <label>Default Recall Scopes</label>
-            <label class="checkbox-label"><input type="checkbox" id="edit-recall-all" onchange="toggleRecallPicker('edit')"> <span>Recall from all readable scopes (default)</span></label>
+            <label class="checkbox-label"><input type="checkbox" id="edit-recall-all" onchange="toggleRecallPicker('edit')"> <span>Recall from <strong>all</strong> scopes this agent can read</span></label>
             <div id="edit-recall-wrap">
               {edit_recall_html}
-              <p class="form-hint">When narrowed, an unscoped <code>memory_search</code>/<code>memory_get</code> recalls only these scopes; other readable scopes stay reachable on demand via <code>memory_search(scope=…)</code>. The agent's own scope is always included.</p>
+              <p class="form-hint"><strong>Checked</strong> = recall from everything the agent can read (the default — same as before this setting existed). <strong>Uncheck</strong> to recall only the scopes ticked below. The agent's own scope is always included, and any other readable scope stays reachable on demand via <code>memory_search(scope=…)</code>.</p>
             </div>
           </div>
           <div class="modal-footer">
