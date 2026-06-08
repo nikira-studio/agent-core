@@ -5855,6 +5855,8 @@ The guiding rule: anything that is shared across agents or tools by default, or 
 Read `{user_scope}` for stable owner preferences and owner-context details. Treat the user scope as read-only unless your key was explicitly granted user-scope write; it is for facts about the owner, not a general shared store.
 Use full prefixed scope names exactly as shown. Do not use plain workspace IDs or agent IDs as memory scopes.
 
+Default vs on-demand recall: your everyday recall scopes are `{durable_scope}` (your own working store) and `{user_scope}` (owner facts). Your key may ALSO be granted read access to other workspaces — other projects, or other agents' work. Do NOT search those by default. When the owner asks you something general, answer only from your default scopes. Reach into another workspace ONLY when the request is explicitly about that project or topic, and name that `workspace:<id>` directly in `memory_search`/`memory_get`. Note: an unscoped `memory_search` fans across every scope your key can read and will mix unrelated projects into your answer — so scope your searches, and treat other-project access as on-demand, never the default.
+
 ## Setup
 
 1. Add {APP_NAME} as an MCP server using the connection values provided for this session.
@@ -5879,8 +5881,9 @@ If the session reloads, a handoff begins, or no active activity exists yet, open
 At the start of a meaningful task:
 
 1. Search `{durable_scope}` with focused queries for relevant context, prior decisions, and current state, and search `{user_scope}` for owner preferences and context. If a search returns little, retry with exact topic values or exact keywords from prior records.
-2. If this is a handoff, resume, or review of prior work, inspect `activity_list` and `briefing_list` before making changes.
-3. Use `memory_get` with a scope to list or read records; use `memory_search` to find records by query, topic, or class. There is no fetch-by-id.
+2. Stay in your default scopes by default. Do not fan recall across other workspaces your key can read. Only when the request is explicitly about another project, search that project's `workspace:<id>` by naming it directly; otherwise an unscoped search will mix unrelated projects into your answer.
+3. If this is a handoff, resume, or review of prior work, inspect `activity_list` and `briefing_list` before making changes.
+4. Use `memory_get` with a scope to list or read records; use `memory_search` to find records by query, topic, or class. There is no fetch-by-id.
 
 Write memory only when it will help a future session:
 
