@@ -269,25 +269,7 @@ class HttpEngine(BaseConnector):
                     return ""
                 return str(val)
             if filter_name == "rfc822_base64url":
-                import base64
-
-                def make_rfc822(p: dict) -> str:
-                    def _addr(v):
-                        return ", ".join(v) if isinstance(v, list) else str(v)
-                    headers = [f"To: {_addr(p.get('to', []))}"]
-                    if p.get("cc"):
-                        headers.append(f"Cc: {_addr(p['cc'])}")
-                    if p.get("bcc"):
-                        headers.append(f"Bcc: {_addr(p['bcc'])}")
-                    if p.get("subject"):
-                        headers.append(f"Subject: {p['subject']}")
-                    if p.get("in_reply_to"):
-                        headers.append(f"In-Reply-To: {p['in_reply_to']}")
-                        headers.append(f"References: {p.get('references') or p['in_reply_to']}")
-                    raw = ("\r\n".join(headers) + "\r\n\r\n" + (p.get("body", "") or "")).encode("utf-8")
-                    return base64.urlsafe_b64encode(raw).rstrip(b"=").decode("utf-8")
-
-                return make_rfc822(params) if isinstance(params, dict) else m.group(0)
+                return _make_rfc822_base64url(params) if isinstance(params, dict) else m.group(0)
             if val is None:
                 return m.group(0)
             return str(val)
@@ -698,6 +680,83 @@ def _render_dict(
     return template
 
 
+# Gmail's raw-message hard limit is ~35 MB; reject above this with a clear error
+# rather than letting Google return an opaque 4xx.
+_RFC822_MAX_BYTES = 35 * 1024 * 1024
+
+
+def _make_rfc822_base64url(p: dict) -> str:
+    """Build a Gmail raw (base64url) message from a params dict.
+
+    Single-part (no ``attachments``) output is byte-identical to the original
+    inline builder. When ``attachments`` is present, emit a ``multipart/mixed``
+    message with the text body first and each attachment as a part. Each
+    attachment is ``{filename, content_base64, mime_type?}`` (inline base64).
+    """
+    import base64
+
+    def _addr(v):
+        return ", ".join(v) if isinstance(v, list) else str(v)
+
+    headers = [f"To: {_addr(p.get('to', []))}"]
+    if p.get("cc"):
+        headers.append(f"Cc: {_addr(p['cc'])}")
+    if p.get("bcc"):
+        headers.append(f"Bcc: {_addr(p['bcc'])}")
+    if p.get("subject"):
+        headers.append(f"Subject: {p['subject']}")
+    if p.get("in_reply_to"):
+        headers.append(f"In-Reply-To: {p['in_reply_to']}")
+        headers.append(f"References: {p.get('references') or p['in_reply_to']}")
+    body = p.get("body", "") or ""
+
+    attachments = p.get("attachments")
+    if not attachments:
+        raw = ("\r\n".join(headers) + "\r\n\r\n" + body).encode("utf-8")
+        if len(raw) > _RFC822_MAX_BYTES:
+            raise ValueError("Email exceeds Gmail's ~35MB raw message limit")
+        return base64.urlsafe_b64encode(raw).rstrip(b"=").decode("utf-8")
+
+    from email.mime.base import MIMEBase
+    from email.mime.multipart import MIMEMultipart
+    from email.mime.text import MIMEText
+    from email import encoders
+
+    msg = MIMEMultipart("mixed")
+    msg["To"] = _addr(p.get("to", []))
+    if p.get("cc"):
+        msg["Cc"] = _addr(p["cc"])
+    if p.get("bcc"):
+        msg["Bcc"] = _addr(p["bcc"])
+    if p.get("subject"):
+        msg["Subject"] = p["subject"]
+    if p.get("in_reply_to"):
+        msg["In-Reply-To"] = p["in_reply_to"]
+        msg["References"] = p.get("references") or p["in_reply_to"]
+    msg.attach(MIMEText(body, "plain", "utf-8"))
+
+    for att in attachments:
+        if not isinstance(att, dict):
+            continue
+        filename = att.get("filename") or "attachment"
+        mime_type = att.get("mime_type") or "application/octet-stream"
+        maintype, _, subtype = mime_type.partition("/")
+        try:
+            data = base64.b64decode(att.get("content_base64") or "")
+        except Exception:
+            raise ValueError(f"Attachment '{filename}' has invalid base64 content")
+        part = MIMEBase(maintype or "application", subtype or "octet-stream")
+        part.set_payload(data)
+        encoders.encode_base64(part)
+        part.add_header("Content-Disposition", "attachment", filename=filename)
+        msg.attach(part)
+
+    raw = msg.as_bytes()
+    if len(raw) > _RFC822_MAX_BYTES:
+        raise ValueError("Email exceeds Gmail's ~35MB raw message limit")
+    return base64.urlsafe_b64encode(raw).rstrip(b"=").decode("utf-8")
+
+
 def _render_value(
     m, params: dict, config: dict, cred: Optional[Credential] = None
 ) -> str:
@@ -745,25 +804,7 @@ def _render_value(
             return ""
         return _stringify_for_template(val)
     if filter_name == "rfc822_base64url":
-        import base64
-
-        def make_rfc822(p: dict) -> str:
-            def _addr(v):
-                return ", ".join(v) if isinstance(v, list) else str(v)
-            headers = [f"To: {_addr(p.get('to', []))}"]
-            if p.get("cc"):
-                headers.append(f"Cc: {_addr(p['cc'])}")
-            if p.get("bcc"):
-                headers.append(f"Bcc: {_addr(p['bcc'])}")
-            if p.get("subject"):
-                headers.append(f"Subject: {p['subject']}")
-            if p.get("in_reply_to"):
-                headers.append(f"In-Reply-To: {p['in_reply_to']}")
-                headers.append(f"References: {p.get('references') or p['in_reply_to']}")
-            raw = ("\r\n".join(headers) + "\r\n\r\n" + (p.get("body", "") or "")).encode("utf-8")
-            return base64.urlsafe_b64encode(raw).rstrip(b"=").decode("utf-8")
-
-        return make_rfc822(val) if isinstance(val, dict) else m.group(0)
+        return _make_rfc822_base64url(val) if isinstance(val, dict) else m.group(0)
     return _stringify_for_template(val)
 
 

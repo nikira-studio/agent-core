@@ -82,6 +82,19 @@
               "type": "string"
             },
             "description": "BCC recipients"
+          },
+          "attachments": {
+            "type": "array",
+            "description": "Optional file attachments. Each item is {filename, content_base64, mime_type?}: content_base64 is the file's base64-encoded bytes; mime_type defaults to application/octet-stream. Keep the whole message under ~35MB.",
+            "items": {
+              "type": "object",
+              "properties": {
+                "filename": { "type": "string" },
+                "content_base64": { "type": "string", "description": "Base64-encoded file bytes" },
+                "mime_type": { "type": "string", "description": "e.g. application/pdf" }
+              },
+              "required": [ "filename", "content_base64" ]
+            }
           }
         },
         "required": [
@@ -136,6 +149,19 @@
             "items": {
               "type": "string"
             }
+          },
+          "attachments": {
+            "type": "array",
+            "description": "Optional file attachments. Each item is {filename, content_base64, mime_type?}: content_base64 is the file's base64-encoded bytes; mime_type defaults to application/octet-stream. Keep the whole message under ~35MB.",
+            "items": {
+              "type": "object",
+              "properties": {
+                "filename": { "type": "string" },
+                "content_base64": { "type": "string", "description": "Base64-encoded file bytes" },
+                "mime_type": { "type": "string", "description": "e.g. application/pdf" }
+              },
+              "required": [ "filename", "content_base64" ]
+            }
           }
         },
         "required": [
@@ -177,6 +203,19 @@
             "type": "array",
             "items": {
               "type": "string"
+            }
+          },
+          "attachments": {
+            "type": "array",
+            "description": "Optional file attachments. Each item is {filename, content_base64, mime_type?}: content_base64 is the file's base64-encoded bytes; mime_type defaults to application/octet-stream. Keep the whole message under ~35MB.",
+            "items": {
+              "type": "object",
+              "properties": {
+                "filename": { "type": "string" },
+                "content_base64": { "type": "string", "description": "Base64-encoded file bytes" },
+                "mime_type": { "type": "string", "description": "e.g. application/pdf" }
+              },
+              "required": [ "filename", "content_base64" ]
             }
           }
         },
