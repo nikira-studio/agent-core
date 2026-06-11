@@ -597,3 +597,89 @@ class TestOAuth2RefreshApplication:
         assert engine._is_auth_expired(MagicMock(status=200), None, cred) is False
         # a real auth failure still triggers refresh
         assert engine._is_auth_expired(MagicMock(status=401), None, cred) is True
+
+
+class TestRfc822Attachments:
+    """Phase 2: the rfc822_base64url builder gains multipart attachment support."""
+
+    @staticmethod
+    def _decode(p):
+        import base64
+        from email import message_from_bytes
+        from app.connectors.http_engine import _make_rfc822_base64url
+        raw_b64 = _make_rfc822_base64url(p)
+        # base64url, padding stripped — restore it before decoding
+        pad = "=" * (-len(raw_b64) % 4)
+        return message_from_bytes(base64.urlsafe_b64decode(raw_b64 + pad))
+
+    def test_no_attachments_is_single_part(self):
+        msg = self._decode({"to": ["a@b.com"], "subject": "Hi", "body": "hello"})
+        assert not msg.is_multipart()
+        assert msg["To"] == "a@b.com"
+        assert msg["Subject"] == "Hi"
+        assert msg.get_payload() == "hello"
+
+    def test_single_part_bytes_unchanged(self):
+        # Back-compat: byte-identical to the original hand-rolled single-part output.
+        import base64
+        from app.connectors.http_engine import _make_rfc822_base64url
+        p = {"to": ["a@b.com"], "cc": ["c@d.com"], "subject": "S", "body": "B"}
+        expected_raw = ("To: a@b.com\r\nCc: c@d.com\r\nSubject: S\r\n\r\nB").encode("utf-8")
+        expected = base64.urlsafe_b64encode(expected_raw).rstrip(b"=").decode("utf-8")
+        assert _make_rfc822_base64url(p) == expected
+
+    def test_one_attachment(self):
+        import base64
+        content = b"PDF-BYTES-HERE"
+        msg = self._decode({
+            "to": ["a@b.com"], "subject": "doc", "body": "see attached",
+            "attachments": [{
+                "filename": "report.pdf",
+                "content_base64": base64.b64encode(content).decode(),
+                "mime_type": "application/pdf",
+            }],
+        })
+        assert msg.is_multipart()
+        assert msg.get_content_type() == "multipart/mixed"
+        parts = msg.get_payload()
+        assert parts[0].get_content_type() == "text/plain"
+        assert parts[0].get_payload(decode=True) == b"see attached"
+        att = parts[1]
+        assert att.get_content_type() == "application/pdf"
+        assert att.get_filename() == "report.pdf"
+        assert "attachment" in att["Content-Disposition"]
+        assert att.get_payload(decode=True) == content  # round-trips intact
+
+    def test_multiple_attachments_and_mime_default(self):
+        import base64
+        msg = self._decode({
+            "to": ["a@b.com"], "subject": "two", "body": "body",
+            "attachments": [
+                {"filename": "a.txt", "content_base64": base64.b64encode(b"aaa").decode(), "mime_type": "text/plain"},
+                {"filename": "b.bin", "content_base64": base64.b64encode(b"bbb").decode()},  # no mime_type
+            ],
+        })
+        parts = msg.get_payload()
+        assert len(parts) == 3  # body + 2 attachments
+        assert parts[1].get_filename() == "a.txt"
+        assert parts[2].get_filename() == "b.bin"
+        assert parts[2].get_content_type() == "application/octet-stream"  # default
+
+    def test_invalid_base64_raises(self):
+        from app.connectors.http_engine import _make_rfc822_base64url
+        with pytest.raises(ValueError, match="invalid base64"):
+            _make_rfc822_base64url({
+                "to": ["a@b.com"], "subject": "x", "body": "y",
+                "attachments": [{"filename": "bad", "content_base64": "!!!not base64!!!"}],
+            })
+
+    def test_size_cap_rejected(self, monkeypatch):
+        import base64
+        import app.connectors.http_engine as eng
+        monkeypatch.setattr(eng, "_RFC822_MAX_BYTES", 100)
+        big = base64.b64encode(b"x" * 500).decode()
+        with pytest.raises(ValueError, match="35MB"):
+            eng._make_rfc822_base64url({
+                "to": ["a@b.com"], "subject": "big", "body": "b",
+                "attachments": [{"filename": "big.bin", "content_base64": big}],
+            })
