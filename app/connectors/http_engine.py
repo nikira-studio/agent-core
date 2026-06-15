@@ -25,6 +25,10 @@ _RE_TEMPLATE = re.compile(
 
 _OMIT = "__AGENT_CORE_OMIT__"
 
+# Distinguishes "key absent" from "key present with value None" when resolving a
+# single template token to its native Python type (see _resolve_token_raw).
+_MISSING = object()
+
 
 class HttpEngine(BaseConnector):
     def __init__(self, connector_type: dict):
@@ -668,6 +672,14 @@ def _render_dict(
                 rendered_items.append(rendered)
         return rendered_items
     if isinstance(template, str):
+        # A template that is exactly one token (no surrounding text) resolves to
+        # the value's native Python type, so a numeric-looking STRING (e.g. a
+        # pagination cursor like "560752") is not coerced to int by the JSON
+        # round-trip below. Interpolated strings ("hello {{name}}") still take
+        # the render-then-reparse path so embedded substitutions work.
+        pure = _RE_TEMPLATE.fullmatch(template)
+        if pure:
+            return _resolve_token_raw(pure, params, config, cred)
         rendered = _RE_TEMPLATE.sub(
             lambda m: _render_value(m, params, config, cred), template
         )
@@ -678,6 +690,58 @@ def _render_dict(
         except (json.JSONDecodeError, TypeError):
             return rendered
     return template
+
+
+def _resolve_token_raw(
+    m, params: dict, config: dict, cred: Optional[Credential] = None
+) -> Any:
+    """Resolve a single template token to its native Python value, preserving
+    type. Mirrors _render_value's filter semantics but returns the real value
+    (str stays str, list stays list, bool/int keep their type) rather than a
+    stringified form. Returns _OMIT to drop the key, or the literal placeholder
+    when an unfiltered token references a missing value (matching prior behavior
+    so required-but-absent params surface in upstream validation)."""
+    src, key = m.group(1), m.group(2)
+    filter_name = m.group(3)
+    filter_arg = m.group(4)
+
+    if src == "params":
+        val = params.get(key, _MISSING) if key else params
+    elif src == "cred":
+        resolved = _cred_get_impl(key, params, config, cred)
+        val = _MISSING if resolved is None else resolved
+    elif src == "config":
+        val = config.get(key, _MISSING) if key else params
+    else:
+        val = _MISSING
+
+    unset = val is _MISSING or val is None
+
+    if filter_name == "default":
+        if not unset:
+            return val
+        fallback_str = ""
+        type_arg = filter_arg
+        if filter_arg and ", as=" in filter_arg:
+            parts = filter_arg.split(", as=", 1)
+            fallback_str = parts[0]
+            type_arg = parts[1] if len(parts) > 1 else ""
+        if type_arg == "omit":
+            return _OMIT
+        if fallback_str:
+            try:
+                return json.loads(fallback_str)
+            except (json.JSONDecodeError, ValueError):
+                return fallback_str
+        type_map = {"str": "", "int": 0, "float": 0.0, "bool": False, "list": []}
+        if type_arg and type_arg in type_map:
+            return type_map[type_arg]
+        return ""
+    if filter_name == "rfc822_base64url":
+        return _make_rfc822_base64url(val) if isinstance(val, dict) else m.group(0)
+    if unset:
+        return m.group(0)
+    return val
 
 
 # Gmail's raw-message hard limit is ~35 MB; reject above this with a clear error

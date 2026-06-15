@@ -153,6 +153,43 @@ class TestHttpEngineTemplating:
         )
         assert "ids" not in result["body"]["arguments"]
 
+    def test_render_dict_preserves_numeric_string_scalar(self):
+        # A pure-token string field whose value is all digits (e.g. a pagination
+        # cursor) must stay a STRING, not be coerced to int by the JSON round-trip.
+        engine = HttpEngine(make_ct({"requests": {}}))
+        result = engine._build_request(
+            {
+                "method": "POST",
+                "path": "/q",
+                "body": {
+                    "template": {
+                        "cursor": "{{ params.cursor | default('', as=omit) }}",
+                        "text_query": "{{ params.text_query | default('', as=omit) }}",
+                        "limit": "{{ params.limit | default('', as=omit) }}",
+                        "ids": "{{ params.ids | default('', as=omit) }}",
+                        "flag": "{{ params.flag | default('', as=omit) }}",
+                        "missing": "{{ params.missing | default('', as=omit) }}",
+                    }
+                },
+            },
+            {
+                "cursor": "560752",
+                "text_query": "12345",
+                "limit": 200,
+                "ids": ["260042023"],
+                "flag": False,
+            },
+            {"base_url": "http://example.com"},
+            make_cred(),
+        )
+        body = result["body"]
+        assert body["cursor"] == "560752" and isinstance(body["cursor"], str)
+        assert body["text_query"] == "12345" and isinstance(body["text_query"], str)
+        assert body["limit"] == 200 and isinstance(body["limit"], int)
+        assert body["ids"] == ["260042023"]
+        assert body["flag"] is False
+        assert "missing" not in body
+
 
 # ─── Auth Application ─────────────────────────────────────────────────────────
 
