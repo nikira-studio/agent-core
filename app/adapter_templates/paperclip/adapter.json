@@ -1,0 +1,1215 @@
+{
+  "spec_version": "1.0",
+  "id": "paperclip",
+  "display_name": "Paperclip",
+  "version": "1.4.0",
+  "author": "agent-core team",
+  "description": "Paperclip — open-source agent orchestration platform. Read and manage issues, agents, goals, approvals, and costs across one or more companies. One binding covers all companies your board key can access.",
+  "setup": {
+    "instructions": "Connect Agent Core to a self-hosted Paperclip install.\n\nAgent Core acts as a board operator, not a Paperclip agent, so you need a Board API key (not an agent key). One binding covers all companies your key can access — pass company_id per action call.\n\n## Getting the API key\n\n**Option A — Paperclip CLI (recommended):**\n1. Authenticate as a board user:\n   ```\n   paperclipai auth login\n   ```\n   This opens a browser approval flow and stores your board credential locally.\n2. Mint a named board API key (printed once — copy it now):\n   ```\n   paperclipai token board create --name agent-core\n   ```\n   The returned token starts with `pcp_board_...`.\n\n**Option B — via curl (requires an existing board session):**\n```\ncurl -X POST {base_url}/api/board-api-keys \\\n  -H 'Authorization: Bearer <your-board-session-token>' \\\n  -H 'Content-Type: application/json' \\\n  -d '{\"name\": \"agent-core\"}'\n```\nCopy the key from the response — shown once only.\n\n## Finding your company IDs\nCall get_me after creating the binding — the response lists all companyIds your key can access. Or open the Paperclip web UI; the URL contains /companies/{companyId}.\n\n## Binding config\n- base_url: Paperclip server root, e.g. http://paperclip-host:3100 (no trailing slash, no /api suffix)\n- api_key: Board API key from above (pcp_board_...)\n\nNote: Agent Core blocks private/loopback base_url values (localhost, 127.0.0.1, 172.x) unless that host is on the internal-host allowlist. For a same-host Paperclip, allowlist its address or reach it over a proxied/public hostname.",
+    "documentation_url": "https://paperclip.ing/docs"
+  },
+  "credential_schema": {
+    "fields": [
+      {
+        "name": "api_key",
+        "type": "string",
+        "secret": true,
+        "required": true,
+        "description": "Board API key from Paperclip (pcp_board_...). Create one with: paperclipai auth login, then paperclipai token board create --name agent-core."
+      }
+    ]
+  },
+  "requires": {
+    "config": ["base_url"]
+  },
+  "actions": [
+    {
+      "name": "get_me",
+      "description": "Verify the connection and return board operator identity — user ID, all accessible company IDs, and key info. Call this first to discover your company IDs.",
+      "side_effect": "read",
+      "input_schema": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "list_issues",
+      "description": "List issues in a company, sorted by priority. Filter by status, assignee, or project.",
+      "side_effect": "read",
+      "input_schema": {
+        "type": "object",
+        "required": ["company_id"],
+        "properties": {
+          "company_id": {
+            "type": "string",
+            "description": "Paperclip company ID. Call get_me to list all company IDs your key can access."
+          },
+          "status": {
+            "type": "string",
+            "description": "Comma-separated status filter, e.g. 'todo,in_progress'. Valid values: backlog, todo, in_progress, in_review, blocked, done, cancelled."
+          },
+          "assignee_agent_id": {
+            "type": "string",
+            "description": "Filter by assigned agent UUID."
+          },
+          "project_id": {
+            "type": "string",
+            "description": "Filter by project ID."
+          }
+        }
+      }
+    },
+    {
+      "name": "get_issue",
+      "description": "Get a single issue by ID, including its plan document, parent chain, project, and goal.",
+      "side_effect": "read",
+      "input_schema": {
+        "type": "object",
+        "required": ["issue_id"],
+        "properties": {
+          "issue_id": {
+            "type": "string",
+            "description": "The issue ID (e.g. PROJ-42 or a UUID)."
+          }
+        }
+      }
+    },
+    {
+      "name": "create_issue",
+      "description": "Create a new issue in a company.",
+      "side_effect": "write",
+      "input_schema": {
+        "type": "object",
+        "required": ["company_id", "title"],
+        "properties": {
+          "company_id": {
+            "type": "string",
+            "description": "Paperclip company ID."
+          },
+          "title": {
+            "type": "string",
+            "description": "Issue title."
+          },
+          "description": {
+            "type": "string",
+            "description": "Issue description (markdown)."
+          },
+          "status": {
+            "type": "string",
+            "description": "Initial status. Default: todo.",
+            "enum": ["backlog", "todo", "in_progress", "blocked"]
+          },
+          "priority": {
+            "type": "string",
+            "enum": ["urgent", "high", "medium", "low"]
+          },
+          "assignee_agent_id": {
+            "type": "string",
+            "description": "Agent UUID or shortname to assign."
+          },
+          "parent_id": {
+            "type": "string",
+            "description": "Parent issue ID for sub-issues."
+          },
+          "project_id": {
+            "type": "string",
+            "description": "Project ID to associate the issue with."
+          },
+          "goal_id": {
+            "type": "string",
+            "description": "Goal ID to associate the issue with."
+          }
+        }
+      }
+    },
+    {
+      "name": "update_issue",
+      "description": "Update an existing issue. Optionally include a comment in the same call. Provide run_id when calling during an agent heartbeat.",
+      "side_effect": "write",
+      "input_schema": {
+        "type": "object",
+        "required": ["issue_id"],
+        "properties": {
+          "issue_id": {
+            "type": "string",
+            "description": "The issue ID to update."
+          },
+          "title": {"type": "string"},
+          "description": {"type": "string", "description": "Issue description (markdown)."},
+          "status": {
+            "type": "string",
+            "enum": ["backlog", "todo", "in_progress", "in_review", "blocked", "done", "cancelled"]
+          },
+          "priority": {
+            "type": "string",
+            "enum": ["urgent", "high", "medium", "low"]
+          },
+          "assignee_agent_id": {
+            "type": "string",
+            "description": "Reassign to this agent UUID or shortname."
+          },
+          "comment": {
+            "type": "string",
+            "description": "Optional comment to add alongside the update."
+          },
+          "run_id": {
+            "type": "string",
+            "description": "Current run ID (X-Paperclip-Run-Id header). Required for audit trail during heartbeats."
+          }
+        }
+      }
+    },
+    {
+      "name": "checkout_issue",
+      "description": "Atomically claim an issue and transition it to in_progress. Returns 409 if another agent owns it — do not retry on 409. Idempotent if you already own it.",
+      "side_effect": "write",
+      "input_schema": {
+        "type": "object",
+        "required": ["issue_id", "agent_id"],
+        "properties": {
+          "issue_id": {
+            "type": "string",
+            "description": "The issue ID to check out."
+          },
+          "agent_id": {
+            "type": "string",
+            "description": "The agent UUID claiming the issue."
+          },
+          "expected_statuses": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "Statuses you expect the issue to be in. Defaults to ['todo','backlog','blocked','in_review']. Include 'in_progress' to re-claim after a crashed run.",
+            "default": ["todo", "backlog", "blocked", "in_review"]
+          },
+          "run_id": {
+            "type": "string",
+            "description": "Current run ID (X-Paperclip-Run-Id header)."
+          }
+        }
+      }
+    },
+    {
+      "name": "release_issue",
+      "description": "Release ownership of an issue so another agent can pick it up.",
+      "side_effect": "write",
+      "input_schema": {
+        "type": "object",
+        "required": ["issue_id"],
+        "properties": {
+          "issue_id": {
+            "type": "string",
+            "description": "The issue ID to release."
+          }
+        }
+      }
+    },
+    {
+      "name": "add_comment",
+      "description": "Post a comment on an issue. @-mentions (@AgentName) trigger heartbeats for the mentioned agent.",
+      "side_effect": "write",
+      "input_schema": {
+        "type": "object",
+        "required": ["issue_id", "body"],
+        "properties": {
+          "issue_id": {
+            "type": "string",
+            "description": "The issue ID to comment on."
+          },
+          "body": {
+            "type": "string",
+            "description": "Comment body (markdown). Use @AgentName to mention and wake an agent."
+          }
+        }
+      }
+    },
+    {
+      "name": "list_comments",
+      "description": "List all comments on an issue.",
+      "side_effect": "read",
+      "input_schema": {
+        "type": "object",
+        "required": ["issue_id"],
+        "properties": {
+          "issue_id": {
+            "type": "string",
+            "description": "The issue ID."
+          }
+        }
+      }
+    },
+    {
+      "name": "list_agents",
+      "description": "List all agents in a company.",
+      "side_effect": "read",
+      "input_schema": {
+        "type": "object",
+        "required": ["company_id"],
+        "properties": {
+          "company_id": {
+            "type": "string",
+            "description": "Paperclip company ID."
+          }
+        }
+      }
+    },
+    {
+      "name": "list_goals",
+      "description": "List all goals in a company.",
+      "side_effect": "read",
+      "input_schema": {
+        "type": "object",
+        "required": ["company_id"],
+        "properties": {
+          "company_id": {
+            "type": "string",
+            "description": "Paperclip company ID."
+          }
+        }
+      }
+    },
+    {
+      "name": "list_approvals",
+      "description": "List approval requests in a company. Filter by status (e.g. 'pending').",
+      "side_effect": "read",
+      "input_schema": {
+        "type": "object",
+        "required": ["company_id"],
+        "properties": {
+          "company_id": {
+            "type": "string",
+            "description": "Paperclip company ID."
+          },
+          "status": {
+            "type": "string",
+            "description": "Filter by approval status, e.g. 'pending'."
+          }
+        }
+      }
+    },
+    {
+      "name": "get_costs_summary",
+      "description": "Get total spend, budget, and utilization for a company for the current month.",
+      "side_effect": "read",
+      "input_schema": {
+        "type": "object",
+        "required": ["company_id"],
+        "properties": {
+          "company_id": {
+            "type": "string",
+            "description": "Paperclip company ID."
+          }
+        }
+      }
+    },
+    {
+      "name": "list_activity",
+      "description": "Query the audit trail of all mutations in a company. Filter by agent, entity type, or entity ID.",
+      "side_effect": "read",
+      "input_schema": {
+        "type": "object",
+        "required": ["company_id"],
+        "properties": {
+          "company_id": {
+            "type": "string",
+            "description": "Paperclip company ID."
+          },
+          "agent_id": {
+            "type": "string",
+            "description": "Filter by actor agent ID."
+          },
+          "entity_type": {
+            "type": "string",
+            "description": "Filter by entity type: issue, agent, approval."
+          },
+          "entity_id": {
+            "type": "string",
+            "description": "Filter by specific entity ID."
+          }
+        }
+      }
+    },
+    {
+      "name": "list_runs",
+      "description": "List heartbeat runs for a company, newest first. Optionally filter by agent or cap the result count.",
+      "side_effect": "read",
+      "input_schema": {
+        "type": "object",
+        "required": ["company_id"],
+        "properties": {
+          "company_id": {
+            "type": "string",
+            "description": "Paperclip company ID."
+          },
+          "agent_id": {
+            "type": "string",
+            "description": "Filter to runs for a specific agent UUID."
+          },
+          "limit": {
+            "type": "integer",
+            "description": "Max runs to return (1–1000, default 200)."
+          }
+        }
+      }
+    },
+    {
+      "name": "list_live_runs",
+      "description": "List currently queued or running heartbeat runs for a company. Use minCount to also include recent completed runs when the live count is low.",
+      "side_effect": "read",
+      "input_schema": {
+        "type": "object",
+        "required": ["company_id"],
+        "properties": {
+          "company_id": {
+            "type": "string",
+            "description": "Paperclip company ID."
+          },
+          "min_count": {
+            "type": "integer",
+            "description": "If live run count is below this, pad with recent completed runs (0–20)."
+          }
+        }
+      }
+    },
+    {
+      "name": "get_run",
+      "description": "Get a single heartbeat run by ID.",
+      "side_effect": "read",
+      "input_schema": {
+        "type": "object",
+        "required": ["run_id"],
+        "properties": {
+          "run_id": {
+            "type": "string",
+            "description": "Heartbeat run UUID."
+          }
+        }
+      }
+    },
+    {
+      "name": "cancel_run",
+      "description": "Cancel an active heartbeat run. Board key required. Returns the cancelled run record.",
+      "side_effect": "write",
+      "input_schema": {
+        "type": "object",
+        "required": ["run_id"],
+        "properties": {
+          "run_id": {
+            "type": "string",
+            "description": "Heartbeat run UUID to cancel."
+          }
+        }
+      }
+    },
+    {
+      "name": "get_run_events",
+      "description": "List events emitted during a heartbeat run. Supports pagination via afterSeq.",
+      "side_effect": "read",
+      "input_schema": {
+        "type": "object",
+        "required": ["run_id"],
+        "properties": {
+          "run_id": {
+            "type": "string",
+            "description": "Heartbeat run UUID."
+          },
+          "after_seq": {
+            "type": "integer",
+            "description": "Return only events after this sequence number (for polling, default 0)."
+          },
+          "limit": {
+            "type": "integer",
+            "description": "Max events to return (default 200)."
+          }
+        }
+      }
+    },
+    {
+      "name": "get_run_log",
+      "description": "Read raw stdout/stderr log bytes for a heartbeat run. Supports byte-range pagination.",
+      "side_effect": "read",
+      "input_schema": {
+        "type": "object",
+        "required": ["run_id"],
+        "properties": {
+          "run_id": {
+            "type": "string",
+            "description": "Heartbeat run UUID."
+          },
+          "offset": {
+            "type": "integer",
+            "description": "Byte offset to start reading from (default 0)."
+          },
+          "limit_bytes": {
+            "type": "integer",
+            "description": "Max bytes to return (default 256000)."
+          }
+        }
+      }
+    },
+    {
+      "name": "list_issue_runs",
+      "description": "List currently live (queued or running) heartbeat runs associated with a specific issue.",
+      "side_effect": "read",
+      "input_schema": {
+        "type": "object",
+        "required": ["issue_id"],
+        "properties": {
+          "issue_id": {
+            "type": "string",
+            "description": "Issue ID or identifier (e.g. PROJ-42)."
+          }
+        }
+      }
+    },
+    {
+      "name": "get_issue_active_run",
+      "description": "Get the currently active heartbeat run for an issue, if any. Returns null when the issue has no live run.",
+      "side_effect": "read",
+      "input_schema": {
+        "type": "object",
+        "required": ["issue_id"],
+        "properties": {
+          "issue_id": {
+            "type": "string",
+            "description": "Issue ID or identifier (e.g. PROJ-42)."
+          }
+        }
+      }
+    },
+    {
+      "name": "pause_agent",
+      "description": "Pause an agent and cancel its active run. Board key required. The agent will not accept new heartbeats while paused.",
+      "side_effect": "write",
+      "input_schema": {
+        "type": "object",
+        "required": ["agent_id"],
+        "properties": {
+          "agent_id": {
+            "type": "string",
+            "description": "Agent UUID to pause."
+          }
+        }
+      }
+    },
+    {
+      "name": "resume_agent",
+      "description": "Resume a paused agent so it can accept heartbeats again. Board key required.",
+      "side_effect": "write",
+      "input_schema": {
+        "type": "object",
+        "required": ["agent_id"],
+        "properties": {
+          "agent_id": {
+            "type": "string",
+            "description": "Agent UUID to resume."
+          }
+        }
+      }
+    },
+    {
+      "name": "terminate_agent",
+      "description": "Terminate an agent and cancel its active run. Board key required. More forceful than pause — use when an agent is stuck.",
+      "side_effect": "write",
+      "input_schema": {
+        "type": "object",
+        "required": ["agent_id"],
+        "properties": {
+          "agent_id": {
+            "type": "string",
+            "description": "Agent UUID to terminate."
+          }
+        }
+      }
+    },
+    {
+      "name": "wakeup_agent",
+      "description": "Send a wakeup to trigger an agent heartbeat. Returns the new run, or 202 with a skip reason if the agent is already running or paused.",
+      "side_effect": "write",
+      "input_schema": {
+        "type": "object",
+        "required": ["agent_id"],
+        "properties": {
+          "agent_id": {
+            "type": "string",
+            "description": "Agent UUID to wake."
+          },
+          "reason": {
+            "type": "string",
+            "description": "Human-readable reason for the wakeup, shown in run history."
+          },
+          "payload": {
+            "type": "object",
+            "description": "Optional JSON payload passed to the agent's heartbeat context."
+          },
+          "force_fresh_session": {
+            "type": "boolean",
+            "description": "Start a fresh session even if the agent has an existing one."
+          }
+        }
+      }
+    },
+    {
+      "name": "list_projects",
+      "description": "List all projects in a company.",
+      "side_effect": "read",
+      "input_schema": {
+        "type": "object",
+        "required": ["company_id"],
+        "properties": {
+          "company_id": {"type": "string", "description": "Paperclip company ID."}
+        }
+      }
+    },
+    {
+      "name": "get_project",
+      "description": "Get a single project by ID, including its workspaces.",
+      "side_effect": "read",
+      "input_schema": {
+        "type": "object",
+        "required": ["project_id"],
+        "properties": {
+          "project_id": {"type": "string", "description": "Project ID or slug."}
+        }
+      }
+    },
+    {
+      "name": "create_project",
+      "description": "Create a new project in a company.",
+      "side_effect": "write",
+      "input_schema": {
+        "type": "object",
+        "required": ["company_id", "name"],
+        "properties": {
+          "company_id": {"type": "string", "description": "Paperclip company ID."},
+          "name": {"type": "string", "description": "Project name."},
+          "description": {"type": "string", "description": "Optional project description."}
+        }
+      }
+    },
+    {
+      "name": "list_project_workspaces",
+      "description": "List workspaces attached to a project.",
+      "side_effect": "read",
+      "input_schema": {
+        "type": "object",
+        "required": ["project_id"],
+        "properties": {
+          "project_id": {"type": "string", "description": "Project ID."}
+        }
+      }
+    },
+    {
+      "name": "list_skills",
+      "description": "List all company skills (shared instruction bundles) for a company.",
+      "side_effect": "read",
+      "input_schema": {
+        "type": "object",
+        "required": ["company_id"],
+        "properties": {
+          "company_id": {"type": "string", "description": "Paperclip company ID."}
+        }
+      }
+    },
+    {
+      "name": "get_skill",
+      "description": "Get details of a single company skill.",
+      "side_effect": "read",
+      "input_schema": {
+        "type": "object",
+        "required": ["company_id", "skill_id"],
+        "properties": {
+          "company_id": {"type": "string", "description": "Paperclip company ID."},
+          "skill_id": {"type": "string", "description": "Skill ID or slug."}
+        }
+      }
+    },
+    {
+      "name": "get_skill_file",
+      "description": "Read a file from a company skill's instruction bundle. Default file is SKILL.md.",
+      "side_effect": "read",
+      "input_schema": {
+        "type": "object",
+        "required": ["company_id", "skill_id"],
+        "properties": {
+          "company_id": {"type": "string", "description": "Paperclip company ID."},
+          "skill_id": {"type": "string", "description": "Skill ID or slug."},
+          "path": {"type": "string", "description": "Relative file path within the skill bundle (default: SKILL.md)."}
+        }
+      }
+    },
+    {
+      "name": "import_skills",
+      "description": "Import one or more skills from a remote source (e.g. a GitHub repo slug like 'paperclipai/paperclip/paperclip'). Returns imported skill list and any warnings.",
+      "side_effect": "write",
+      "input_schema": {
+        "type": "object",
+        "required": ["company_id", "source"],
+        "properties": {
+          "company_id": {"type": "string", "description": "Paperclip company ID."},
+          "source": {"type": "string", "description": "Skill source identifier, e.g. 'paperclipai/paperclip/paperclip'."}
+        }
+      }
+    },
+    {
+      "name": "install_skill_update",
+      "description": "Pull and apply the latest version of an installed company skill.",
+      "side_effect": "write",
+      "input_schema": {
+        "type": "object",
+        "required": ["company_id", "skill_id"],
+        "properties": {
+          "company_id": {"type": "string", "description": "Paperclip company ID."},
+          "skill_id": {"type": "string", "description": "Skill ID to update."}
+        }
+      }
+    },
+    {
+      "name": "list_routines",
+      "description": "List all routines in a company.",
+      "side_effect": "read",
+      "input_schema": {
+        "type": "object",
+        "required": ["company_id"],
+        "properties": {
+          "company_id": {"type": "string", "description": "Paperclip company ID."}
+        }
+      }
+    },
+    {
+      "name": "get_routine",
+      "description": "Get a single routine with its triggers and recent run history.",
+      "side_effect": "read",
+      "input_schema": {
+        "type": "object",
+        "required": ["routine_id"],
+        "properties": {
+          "routine_id": {"type": "string", "description": "Routine ID."}
+        }
+      }
+    },
+    {
+      "name": "run_routine",
+      "description": "Manually trigger a routine run. Returns the queued run record.",
+      "side_effect": "write",
+      "input_schema": {
+        "type": "object",
+        "required": ["routine_id"],
+        "properties": {
+          "routine_id": {"type": "string", "description": "Routine ID to run."},
+          "payload": {"type": "object", "description": "Optional payload passed to the routine."}
+        }
+      }
+    },
+    {
+      "name": "list_labels",
+      "description": "List all issue labels defined in a company.",
+      "side_effect": "read",
+      "input_schema": {
+        "type": "object",
+        "required": ["company_id"],
+        "properties": {
+          "company_id": {"type": "string", "description": "Paperclip company ID."}
+        }
+      }
+    },
+    {
+      "name": "create_label",
+      "description": "Create a new issue label in a company.",
+      "side_effect": "write",
+      "input_schema": {
+        "type": "object",
+        "required": ["company_id", "name"],
+        "properties": {
+          "company_id": {"type": "string", "description": "Paperclip company ID."},
+          "name": {"type": "string", "description": "Label name."},
+          "color": {"type": "string", "description": "Label color as a hex string, e.g. #ff0000."}
+        }
+      }
+    },
+    {
+      "name": "delete_label",
+      "description": "Delete an issue label by ID.",
+      "side_effect": "write",
+      "input_schema": {
+        "type": "object",
+        "required": ["label_id"],
+        "properties": {
+          "label_id": {"type": "string", "description": "Label ID to delete."}
+        }
+      }
+    },
+    {
+      "name": "list_issue_documents",
+      "description": "List all documents (plan, notes, etc.) attached to an issue.",
+      "side_effect": "read",
+      "input_schema": {
+        "type": "object",
+        "required": ["issue_id"],
+        "properties": {
+          "issue_id": {"type": "string", "description": "Issue ID or identifier (e.g. PROJ-42)."}
+        }
+      }
+    },
+    {
+      "name": "get_issue_document",
+      "description": "Get a specific document by key for an issue. Common keys: plan, notes.",
+      "side_effect": "read",
+      "input_schema": {
+        "type": "object",
+        "required": ["issue_id", "key"],
+        "properties": {
+          "issue_id": {"type": "string", "description": "Issue ID or identifier."},
+          "key": {"type": "string", "description": "Document key, e.g. 'plan' or 'notes'."}
+        }
+      }
+    },
+    {
+      "name": "upsert_issue_document",
+      "description": "Create or update a document on an issue. Creates if absent, updates (with revision) if present.",
+      "side_effect": "write",
+      "input_schema": {
+        "type": "object",
+        "required": ["issue_id", "key", "format", "body"],
+        "properties": {
+          "issue_id": {"type": "string", "description": "Issue ID or identifier."},
+          "key": {"type": "string", "description": "Document key, e.g. 'plan' or 'notes'."},
+          "format": {"type": "string", "description": "Document format, typically 'markdown'."},
+          "body": {"type": "string", "description": "Document body content."},
+          "title": {"type": "string", "description": "Optional document title."},
+          "change_summary": {"type": "string", "description": "Optional summary of what changed in this revision."},
+          "base_revision_id": {"type": "string", "description": "Optional base revision ID for conflict detection."}
+        }
+      }
+    },
+    {
+      "name": "list_issue_attachments",
+      "description": "List file attachments on an issue.",
+      "side_effect": "read",
+      "input_schema": {
+        "type": "object",
+        "required": ["issue_id"],
+        "properties": {
+          "issue_id": {"type": "string", "description": "Issue ID or identifier."}
+        }
+      }
+    }
+  ],
+  "backend": {
+    "type": "http",
+    "base_url": {
+      "from": "config",
+      "field": "base_url"
+    },
+    "auth": {
+      "type": "bearer",
+      "field": "api_key"
+    },
+    "test_action": "get_me",
+    "requests": {
+      "get_me": {
+        "method": "GET",
+        "path": "/api/cli-auth/me",
+        "response": {
+          "success_when": "$.status >= 200 and $.status < 300"
+        }
+      },
+      "list_issues": {
+        "method": "GET",
+        "path": "/api/companies/{{ params.company_id }}/issues",
+        "query_params": {
+          "status": "{{ params.status | default('', as=omit) }}",
+          "assigneeAgentId": "{{ params.assignee_agent_id | default('', as=omit) }}",
+          "projectId": "{{ params.project_id | default('', as=omit) }}"
+        },
+        "response": {
+          "success_when": "$.status >= 200 and $.status < 300"
+        }
+      },
+      "get_issue": {
+        "method": "GET",
+        "path": "/api/issues/{{ params.issue_id }}",
+        "response": {
+          "success_when": "$.status >= 200 and $.status < 300"
+        }
+      },
+      "create_issue": {
+        "method": "POST",
+        "path": "/api/companies/{{ params.company_id }}/issues",
+        "body": {
+          "template": {
+            "title": "{{ params.title }}",
+            "description": "{{ params.description | default('', as=omit) }}",
+            "status": "{{ params.status | default('todo') }}",
+            "priority": "{{ params.priority | default('', as=omit) }}",
+            "assigneeAgentId": "{{ params.assignee_agent_id | default('', as=omit) }}",
+            "parentId": "{{ params.parent_id | default('', as=omit) }}",
+            "projectId": "{{ params.project_id | default('', as=omit) }}",
+            "goalId": "{{ params.goal_id | default('', as=omit) }}"
+          }
+        },
+        "response": {
+          "success_when": "$.status >= 200 and $.status < 300"
+        }
+      },
+      "update_issue": {
+        "method": "PATCH",
+        "path": "/api/issues/{{ params.issue_id }}",
+        "header_params": {
+          "X-Paperclip-Run-Id": "{{ params.run_id | default('', as=omit) }}"
+        },
+        "body": {
+          "template": {
+            "title": "{{ params.title | default('', as=omit) }}",
+            "description": "{{ params.description | default('', as=omit) }}",
+            "status": "{{ params.status | default('', as=omit) }}",
+            "priority": "{{ params.priority | default('', as=omit) }}",
+            "assigneeAgentId": "{{ params.assignee_agent_id | default('', as=omit) }}",
+            "comment": "{{ params.comment | default('', as=omit) }}"
+          }
+        },
+        "response": {
+          "success_when": "$.status >= 200 and $.status < 300"
+        }
+      },
+      "checkout_issue": {
+        "method": "POST",
+        "path": "/api/issues/{{ params.issue_id }}/checkout",
+        "header_params": {
+          "X-Paperclip-Run-Id": "{{ params.run_id | default('', as=omit) }}"
+        },
+        "body": {
+          "template": {
+            "agentId": "{{ params.agent_id }}",
+            "expectedStatuses": "{{ params.expected_statuses | default(['todo','backlog','blocked','in_review']) }}"
+          }
+        },
+        "response": {
+          "success_when": "$.status >= 200 and $.status < 300"
+        }
+      },
+      "release_issue": {
+        "method": "POST",
+        "path": "/api/issues/{{ params.issue_id }}/release",
+        "body": {
+          "template": {}
+        },
+        "response": {
+          "success_when": "$.status >= 200 and $.status < 300"
+        }
+      },
+      "add_comment": {
+        "method": "POST",
+        "path": "/api/issues/{{ params.issue_id }}/comments",
+        "body": {
+          "template": {
+            "body": "{{ params.body }}"
+          }
+        },
+        "response": {
+          "success_when": "$.status >= 200 and $.status < 300"
+        }
+      },
+      "list_comments": {
+        "method": "GET",
+        "path": "/api/issues/{{ params.issue_id }}/comments",
+        "response": {
+          "success_when": "$.status >= 200 and $.status < 300"
+        }
+      },
+      "list_agents": {
+        "method": "GET",
+        "path": "/api/companies/{{ params.company_id }}/agents",
+        "response": {
+          "success_when": "$.status >= 200 and $.status < 300"
+        }
+      },
+      "list_goals": {
+        "method": "GET",
+        "path": "/api/companies/{{ params.company_id }}/goals",
+        "response": {
+          "success_when": "$.status >= 200 and $.status < 300"
+        }
+      },
+      "list_approvals": {
+        "method": "GET",
+        "path": "/api/companies/{{ params.company_id }}/approvals",
+        "query_params": {
+          "status": "{{ params.status | default('', as=omit) }}"
+        },
+        "response": {
+          "success_when": "$.status >= 200 and $.status < 300"
+        }
+      },
+      "get_costs_summary": {
+        "method": "GET",
+        "path": "/api/companies/{{ params.company_id }}/costs/summary",
+        "response": {
+          "success_when": "$.status >= 200 and $.status < 300"
+        }
+      },
+      "list_activity": {
+        "method": "GET",
+        "path": "/api/companies/{{ params.company_id }}/activity",
+        "query_params": {
+          "agentId": "{{ params.agent_id | default('', as=omit) }}",
+          "entityType": "{{ params.entity_type | default('', as=omit) }}",
+          "entityId": "{{ params.entity_id | default('', as=omit) }}"
+        },
+        "response": {
+          "success_when": "$.status >= 200 and $.status < 300"
+        }
+      },
+      "list_runs": {
+        "method": "GET",
+        "path": "/api/companies/{{ params.company_id }}/heartbeat-runs",
+        "query_params": {
+          "agentId": "{{ params.agent_id | default('', as=omit) }}",
+          "limit": "{{ params.limit | default('', as=omit) }}"
+        },
+        "response": {
+          "success_when": "$.status >= 200 and $.status < 300"
+        }
+      },
+      "list_live_runs": {
+        "method": "GET",
+        "path": "/api/companies/{{ params.company_id }}/live-runs",
+        "query_params": {
+          "minCount": "{{ params.min_count | default('', as=omit) }}"
+        },
+        "response": {
+          "success_when": "$.status >= 200 and $.status < 300"
+        }
+      },
+      "get_run": {
+        "method": "GET",
+        "path": "/api/heartbeat-runs/{{ params.run_id }}",
+        "response": {
+          "success_when": "$.status >= 200 and $.status < 300"
+        }
+      },
+      "cancel_run": {
+        "method": "POST",
+        "path": "/api/heartbeat-runs/{{ params.run_id }}/cancel",
+        "body": {
+          "template": {}
+        },
+        "response": {
+          "success_when": "$.status >= 200 and $.status < 300"
+        }
+      },
+      "get_run_events": {
+        "method": "GET",
+        "path": "/api/heartbeat-runs/{{ params.run_id }}/events",
+        "query_params": {
+          "afterSeq": "{{ params.after_seq | default('', as=omit) }}",
+          "limit": "{{ params.limit | default('', as=omit) }}"
+        },
+        "response": {
+          "success_when": "$.status >= 200 and $.status < 300"
+        }
+      },
+      "get_run_log": {
+        "method": "GET",
+        "path": "/api/heartbeat-runs/{{ params.run_id }}/log",
+        "query_params": {
+          "offset": "{{ params.offset | default('', as=omit) }}",
+          "limitBytes": "{{ params.limit_bytes | default('', as=omit) }}"
+        },
+        "response": {
+          "success_when": "$.status >= 200 and $.status < 300"
+        }
+      },
+      "list_issue_runs": {
+        "method": "GET",
+        "path": "/api/issues/{{ params.issue_id }}/live-runs",
+        "response": {
+          "success_when": "$.status >= 200 and $.status < 300"
+        }
+      },
+      "get_issue_active_run": {
+        "method": "GET",
+        "path": "/api/issues/{{ params.issue_id }}/active-run",
+        "response": {
+          "success_when": "$.status >= 200 and $.status < 300"
+        }
+      },
+      "pause_agent": {
+        "method": "POST",
+        "path": "/api/agents/{{ params.agent_id }}/pause",
+        "body": {
+          "template": {}
+        },
+        "response": {
+          "success_when": "$.status >= 200 and $.status < 300"
+        }
+      },
+      "resume_agent": {
+        "method": "POST",
+        "path": "/api/agents/{{ params.agent_id }}/resume",
+        "body": {
+          "template": {}
+        },
+        "response": {
+          "success_when": "$.status >= 200 and $.status < 300"
+        }
+      },
+      "terminate_agent": {
+        "method": "POST",
+        "path": "/api/agents/{{ params.agent_id }}/terminate",
+        "body": {
+          "template": {}
+        },
+        "response": {
+          "success_when": "$.status >= 200 and $.status < 300"
+        }
+      },
+      "wakeup_agent": {
+        "method": "POST",
+        "path": "/api/agents/{{ params.agent_id }}/wakeup",
+        "body": {
+          "template": {
+            "source": "board",
+            "triggerDetail": "manual",
+            "reason": "{{ params.reason | default('', as=omit) }}",
+            "payload": "{{ params.payload | default('', as=omit) }}",
+            "forceFreshSession": "{{ params.force_fresh_session | default('', as=omit) }}"
+          }
+        },
+        "response": {
+          "success_when": "$.status >= 200 and $.status < 300"
+        }
+      },
+      "list_projects": {
+        "method": "GET",
+        "path": "/api/companies/{{ params.company_id }}/projects",
+        "response": {"success_when": "$.status >= 200 and $.status < 300"}
+      },
+      "get_project": {
+        "method": "GET",
+        "path": "/api/projects/{{ params.project_id }}",
+        "response": {"success_when": "$.status >= 200 and $.status < 300"}
+      },
+      "create_project": {
+        "method": "POST",
+        "path": "/api/companies/{{ params.company_id }}/projects",
+        "body": {
+          "template": {
+            "name": "{{ params.name }}",
+            "description": "{{ params.description | default('', as=omit) }}"
+          }
+        },
+        "response": {"success_when": "$.status >= 200 and $.status < 300"}
+      },
+      "list_project_workspaces": {
+        "method": "GET",
+        "path": "/api/projects/{{ params.project_id }}/workspaces",
+        "response": {"success_when": "$.status >= 200 and $.status < 300"}
+      },
+      "list_skills": {
+        "method": "GET",
+        "path": "/api/companies/{{ params.company_id }}/skills",
+        "response": {"success_when": "$.status >= 200 and $.status < 300"}
+      },
+      "get_skill": {
+        "method": "GET",
+        "path": "/api/companies/{{ params.company_id }}/skills/{{ params.skill_id }}",
+        "response": {"success_when": "$.status >= 200 and $.status < 300"}
+      },
+      "get_skill_file": {
+        "method": "GET",
+        "path": "/api/companies/{{ params.company_id }}/skills/{{ params.skill_id }}/files",
+        "query_params": {
+          "path": "{{ params.path | default('SKILL.md') }}"
+        },
+        "response": {"success_when": "$.status >= 200 and $.status < 300"}
+      },
+      "import_skills": {
+        "method": "POST",
+        "path": "/api/companies/{{ params.company_id }}/skills/import",
+        "body": {
+          "template": {
+            "source": "{{ params.source }}"
+          }
+        },
+        "response": {"success_when": "$.status >= 200 and $.status < 300"}
+      },
+      "install_skill_update": {
+        "method": "POST",
+        "path": "/api/companies/{{ params.company_id }}/skills/{{ params.skill_id }}/install-update",
+        "body": {"template": {}},
+        "response": {"success_when": "$.status >= 200 and $.status < 300"}
+      },
+      "list_routines": {
+        "method": "GET",
+        "path": "/api/companies/{{ params.company_id }}/routines",
+        "response": {"success_when": "$.status >= 200 and $.status < 300"}
+      },
+      "get_routine": {
+        "method": "GET",
+        "path": "/api/routines/{{ params.routine_id }}",
+        "response": {"success_when": "$.status >= 200 and $.status < 300"}
+      },
+      "run_routine": {
+        "method": "POST",
+        "path": "/api/routines/{{ params.routine_id }}/run",
+        "body": {
+          "template": {
+            "payload": "{{ params.payload | default('', as=omit) }}"
+          }
+        },
+        "response": {"success_when": "$.status >= 200 and $.status < 300"}
+      },
+      "list_labels": {
+        "method": "GET",
+        "path": "/api/companies/{{ params.company_id }}/labels",
+        "response": {"success_when": "$.status >= 200 and $.status < 300"}
+      },
+      "create_label": {
+        "method": "POST",
+        "path": "/api/companies/{{ params.company_id }}/labels",
+        "body": {
+          "template": {
+            "name": "{{ params.name }}",
+            "color": "{{ params.color | default('', as=omit) }}"
+          }
+        },
+        "response": {"success_when": "$.status >= 200 and $.status < 300"}
+      },
+      "delete_label": {
+        "method": "DELETE",
+        "path": "/api/labels/{{ params.label_id }}",
+        "response": {"success_when": "$.status >= 200 and $.status < 300"}
+      },
+      "list_issue_documents": {
+        "method": "GET",
+        "path": "/api/issues/{{ params.issue_id }}/documents",
+        "response": {"success_when": "$.status >= 200 and $.status < 300"}
+      },
+      "get_issue_document": {
+        "method": "GET",
+        "path": "/api/issues/{{ params.issue_id }}/documents/{{ params.key }}",
+        "response": {"success_when": "$.status >= 200 and $.status < 300"}
+      },
+      "upsert_issue_document": {
+        "method": "PUT",
+        "path": "/api/issues/{{ params.issue_id }}/documents/{{ params.key }}",
+        "body": {
+          "template": {
+            "format": "{{ params.format }}",
+            "body": "{{ params.body }}",
+            "title": "{{ params.title | default('', as=omit) }}",
+            "changeSummary": "{{ params.change_summary | default('', as=omit) }}",
+            "baseRevisionId": "{{ params.base_revision_id | default('', as=omit) }}"
+          }
+        },
+        "response": {"success_when": "$.status >= 200 and $.status < 300"}
+      },
+      "list_issue_attachments": {
+        "method": "GET",
+        "path": "/api/issues/{{ params.issue_id }}/attachments",
+        "response": {"success_when": "$.status >= 200 and $.status < 300"}
+      }
+    }
+  }
+}

@@ -169,26 +169,25 @@ class HttpEngine(BaseConnector):
 
         req = {"method": method, "url": url, "headers": {}, "body": None}
 
-        for loc, key in [("query_params", "header_params")]:
+        for loc in ("query_params", "header_params"):
             mapping = request_def.get(loc, {})
-            if isinstance(mapping, dict):
-                for param_name, param_loc in mapping.items():
-                    if param_loc == "request_header":
-                        val = self._render(
-                            str(param_loc.get("default", "")), params, config, cred
-                        )
-                        req["headers"][param_name] = val
-                    elif loc == "query_params" and isinstance(param_loc, str):
-                        val = self._render(param_loc, params, config, cred)
-                        if val and val != _OMIT and not (
-                            val == param_loc and param_loc.startswith("{{")
-                        ):
-                            sep = (
-                                "&" if urllib.parse.urlparse(req["url"]).query else "?"
-                            )
-                            req["url"] = (
-                                f"{req['url']}{sep}{urllib.parse.urlencode({param_name: val})}"
-                            )
+            if not isinstance(mapping, dict):
+                continue
+            for param_name, param_tpl in mapping.items():
+                if not isinstance(param_tpl, str):
+                    continue
+                val = self._render(param_tpl, params, config, cred)
+                if not val or val == _OMIT:
+                    continue
+                if loc == "header_params":
+                    req["headers"][param_name] = val
+                else:
+                    if val == param_tpl and param_tpl.startswith("{{"):
+                        continue
+                    sep = "&" if urllib.parse.urlparse(req["url"]).query else "?"
+                    req["url"] = (
+                        f"{req['url']}{sep}{urllib.parse.urlencode({param_name: val})}"
+                    )
 
         body_tpl = request_def.get("body", {}).get("template")
         if body_tpl:
@@ -241,7 +240,7 @@ class HttpEngine(BaseConnector):
                 if src == "config":
                     if key:
                         return config.get(key, m.group(0))
-                    return params
+                    return config
                 return m.group(0)
 
             val = _get_value()
@@ -283,30 +282,7 @@ class HttpEngine(BaseConnector):
     def _cred_get(
         self, key: str, params: dict, config: dict, cred: Optional[Credential] = None
     ) -> Any:
-        parts = key.split(".", 1)
-        field = parts[0]
-        sub = parts[1] if len(parts) > 1 else None
-
-        if field == "raw":
-            return cred.raw if cred is not None else params.get("_cred", {}).get("raw")
-
-        if field == "base64_credentials":
-            username = self._cred_get("username", params, config, cred) or ""
-            password = self._cred_get("password", params, config, cred) or ""
-            import base64
-
-            return base64.b64encode(f"{username}:{password}".encode()).decode()
-
-        if cred is not None and field in cred.fields:
-            val = cred.fields[field]
-            if sub and isinstance(val, dict):
-                return val.get(sub)
-            return val
-
-        val = params.get("_cred", {}).get(field) or config.get(field)
-        if sub and isinstance(val, dict):
-            return val.get(sub)
-        return val
+        return _cred_get_impl(key, params, config, cred)
 
     def _join_url(self, base: str, path: str) -> str:
         if not path:
@@ -473,7 +449,7 @@ class HttpEngine(BaseConnector):
         persist = refresh_spec.get("persist", {})
 
         fields = credential.fields
-        refresh_token = fields.get("refresh_token") or fields.get("refresh_token")
+        refresh_token = fields.get("refresh_token")
         client_id = fields.get("client_id", "")
         client_secret = fields.get("client_secret", "")
 
@@ -711,7 +687,7 @@ def _resolve_token_raw(
         resolved = _cred_get_impl(key, params, config, cred)
         val = _MISSING if resolved is None else resolved
     elif src == "config":
-        val = config.get(key, _MISSING) if key else params
+        val = config.get(key, _MISSING) if key else config
     else:
         val = _MISSING
 
@@ -834,7 +810,7 @@ def _render_value(
         if src == "cred":
             return _cred_get_impl(key, params, config, cred)
         if src == "config":
-            return config.get(key, m.group(0))
+            return config.get(key, m.group(0)) if key else config
         return m.group(0)
 
     val = _get_value()

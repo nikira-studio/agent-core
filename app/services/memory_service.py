@@ -585,7 +585,10 @@ def search_memory(
             ORDER BY mr.importance DESC, mr.created_at DESC
             LIMIT ? OFFSET ?
         """
-        fts_params = params + extra_vals + [limit, offset]
+        # Fetch limit+offset rows with no SQL offset so the final merged[start:end]
+        # slice can apply pagination correctly for both fts_only and hybrid paths.
+        fts_sql_limit = limit + max(offset, 0) if limit >= 0 else limit
+        fts_params = params + extra_vals + [fts_sql_limit, 0]
         with get_db() as conn:
             fts_rows = conn.execute(sql, fts_params).fetchall()
             fts_results = [dict(row) for row in fts_rows]
