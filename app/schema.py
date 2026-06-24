@@ -379,6 +379,22 @@ CREATE TABLE IF NOT EXISTS connector_session_cache (
     expires_at TEXT,
     updated_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
+
+-- Tool result spill table: large MCP tool outputs are offloaded here and
+-- replaced in the response with a summary + handle, so big payloads do not
+-- flood the agent's context window. Retrieved in slices via result_fetch and
+-- swept after expiry.
+CREATE TABLE IF NOT EXISTS tool_result_spill (
+    id TEXT PRIMARY KEY,
+    agent_id TEXT,
+    tool TEXT,
+    content TEXT NOT NULL,
+    total_chars INTEGER NOT NULL,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    expires_at TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_tool_result_spill_expires ON tool_result_spill(expires_at);
 """
 
 

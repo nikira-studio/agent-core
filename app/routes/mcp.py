@@ -15,7 +15,9 @@ from app.services import (
     briefing_service,
     audit_service,
     webhook_service,
+    tool_spill_service,
 )
+from app.config import settings
 from app.models.enums import MEMORY_CLASSES, SOURCE_KINDS
 
 
@@ -319,6 +321,25 @@ MANIFEST = {
                 "required": ["binding_id", "action"],
             },
         },
+        {
+            "name": "result_fetch",
+            "description": (
+                "Retrieve a slice of a previously offloaded large tool result. "
+                "When a tool's output is too big to return inline, it is offloaded "
+                "and you receive a handle + summary instead; call this with that "
+                "handle to read the full payload in chunks (use the returned "
+                "next_offset to page)."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "handle": {"type": "string"},
+                    "offset": {"type": "integer", "default": 0},
+                    "limit": {"type": "integer", "default": 4000},
+                },
+                "required": ["handle"],
+            },
+        },
     ],
 }
 
@@ -363,6 +384,45 @@ def _mcp_tool_result_from_custom_response(response: JSONResponse) -> JSONRespons
             "error": {"message": "Tool returned an invalid response"},
         }
     return payload
+
+
+def _maybe_offload_tool_result(
+    tool_name: str, text: str, is_error: bool, ctx: RequestContext
+) -> str:
+    """Offload oversized successful tool results to spill storage.
+
+    Returns the original text when it is within budget, otherwise persists the
+    full payload and returns a compact summary + retrieval handle. result_fetch
+    output is never offloaded (it is the retrieval path and is already chunked).
+    """
+    threshold = settings.TOOL_RESULT_SPILL_THRESHOLD
+    if (
+        is_error
+        or threshold <= 0
+        or tool_name == "result_fetch"
+        or len(text) <= threshold
+    ):
+        return text
+    try:
+        spill = tool_spill_service.spill(
+            agent_id=ctx.agent_id,
+            tool=tool_name,
+            content=text,
+            ttl_hours=settings.TOOL_RESULT_SPILL_TTL_HOURS,
+        )
+    except Exception:
+        # Never fail a tool call because offloading failed; fall back to inline.
+        return text
+    audit_service.write_event(
+        actor_type="agent",
+        actor_id=ctx.agent_id,
+        action="tool_result_offloaded",
+        resource_type="tool_result_spill",
+        resource_id=spill["handle"],
+        result="success",
+        details={"tool": tool_name, "total_chars": spill["total_chars"]},
+    )
+    return json.dumps(spill, indent=2, default=str)
 
 
 def _query_noise_free(query: str) -> bool:
@@ -589,6 +649,7 @@ async def _handle_mcp_jsonrpc(body: dict, request: Request, ctx: RequestContext)
             indent=2,
             default=str,
         )
+        text = _maybe_offload_tool_result(tool_name, text, is_error, ctx)
         return _jsonrpc_response(
             request_id,
             {
@@ -614,6 +675,24 @@ async def _handle_custom_mcp_tool(body: dict, ctx: RequestContext):
 
     if not tool:
         return _mcp_error("TOOL_REQUIRED", "tool name is required", 400)
+
+    if tool == "result_fetch":
+        handle = (params.get("handle") or "").strip()
+        if not handle:
+            return _mcp_error("INVALID_PARAMS", "handle is required", 400)
+        result = tool_spill_service.fetch(
+            handle=handle,
+            offset=params.get("offset", 0),
+            limit=min(max(params.get("limit", 4000), 1), 50000),
+            agent_id=ctx.agent_id,
+        )
+        if result is None:
+            return _mcp_error(
+                "NOT_FOUND",
+                "No offloaded result for that handle (it may have expired).",
+                404,
+            )
+        return JSONResponse(content={"ok": True, "data": result})
 
     if tool == "memory_search":
         query_text = params.get("query", "").strip()

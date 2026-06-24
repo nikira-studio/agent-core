@@ -34,6 +34,7 @@ AUDIT_ACTIONS = (
     "memory_restore",
     "memory_delete",
     "retrieval_degraded",
+    "tool_result_offloaded",
     "activity_update",
     "activity_pickup",
     "activity_heartbeat",
