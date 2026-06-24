@@ -534,21 +534,46 @@ def sync_installed_adapters() -> None:
     records = _get_all_install_records()
     restored = 0
     for record in records:
+        adapter_id = record["adapter_id"]
         manifest_path = Path(record["source_path"]) / "adapter.json"
+        relink_path: str | None = None
         if not manifest_path.exists():
-            logger.warning(
-                "Installed adapter %s missing manifest at %s",
-                record["adapter_id"],
-                manifest_path,
-            )
-            continue
+            # Install records store the absolute source_path captured at install
+            # time. If the data directory later moves — e.g. the same data volume
+            # mounted at a different path inside a container — that stored path no
+            # longer resolves. Re-derive the canonical location under the current
+            # user adapter dir and self-heal the record so future restarts stay
+            # clean instead of warning forever and dropping the connector.
+            canonical_dir = get_user_adapter_dir() / adapter_id
+            canonical_manifest = canonical_dir / "adapter.json"
+            if canonical_manifest.exists():
+                logger.info(
+                    "Adapter %s source_path %s is stale; relinking to %s",
+                    adapter_id,
+                    record["source_path"],
+                    canonical_dir,
+                )
+                manifest_path = canonical_manifest
+                relink_path = str(canonical_dir)
+            else:
+                logger.warning(
+                    "Installed adapter %s missing manifest at %s",
+                    adapter_id,
+                    manifest_path,
+                )
+                continue
         manifest, err = load_and_validate(manifest_path)
         if err or manifest is None:
-            logger.warning(
-                "Skipping installed adapter %s: %s", record["adapter_id"], err
-            )
+            logger.warning("Skipping installed adapter %s: %s", adapter_id, err)
             continue
         _upsert_connector_type(manifest)
+        if relink_path is not None:
+            _upsert_install_record(
+                adapter_id=adapter_id,
+                source_kind=record.get("source_kind") or "system",
+                source_path=relink_path,
+                installed_version=manifest.version,
+            )
         restored += 1
 
     logger.info("Adapter install restore complete: %d restored", restored)

@@ -21,6 +21,13 @@ class Settings(BaseSettings):
     COOKIE_SECURE: bool = False
     BLOCK_INTERNAL_HOSTS: bool = False
     ALLOWED_INTERNAL_HOSTS: str = ""
+    # Tool-result offloader: MCP tool outputs whose serialized text exceeds this
+    # many characters are spilled to local storage and replaced with a summary +
+    # handle, so large payloads do not flood the agent's context window. Set to 0
+    # to disable offloading.
+    TOOL_RESULT_SPILL_THRESHOLD: int = 8000
+    # How long a spilled payload is retrievable via result_fetch before sweep.
+    TOOL_RESULT_SPILL_TTL_HOURS: int = 24
 
     @property
     def data_dir(self) -> Path:
