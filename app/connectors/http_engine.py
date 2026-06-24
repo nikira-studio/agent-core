@@ -29,6 +29,40 @@ _OMIT = "__AGENT_CORE_OMIT__"
 # single template token to its native Python type (see _resolve_token_raw).
 _MISSING = object()
 
+_DEFAULT_TYPE_ZEROS = {"str": "", "int": 0, "float": 0.0, "bool": False, "list": []}
+
+
+def _parse_default_filter(filter_arg: Optional[str]) -> tuple[str, str]:
+    """Split a `default` filter argument into (fallback_literal, type_arg).
+
+    `default(5, as=int)` -> ("5", "int"); `default(0)` -> ("", "0").
+    """
+    if filter_arg and ", as=" in filter_arg:
+        fallback_str, _, type_arg = filter_arg.partition(", as=")
+        return fallback_str, type_arg
+    return "", (filter_arg or "")
+
+
+def _default_fallback(filter_arg: Optional[str]) -> Any:
+    """Native fallback value for a `default` filter on a missing/None token.
+
+    Single source of truth for the three render paths. Returns _OMIT to signal
+    the key should be dropped. The string paths (`_render`, `_render_value`)
+    wrap the result with str(); the native path (`_resolve_token_raw`) uses it
+    as-is so typed defaults keep their Python type.
+    """
+    fallback_str, type_arg = _parse_default_filter(filter_arg)
+    if type_arg == "omit":
+        return _OMIT
+    if fallback_str:
+        try:
+            return json.loads(fallback_str)
+        except (json.JSONDecodeError, ValueError):
+            return fallback_str
+    if type_arg in _DEFAULT_TYPE_ZEROS:
+        return _DEFAULT_TYPE_ZEROS[type_arg]
+    return ""
+
 
 class HttpEngine(BaseConnector):
     def __init__(self, connector_type: dict):
@@ -234,9 +268,10 @@ class HttpEngine(BaseConnector):
                         return params.get(key, m.group(0))
                     return params
                 if src == "cred":
-                    if key:
-                        return self._cred_get(key, params, config, cred)
-                    return params
+                    # No-key cred tokens resolve via _cred_get (None -> the
+                    # placeholder is left intact), never falling back to the
+                    # params dict. Matches _render_value / _resolve_token_raw.
+                    return self._cred_get(key, params, config, cred)
                 if src == "config":
                     if key:
                         return config.get(key, m.group(0))
@@ -246,30 +281,8 @@ class HttpEngine(BaseConnector):
             val = _get_value()
             if filter_name == "default":
                 if val is None or val == m.group(0):
-                    type_map = {
-                        "str": "",
-                        "int": 0,
-                        "float": 0.0,
-                        "bool": False,
-                        "list": [],
-                        "omit": _OMIT,
-                    }
-                    fallback_str = ""
-                    type_arg = filter_arg
-                    if filter_arg and ", as=" in filter_arg:
-                        parts = filter_arg.split(", as=", 1)
-                        fallback_str = parts[0]
-                        type_arg = parts[1] if len(parts) > 1 else ""
-                    if type_arg == "omit":
-                        return _OMIT
-                    if fallback_str:
-                        try:
-                            return str(json.loads(fallback_str))
-                        except (json.JSONDecodeError, ValueError):
-                            return fallback_str
-                    if type_arg and type_arg in type_map:
-                        return str(type_map[type_arg])
-                    return ""
+                    fb = _default_fallback(filter_arg)
+                    return fb if fb is _OMIT else str(fb)
                 return str(val)
             if filter_name == "rfc822_base64url":
                 return _make_rfc822_base64url(params) if isinstance(params, dict) else m.group(0)
@@ -694,25 +707,7 @@ def _resolve_token_raw(
     unset = val is _MISSING or val is None
 
     if filter_name == "default":
-        if not unset:
-            return val
-        fallback_str = ""
-        type_arg = filter_arg
-        if filter_arg and ", as=" in filter_arg:
-            parts = filter_arg.split(", as=", 1)
-            fallback_str = parts[0]
-            type_arg = parts[1] if len(parts) > 1 else ""
-        if type_arg == "omit":
-            return _OMIT
-        if fallback_str:
-            try:
-                return json.loads(fallback_str)
-            except (json.JSONDecodeError, ValueError):
-                return fallback_str
-        type_map = {"str": "", "int": 0, "float": 0.0, "bool": False, "list": []}
-        if type_arg and type_arg in type_map:
-            return type_map[type_arg]
-        return ""
+        return val if not unset else _default_fallback(filter_arg)
     if filter_name == "rfc822_base64url":
         return _make_rfc822_base64url(val) if isinstance(val, dict) else m.group(0)
     if unset:
@@ -816,32 +811,8 @@ def _render_value(
     val = _get_value()
     if filter_name == "default":
         if val is None or val == m.group(0):
-            type_map = {
-                "str": "",
-                "int": 0,
-                "float": 0.0,
-                "bool": False,
-                "list": [],
-                "omit": _OMIT,
-            }
-            fallback_str = ""
-            type_arg = filter_arg
-            if filter_arg and ", as=" in filter_arg:
-                parts = filter_arg.split(", as=", 1)
-                fallback_str = parts[0]
-                type_arg = parts[1] if len(parts) > 1 else ""
-            if type_arg == "omit":
-                return _OMIT
-            # An explicit fallback wins over the type's zero-value, so
-            # default(1, as=int) yields 1 (not 0). (Matches HttpEngine._render.)
-            if fallback_str:
-                try:
-                    return str(json.loads(fallback_str))
-                except (json.JSONDecodeError, ValueError):
-                    return fallback_str
-            if type_arg and type_arg in type_map:
-                return str(type_map[type_arg])
-            return ""
+            fb = _default_fallback(filter_arg)
+            return fb if fb is _OMIT else str(fb)
         return _stringify_for_template(val)
     if filter_name == "rfc822_base64url":
         return _make_rfc822_base64url(val) if isinstance(val, dict) else m.group(0)
@@ -860,8 +831,12 @@ def _stringify_for_template(val: Any) -> str:
 
 
 def _cred_get_impl(
-    key: str, params: dict, config: dict, cred: Optional[Credential] = None
+    key: Optional[str], params: dict, config: dict, cred: Optional[Credential] = None
 ) -> Any:
+    # A no-field cred token ({{ cred }}) has no key; there is no whole-credential
+    # value to expose, so resolve to None (callers leave the placeholder intact).
+    if not key:
+        return None
     parts = key.split(".", 1)
     field = parts[0]
     sub = parts[1] if len(parts) > 1 else None

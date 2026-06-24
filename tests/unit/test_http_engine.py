@@ -8,7 +8,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from app.connectors.base import Credential
-from app.connectors.http_engine import HttpEngine
+from app.connectors.http_engine import HttpEngine, _render_dict
 
 
 # ─── Fixtures ────────────────────────────────────────────────────────────────
@@ -720,3 +720,64 @@ class TestRfc822Attachments:
                 "to": ["a@b.com"], "subject": "big", "body": "b",
                 "attachments": [{"filename": "big.bin", "content_base64": big}],
             })
+
+
+class TestTemplateDefaultConsolidation:
+    """Pin the `default` filter behavior across all three render paths so the
+    shared filter helper can't silently diverge them:
+      - string path:       HttpEngine._render
+      - native (pure tok): _resolve_token_raw, via _render_dict on a bare token
+      - interpolated path: _render_value, via _render_dict on token + text
+    """
+
+    def _engine(self):
+        return HttpEngine(make_ct({"requests": {}}))
+
+    def _native(self, tpl, params, config=None, cred=None):
+        # A bare-token dict field routes through _resolve_token_raw (native type).
+        return _render_dict({"v": tpl}, params, config or {}, cred)["v"]
+
+    def _interp(self, tpl, params, config=None, cred=None):
+        # Prefixed text forces the interpolated _render_value path.
+        return _render_dict({"v": "x" + tpl}, params, config or {}, cred)["v"]
+
+    def test_default_bool_native_vs_string(self):
+        tpl = "{{ params.missing | default(false, as=bool) }}"
+        assert self._engine()._render(tpl, {}, {}) == "False"  # str(False)
+        native = self._native(tpl, {})
+        assert native is False  # native path preserves bool
+        assert self._interp(tpl, {}) == "xFalse"
+
+    def test_default_int_keeps_native_type_on_pure_token(self):
+        tpl = "{{ params.missing | default(5, as=int) }}"
+        assert self._engine()._render(tpl, {}, {}) == "5"  # string path stringifies
+        native = self._native(tpl, {})
+        assert native == 5 and isinstance(native, int)  # native path preserves int
+        assert self._interp(tpl, {}) == "x5"
+
+    def test_default_list_native_vs_string(self):
+        tpl = "{{ params.missing | default([1, 2], as=list) }}"
+        native = self._native(tpl, {})
+        assert native == [1, 2] and isinstance(native, list)
+        assert self._engine()._render(tpl, {}, {}) == "[1, 2]"
+
+    def test_default_omit_all_paths(self):
+        tpl = "{{ params.missing | default('', as=omit) }}"
+        from app.connectors.http_engine import _OMIT
+
+        assert self._engine()._render(tpl, {}, {}) == _OMIT
+        # Omitted dict fields are dropped entirely.
+        assert "v" not in _render_dict({"v": tpl}, {}, {})
+
+    def test_present_value_unaffected_by_default(self):
+        tpl = "{{ params.x | default(9, as=int) }}"
+        assert self._engine()._render(tpl, {"x": "set"}, {}) == "set"
+        assert self._native(tpl, {"x": "set"}) == "set"
+
+    def test_no_key_cred_token_does_not_leak_params(self):
+        # A bare {{ cred }} token (no field) must not fall back to the params
+        # dict; it resolves to nothing and the placeholder is left intact.
+        engine = self._engine()
+        out = engine._render("{{ cred }}", {"secret": "do-not-leak"}, {})
+        assert "do-not-leak" not in out
+        assert out == "{{ cred }}"
