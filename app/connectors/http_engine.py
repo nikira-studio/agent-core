@@ -234,9 +234,10 @@ class HttpEngine(BaseConnector):
                         return params.get(key, m.group(0))
                     return params
                 if src == "cred":
-                    if key:
-                        return self._cred_get(key, params, config, cred)
-                    return params
+                    # No-key cred tokens resolve through _cred_get (yields None,
+                    # leaving the placeholder) rather than falling back to the
+                    # params dict. Matches _render_value / _resolve_token_raw.
+                    return self._cred_get(key, params, config, cred)
                 if src == "config":
                     if key:
                         return config.get(key, m.group(0))
