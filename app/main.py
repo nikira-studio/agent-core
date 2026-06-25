@@ -31,6 +31,9 @@ from app.routes import (
     users_page_router,
     activity_page_router,
     audit_page_router,
+    agents_page_router,
+    workspaces_page_router,
+    memory_page_router,
     events_router,
     webhooks_router,
 )
@@ -169,6 +172,9 @@ def create_app() -> FastAPI:
     app.include_router(users_page_router, tags=["users_page"])
     app.include_router(activity_page_router, tags=["activity_page"])
     app.include_router(audit_page_router, tags=["audit_page"])
+    app.include_router(agents_page_router, tags=["agents_page"])
+    app.include_router(workspaces_page_router, tags=["workspaces_page"])
+    app.include_router(memory_page_router, tags=["memory_page"])
     app.include_router(dashboard_api_router, tags=["dashboard_api"])
     app.include_router(backup_router, tags=["backup"])
     app.include_router(events_router, tags=["events"])
