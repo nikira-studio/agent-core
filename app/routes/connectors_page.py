@@ -10,7 +10,7 @@ from app.services import workspace_service
 from app.services import connector_service
 from app.services import adapter_loader
 from app.services.agent_service import list_agents
-from app.routes.dashboard import (
+from app.routes.dashboard_shared import (
     render_page,
     escape_html,
     require_auth,
