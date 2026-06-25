@@ -28,6 +28,9 @@ from app.routes import (
     connector_types_router,
     connector_compat_router,
     connectors_page_router,
+    users_page_router,
+    activity_page_router,
+    audit_page_router,
     events_router,
     webhooks_router,
 )
@@ -163,6 +166,9 @@ def create_app() -> FastAPI:
     app.include_router(connector_compat_router, tags=["connector_bindings"])
     app.include_router(connector_types_router, tags=["connector_types"])
     app.include_router(connectors_page_router, tags=["connectors_page"])
+    app.include_router(users_page_router, tags=["users_page"])
+    app.include_router(activity_page_router, tags=["activity_page"])
+    app.include_router(audit_page_router, tags=["audit_page"])
     app.include_router(dashboard_api_router, tags=["dashboard_api"])
     app.include_router(backup_router, tags=["backup"])
     app.include_router(events_router, tags=["events"])

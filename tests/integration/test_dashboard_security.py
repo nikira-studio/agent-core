@@ -62,6 +62,9 @@ def test_dashboard_connectors_filters_credentials_by_readable_scopes(
 
 def test_dashboard_routes_importable():
     from app.routes import dashboard
+    from app.routes import audit_page
 
     assert hasattr(dashboard, "router")
-    assert hasattr(dashboard, "audit_page")
+    # audit_page moved to its own module in the dashboard split (item 6).
+    assert hasattr(audit_page, "router")
+    assert hasattr(audit_page, "audit_page")
