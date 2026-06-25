@@ -22,6 +22,10 @@ from app.routes.audit_page import router as audit_page_router
 from app.routes.agents_page import router as agents_page_router
 from app.routes.workspaces_page import router as workspaces_page_router
 from app.routes.memory_page import router as memory_page_router
+from app.routes.overview_page import router as overview_page_router
+from app.routes.auth_pages import router as auth_pages_router
+from app.routes.settings_page import router as settings_page_router
+from app.routes.webhooks_page import router as webhooks_page_router
 from app.routes.events import router as events_router
 from app.routes.webhooks import router as webhooks_router
 
@@ -50,6 +54,10 @@ __all__ = [
     "agents_page_router",
     "workspaces_page_router",
     "memory_page_router",
+    "overview_page_router",
+    "auth_pages_router",
+    "settings_page_router",
+    "webhooks_page_router",
     "events_router",
     "webhooks_router",
 ]
