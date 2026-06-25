@@ -30,6 +30,14 @@ def normalize_action_names(actions: Optional[list]) -> list[str]:
 def list_connector_types(include_inactive: bool = False) -> list[dict]:
     from app.services import adapter_loader
 
+    # Scan the adapter library once and index by id. Previously this called
+    # adapter_loader.get_adapter_library_entry(id) per row, and each of those
+    # re-ran the full list_available_adapters() scan — O(N^2), ~2s on the
+    # connectors page. One scan + dict lookup makes it O(N).
+    available_adapters = {
+        entry["id"]: entry for entry in adapter_loader.list_available_adapters()
+    }
+
     with get_db() as conn:
         query = """
             SELECT id, display_name, description, provider_type, auth_type,
@@ -47,7 +55,7 @@ def list_connector_types(include_inactive: bool = False) -> list[dict]:
         connector_types = []
         for row in rows:
             ct = _row_to_connector_type(dict(row))
-            adapter_entry = adapter_loader.get_adapter_library_entry(ct["id"])
+            adapter_entry = available_adapters.get(ct["id"])
             if adapter_entry and not adapter_entry.get("installed"):
                 continue
             connector_types.append(ct)
