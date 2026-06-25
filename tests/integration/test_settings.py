@@ -121,7 +121,7 @@ def test_vector_settings_models_rejects_invalid_url(admin_client):
 
 
 def test_vector_settings_models_lists_ollama_models(admin_client, monkeypatch):
-    import app.routes.dashboard as dashboard
+    import app.routes.settings_page as settings_page
 
     class FakeResponse:
         status_code = 200
@@ -148,7 +148,7 @@ def test_vector_settings_models_lists_ollama_models(admin_client, monkeypatch):
             assert url == "http://ollama.test/api/tags"
             return FakeResponse()
 
-    monkeypatch.setattr(dashboard.httpx, "AsyncClient", FakeClient)
+    monkeypatch.setattr(settings_page.httpx, "AsyncClient", FakeClient)
 
     r = admin_client.get(
         "/api/dashboard/vector-settings/models?url=http%3A%2F%2Follama.test"
