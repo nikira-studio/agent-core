@@ -3,7 +3,6 @@ import os
 
 from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
-from fastapi.templating import Jinja2Templates
 from fastapi.responses import JSONResponse
 from starlette.middleware.cors import CORSMiddleware
 
@@ -152,9 +151,6 @@ def create_app() -> FastAPI:
             content={"ok": False, "error": {"code": exc.code, "message": exc.message}},
             status_code=exc.status_code,
         )
-
-    templates = Jinja2Templates(directory="app/dashboard/templates")
-    app.state.templates = templates
 
     app.mount("/static", StaticFiles(directory="app/dashboard/static"), name="static")
 
