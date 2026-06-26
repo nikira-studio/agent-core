@@ -190,6 +190,45 @@ class TestHttpEngineTemplating:
         assert body["flag"] is False
         assert "missing" not in body
 
+    def test_execute_merges_default_params(self, monkeypatch):
+        engine = HttpEngine(
+            make_ct(
+                {
+                    "base_url": {"from": "config", "field": "base_url"},
+                    "requests": {
+                        "get_item": {
+                            "method": "GET",
+                            "path": "/items/{{ params.item_id }}",
+                        }
+                    }
+                }
+            )
+        )
+        sent = []
+        monkeypatch.setattr(
+            engine,
+            "_send",
+            lambda req, config: sent.append(req) or object(),
+        )
+        monkeypatch.setattr(engine, "_raise_on_errors", lambda resp, credential: None)
+        monkeypatch.setattr(
+            engine,
+            "_extract",
+            lambda resp, request_def, config: {
+                "success": True,
+                "url": sent[0]["url"],
+            },
+        )
+
+        result = engine.execute(
+            "get_item",
+            {},
+            make_cred(),
+            '{"base_url": "http://example.com", "default_params": {"item_id": "42"}}',
+        )
+
+        assert result == {"success": True, "url": "http://example.com/items/42"}
+
 
 # ─── Auth Application ─────────────────────────────────────────────────────────
 

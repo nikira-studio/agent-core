@@ -130,7 +130,11 @@ class HttpEngine(BaseConnector):
             }
 
         config = _parse_json(config_json)
-        req = self._build_request(request_def, params, config, credential)
+        defaults = config.get("default_params", {})
+        if not isinstance(defaults, dict):
+            defaults = {}
+        merged_params = {**defaults, **(params or {})}
+        req = self._build_request(request_def, merged_params, config, credential)
         self._apply_auth(req, credential, session, config)
         self._apply_session(req, session)
         resp = self._send(req, config)
@@ -149,7 +153,9 @@ class HttpEngine(BaseConnector):
                 if not captured:
                     break
                 session = {**(session or {}), **captured}
-                req = self._build_request(request_def, params, config, credential)
+                req = self._build_request(
+                    request_def, merged_params, config, credential
+                )
                 self._apply_auth(req, credential, session, config)
                 self._apply_session(req, session)
                 resp = self._send(req, config)

@@ -1,6 +1,7 @@
 import json
 import logging
 import random
+import re
 import secrets
 import time
 from typing import Optional
@@ -915,6 +916,55 @@ def _validate_action_params(
     return None
 
 
+def _action_meta(connector_type: dict, action: str) -> dict:
+    for a in connector_type.get("supported_actions") or []:
+        if isinstance(a, dict) and a.get("name") == action:
+            return a
+    return {}
+
+
+def _prepare_action_params(
+    connector_type: dict,
+    action: str,
+    params: Optional[dict],
+    binding_config: Optional[dict],
+) -> dict:
+    caller_params = params if isinstance(params, dict) else {}
+    normalized = dict(caller_params)
+    meta = _action_meta(connector_type, action)
+    aliases = meta.get("param_aliases") or {}
+    if isinstance(aliases, dict):
+        for alias, canonical in aliases.items():
+            if (
+                isinstance(alias, str)
+                and isinstance(canonical, str)
+                and alias in caller_params
+                and canonical not in caller_params
+            ):
+                normalized[canonical] = caller_params[alias]
+
+    schema = meta.get("input_schema") or {}
+    properties = schema.get("properties") if isinstance(schema, dict) else None
+    if isinstance(properties, dict):
+        for name, value in caller_params.items():
+            if not isinstance(name, str):
+                continue
+            canonical = re.sub(r"(?<!^)(?=[A-Z])", "_", name).lower()
+            if (
+                canonical != name
+                and canonical in properties
+                and canonical not in caller_params
+            ):
+                normalized[canonical] = value
+
+    defaults = {}
+    if isinstance(binding_config, dict):
+        configured_defaults = binding_config.get("default_params")
+        if isinstance(configured_defaults, dict):
+            defaults = configured_defaults
+    return {**defaults, **normalized}
+
+
 def execute_binding_action(
     binding_id: str, action: str, params: Optional[dict] = None
 ) -> dict:
@@ -947,19 +997,29 @@ def execute_binding_action(
             "error": error_messages.get(action_error, "Action validation failed"),
             "error_code": action_error,
         }
+    if params is not None and not isinstance(params, dict):
+        return {
+            "success": False,
+            "error": f"Invalid parameters for '{action}': params must be an object",
+            "error_code": "INVALID_PARAMS",
+        }
 
-    param_error = _validate_action_params(connector_type, action, params)
-    if param_error:
-        return param_error
-
-    binding_with_cred = get_binding_with_credential(binding_id)
-    cred = binding_with_cred.get("credential")
     binding_config = {}
     if binding.get("config_json"):
         try:
             binding_config = json.loads(binding["config_json"])
         except json.JSONDecodeError:
             pass
+
+    effective_params = _prepare_action_params(
+        connector_type, action, params, binding_config
+    )
+    param_error = _validate_action_params(connector_type, action, effective_params)
+    if param_error:
+        return param_error
+
+    binding_with_cred = get_binding_with_credential(binding_id)
+    cred = binding_with_cred.get("credential")
     auth_overridden = binding_config.get("auth_mode") == "none"
     if connector_type.get("auth_type") != "none" and not cred and not auth_overridden:
         return {
@@ -1006,7 +1066,7 @@ def execute_binding_action(
                 result = _mcp.execute_mcp_tool(
                     endpoint_url=endpoint_url,
                     action=action,
-                    params=params or {},
+                    params=effective_params,
                     credential=cred.raw if cred else None,
                     config_json=binding.get("config_json"),
                     transport_type=connector_type.get("transport_type")
@@ -1032,7 +1092,7 @@ def execute_binding_action(
                 executor_config = _build_executor_config(binding, connector_type)
                 return executor.execute(
                     action=action,
-                    params=params or {},
+                    params=effective_params,
                     credential=cred,
                     config_json=executor_config,
                     session=session,

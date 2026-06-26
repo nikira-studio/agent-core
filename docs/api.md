@@ -330,26 +330,35 @@ Restore a previous key (use to recover from a bad rotation, with a key from a ba
 
 ## Connector Types
 
-Connector types are the reusable definitions Agent Core builds from imported OpenAPI specs and native MCP servers, plus the built-in `generic_http` fallback. The connector catalog is instance-wide, so imported connector types are visible to other authenticated users in the same Agent Core deployment.
+Connector types are the reusable definitions Agent Core builds from imported OpenAPI specs, native MCP servers, the built-in Generic HTTP fallback, and installed adapters. The connector catalog is instance-wide, so imported connector types and installed adapters are visible to other authenticated users in the same Agent Core deployment.
 
 Provider types:
 
-- `builtin` for built-in fallback connector types like `generic_http`
+- `builtin` for adapter-backed connector types and other built-in handlers
+- `generic_http` for the built-in Generic HTTP fallback and legacy Generic HTTP rows
 - `openapi` for imported REST/OpenAPI connector types
 - `mcp` for native MCP server registrations
 
-The connector type row stores provider metadata such as `endpoint_url`, `transport_type`, `capabilities_json`, and `tool_snapshot_json` when applicable.
+The connector type row stores provider metadata such as `endpoint_url`, `transport_type`, `capabilities_json`, `tool_snapshot_json`, `operations_json`, `backend_type`, and `backend_json` when applicable.
 
 | Method | Path | Auth | Description |
 | --- | --- | --- | --- |
 | `GET` | `/api/connector-types` | Agent/session | List installed connector types |
+| `GET` | `/api/connector-types/summary` | Agent/session | Summarize connector types, visible bindings, and action health |
+| `POST` | `/api/connector-types/health-check` | Agent/session | Check enabled binding health for a connector type and/or scope |
 | `GET` | `/api/connector-types/{connector_type_id}/tools` | Agent/session | List actions for a connector type |
 | `PUT` | `/api/connector-types/{connector_type_id}/actions` | Admin | Update the disabled actions list for a connector type |
+| `GET` | `/api/connector-types/adapters` | Agent/session | List available system and user adapters |
+| `POST` | `/api/connector-types/adapters/{adapter_id}/install` | Admin | Install an adapter into the connector catalog |
+| `POST` | `/api/connector-types/adapters/{adapter_id}/update` | Admin | Refresh an installed adapter from the newer available template |
+| `DELETE` | `/api/connector-types/adapters/{adapter_id}/install` | Admin | Uninstall an adapter from the connector catalog |
 | `POST` | `/api/connector-types/preview` | Admin | Parse an OpenAPI spec and return metadata without persisting |
 | `POST` | `/api/connector-types/import` | Admin | Import an OpenAPI spec from URL or pasted JSON/YAML |
+| `POST` | `/api/connector-types/create-http` | Admin | Create a Generic HTTP connector type |
 | `POST` | `/api/connector-types/import-mcp` | Admin | Register a native MCP server and discover its tools |
 | `POST` | `/api/connector-types/{connector_type_id}/refresh` | Admin | Refresh MCP discovery metadata and tool snapshot |
 | `GET` | `/api/connector-types/directory` | Agent/session | Browse the public API directory (grouped by provider, variants included) |
+| `DELETE` | `/api/connector-types/{connector_type_id}` | Admin | Delete a connector type; adapter-backed connector types follow uninstall behavior |
 
 Import:
 ```json
@@ -388,9 +397,18 @@ Credential scope controls access to the stored secret. Binding scope controls wh
 Use `config_json` for fixed, non-secret defaults that should travel with the binding. Common examples:
 
 - `base_url` or `test_url` for a generic HTTP binding
-- `default_params` for imported APIs that always need the same repo, owner, workspace, or other context
+- `default_params` for imported APIs or adapters that always need the same repo, owner, workspace, tenant, company, or other context
 - `auth_header`, `auth_scheme`, `auth_scheme_name`, `auth_location`, or `query_param` when the connector needs a specific non-secret auth layout
 - `auth_mode: "none"` to suppress spec-driven auth injection for a trusted local deployment that does not actually require auth
+
+When running a connector action, Agent Core prepares params before validation and execution:
+
+1. Start with the caller's `params` object.
+2. Apply any action-level `param_aliases` from the connector metadata, and infer simple camelCase-to-snake_case aliases when the action schema declares the snake_case property.
+3. Merge `config_json.default_params` underneath the caller params.
+4. Validate the merged params against the action schema.
+
+Explicit caller params always override defaults. This lets a binding provide stable context like `{"default_params":{"company_id":"..."}}` while still allowing a caller to override `company_id` for a specific action. Keep `default_params` non-secret; use credentials for secrets.
 
 If the connector and credential are enough on their own, leave `config_json` empty.
 

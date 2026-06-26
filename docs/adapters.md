@@ -33,7 +33,7 @@ Agent Core has a **two-tier adapter library**:
 | **System** | `app/adapter_templates/<id>/adapter.json` | shipped with Agent Core, maintained by the project | replaced on each upgrade — it *is* the product |
 | **User** | `data/adapters/<id>/adapter.json` | adapters you installed or wrote yourself | **yes**, lives in the data dir alongside the DB |
 
-The Browse Adapters page at **`/connectors/adapters`** lists adapters from both libraries. Installing a system adapter copies it into the user library, so any local edits you make persist across upgrades and you keep the version you tested. If the shipped template later changes, the same page shows **Update** for the installed copy; updating replaces the installed adapter files in place and keeps bindings attached to the same connector type id. The `adapter_installations` DB table is the source of truth for *which* adapters are active in the connector catalog; a restart re-seeds them from there.
+The Browse Adapters page at **`/connectors/adapters`** lists adapters from both libraries. Installing a system adapter copies it into the user library, so any local edits you make persist across upgrades and you keep the version you tested. If the shipped template later changes, the same page shows **Update** for the installed copy; updating replaces the installed adapter files in place and keeps bindings attached to the same connector type id. Updates are version-driven, so bump the adapter's `version` whenever you change its manifest. The `adapter_installations` DB table is the source of truth for *which* adapters are active in the connector catalog; a restart re-seeds them from there.
 
 ## Install an adapter (3 ways)
 
@@ -41,7 +41,7 @@ The Browse Adapters page at **`/connectors/adapters`** lists adapters from both 
 
 1. Go to **`/connectors`** → click **Browse Adapters** (or visit `/connectors/adapters` directly).
 2. Pick an adapter from the list. Each entry shows its description, version, backend (`http`/`mcp`/`cli`), and whether its `requires` (binaries, env vars) are satisfied.
-3. Click **Install**. If it's a system adapter, Agent Core copies it from `app/adapter_templates/` into `data/adapters/`, seeds the connector type, and records the installation. If it's already in `data/adapters/`, the install just seeds and records. If the page later shows **Update**, clicking it refreshes the installed copy in place without changing bindings.
+3. Click **Install**. If it's a system adapter, Agent Core copies it from `app/adapter_templates/` into `data/adapters/`, seeds the connector type, and records the installation. If it's already in `data/adapters/`, the install just seeds and records. If the page later shows **Update**, clicking it refreshes the installed copy in place without changing bindings. The Update button appears when the available template version differs from the installed version.
 4. The new connector type now shows in your `/connectors` catalog.
 
 For `mcp` and `cli` adapters, a **dangerous-pattern scan** runs first and surfaces anything suspicious in the manifest before enabling. `http` adapters are pure data and don't need scanning.
@@ -82,6 +82,8 @@ Adapters use the same binding model as every other connector type:
    ```
 
 `connectors_actions_list` exposes per-action input schemas so the agent can introspect what each action accepts. Agent Core resolves the raw credential server-side and never surfaces it to the agent.
+
+Bindings can carry non-secret defaults in `config_json.default_params`. Agent Core merges those defaults before validating and executing an action, with explicit caller params winning over defaults. Use this for stable context such as a repo, workspace, tenant, or company ID that almost every call needs.
 
 ## Uninstall an adapter
 
@@ -163,6 +165,32 @@ A minimal adapter is a single `adapter.json` file. The structure has two parts: 
 - `description` — agent-oriented; this is what the agent sees when discovering tools. Write it for the agent, not the developer.
 - `side_effect` — `"read"`, `"write"`, or `"destructive"`. Surfaces to the agent so it can confirm before destructive operations.
 - `input_schema` — real JSON Schema for the params. Lets the agent know what to pass without trial and error.
+- `param_aliases` — optional map of alternate caller keys to canonical keys, for example `{ "issueId": "issue_id" }`. Agent Core applies aliases before JSON Schema validation and request rendering. It also infers simple camelCase-to-snake_case aliases when the schema declares the snake_case property, but explicit aliases are clearer for agents and should be preferred in shared adapters.
+
+Action params are prepared in this order:
+
+1. Start with caller `params`.
+2. Apply `param_aliases` and inferred camelCase-to-snake_case aliases without overwriting a canonical key the caller already sent.
+3. Merge binding `config_json.default_params` underneath the normalized caller params, so explicit caller values win.
+4. Validate the result against `input_schema`.
+5. Render the request, command, or MCP call.
+
+Example:
+
+```json
+{
+  "name": "get_issue",
+  "param_aliases": { "issueId": "issue_id" },
+  "input_schema": {
+    "type": "object",
+    "required": ["issue_id"],
+    "properties": {
+      "issue_id": { "type": "string" },
+      "issueId": { "type": "string", "description": "Alias for issue_id." }
+    }
+  }
+}
+```
 
 **`credential_schema.fields[]`** — each field declares `name`, `type`, `secret` (true = redacted in UI/logs), `required`. The UI uses this to build the credential entry form. For single-secret connectors (one `api_key` field), the stored value is the secret string. For multi-field credentials, the stored value is a JSON object with those field names as keys.
 
@@ -223,6 +251,21 @@ Either a hard-coded string (`"https://api.stripe.com"`) or a config-driven objec
 ```
 
 If you use the config form, list the field in `requires.config` so each binding remembers to provide it.
+
+### Binding defaults
+
+For fixed non-secret context, put defaults on the binding rather than making agents repeat them every call:
+
+```json
+{
+  "base_url": "https://api.example.com",
+  "default_params": {
+    "workspace_id": "ws_123"
+  }
+}
+```
+
+`default_params` works for imported OpenAPI connectors and adapter-backed connectors. HTTP adapters merge it both in the shared connector service before validation and again inside the HTTP engine as defense in depth for direct executor calls. Never put secrets in `default_params`; store secrets as credentials.
 
 ### `auth`
 

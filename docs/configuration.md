@@ -25,6 +25,7 @@ These control how long dashboard logins stay active.
 | `AGENT_CORE_SESSION_DURATION_HOURS` | `8` | Maximum session lifetime before requiring a new login |
 | `AGENT_CORE_INACTIVITY_TIMEOUT_MINUTES` | `30` | How long a session can sit idle before expiring |
 | `AGENT_CORE_COOKIE_SECURE` | `false` | Set to `true` if Agent Core is served over HTTPS or behind a TLS proxy — makes browser cookies require a secure connection |
+| `AGENT_CORE_TRUSTED_PROXIES` | *(empty)* | Comma-separated proxy IPs that may supply `X-Forwarded-For` for login rate-limit identity |
 
 ---
 
@@ -45,6 +46,8 @@ These control how long dashboard logins stay active.
 | --- | --- | --- |
 | `AGENT_CORE_SHARED_SCOPE_AGENTS` | *(empty)* | Comma-separated agent IDs that can write to the `shared` memory scope, in addition to any agent that has `shared` explicitly in its `write_scopes`. This does not grant credential access |
 | `AGENT_CORE_STALE_THRESHOLD_MINUTES` | `5` | How long an agent can go without sending a heartbeat before its active task is automatically marked stale |
+| `AGENT_CORE_TOOL_RESULT_SPILL_THRESHOLD` | `8000` | MCP tool outputs larger than this many serialized characters are stored in Agent Core and returned as a `result_fetch` handle. Set to `0` to disable spilling |
+| `AGENT_CORE_TOOL_RESULT_SPILL_TTL_HOURS` | `24` | How long spilled tool results remain retrievable before cleanup |
 
 **Vector search** — the embedding provider, endpoint URL, model, and auth type — is configured from **Settings → Vector Search** in the dashboard, not through environment variables. Semantic search is off by default. When it's disabled or the embedding backend is unreachable, Agent Core falls back to full-text search automatically.
 

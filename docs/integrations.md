@@ -286,7 +286,7 @@ For adapters that define their own request path, set `base_url` to the service r
 
 **Three install paths:** the Browse Adapters page (system templates + already-dropped-in user adapters), a drop-in into `data/adapters/<id>/adapter.json`, or `git:owner/repo@ref` for adapters shared from a git repo. Code-bearing backends (`mcp`/`cli`) get a dangerous-pattern scan before enabling.
 
-Uninstall behavior is split by source: system adapters remove the installed copy from `data/adapters/` and clear the catalog entry; user-dropped adapters clear the catalog entry but leave the local file in place so you can reinstall without re-downloading. Updates keep the connector type id stable and preserve bindings.
+Uninstall behavior is split by source: system adapters remove the installed copy from `data/adapters/` and clear the catalog entry; user-dropped adapters clear the catalog entry but leave the local file in place so you can reinstall without re-downloading. Updates are driven by the adapter `version`; bump it whenever you change a bundled template. Updating keeps the connector type id stable and preserves bindings.
 
 **👉 For the complete guide — installing, building your own, the manifest schema, templating, OAuth/session patterns, testing, and sharing — see [docs/adapters.md](adapters.md).**
 
@@ -657,18 +657,18 @@ See [Credential Broker](credential-broker.md) for setup instructions.
 
 ### Connectors: Agent Core Runs Actions Directly
 
-If you want Agent Core itself to call an imported OpenAPI spec or another service on your behalf, use the **Connectors** page at `/connectors`.
+If you want Agent Core itself to call an imported OpenAPI spec, native MCP server, installed adapter, or another HTTP service on your behalf, use the **Connectors** page at `/connectors`.
 
 The current flow is:
 
-1. Import an OpenAPI spec for the service you want, or use the built-in `generic_http` connector for a quick one-off endpoint.
+1. Import an OpenAPI spec, register a native MCP server, install an adapter, or use the built-in `generic_http` connector for a quick one-off endpoint.
 2. Create or pick a stored credential. You can create credentials directly on the Connectors page or inline while creating a binding. If the connector needs multiple credential fields, the binding form will show the exact field names and expects them as one JSON secret.
 3. Create a connector binding for the imported connector type.
 4. Bind that connector to a scope like `workspace:<id>`, `user:<id>`, or `shared`.
 5. Test the binding from the dashboard.
 6. Run actions through MCP with `connectors_run`.
 
-Connector types are instance-wide catalog entries. The built-in `generic_http` type is always available, and any imported spec becomes visible to other authenticated users in the same Agent Core instance.
+Connector types are instance-wide catalog entries. The built-in `generic_http` type is always available, and imported specs, registered MCP servers, and installed adapters become visible to other authenticated users in the same Agent Core instance.
 
 This is the clearest example of the capability-layer model. The connector catalog is a service directory, and each action is a server-side capability that the agent can call when it needs that external system.
 
@@ -683,7 +683,9 @@ For normal workspace use, set both to the same workspace. For advanced use, a cr
 
 When you want to distinguish personal bindings from workspace bindings, call `connectors_bindings_list` once with no scope filter and again with an explicit `scope` such as `user:<id>` or `workspace:<id>`.
 
-Each binding currently links to one credential. Connector-specific non-secret settings, such as a default repo, base URL, auth header name, or query parameter name, belong in the binding config JSON.
+Each binding currently links to one credential. Connector-specific non-secret settings, such as a default repo, base URL, auth header name, query parameter name, or stable tenant/company/workspace ID, belong in the binding config JSON.
+
+Use `config_json.default_params` when most calls need the same non-secret context. Agent Core merges those defaults before schema validation and execution, and explicit caller params win. Adapter actions can also declare `param_aliases` such as `issueId -> issue_id`; aliases are normalized before validation and before request templates render. This keeps agent-facing schemas forgiving without exposing secrets or requiring agents to repeat stable IDs on every call.
 
 ### Workspace Collaboration
 

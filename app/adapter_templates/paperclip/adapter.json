@@ -2,7 +2,7 @@
   "spec_version": "1.0",
   "id": "paperclip",
   "display_name": "Paperclip",
-  "version": "1.4.0",
+  "version": "1.4.1",
   "author": "agent-core team",
   "description": "Paperclip — open-source agent orchestration platform. Read and manage issues, agents, goals, approvals, and costs across one or more companies. One binding covers all companies your board key can access.",
   "setup": {
@@ -37,13 +37,19 @@
       "name": "list_issues",
       "description": "List issues in a company, sorted by priority. Filter by status, assignee, or project.",
       "side_effect": "read",
+      "param_aliases": {
+        "companyId": "company_id"
+      },
       "input_schema": {
         "type": "object",
-        "required": ["company_id"],
         "properties": {
           "company_id": {
             "type": "string",
-            "description": "Paperclip company ID. Call get_me to list all company IDs your key can access."
+            "description": "Paperclip company ID. Optional when the binding has default_params.company_id configured."
+          },
+          "companyId": {
+            "type": "string",
+            "description": "Alias for company_id."
           },
           "status": {
             "type": "string",
@@ -64,6 +70,9 @@
       "name": "get_issue",
       "description": "Get a single issue by ID, including its plan document, parent chain, project, and goal.",
       "side_effect": "read",
+      "param_aliases": {
+        "issueId": "issue_id"
+      },
       "input_schema": {
         "type": "object",
         "required": ["issue_id"],
@@ -71,6 +80,10 @@
           "issue_id": {
             "type": "string",
             "description": "The issue ID (e.g. PROJ-42 or a UUID)."
+          },
+          "issueId": {
+            "type": "string",
+            "description": "Alias for issue_id."
           }
         }
       }
