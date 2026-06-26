@@ -27,16 +27,21 @@ def normalize_action_names(actions: Optional[list]) -> list[str]:
     return names
 
 
-def list_connector_types(include_inactive: bool = False) -> list[dict]:
-    from app.services import adapter_loader
-
+def list_connector_types(
+    include_inactive: bool = False, available_adapters: dict | None = None
+) -> list[dict]:
     # Scan the adapter library once and index by id. Previously this called
     # adapter_loader.get_adapter_library_entry(id) per row, and each of those
     # re-ran the full list_available_adapters() scan — O(N^2), ~2s on the
-    # connectors page. One scan + dict lookup makes it O(N).
-    available_adapters = {
-        entry["id"]: entry for entry in adapter_loader.list_available_adapters()
-    }
+    # connectors page. One scan + dict lookup makes it O(N). Callers that already
+    # hold a scanned map (e.g. the /connectors page) can pass it in to avoid a
+    # second scan entirely.
+    if available_adapters is None:
+        from app.services import adapter_loader
+
+        available_adapters = {
+            entry["id"]: entry for entry in adapter_loader.list_available_adapters()
+        }
 
     with get_db() as conn:
         query = """
