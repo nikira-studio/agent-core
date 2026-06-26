@@ -200,10 +200,14 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
         active_workspace_ids=ctx.active_workspace_ids,
     )
 
-    connector_types = connector_service.list_connector_types()
+    # Scan the adapter library once and reuse it for both the connector-type
+    # filter and the per-type binding guidance (avoids a second full scan).
     available_adapters = {
         entry["id"]: entry for entry in adapter_loader.list_available_adapters()
     }
+    connector_types = connector_service.list_connector_types(
+        available_adapters=available_adapters
+    )
     binding_guidance = {
         ct["id"]: _binding_guidance_for_connector_type(
             ct, available_adapters.get(ct["id"])
