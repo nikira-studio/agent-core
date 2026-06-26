@@ -6,7 +6,6 @@ query-param omission, and the default-fallback render fix.
 """
 
 import json
-import os
 from pathlib import Path
 
 from app.connectors.base import Credential

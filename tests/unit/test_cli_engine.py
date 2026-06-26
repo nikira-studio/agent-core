@@ -71,11 +71,6 @@ class TestCliEngineTemplating:
         result = engine._render("{{ params.owner | default('', as=omit) }}", {}, {})
         assert result == "__OMIT__"
 
-    def test_render_params_default_omit(self):
-        engine = CliEngine(make_ct({"bin": "gh", "commands": {}}))
-        result = engine._render("{{ params.owner | default('', as=omit) }}", {}, {})
-        assert result == "__OMIT__"
-
     def test_render_cred_raw(self):
         engine = CliEngine(make_ct({"bin": "gh", "commands": {}}))
         cred = make_cred(raw="secret-token")
