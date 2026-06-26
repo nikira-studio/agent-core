@@ -9,7 +9,7 @@ from app.routes.memory import router as memory_router
 from app.routes.activity import router as activity_router
 from app.routes.briefings import router as briefings_router
 from app.routes.mcp import router as mcp_router
-from app.routes.dashboard import router as dashboard_router
+from app.routes.integrations_page import router as integrations_page_router
 from app.routes.dashboard_api import router as dashboard_api_router
 from app.routes.backup import router as backup_router
 from app.routes.connectors import router as connector_router
@@ -41,7 +41,7 @@ __all__ = [
     "activity_router",
     "briefings_router",
     "mcp_router",
-    "dashboard_router",
+    "integrations_page_router",
     "dashboard_api_router",
     "backup_router",
     "connector_router",

@@ -7,7 +7,7 @@ no-workspace agent to request one); these tests lock that in so it can't silentl
 regress.
 """
 
-from app.routes.dashboard import _build_assistants_md
+from app.routes.integrations_page import _build_assistants_md
 
 BASE = "http://core.example.com"
 USER = "user:brian"

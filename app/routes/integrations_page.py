@@ -1,3 +1,9 @@
+"""Integrations dashboard page and agent-setup/connection generators.
+
+Last feature area split out of the former dashboard.py monolith
+(see private/dashboard-split-plan.md); dashboard.py no longer exists.
+"""
+
 from fastapi import APIRouter, Request, Depends
 import json
 

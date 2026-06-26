@@ -61,10 +61,12 @@ def test_dashboard_connectors_filters_credentials_by_readable_scopes(
 
 
 def test_dashboard_routes_importable():
-    from app.routes import dashboard
+    # dashboard.py was split into per-feature page modules (item 6); the former
+    # monolith no longer exists. Spot-check a couple of the split modules import.
     from app.routes import audit_page
+    from app.routes import integrations_page
 
-    assert hasattr(dashboard, "router")
-    # audit_page moved to its own module in the dashboard split (item 6).
     assert hasattr(audit_page, "router")
     assert hasattr(audit_page, "audit_page")
+    assert hasattr(integrations_page, "router")
+    assert hasattr(integrations_page, "integrations_page")

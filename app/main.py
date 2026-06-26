@@ -21,7 +21,7 @@ from app.routes import (
     activity_router,
     briefings_router,
     mcp_router,
-    dashboard_router,
+    integrations_page_router,
     dashboard_api_router,
     backup_router,
     connector_router,
@@ -187,7 +187,7 @@ def create_app() -> FastAPI:
     app.include_router(backup_router, tags=["backup"])
     app.include_router(events_router, tags=["events"])
     app.include_router(webhooks_router, tags=["webhooks"])
-    app.include_router(dashboard_router, prefix="", tags=["dashboard"])
+    app.include_router(integrations_page_router, prefix="", tags=["integrations_page"])
 
     settings.data_dir
     init_db()
