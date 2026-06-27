@@ -84,7 +84,8 @@ def test_connectors_page_surfaces_credentials_workflow(authenticated_client):
     assert "New Credential" in html
     assert "Import MCP Server" in html
     assert "Preview Spec" in html
-    assert "/api/credentials/entries" in html
+    # JS wiring (incl. /api/credentials/entries) now lives in the static bundle.
+    assert "/static/js/connectors.js" in html
     assert "Create new credential" in html
     assert "Use stored credential" in html
     assert "oauth-redirect-modal" in html
@@ -122,7 +123,8 @@ def test_credentials_page_surfaces_credential_forms(authenticated_client):
     assert "edit-credential-form" in html
     assert "Leave blank to keep current value" in html
     assert "submitEditCredential" in html
-    assert "/api/credentials/entries" in html
+    # API wiring lives in the externalized static JS now.
+    assert "/static/js/credentials.js" in html
 
 
 def test_connectors_directory_page_surfaces_mcp_import(authenticated_client):
