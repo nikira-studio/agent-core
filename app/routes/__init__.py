@@ -16,6 +16,7 @@ from app.routes.connectors import router as connector_router
 from app.routes.connectors import connector_types_router
 from app.routes.connectors import connector_compat_router
 from app.routes.connectors_page import router as connectors_page_router
+from app.routes.credentials_page import router as credentials_page_router
 from app.routes.users_page import router as users_page_router
 from app.routes.activity_page import router as activity_page_router
 from app.routes.audit_page import router as audit_page_router
@@ -48,6 +49,7 @@ __all__ = [
     "connector_types_router",
     "connector_compat_router",
     "connectors_page_router",
+    "credentials_page_router",
     "users_page_router",
     "activity_page_router",
     "audit_page_router",
