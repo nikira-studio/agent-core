@@ -65,6 +65,25 @@ function clearBindingTemplateFlag(el) {
   el.dataset.template = 'false';
 }
 
+function resetCreateBindingForm() {
+  const form = document.getElementById('create-binding-form');
+  if (form) form.reset();
+  const configEl = document.getElementById('binding-config');
+  if (configEl) {
+    configEl.value = '';
+    configEl.dataset.template = 'false';
+  }
+  const setupGroup = document.getElementById('binding-setup-group');
+  if (setupGroup) setupGroup.style.display = 'none';
+  const setupEl = document.getElementById('binding-setup');
+  if (setupEl) setupEl.innerHTML = '';
+  const recipe = document.getElementById('binding-recipe');
+  if (recipe) recipe.textContent = 'Choose a connector type to see the required credential and config fields.';
+  const credentialMode = document.getElementById('binding-credential-mode');
+  if (credentialMode) credentialMode.value = 'none';
+  toggleBindingCredentialMode(false);
+}
+
 function prefillBindingConfig(guidance) {
   const configEl = document.getElementById('binding-config');
   if (!configEl) return;
@@ -90,7 +109,17 @@ function renderBindingCredentialEditor(guidance) {
   const fields = Array.isArray(guidance?.credential_fields) ? guidance.credential_fields : [];
   if (!fields.length) {
     wrap.dataset.template = 'false';
-    wrap.innerHTML = '<div class="form-hint">This connector does not declare a credential payload. Use a stored credential if one exists.</div>';
+    const authType = String(guidance?.auth_type || 'none');
+    if (authType && authType !== 'none') {
+      wrap.innerHTML =
+        '<div class="form-group">' +
+          '<label>Credential Value</label>' +
+          '<input type="password" id="binding-new-credential-value" autocomplete="new-password" placeholder="Optional API key or token">' +
+        '</div>' +
+        '<div class="form-hint">This credential is optional. Leave credential mode set to No credential for public or unauthenticated access.</div>';
+      return;
+    }
+    wrap.innerHTML = '<div class="form-hint">This connector does not declare a credential payload.</div>';
     return;
   }
 
@@ -146,6 +175,8 @@ function updateBindingFormContext(defaultName) {
     }
     if (Array.isArray(guidance?.credential_fields) && guidance.credential_fields.length) {
       bits.push('Credential JSON fields: ' + guidance.credential_fields.join(', '));
+    } else if (guidance?.auth_type && guidance.auth_type !== 'none') {
+      bits.push('Credential optional');
     }
     if (Array.isArray(guidance?.config_fields) && guidance.config_fields.length) {
       bits.push('Config JSON fields: ' + guidance.config_fields.join(', '));
@@ -204,37 +235,60 @@ function updateBindingFormContext(defaultName) {
   prefillBindingConfig(guidance);
 }
 
+function defaultCredentialModeForGuidance(guidance) {
+  if (!bindingCredentialRequired(guidance)) return 'none';
+  return Array.isArray(guidance?.credential_fields) && guidance.credential_fields.length > 1 ? 'new' : 'existing';
+}
+
+function bindingConnectorTypeChanged() {
+  const credentialMode = document.getElementById('binding-credential-mode');
+  const guidance = parseBindingGuidance();
+  if (credentialMode) credentialMode.value = defaultCredentialModeForGuidance(guidance);
+  updateBindingFormContext();
+  toggleBindingCredentialMode(false);
+}
+
+function bindingCredentialRequired(guidance) {
+  if (guidance && guidance.credential_required === true) return true;
+  return Array.isArray(guidance?.credential_fields) && guidance.credential_fields.length > 0;
+}
+
 async function createBinding(e) {
   e.preventDefault();
   let credentialId = document.getElementById('binding-credential').value || null;
   const credentialMode = document.getElementById('binding-credential-mode').value;
   const bindingScope = document.getElementById('binding-scope').value;
   const guidance = parseBindingGuidance();
+  const requiredCredentialFields = Array.isArray(guidance?.credential_fields) ? guidance.credential_fields : [];
+  const credentialRequired = bindingCredentialRequired(guidance);
 
-  if (credentialMode === 'new') {
+  if (credentialMode === 'none') {
+    credentialId = null;
+  } else if (credentialMode === 'new') {
     const credentialName = document.getElementById('binding-new-credential-name').value;
-    const credentialValue = document.getElementById('binding-new-credential-value').value;
+    const credentialValueEl = document.getElementById('binding-new-credential-value');
+    const credentialValue = credentialValueEl ? credentialValueEl.value : '';
     if (!bindingScope) {
       showToast('Select a scope before creating a credential', 'danger');
       return;
     }
     if (!credentialName || !credentialValue) {
-      showToast('Credential name and secret value are required', 'danger');
+      showToast(credentialRequired ? 'Credential name and secret value are required' : 'Enter a credential value or choose No credential', 'danger');
       return;
     }
     const existingCredential = findMatchingCredentialOption(credentialName, bindingScope);
     if (existingCredential) {
       credentialId = existingCredential.value;
     } else {
-      if ((guidance.credential_fields || []).length > 1) {
+      if (requiredCredentialFields.length > 1) {
         let parsed = null;
         try {
           parsed = JSON.parse(credentialValue);
         } catch (err) {
-          showToast('Enter valid JSON for ' + guidance.credential_fields.join(', '), 'danger');
+          showToast('Enter valid JSON for ' + requiredCredentialFields.join(', '), 'danger');
           return;
         }
-        const missing = (guidance.credential_fields || []).filter(function(field) {
+        const missing = requiredCredentialFields.filter(function(field) {
           return parsed[field] === undefined || parsed[field] === null || parsed[field] === '';
         });
         if (missing.length) {
@@ -262,8 +316,8 @@ async function createBinding(e) {
     }
   }
 
-  if ((guidance.credential_fields || []).length && !credentialId) {
-    showToast('This adapter needs a credential for: ' + guidance.credential_fields.join(', '), 'danger');
+  if (credentialRequired && !credentialId) {
+    showToast('This adapter needs a credential for: ' + requiredCredentialFields.join(', '), 'danger');
     return;
   }
 
@@ -314,11 +368,11 @@ async function createBinding(e) {
   }
 }
 
-function toggleBindingCredentialMode() {
+function toggleBindingCredentialMode(refreshContext) {
   const mode = document.getElementById('binding-credential-mode').value;
   document.getElementById('binding-existing-credential-fields').style.display = mode === 'existing' ? '' : 'none';
   document.getElementById('binding-new-credential-fields').style.display = mode === 'new' ? '' : 'none';
-  updateBindingFormContext();
+  if (refreshContext !== false) updateBindingFormContext();
 }
 
 async function editBinding(id) {
@@ -490,6 +544,7 @@ function escapeHtml(s) {
 }
 
 function openNewBinding(typeId, defaultName) {
+  resetCreateBindingForm();
   const el = document.getElementById('binding-connector-type');
   if (el) {
     el.value = typeId;
@@ -497,11 +552,31 @@ function openNewBinding(typeId, defaultName) {
   updateBindingFormContext(defaultName);
   const guidance = parseBindingGuidance();
   const credentialMode = document.getElementById('binding-credential-mode');
-  if (credentialMode && Array.isArray(guidance?.credential_fields) && guidance.credential_fields.length > 1) {
-    credentialMode.value = 'new';
-  }
-  toggleBindingCredentialMode();
+  if (credentialMode) credentialMode.value = defaultCredentialModeForGuidance(guidance);
+  toggleBindingCredentialMode(false);
   openModal('create-binding-modal');
+}
+
+function focusBinding(bindingId) {
+  const row = document.querySelector('[data-binding-id="' + CSS.escape(String(bindingId)) + '"]');
+  if (!row) return;
+  row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  row.classList.add('row-highlight');
+  setTimeout(function() {
+    row.classList.remove('row-highlight');
+  }, 1800);
+}
+
+function focusConnectorBindings(connectorTypeId) {
+  const rows = document.querySelectorAll('[data-connector-type-id="' + CSS.escape(String(connectorTypeId)) + '"]');
+  if (!rows.length) return;
+  rows[0].scrollIntoView({ behavior: 'smooth', block: 'center' });
+  rows.forEach(function(row) {
+    row.classList.add('row-highlight');
+    setTimeout(function() {
+      row.classList.remove('row-highlight');
+    }, 1800);
+  });
 }
 
 let importSpecPreviewState = null;
@@ -893,4 +968,3 @@ window[window.AGENT_CORE_WINDOW_EVENT || "onAgentCoreEvent"] = function(event) {
     if (el) el.remove();
   }, 4000);
 };
-

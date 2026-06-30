@@ -1,0 +1,324 @@
+{
+  "spec_version": "1.0",
+  "id": "worldmonitor",
+  "display_name": "WorldMonitor",
+  "version": "1.0.0",
+  "author": "agent-core team",
+  "description": "WorldMonitor REST API connector for read-only global intelligence, conflict, markets, supply-chain, cyber, natural events, and news data. Configure each binding with the base URL of the target WorldMonitor instance.",
+  "setup": {
+    "instructions": "Connect Agent Core to a WorldMonitor instance.\n\n1. Run or choose a WorldMonitor deployment with its /api routes reachable from Agent Core.\n2. Create the binding with base_url set to the WorldMonitor origin only, for example https://worldmonitor.example.com. Do not include a trailing /api path; each action appends its own path.\n3. API key is optional for public endpoints. For premium/API-gated endpoints, provide a WorldMonitor user key or operator-issued key as api_key; the connector sends it in the X-WorldMonitor-Key header.\n4. To create an unauthenticated public binding, omit the credential and set config auth_mode to none.\n\nAgent Core validates outbound URLs. Private, loopback, and Docker-internal hosts may require the Agent Core internal-host allowlist before they can be used as base_url values.",
+    "documentation_url": "https://github.com/koala73/worldmonitor"
+  },
+  "credential_schema": {
+    "fields": [
+      {
+        "name": "api_key",
+        "type": "string",
+        "secret": true,
+        "required": false,
+        "description": "Optional WorldMonitor user or operator-issued API key for the configured instance. Sent as X-WorldMonitor-Key when provided."
+      }
+    ]
+  },
+  "requires": {
+    "config": [
+      "base_url"
+    ]
+  },
+  "actions": [
+    {
+      "name": "get_version",
+      "description": "Return the WorldMonitor build version for the configured instance.",
+      "side_effect": "read",
+      "input_schema": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "get_platform_health",
+      "description": "Return WorldMonitor platform and seed-data health status.",
+      "side_effect": "read",
+      "input_schema": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "list_acled_events",
+      "description": "List armed conflict events from ACLED, optionally filtered by epoch-millisecond time range and ISO 3166-1 alpha-2 country code.",
+      "side_effect": "read",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "start": {
+            "type": "string",
+            "description": "Inclusive start time as Unix epoch milliseconds."
+          },
+          "end": {
+            "type": "string",
+            "description": "Inclusive end time as Unix epoch milliseconds."
+          },
+          "page_size": {
+            "type": "integer",
+            "description": "Maximum events to return, usually 1-100."
+          },
+          "cursor": {
+            "type": "string",
+            "description": "Pagination cursor returned by a previous response."
+          },
+          "country": {
+            "type": "string",
+            "description": "Optional ISO 3166-1 alpha-2 country code."
+          }
+        }
+      }
+    },
+    {
+      "name": "list_cyber_threats",
+      "description": "List cyber threat indicators, optionally filtered by time range, type, source, and pagination cursor.",
+      "side_effect": "read",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "start": {
+            "type": "string",
+            "description": "Inclusive start time as Unix epoch milliseconds."
+          },
+          "end": {
+            "type": "string",
+            "description": "Inclusive end time as Unix epoch milliseconds."
+          },
+          "page_size": {
+            "type": "integer",
+            "description": "Maximum threats to return, usually 1-100."
+          },
+          "cursor": {
+            "type": "string",
+            "description": "Pagination cursor returned by a previous response."
+          },
+          "type": {
+            "type": "string",
+            "description": "Optional threat type filter."
+          },
+          "source": {
+            "type": "string",
+            "description": "Optional source filter."
+          }
+        }
+      }
+    },
+    {
+      "name": "get_country_risk",
+      "description": "Get composite risk intelligence for a country.",
+      "side_effect": "read",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "country_code": {
+            "type": "string",
+            "description": "ISO 3166-1 alpha-2 country code."
+          }
+        }
+      }
+    },
+    {
+      "name": "get_country_intel_brief",
+      "description": "Generate or fetch a strategic intelligence brief for a country.",
+      "side_effect": "read",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "country_code": {
+            "type": "string",
+            "description": "ISO 3166-1 alpha-2 country code."
+          },
+          "framework": {
+            "type": "string",
+            "description": "Optional analytical framework instructions."
+          }
+        }
+      }
+    },
+    {
+      "name": "list_market_quotes",
+      "description": "List default stock and index quotes from WorldMonitor market data.",
+      "side_effect": "read",
+      "input_schema": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "get_fear_greed_index",
+      "description": "Get the composite market Fear & Greed sentiment index.",
+      "side_effect": "read",
+      "input_schema": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "get_chokepoint_status",
+      "description": "Get current supply-chain chokepoint status and maritime disruption indicators.",
+      "side_effect": "read",
+      "input_schema": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "list_natural_events",
+      "description": "List recent natural-disaster events.",
+      "side_effect": "read",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "days": {
+            "type": "integer",
+            "description": "Lookback window in days."
+          }
+        }
+      }
+    },
+    {
+      "name": "list_feed_digest",
+      "description": "List pre-aggregated news feed digest entries for a site variant and language.",
+      "side_effect": "read",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "variant": {
+            "type": "string",
+            "description": "Digest variant, such as full, tech, finance, happy, or commodity."
+          },
+          "lang": {
+            "type": "string",
+            "description": "ISO 639-1 language code."
+          }
+        }
+      }
+    }
+  ],
+  "backend": {
+    "type": "http",
+    "base_url": {
+      "from": "config",
+      "field": "base_url"
+    },
+    "auth": {
+      "type": "api_key",
+      "name": "X-WorldMonitor-Key",
+      "location": "header"
+    },
+    "test_action": "get_version",
+    "requests": {
+      "get_version": {
+        "method": "GET",
+        "path": "/api/version",
+        "header_params": {
+          "User-Agent": "Agent-Core WorldMonitor Connector/1.0"
+        }
+      },
+      "get_platform_health": {
+        "method": "GET",
+        "path": "/api/health",
+        "header_params": {
+          "User-Agent": "Agent-Core WorldMonitor Connector/1.0"
+        }
+      },
+      "list_acled_events": {
+        "method": "GET",
+        "path": "/api/conflict/v1/list-acled-events",
+        "query_params": {
+          "start": "{{ params.start | default('', as=omit) }}",
+          "end": "{{ params.end | default('', as=omit) }}",
+          "page_size": "{{ params.page_size | default('', as=omit) }}",
+          "cursor": "{{ params.cursor | default('', as=omit) }}",
+          "country": "{{ params.country | default('', as=omit) }}"
+        },
+        "header_params": {
+          "User-Agent": "Agent-Core WorldMonitor Connector/1.0"
+        }
+      },
+      "list_cyber_threats": {
+        "method": "GET",
+        "path": "/api/cyber/v1/list-cyber-threats",
+        "query_params": {
+          "start": "{{ params.start | default('', as=omit) }}",
+          "end": "{{ params.end | default('', as=omit) }}",
+          "page_size": "{{ params.page_size | default('', as=omit) }}",
+          "cursor": "{{ params.cursor | default('', as=omit) }}",
+          "type": "{{ params.type | default('', as=omit) }}",
+          "source": "{{ params.source | default('', as=omit) }}"
+        },
+        "header_params": {
+          "User-Agent": "Agent-Core WorldMonitor Connector/1.0"
+        }
+      },
+      "get_country_risk": {
+        "method": "GET",
+        "path": "/api/intelligence/v1/get-country-risk",
+        "query_params": {
+          "country_code": "{{ params.country_code | default('', as=omit) }}"
+        },
+        "header_params": {
+          "User-Agent": "Agent-Core WorldMonitor Connector/1.0"
+        }
+      },
+      "get_country_intel_brief": {
+        "method": "GET",
+        "path": "/api/intelligence/v1/get-country-intel-brief",
+        "query_params": {
+          "country_code": "{{ params.country_code | default('', as=omit) }}",
+          "framework": "{{ params.framework | default('', as=omit) }}"
+        },
+        "header_params": {
+          "User-Agent": "Agent-Core WorldMonitor Connector/1.0"
+        }
+      },
+      "list_market_quotes": {
+        "method": "GET",
+        "path": "/api/market/v1/list-market-quotes",
+        "header_params": {
+          "User-Agent": "Agent-Core WorldMonitor Connector/1.0"
+        }
+      },
+      "get_fear_greed_index": {
+        "method": "GET",
+        "path": "/api/market/v1/get-fear-greed-index",
+        "header_params": {
+          "User-Agent": "Agent-Core WorldMonitor Connector/1.0"
+        }
+      },
+      "get_chokepoint_status": {
+        "method": "GET",
+        "path": "/api/supply-chain/v1/get-chokepoint-status",
+        "header_params": {
+          "User-Agent": "Agent-Core WorldMonitor Connector/1.0"
+        }
+      },
+      "list_natural_events": {
+        "method": "GET",
+        "path": "/api/natural/v1/list-natural-events",
+        "query_params": {
+          "days": "{{ params.days | default('', as=omit) }}"
+        },
+        "header_params": {
+          "User-Agent": "Agent-Core WorldMonitor Connector/1.0"
+        }
+      },
+      "list_feed_digest": {
+        "method": "GET",
+        "path": "/api/news/v1/list-feed-digest",
+        "query_params": {
+          "variant": "{{ params.variant | default('', as=omit) }}",
+          "lang": "{{ params.lang | default('', as=omit) }}"
+        },
+        "header_params": {
+          "User-Agent": "Agent-Core WorldMonitor Connector/1.0"
+        }
+      }
+    }
+  }
+}

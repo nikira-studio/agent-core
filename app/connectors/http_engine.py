@@ -318,6 +318,10 @@ class HttpEngine(BaseConnector):
     def _apply_auth(
         self, req: dict, credential: Credential, session, config: Optional[dict] = None
     ) -> None:
+        if isinstance(config, dict) and config.get("auth_mode") == "none":
+            return
+        if not credential:
+            return
         auth = self.spec.get("auth", {})
         auth_type = auth.get("type")
         if auth_type == "api_key":

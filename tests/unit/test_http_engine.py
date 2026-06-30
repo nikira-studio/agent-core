@@ -308,6 +308,22 @@ class TestHttpEngineAuth:
         engine._apply_auth(req, cred, {})
         assert req["headers"]["Authorization"] == "Bearer fallback-token"
 
+    def test_apply_auth_skips_when_credential_missing(self):
+        engine = HttpEngine(
+            make_ct(
+                {
+                    "auth": {
+                        "type": "api_key",
+                        "name": "X-Token",
+                        "location": "header",
+                    },
+                }
+            )
+        )
+        req = {"headers": {}, "url": "http://example.com"}
+        engine._apply_auth(req, None, {}, {})
+        assert "X-Token" not in req["headers"]
+
 
 # ─── Session Capture ──────────────────────────────────────────────────────────
 

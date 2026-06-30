@@ -101,6 +101,71 @@ class TestConnectorActionsSchema:
         assert len(result["tools"]) == 1
         assert result["tools"][0]["name"] == "call_endpoint"
 
+    def test_optional_credential_http_connector_runs_without_credential(
+        self, clean_db, monkeypatch
+    ):
+        from app.connectors.http_engine import HttpEngine
+        from app.services import connector_service
+
+        connector_service.create_connector_type(
+            connector_type_id="optional_credential_http",
+            display_name="Optional Credential HTTP",
+            provider_type="builtin",
+            auth_type="api_key",
+            supported_actions=[
+                {
+                    "name": "ping",
+                    "description": "Ping",
+                    "side_effect": "read",
+                    "input_schema": {"type": "object", "properties": {}},
+                }
+            ],
+            required_credential_fields=[],
+            backend_type="http",
+            backend_json=json.dumps(
+                {
+                    "base_url": {"from": "config", "field": "base_url"},
+                    "auth": {
+                        "type": "api_key",
+                        "name": "X-Test-Key",
+                        "location": "header",
+                    },
+                    "requests": {
+                        "ping": {
+                            "method": "GET",
+                            "path": "/ping",
+                        }
+                    },
+                }
+            ),
+        )
+        binding = connector_service.create_binding(
+            connector_type_id="optional_credential_http",
+            name="optional-credential-http",
+            scope="workspace:test",
+            config_json='{"base_url": "https://example.test"}',
+        )
+
+        sent = []
+
+        def fake_send(self, req, config):
+            sent.append(req)
+            return object()
+
+        monkeypatch.setattr(HttpEngine, "_send", fake_send)
+        monkeypatch.setattr(HttpEngine, "_raise_on_errors", lambda self, resp, cred: None)
+        monkeypatch.setattr(
+            HttpEngine,
+            "_extract",
+            lambda self, resp, request_def, config: {"success": True, "status": 200},
+        )
+
+        result = connector_service.execute_binding_action(binding["id"], "ping", {})
+
+        assert result["success"] is True
+        assert sent[0]["url"] == "https://example.test/ping"
+        assert "X-Test-Key" not in sent[0]["headers"]
+
     def test_connector_types_have_backend_type_column(self, clean_db):
         from app.database import get_db
 

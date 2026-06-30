@@ -441,6 +441,17 @@ def _build_executor_config(binding: dict, connector_type: dict) -> str:
     return json.dumps(config) if config else None
 
 
+def _connector_requires_credential(connector_type: dict, config: dict | None = None) -> bool:
+    if connector_type.get("auth_type") == "none":
+        return False
+    if isinstance(config, dict) and config.get("auth_mode") == "none":
+        return False
+    required_fields = connector_type.get("required_credential_fields")
+    if isinstance(required_fields, list):
+        return bool(required_fields)
+    return connector_type.get("auth_type") != "none"
+
+
 def _mcp_tools_from_snapshot(
     connector_type_id: str,
     snapshot_json: Optional[str],
@@ -763,10 +774,7 @@ def build_capability_summary(
                     credential_readable = enforcer.can_read(credential_scope)
 
             binding_config = _parse_json_object(binding.get("config_json")) or {}
-            auth_overridden = binding_config.get("auth_mode") == "none"
-            auth_required = (
-                connector_type.get("auth_type") != "none" and not auth_overridden
-            )
+            auth_required = _connector_requires_credential(connector_type, binding_config)
             credential_ready = (not auth_required) or credential_present
             usable = (
                 bool(binding.get("enabled"))
@@ -1020,8 +1028,7 @@ def execute_binding_action(
 
     binding_with_cred = get_binding_with_credential(binding_id)
     cred = binding_with_cred.get("credential")
-    auth_overridden = binding_config.get("auth_mode") == "none"
-    if connector_type.get("auth_type") != "none" and not cred and not auth_overridden:
+    if _connector_requires_credential(connector_type, binding_config) and not cred:
         return {
             "success": False,
             "error": "No credential linked to this binding",

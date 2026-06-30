@@ -57,10 +57,13 @@ def _binding_guidance_for_connector_type(
 
     display_name = ct.get("display_name") or ct.get("id") or "Binding"
     setup = (adapter_entry or {}).get("setup") or {}
+    auth_type = ct.get("auth_type") or "none"
     return {
         "suggested_binding_name": display_name,
         "suggested_credential_name": f"{display_name} credentials",
         "credential_fields": credential_fields,
+        "credential_required": bool(credential_fields),
+        "auth_type": auth_type,
         "config_fields": config_fields,
         "setup_instructions": setup.get("instructions") or "",
         "documentation_url": setup.get("documentation_url") or "",
@@ -181,7 +184,7 @@ def _render_adapter_cards(adapter_entries: list[dict], ctx) -> str:
           </div>
           <div class='connector-type-footer' style="margin-top:auto; display:flex; flex-direction:column; gap:8px; align-items:stretch;">
             <div style="display:flex;align-items:center;gap:0.4rem;">{state_badge}</div>
-            <div style="display:flex;gap:0.4rem;align-items:center;justify-content:flex-end;">
+            <div class="connector-card-actions">
               {action_btn}
             </div>
           </div>
@@ -347,7 +350,7 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
                 f"onclick='authorizeBindingOAuth(\"{b['id']}\")'>{oauth_label}</button>"
             )
         bindings_rows += f"""
-        <tr data-binding-id="{b["id"]}">
+        <tr data-binding-id="{b["id"]}" data-connector-type-id="{escape_html(b.get("connector_type_id", ""))}">
           <td style="{text_style}">{escape_html(b.get("name", ""))}</td>
           <td style="{text_style}">{escape_html(ct.get("display_name", "") if ct else b.get("connector_type_id", ""))}</td>
           <td style="{text_style}"><code>{escape_html(b.get("scope", ""))}</code></td>
@@ -423,7 +426,8 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
             if action_count
             else ""
         )
-        binding_action_line = f"{binding_counts.get(ct['id'], 0)} binding(s)"
+        binding_count = binding_counts.get(ct["id"], 0)
+        binding_action_line = f"Bindings: {binding_count}"
         if action_count:
             binding_action_line += (
                 f" &middot; {enabled_action_count}/{action_count} actions"
@@ -469,12 +473,12 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
             {binding_recipe_line}
           </div>
           <div class='connector-type-footer' style="margin-top:auto; display:flex; flex-direction:column; gap:8px; align-items:stretch;">
-            <div style="display:flex;align-items:center;gap:0.4rem;">{type_chip}{health_badge}{adapter_badges}</div>
-            <div style="display:flex;gap:0.4rem;align-items:center;justify-content:flex-end;">
+            <div style="display:flex;align-items:center;gap:0.4rem;min-width:0;overflow:hidden;">{type_chip}{health_badge}{adapter_badges}</div>
+            <div class="connector-card-actions">
               {view_actions_btn}
-              <button type='button' class='btn btn-sm btn-secondary' onclick='openNewBinding("{ct["id"]}", "{escape_html(ct["display_name"])}")'>Bind</button>
+              <button type='button' class='btn btn-sm btn-secondary' onclick='openNewBinding("{ct["id"]}", "{escape_html(ct["display_name"])}")'>Add Binding</button>
               {update_btn}
-              <button type='button' class='btn btn-sm btn-danger icon-delete-btn' onclick='deleteConnectorType("{ct["id"]}")' title='{ "Uninstall adapter" if adapter_installed else "Delete connector type" }' aria-label='{ "Uninstall adapter" if adapter_installed else "Delete connector type" }'>{ "Uninstall" if adapter_installed else get_icon("delete") }</button>
+              <button type='button' class='btn btn-sm btn-danger icon-delete-btn' onclick='deleteConnectorType("{ct["id"]}")' title='{ "Uninstall adapter" if adapter_installed else "Delete connector type" }' aria-label='{ "Uninstall adapter" if adapter_installed else "Delete connector type" }'>{get_icon("delete")}</button>
             </div>
           </div>
         </div>"""
@@ -557,7 +561,7 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
         <form id="create-binding-form" onsubmit="createBinding(event)">
           <div class="form-group">
             <label>Connector Type *</label>
-            <select id="binding-connector-type" required onchange="updateBindingFormContext()">
+            <select id="binding-connector-type" required onchange="bindingConnectorTypeChanged()">
               <option value="">-- Select --</option>
               {connector_type_opts}
             </select>
@@ -583,6 +587,7 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
           <div class="form-group">
             <label>Credential</label>
             <select id="binding-credential-mode" onchange="toggleBindingCredentialMode()">
+              <option value="none">No credential</option>
               <option value="existing">Use stored credential</option>
               <option value="new">Create new credential</option>
             </select>
@@ -845,7 +850,7 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
     </div>
     """
 
-    extra_js = '<script src="/static/js/connectors.js?v=20260626"></script>'
+    extra_js = '<script src="/static/js/connectors.js?v=20260630"></script>'
     return render_page("Connectors", body, "/connectors", extra_js, session=session)
 
 

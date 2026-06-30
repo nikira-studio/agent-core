@@ -177,7 +177,7 @@ def render_page(
     <link rel="icon" type="image/png" sizes="16x16" href="/static/img/favicon/favicon-16x16.png">
     <link rel="apple-touch-icon" sizes="180x180" href="/static/img/favicon/apple-touch-icon.png">
     <link rel="manifest" href="/static/img/favicon/site.webmanifest">
-    <link rel="stylesheet" href="/static/css/dashboard.css?v=20260523d">
+    <link rel="stylesheet" href="/static/css/dashboard.css?v=20260630">
 </head>
 <body>
 <div class="{layout_class}">
