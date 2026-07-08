@@ -1,5 +1,4 @@
-"""Memory dashboard page. Split from dashboard.py — see
-private/dashboard-split-plan.md."""
+"""Memory dashboard page."""
 
 from fastapi import APIRouter, Request, Depends
 

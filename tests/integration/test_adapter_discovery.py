@@ -5,6 +5,7 @@ import tempfile
 from pathlib import Path
 
 
+from app.adapter_paths import SYSTEM_ADAPTER_DIR
 from app.connectors.manifest import load_and_validate
 
 
@@ -197,9 +198,7 @@ class TestAdapterDiscovery:
 
 class TestManifestLoaderIntegration:
     def test_load_and_validate_transmission_manifest(self):
-        path = Path(
-            "/srv/docker-data/projects/Apps/agent-core/data/adapters/transmission/adapter.json"
-        )
+        path = SYSTEM_ADAPTER_DIR / "transmission" / "adapter.json"
         m, err = load_and_validate(path)
         assert err is None, f"Expected no error, got: {err}"
         assert m is not None
@@ -211,9 +210,7 @@ class TestManifestLoaderIntegration:
         assert "remove_torrent" in action_names
 
     def test_all_transmission_actions_have_side_effect(self):
-        path = Path(
-            "/srv/docker-data/projects/Apps/agent-core/data/adapters/transmission/adapter.json"
-        )
+        path = SYSTEM_ADAPTER_DIR / "transmission" / "adapter.json"
         m, err = load_and_validate(path)
         assert err is None
         for action in m.actions:

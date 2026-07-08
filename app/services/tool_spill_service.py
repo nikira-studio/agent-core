@@ -12,10 +12,14 @@ connector_oauth_states pattern (no separate scheduler).
 """
 
 import json
+import logging
 import secrets
 from datetime import datetime, timedelta, timezone
 
 from app.database import get_db
+from app.security.encryption import decrypt_value, encrypt_value
+
+logger = logging.getLogger(__name__)
 
 
 def _now() -> datetime:
@@ -69,6 +73,11 @@ def spill(agent_id: str | None, tool: str | None, content: str, ttl_hours: int) 
     handle = secrets.token_urlsafe(16)
     total_chars = len(content)
     expires_at = (_now() + timedelta(hours=ttl_hours)).isoformat() if ttl_hours > 0 else None
+    # Spilled payloads can contain data returned by an authenticated external API
+    # (e.g. a connectors_run response), so encrypt the body at rest with the same
+    # Fernet keyring used for credentials. total_chars stays the plaintext length
+    # so the caller's paging math is unaffected.
+    stored_content = encrypt_value(content)
     with get_db() as conn:
         cleanup_expired(conn)
         conn.execute(
@@ -77,7 +86,7 @@ def spill(agent_id: str | None, tool: str | None, content: str, ttl_hours: int) 
                 (id, agent_id, tool, content, total_chars, expires_at)
             VALUES (?, ?, ?, ?, ?, ?)
             """,
-            (handle, agent_id, tool, content, total_chars, expires_at),
+            (handle, agent_id, tool, stored_content, total_chars, expires_at),
         )
     summary = _summarize(content)
     return {
@@ -118,10 +127,17 @@ def fetch(handle: str, offset: int, limit: int, agent_id: str | None = None) -> 
     if row is None:
         return None
 
-    total = row["total_chars"]
+    try:
+        content = decrypt_value(row["content"])
+    except Exception:
+        # Tolerate any legacy/plaintext row written before content was encrypted.
+        logger.warning("tool_result_spill %s content could not be decrypted; using raw", handle)
+        content = row["content"]
+
+    total = len(content)
     offset = max(0, offset)
     limit = max(1, limit)
-    chunk = row["content"][offset : offset + limit]
+    chunk = content[offset : offset + limit]
     next_offset = offset + len(chunk)
     return {
         "handle": handle,

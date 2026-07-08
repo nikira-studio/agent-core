@@ -12,7 +12,10 @@ from pathlib import Path
 from app.adapter_paths import SYSTEM_ADAPTER_DIR, get_user_adapter_dir
 from app.connectors.manifest import Manifest, load_and_validate
 from app.database import get_db
-from app.security.dangerous_pattern_scanner import validate_adapter_source
+from app.security.dangerous_pattern_scanner import (
+    validate_adapter_source,
+    validate_cli_bin,
+)
 from app.services import connector_service
 
 logger = logging.getLogger(__name__)
@@ -158,6 +161,10 @@ def _dangerous_scan_if_needed(manifest_json: str, manifest: Manifest) -> None:
         raise AdapterInstallError(
             f"Dangerous patterns detected in {manifest.id}: {dangerous_patterns}"
         )
+    if backend_type == "cli":
+        ok, reason = validate_cli_bin(manifest.backend.get("bin", ""))
+        if not ok:
+            raise AdapterInstallError(f"{manifest.id}: {reason}")
 
 
 def _seed_unavailable(manifest: Manifest) -> None:
@@ -668,6 +675,36 @@ def install_from_git(source: str, adapters_dir: Path | None = None) -> str:
             raise AdapterInstallError(
                 f"Dangerous patterns detected in {adapter_id}: {dangerous_patterns}"
             )
+
+        # The whole repo rides along on copytree, so scan every text file in the
+        # clone, not just adapter.json — dangerous content elsewhere would still
+        # land in the user adapter dir. Skip .git internals and undecodable
+        # binaries.
+        for file_path in sorted(tmp_path.rglob("*")):
+            if not file_path.is_file() or ".git" in file_path.parts:
+                continue
+            try:
+                file_content = file_path.read_text()
+            except (OSError, UnicodeDecodeError):
+                continue
+            is_safe, dangerous_patterns = validate_adapter_source(file_content)
+            if not is_safe:
+                rel = file_path.relative_to(tmp_path)
+                raise AdapterInstallError(
+                    f"Dangerous patterns detected in {adapter_id} ({rel}): "
+                    f"{dangerous_patterns}"
+                )
+
+        # A CLI adapter names a local binary to execute; reject shells/interpreters.
+        try:
+            manifest_data = json.loads(adapter_json_content)
+        except json.JSONDecodeError:
+            manifest_data = {}
+        backend = manifest_data.get("backend") or {}
+        if isinstance(backend, dict) and backend.get("type") == "cli":
+            ok, reason = validate_cli_bin(backend.get("bin", ""))
+            if not ok:
+                raise AdapterInstallError(f"{adapter_id}: {reason}")
 
         adapter_target_dir = adapters_dir / adapter_id
         shutil.copytree(tmp_path, adapter_target_dir, dirs_exist_ok=True)

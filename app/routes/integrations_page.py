@@ -1,7 +1,7 @@
 """Integrations dashboard page and agent-setup/connection generators.
 
 Last feature area split out of the former dashboard.py monolith
-(see private/dashboard-split-plan.md); dashboard.py no longer exists.
+dashboard.py no longer exists.
 """
 
 from fastapi import APIRouter, Request, Depends
@@ -20,6 +20,15 @@ from app.routes.dashboard_shared import (
 
 router = APIRouter()
 
+
+# Shared memory-discipline guidance interpolated into every generated agent
+# prompt (CLAUDE.md, AGENTS.md, session prompt, assistant onboarding). The
+# specific rules come from observed failures: three different live agents
+# independently wrote one fact/decision record PER monitor tick / watchdog
+# refire / idle heartbeat (140+ near-duplicate records) because the generic
+# "no routine progress" rule didn't register for records they classified as
+# "findings". This block names that failure mode explicitly.
+MEMORY_DISCIPLINE_GUIDANCE = """One memory per insight, not per occurrence: when a recurring task (heartbeat, monitor tick, scheduled review, watchdog retry) keeps producing the same finding, write ONE record the first time and supersede it if the situation changes — never a new record per tick, per fire, or per re-check. Per-occurrence status belongs in `activity_update` (`task_note`/`task_result`) or the source system, not in memory. Before writing a `fact` or `decision`, search for an existing record on the same topic and supersede it (`supersedes_id`) instead of adding a near-duplicate. For notes that stop being true on their own (for example "service X is down right now"), use `scratchpad` or set `expires_at`."""
 
 
 # ─── INTEGRATIONS ─────────────────────────────────────────────────────────────
@@ -941,6 +950,7 @@ You are connected to {APP_NAME}.
 - Use `{workspace_scope_label}` for workspace memory when a workspace is selected, `{user_scope}` for stable user preferences, and `{agent_scope}` for private scratch context.
 - Domain and topic are optional exact-match search filters. Add them only when they will help future retrieval.
 - Confidence is caller-assigned and can be filtered by search; importance affects result ranking.
+- {MEMORY_DISCIPLINE_GUIDANCE}
 
 ## Credentials And Connectors
 
@@ -1076,7 +1086,8 @@ Write memory only when it will help a future session:
 - `preference` in the authenticated/default user scope only if your key has user-scope write; otherwise treat the user scope as read-only owner context and write the preference to `{default_scope}` instead.
 - `scratchpad` in `{agent_scope}` for temporary private notes, or in `{default_scope}` only for short-lived workspace handoff notes.
 
-Do not write memory for routine progress, command output, facts already obvious from files, secrets, raw credentials, or noisy transient debugging notes. Use concise content, add domain/topic when useful for exact filtering, set confidence to match certainty, and set importance higher only for information likely to matter later.
+Do not write memory for routine progress, command output, facts already obvious from files, secrets, raw credentials, or noisy transient debugging notes.
+{MEMORY_DISCIPLINE_GUIDANCE} Use concise content, add domain/topic when useful for exact filtering, set confidence to match certainty, and set importance higher only for information likely to matter later.
 Use this prompt to bootstrap behavior in clients without lifecycle hooks; it is not a substitute for a configured MCP server or plugin.
 
 Start by confirming you can reach {APP_NAME} at {base_url}/mcp, then search `{default_scope}` for relevant context before making changes.
@@ -1130,6 +1141,7 @@ Write memory only when it will help a future session:
 - `scratchpad` in the authenticated private agent scope for temporary private notes, or in `{default_scope}` only for short-lived workspace handoff notes.
 
 Do not write memory for routine progress, command output, facts already obvious from files, secrets, raw credentials, or noisy transient debugging notes.
+{MEMORY_DISCIPLINE_GUIDANCE}
 
 Keep memory content concise. Add domain/topic when useful for exact filtering. Set confidence to match certainty. Set importance higher only for information likely to matter later.
 
@@ -1250,6 +1262,7 @@ Write memory only when it will help a future session:
 - `scratchpad` in the authenticated private agent scope for temporary private notes, or in `{default_scope}` only for short-lived workspace handoff notes.
 
 Do not write memory for routine progress, command output, facts already obvious from files, secrets, raw credentials, or noisy transient debugging notes.
+{MEMORY_DISCIPLINE_GUIDANCE}
 
 Keep memory content concise. Add domain/topic when useful for exact filtering. Set confidence to match certainty. Set importance higher only for information likely to matter later.
 
@@ -1394,6 +1407,7 @@ Write memory only when it will help a future session:
 - To revise a `fact` or `decision`, write the new record with `supersedes_id` set to the prior record's id; reserve `memory_retract` for records that are simply wrong.
 
 Do not write memory for routine progress, command output, facts already obvious from files, secrets, raw credentials, or noisy transient debugging notes.
+{MEMORY_DISCIPLINE_GUIDANCE}
 
 When a task may require an external service, credential, API token, repository host, chat service, browser service, or Composio-style connector, check {APP_NAME} before asking the user for setup details.
 

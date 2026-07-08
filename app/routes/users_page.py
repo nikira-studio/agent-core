@@ -1,5 +1,4 @@
-"""Users dashboard page (admin-only). Split from dashboard.py — see
-private/dashboard-split-plan.md."""
+"""Users dashboard page (admin-only)."""
 
 import json
 

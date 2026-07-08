@@ -97,6 +97,51 @@ def test_integrations_generates_claude_md(integrations_client):
     assert "Agent ID:" not in output
 
 
+def test_all_generated_prompts_include_memory_discipline_guidance():
+    """Every generated agent artifact must carry the anti-repetition memory
+    rule ("one memory per insight, not per occurrence"). Added after three
+    different live agents each wrote one fact/decision record per monitor
+    tick / watchdog refire / idle heartbeat (140+ near-duplicates), because
+    the generic "no routine progress" line didn't cover findings-shaped
+    repetition."""
+    from app.routes.integrations_page import (
+        MEMORY_DISCIPLINE_GUIDANCE,
+        _build_agents_md,
+        _build_assistants_md,
+        _build_claude_md,
+        _build_instructions,
+        _build_session_prompt,
+    )
+
+    needle = "One memory per insight, not per occurrence"
+    assert needle in MEMORY_DISCIPLINE_GUIDANCE
+
+    outputs = {
+        "instructions": _build_instructions(
+            "claude_code", "http://x", "user:u", "workspace:w", "agent:a",
+            "Agent", "User", "ws",
+        ),
+        "session_prompt": _build_session_prompt(
+            "claude_code", "http://x", "user:u", "workspace:w", "agent:a",
+            "Agent", "User", "ws",
+        ),
+        "claude_md": _build_claude_md(
+            "http://x", "user:u", "workspace:w", "agent:a", "Agent", "ws"
+        ),
+        "agents_md": _build_agents_md(
+            "http://x", "user:u", "workspace:w", "agent:a", "ws"
+        ),
+        "assistants_md": _build_assistants_md(
+            "http://x", "user:u", "workspace:w", "agent:a"
+        ),
+    }
+    for name, output in outputs.items():
+        assert needle in output, f"{name} is missing the memory-discipline guidance"
+        assert "{MEMORY_DISCIPLINE_GUIDANCE}" not in output, (
+            f"{name} has an unresolved placeholder"
+        )
+
+
 def test_integrations_generates_env_vars(integrations_client):
     r = integrations_client.get(
         "/integrations?user_id=brian&workspace_id=agent-core&agent_id=claude-code&target=claude_code&output_type=env"

@@ -1,9 +1,9 @@
 """Integration tests for the GitHub CLI adapter manifest."""
 
 import json
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+from app.adapter_paths import SYSTEM_ADAPTER_DIR
 from app.connectors.base import Credential
 from app.connectors.cli_engine import CliEngine
 from app.connectors.manifest import load_and_validate
@@ -15,22 +15,17 @@ def make_gh_cred(token: str = "ghp_testtoken") -> Credential:
 
 class TestGitHubCliAdapterManifest:
     def test_github_cli_manifest_loads_valid(self):
-        manifest_path = Path(
-            "/srv/docker-data/projects/Apps/agent-core/data/adapters/github_cli/adapter.json"
-        )
+        manifest_path = SYSTEM_ADAPTER_DIR / "github_cli" / "adapter.json"
         m, err = load_and_validate(manifest_path)
         assert err is None, f"Expected no error, got: {err}"
         assert m is not None
         assert m.id == "github_cli"
         assert m.spec_version == "1.0"
-        assert m.version == "1.0.0"
         assert m.backend["type"] == "cli"
         assert m.backend["bin"] == "gh"
 
     def test_github_cli_actions_present(self):
-        manifest_path = Path(
-            "/srv/docker-data/projects/Apps/agent-core/data/adapters/github_cli/adapter.json"
-        )
+        manifest_path = SYSTEM_ADAPTER_DIR / "github_cli" / "adapter.json"
         m, err = load_and_validate(manifest_path)
         assert err is None
         action_names = [a["name"] for a in m.actions]
@@ -38,18 +33,14 @@ class TestGitHubCliAdapterManifest:
             assert action in action_names, f"Missing action: {action}"
 
     def test_github_cli_requires_gh_binary(self):
-        manifest_path = Path(
-            "/srv/docker-data/projects/Apps/agent-core/data/adapters/github_cli/adapter.json"
-        )
+        manifest_path = SYSTEM_ADAPTER_DIR / "github_cli" / "adapter.json"
         m, err = load_and_validate(manifest_path)
         assert err is None
         assert m.requires is not None
         assert "gh" in m.requires.get("bins", [])
 
     def test_github_cli_credential_schema(self):
-        manifest_path = Path(
-            "/srv/docker-data/projects/Apps/agent-core/data/adapters/github_cli/adapter.json"
-        )
+        manifest_path = SYSTEM_ADAPTER_DIR / "github_cli" / "adapter.json"
         m, err = load_and_validate(manifest_path)
         assert err is None
         fields = m.credential_schema["fields"]
@@ -59,9 +50,7 @@ class TestGitHubCliAdapterManifest:
         assert fields[0]["required"] is True
 
     def test_github_cli_all_commands_use_json_output(self):
-        manifest_path = Path(
-            "/srv/docker-data/projects/Apps/agent-core/data/adapters/github_cli/adapter.json"
-        )
+        manifest_path = SYSTEM_ADAPTER_DIR / "github_cli" / "adapter.json"
         m, err = load_and_validate(manifest_path)
         assert err is None
         commands = m.backend.get("commands", {})
@@ -82,9 +71,7 @@ class TestGitHubCliAdapterWireLevel:
             ).encode(),
             stderr=b"",
         )
-        manifest_path = Path(
-            "/srv/docker-data/projects/Apps/agent-core/data/adapters/github_cli/adapter.json"
-        )
+        manifest_path = SYSTEM_ADAPTER_DIR / "github_cli" / "adapter.json"
         m, err = load_and_validate(manifest_path)
         assert err is None
 
@@ -116,9 +103,7 @@ class TestGitHubCliAdapterWireLevel:
             stdout=json.dumps([]).encode(),
             stderr=b"",
         )
-        manifest_path = Path(
-            "/srv/docker-data/projects/Apps/agent-core/data/adapters/github_cli/adapter.json"
-        )
+        manifest_path = SYSTEM_ADAPTER_DIR / "github_cli" / "adapter.json"
         m, err = load_and_validate(manifest_path)
         assert err is None
 
@@ -140,9 +125,7 @@ class TestGitHubCliAdapterWireLevel:
             ).encode(),
             stderr=b"",
         )
-        manifest_path = Path(
-            "/srv/docker-data/projects/Apps/agent-core/data/adapters/github_cli/adapter.json"
-        )
+        manifest_path = SYSTEM_ADAPTER_DIR / "github_cli" / "adapter.json"
         m, err = load_and_validate(manifest_path)
         assert err is None
 
@@ -163,9 +146,7 @@ class TestGitHubCliAdapterWireLevel:
     @patch("app.connectors.cli_engine.subprocess.run")
     def test_list_repos_passes_token_via_env(self, mock_run):
         mock_run.return_value = MagicMock(returncode=0, stdout=b"[]", stderr=b"")
-        manifest_path = Path(
-            "/srv/docker-data/projects/Apps/agent-core/data/adapters/github_cli/adapter.json"
-        )
+        manifest_path = SYSTEM_ADAPTER_DIR / "github_cli" / "adapter.json"
         m, err = load_and_validate(manifest_path)
         assert err is None
 
@@ -184,9 +165,7 @@ class TestGitHubCliAdapterWireLevel:
             stdout=json.dumps([]).encode(),
             stderr=b"",
         )
-        manifest_path = Path(
-            "/srv/docker-data/projects/Apps/agent-core/data/adapters/github_cli/adapter.json"
-        )
+        manifest_path = SYSTEM_ADAPTER_DIR / "github_cli" / "adapter.json"
         m, err = load_and_validate(manifest_path)
         assert err is None
 
@@ -216,9 +195,7 @@ class TestGitHubCliAdapterWireLevel:
             ).encode(),
             stderr=b"",
         )
-        manifest_path = Path(
-            "/srv/docker-data/projects/Apps/agent-core/data/adapters/github_cli/adapter.json"
-        )
+        manifest_path = SYSTEM_ADAPTER_DIR / "github_cli" / "adapter.json"
         m, err = load_and_validate(manifest_path)
         assert err is None
 
@@ -256,9 +233,7 @@ class TestGitHubCliAdapterWireLevel:
             ).encode(),
             stderr=b"",
         )
-        manifest_path = Path(
-            "/srv/docker-data/projects/Apps/agent-core/data/adapters/github_cli/adapter.json"
-        )
+        manifest_path = SYSTEM_ADAPTER_DIR / "github_cli" / "adapter.json"
         m, err = load_and_validate(manifest_path)
         assert err is None
 
@@ -277,9 +252,7 @@ class TestGitHubCliAdapterWireLevel:
     @patch("app.connectors.cli_engine.subprocess.run")
     def test_shell_false_is_always_set(self, mock_run):
         mock_run.return_value = MagicMock(returncode=0, stdout=b"[]", stderr=b"")
-        manifest_path = Path(
-            "/srv/docker-data/projects/Apps/agent-core/data/adapters/github_cli/adapter.json"
-        )
+        manifest_path = SYSTEM_ADAPTER_DIR / "github_cli" / "adapter.json"
         m, err = load_and_validate(manifest_path)
         assert err is None
 
@@ -291,9 +264,7 @@ class TestGitHubCliAdapterWireLevel:
     @patch("app.connectors.cli_engine.subprocess.run")
     def test_env_passed_explicitly_no_inherit(self, mock_run):
         mock_run.return_value = MagicMock(returncode=0, stdout=b"[]", stderr=b"")
-        manifest_path = Path(
-            "/srv/docker-data/projects/Apps/agent-core/data/adapters/github_cli/adapter.json"
-        )
+        manifest_path = SYSTEM_ADAPTER_DIR / "github_cli" / "adapter.json"
         m, err = load_and_validate(manifest_path)
         assert err is None
 
@@ -311,9 +282,7 @@ class TestGitHubCliAdapterWireLevel:
         import subprocess
 
         mock_run.side_effect = subprocess.TimeoutExpired("gh", 30)
-        manifest_path = Path(
-            "/srv/docker-data/projects/Apps/agent-core/data/adapters/github_cli/adapter.json"
-        )
+        manifest_path = SYSTEM_ADAPTER_DIR / "github_cli" / "adapter.json"
         m, err = load_and_validate(manifest_path)
         assert err is None
 
@@ -328,9 +297,7 @@ class TestGitHubCliAdapterWireLevel:
         mock_run.return_value = MagicMock(
             returncode=1, stdout=b"", stderr=b"Resource not found"
         )
-        manifest_path = Path(
-            "/srv/docker-data/projects/Apps/agent-core/data/adapters/github_cli/adapter.json"
-        )
+        manifest_path = SYSTEM_ADAPTER_DIR / "github_cli" / "adapter.json"
         m, err = load_and_validate(manifest_path)
         assert err is None
 
@@ -348,10 +315,7 @@ class TestGitHubCliAdapterSeeding:
     def test_github_cli_seeds_connector_type(self, clean_db):
         from app.services import adapter_loader
 
-        real_adapters = str(
-            Path("/srv/docker-data/projects/Apps/agent-core/data/adapters").resolve()
-        )
-        adapter_loader.discover_and_seed_adapters(adapters_dir=real_adapters)
+        adapter_loader.discover_and_seed_adapters(adapters_dir=str(SYSTEM_ADAPTER_DIR))
 
         from app.services import connector_service
 

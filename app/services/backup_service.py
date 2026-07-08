@@ -739,7 +739,37 @@ def run_startup_checks() -> list[dict]:
     return issues
 
 
-def run_scheduled_maintenance() -> dict:
+_MAINTENANCE_LOCK_KEY = "maintenance_lock_until"
+
+
+def try_acquire_maintenance_lock(lease_seconds: int = 120) -> bool:
+    """Best-effort lease lock so that multiple uvicorn worker processes sharing
+    one SQLite file (production runs --workers 4 by default) don't all run the
+    scheduled sweep on the same tick — each worker has its own independent
+    scheduler task, since the lifespan hook runs once per process.
+
+    Only meant to gate the *automatic* scheduled run (see
+    scheduler_service._run_once). The manual "Run Maintenance" button is a
+    deliberate human action, not redundant background noise, so it always
+    runs regardless of this lock.
+    """
+    now_iso = utc_now_iso()
+    lease_until_iso = (utc_now() + timedelta(seconds=lease_seconds)).isoformat()
+    with get_db() as conn:
+        conn.execute(
+            "INSERT OR IGNORE INTO system_settings (key, value) VALUES (?, ?)",
+            (_MAINTENANCE_LOCK_KEY, "1970-01-01T00:00:00+00:00"),
+        )
+        cursor = conn.execute(
+            "UPDATE system_settings SET value = ?, updated_at = CURRENT_TIMESTAMP "
+            "WHERE key = ? AND value < ?",
+            (lease_until_iso, _MAINTENANCE_LOCK_KEY, now_iso),
+        )
+        conn.commit()
+        return cursor.rowcount > 0
+
+
+def run_scheduled_maintenance(triggered_by: str = "manual") -> dict:
     from app.services.activity_service import mark_stale_activities
 
     stale_count = mark_stale_activities()
@@ -766,8 +796,17 @@ def run_scheduled_maintenance() -> dict:
             if row["created_at"] and parse_utc_datetime(row["created_at"]) < cutoff
         ]
         if delete_ids:
+            placeholders = ",".join("?" for _ in delete_ids)
+            # memory_embeddings.record_id has a FK to memory_records(id) with
+            # foreign_keys=ON (see database.py), so embedded scratchpad rows
+            # must be cleared first or the DELETE below raises IntegrityError.
+            # This mirrors the TTL sweep below, which already does this correctly.
+            conn.execute(
+                f"DELETE FROM memory_embeddings WHERE record_id IN ({placeholders})",
+                delete_ids,
+            )
             cursor = conn.execute(
-                f"DELETE FROM memory_records WHERE id IN ({','.join('?' for _ in delete_ids)})",
+                f"DELETE FROM memory_records WHERE id IN ({placeholders})",
                 delete_ids,
             )
         else:
@@ -815,4 +854,116 @@ def run_scheduled_maintenance() -> dict:
             details={"deleted_count": ttl_deleted},
         )
 
-    return {"stale_activities_marked": stale_count, "scratchpad_pruned": pruned, "ttl_swept": ttl_deleted}
+    # Hard-delete retracted/superseded records past their grace period. These
+    # are no longer the active truth and (per design) aren't meant to be read
+    # again in normal operation -- see get_memory_by_scope's record_status
+    # default -- but nothing previously reclaimed them, so they accumulated
+    # forever. status_changed_at (not created_at) is the cutoff basis: an old
+    # record retracted five minutes ago must still get its full grace period,
+    # not be immediately purge-eligible because it happens to be old.
+    retracted_retention_days = 30
+    try:
+        with get_db() as conn:
+            row = conn.execute(
+                "SELECT value FROM system_settings WHERE key = 'retracted_retention_days'"
+            ).fetchone()
+            if row:
+                retracted_retention_days = int(row["value"])
+    except Exception:
+        pass
+
+    retracted_cutoff = utc_now() - timedelta(days=retracted_retention_days)
+    with get_db() as conn:
+        rows = conn.execute(
+            "SELECT id, status_changed_at FROM memory_records "
+            "WHERE record_status IN ('retracted', 'superseded')"
+        ).fetchall()
+        purge_ids = [
+            row["id"]
+            for row in rows
+            if row["status_changed_at"]
+            and parse_utc_datetime(row["status_changed_at"]) < retracted_cutoff
+        ]
+        if purge_ids:
+            placeholders = ",".join("?" for _ in purge_ids)
+            conn.execute(
+                f"DELETE FROM memory_embeddings WHERE record_id IN ({placeholders})",
+                purge_ids,
+            )
+            cursor = conn.execute(
+                f"DELETE FROM memory_records WHERE id IN ({placeholders})",
+                purge_ids,
+            )
+            purged = cursor.rowcount
+        else:
+            purged = 0
+        conn.commit()
+
+    if purged > 0:
+        audit_service.write_event(
+            actor_type="system",
+            actor_id="maintenance",
+            action="retracted_records_purged",
+            result="success",
+            details={
+                "deleted_count": purged,
+                "retention_days": retracted_retention_days,
+            },
+        )
+
+    result = {
+        "stale_activities_marked": stale_count,
+        "scratchpad_pruned": pruned,
+        "ttl_swept": ttl_deleted,
+        "retracted_purged": purged,
+    }
+
+    # Record last-run status so it's visible (Settings page, status endpoint)
+    # without digging through the audit log — a silently-broken or never-wired
+    # scheduler should be obvious at a glance, not discoverable only by noticing
+    # memory records piling up.
+    now_iso = utc_now_iso()
+    with get_db() as conn:
+        for key, value in (
+            ("maintenance_last_run_at", now_iso),
+            ("maintenance_last_run_by", triggered_by),
+            ("maintenance_last_run_summary_json", json.dumps(result)),
+        ):
+            conn.execute(
+                """
+                INSERT INTO system_settings (key, value, updated_at)
+                VALUES (?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP
+                """,
+                (key, value),
+            )
+        conn.commit()
+
+    return result
+
+
+def get_maintenance_status() -> dict:
+    """Last-run info plus the configured automatic schedule, for the Settings
+    page and a status API — the single place to check "is this actually
+    running" without querying the audit log or DB directly."""
+    with get_db() as conn:
+        rows = conn.execute(
+            "SELECT key, value FROM system_settings WHERE key IN "
+            "('maintenance_last_run_at', 'maintenance_last_run_by', 'maintenance_last_run_summary_json')"
+        ).fetchall()
+    values = {row["key"]: row["value"] for row in rows}
+
+    summary = None
+    if values.get("maintenance_last_run_summary_json"):
+        try:
+            summary = json.loads(values["maintenance_last_run_summary_json"])
+        except (json.JSONDecodeError, TypeError):
+            summary = None
+
+    return {
+        "last_run_at": values.get("maintenance_last_run_at"),
+        "last_run_by": values.get("maintenance_last_run_by"),
+        "last_run_summary": summary,
+        "scheduler_enabled": settings.MAINTENANCE_INTERVAL_MINUTES > 0,
+        "interval_minutes": settings.MAINTENANCE_INTERVAL_MINUTES,
+    }

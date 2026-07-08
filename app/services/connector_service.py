@@ -1028,7 +1028,10 @@ def execute_binding_action(
 
     binding_with_cred = get_binding_with_credential(binding_id)
     cred = binding_with_cred.get("credential")
-    if _connector_requires_credential(connector_type, binding_config) and not cred:
+    # `cred is None`, not `not cred`: Credential.__bool__ is keyed off `.raw`,
+    # which a resolved multi-field (basic/oauth2) credential can legitimately
+    # have falsy — that must still count as "a credential is linked".
+    if _connector_requires_credential(connector_type, binding_config) and cred is None:
         return {
             "success": False,
             "error": "No credential linked to this binding",

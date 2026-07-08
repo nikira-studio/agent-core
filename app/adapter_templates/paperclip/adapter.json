@@ -388,6 +388,9 @@
       "name": "get_run",
       "description": "Get a single heartbeat run by ID.",
       "side_effect": "read",
+      "param_aliases": {
+        "runId": "run_id"
+      },
       "input_schema": {
         "type": "object",
         "required": ["run_id"],
@@ -395,6 +398,10 @@
           "run_id": {
             "type": "string",
             "description": "Heartbeat run UUID."
+          },
+          "runId": {
+            "type": "string",
+            "description": "Alias for run_id."
           }
         }
       }

@@ -208,9 +208,19 @@ async def spec(
             },
         },
         {
+            "name": "activity_pickup",
+            "description": "Claim the next active work item assigned to this agent in authorized scopes",
+            "inputSchema": {},
+        },
+        {
             "name": "connectors_list",
             "description": "List installed connector types as lean summaries (no full specs); use connectors_actions_list for a type's actions",
             "inputSchema": {"limit": "integer?", "offset": "integer?"},
+        },
+        {
+            "name": "connectors_summary",
+            "description": "Summarize visible connector types, bindings, credentials, actions, and health state for the current caller",
+            "inputSchema": {"scope": "string?", "connector_type_id": "string?", "enabled_only": "boolean?"},
         },
         {
             "name": "connectors_actions_list",
@@ -241,6 +251,11 @@ async def spec(
             "name": "briefing_list",
             "description": "List generated briefings visible to the current agent or user",
             "inputSchema": {"agent_id": "string?", "limit": "integer?", "offset": "integer?"},
+        },
+        {
+            "name": "result_fetch",
+            "description": "Retrieve a slice of a previously offloaded large tool result by handle",
+            "inputSchema": {"handle": "string", "offset": "integer?", "limit": "integer?"},
         },
     ]
 

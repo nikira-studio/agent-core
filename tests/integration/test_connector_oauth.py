@@ -1,14 +1,14 @@
 import json
-from pathlib import Path
 from unittest.mock import MagicMock
 
+from app.adapter_paths import SYSTEM_ADAPTER_DIR
 from app.connectors.manifest import load_and_validate
 from app.services import connector_oauth_service, connector_service, credential_service
 
 
 def _install_gmail_connector():
     manifest, err = load_and_validate(
-        Path("/srv/docker-data/projects/Apps/agent-core/app/adapter_templates/google_workspace/adapter.json")
+        SYSTEM_ADAPTER_DIR / "google_workspace" / "adapter.json"
     )
     assert err is None
     row = manifest.to_connector_type_row()

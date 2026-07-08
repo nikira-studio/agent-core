@@ -51,12 +51,29 @@ def get_session_token(request: Request) -> str:
     return ""
 
 
-def set_session_cookie(response, session_id: str) -> None:
+def _request_is_https(request: Request | None) -> bool:
+    """True when the request reached us over HTTPS. Honors X-Forwarded-Proto only
+    from a configured trusted proxy (mirrors get_client_ip), else uses the
+    connection scheme."""
+    if request is None:
+        return False
+    if request.client and request.client.host in settings.trusted_proxy_list:
+        proto = (request.headers.get("x-forwarded-proto") or "").split(",")[0].strip().lower()
+        if proto:
+            return proto == "https"
+    return request.url.scheme == "https"
+
+
+def set_session_cookie(response, session_id: str, request: Request | None = None) -> None:
+    # Force Secure when explicitly configured, or automatically when the request
+    # is HTTPS — so an HTTPS deployment that forgot to set COOKIE_SECURE still
+    # gets a Secure session cookie instead of leaking it over plaintext.
+    secure = settings.COOKIE_SECURE or _request_is_https(request)
     response.set_cookie(
         key="session_token",
         value=session_id,
         httponly=True,
-        secure=settings.COOKIE_SECURE,
+        secure=secure,
         samesite="lax",
         path="/",
     )
@@ -162,7 +179,7 @@ async def register(body: RegisterRequest, request: Request):
     response = success_response({"user_id": user["id"], "role": user["role"]})
     if user_count == 0:
         session = create_session(user["id"], channel="dashboard", expiry_hours=settings.SESSION_DURATION_HOURS)
-        set_session_cookie(response, session["session_id"])
+        set_session_cookie(response, session["session_id"], request)
     return response
 
 
@@ -232,7 +249,7 @@ async def login(body: LoginRequest, request: Request):
     })
     
     if not otp_required:
-        set_session_cookie(response, session["session_id"])
+        set_session_cookie(response, session["session_id"], request)
     return response
 
 
@@ -354,7 +371,7 @@ async def otp_verify(body: OtpVerifyRequest, request: Request):
         "session_token": body.session_id,
         "user_id": session["user_id"],
     })
-    set_session_cookie(response, body.session_id)
+    set_session_cookie(response, body.session_id, request)
     return response
 
 

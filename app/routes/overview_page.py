@@ -1,5 +1,4 @@
-"""Overview dashboard page and global search. Split from dashboard.py — see
-private/dashboard-split-plan.md."""
+"""Overview dashboard page and global search."""
 
 from fastapi import APIRouter, Request, Depends
 from pydantic import BaseModel

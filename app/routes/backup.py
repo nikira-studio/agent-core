@@ -213,3 +213,8 @@ async def startup_checks(session: dict = Depends(require_admin)):
 async def run_maintenance(session: dict = Depends(require_admin)):
     result = backup_service.run_scheduled_maintenance()
     return success_response(result)
+
+
+@router.get("/maintenance/status")
+async def maintenance_status(session: dict = Depends(require_admin)):
+    return success_response(backup_service.get_maintenance_status())

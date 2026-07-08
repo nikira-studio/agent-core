@@ -1,5 +1,4 @@
-"""Agents dashboard page. Split from dashboard.py — see
-private/dashboard-split-plan.md."""
+"""Agents dashboard page."""
 
 import json
 

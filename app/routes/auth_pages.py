@@ -1,5 +1,4 @@
-"""Login / OTP / logout dashboard pages. Split from dashboard.py — see
-private/dashboard-split-plan.md."""
+"""Login / OTP / logout dashboard pages."""
 
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse

@@ -1,5 +1,4 @@
-"""Activity dashboard page. Split from dashboard.py — see
-private/dashboard-split-plan.md."""
+"""Activity dashboard page."""
 
 from collections import Counter
 

@@ -46,6 +46,9 @@ class TestMoveMemoryService:
         refreshed = memory_service.get_memory_record(old["id"])
         assert refreshed["record_status"] == "retracted"
         assert refreshed["superseded_by_id"] == new["id"]
+        # status_changed_at drives the maintenance purge's grace period, so it
+        # must reflect when the move happened, not be left NULL.
+        assert refreshed["status_changed_at"] is not None
         old_prov = json.loads(refreshed["provenance_json"])
         assert old_prov["moved_to"]["record_id"] == new["id"]
         assert old_prov["moved_to"]["scope"] == "workspace:dst"

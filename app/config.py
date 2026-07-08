@@ -28,6 +28,16 @@ class Settings(BaseSettings):
     TOOL_RESULT_SPILL_THRESHOLD: int = 8000
     # How long a spilled payload is retrievable via result_fetch before sweep.
     TOOL_RESULT_SPILL_TTL_HOURS: int = 24
+    # Automatic maintenance sweep (stale activities + scratchpad retention + memory
+    # TTL) runs in-process on this interval. This is what actually keeps memory
+    # from accumulating stale scratchpad/TTL'd records over time; without it,
+    # nothing prunes them unless an admin clicks "Run Maintenance" by hand. Set to
+    # 0 to disable the automatic scheduler (manual runs via the dashboard/API
+    # still work either way).
+    MAINTENANCE_INTERVAL_MINUTES: int = 60
+    # Delay before the first automatic run after app startup, so it doesn't
+    # contend with startup adapter sync and never fires during a fast test run.
+    MAINTENANCE_INITIAL_DELAY_SECONDS: int = 300
 
     @property
     def data_dir(self) -> Path:

@@ -26,7 +26,8 @@ MARKDOWN_HEADING = re.compile(r"^\s{0,3}#{1,6}\s+\S+")
 MEMORY_RECORD_COLUMNS = (
     "id, content, memory_class, scope, domain, topic, confidence, importance, "
     "source_kind, event_time, created_at, record_status, superseded_by_id, "
-    "supersedes_id, provenance_json, slot_key, valid_from, valid_to, last_confirmed_at, expires_at"
+    "supersedes_id, provenance_json, slot_key, valid_from, valid_to, last_confirmed_at, "
+    "expires_at, status_changed_at"
 )
 
 
@@ -262,8 +263,8 @@ def write_memory(
         if effective_supersedes_id:
             conn.execute(
                 "UPDATE memory_records SET record_status = 'superseded', "
-                "superseded_by_id = ? WHERE id = ? AND record_status = 'active'",
-                (record_id, effective_supersedes_id),
+                "superseded_by_id = ?, status_changed_at = ? WHERE id = ? AND record_status = 'active'",
+                (record_id, now, effective_supersedes_id),
             )
 
         conn.execute(
@@ -346,8 +347,9 @@ def get_memory_record(record_id: str) -> Optional[dict]:
 def retract_memory(record_id: str) -> bool:
     with get_db() as conn:
         cursor = conn.execute(
-            "UPDATE memory_records SET record_status = 'retracted' WHERE id = ? AND record_status = 'active'",
-            (record_id,),
+            "UPDATE memory_records SET record_status = 'retracted', status_changed_at = ? "
+            "WHERE id = ? AND record_status = 'active'",
+            (utc_now_iso(), record_id),
         )
         conn.commit()
         return cursor.rowcount > 0
@@ -452,9 +454,9 @@ def move_memory(
         )
         conn.execute(
             "UPDATE memory_records SET record_status = 'retracted', "
-            "superseded_by_id = ?, provenance_json = ? "
+            "superseded_by_id = ?, provenance_json = ?, status_changed_at = ? "
             "WHERE id = ? AND record_status = 'active'",
-            (new_id, old_provenance_json, old["id"]),
+            (new_id, old_provenance_json, now, old["id"]),
         )
         conn.commit()
 
@@ -474,7 +476,8 @@ def move_memory(
 def restore_memory(record_id: str) -> bool:
     with get_db() as conn:
         cursor = conn.execute(
-            "UPDATE memory_records SET record_status = 'active' WHERE id = ? AND record_status = 'retracted'",
+            "UPDATE memory_records SET record_status = 'active', status_changed_at = NULL "
+            "WHERE id = ? AND record_status = 'retracted'",
             (record_id,),
         )
         conn.commit()
@@ -577,11 +580,17 @@ def search_memory(
 
     fts_results: list[dict] = []
     if sanitized:
+        # Whole-table MATCH (not fts.content MATCH) so each query token can hit
+        # content, domain, OR topic — all three are indexed and trigger-maintained
+        # for exactly this purpose. Column-restricting to content made records
+        # unfindable by their own topic (e.g. topic="database", query "database"
+        # → zero results), breaking the documented "retry with exact topic
+        # values" recall workflow.
         sql = f"""
             SELECT mr.{MEMORY_RECORD_COLUMNS.replace(', ', ', mr.')}
             FROM memory_records mr
             JOIN memory_records_fts fts ON fts.rowid = mr.rowid
-            WHERE fts.content MATCH ? AND mr.scope IN ({scope_placeholders}){status_filter}{extra_sql}
+            WHERE memory_records_fts MATCH ? AND mr.scope IN ({scope_placeholders}){status_filter}{extra_sql}
             ORDER BY mr.importance DESC, mr.created_at DESC
             LIMIT ? OFFSET ?
         """
@@ -600,6 +609,15 @@ def search_memory(
     merged: list[dict] = []
     seen_ids = set()
     if retrieval_mode == "hybrid" and semantic_candidates:
+        # An FTS hit matched EVERY sanitized query token exactly (AND semantics)
+        # — a high-precision signal the ranking must respect. Without this floor,
+        # an FTS-only hit fell back to importance*0.5 (e.g. 0.15) and got buried
+        # below dozens of loosely-related semantic candidates, so exact
+        # topic/keyword lookups ("retry with exact topic values") missed records
+        # that matched the query perfectly. The floor slots exact matches above
+        # weak semantic hits while letting strong semantic scores still win.
+        fts_ids = {r["id"] for r in fts_results}
+        _EXACT_MATCH_FLOOR = 0.6
         for r in semantic_candidates:
             if r["id"] not in seen_ids:
                 merged.append(r)
@@ -608,17 +626,21 @@ def search_memory(
             if r["id"] not in seen_ids:
                 merged.append(r)
                 seen_ids.add(r["id"])
+
+        def _hybrid_score(x: dict) -> float:
+            score = (
+                x.get("_semantic_score", 0.0)
+                if "_semantic_score" in x
+                else (x.get("importance", 0.5) * 0.5)
+            )
+            if x["id"] in fts_ids:
+                score = max(score, _EXACT_MATCH_FLOOR)
+            return score + x.get("_freshness_score", 0.0)
+
         merged.sort(
             key=lambda x: (
                 _current_record_priority(x),
-                -(
-                    (
-                        x.get("_semantic_score", 0.0)
-                        if "_semantic_score" in x
-                        else (x.get("importance", 0.5) * 0.5)
-                    )
-                    + x.get("_freshness_score", 0.0)
-                ),
+                -_hybrid_score(x),
                 x.get("created_at", ""),
             )
         )
@@ -647,8 +669,14 @@ def get_memory_by_scope(
     offset: int = 0,
     record_status: Optional[str] = None,
 ) -> list[dict]:
+    """record_status=None (the default) means 'active' -- callers browsing a
+    scope should see current truth by default, not retracted/superseded
+    records mixed in silently. Pass record_status="all" to deliberately see
+    every status, or a specific status ("retracted", "superseded") to inspect
+    just that one."""
     normalized_scope = _normalize_scope(scope)
-    status_sql = " AND record_status = ?" if record_status else ""
+    effective_status = "active" if record_status is None else record_status
+    status_sql = "" if effective_status == "all" else " AND record_status = ?"
     expires_sql = " AND (expires_at IS NULL OR datetime(expires_at) > datetime('now'))"
     with get_db() as conn:
         rows = conn.execute(
@@ -661,7 +689,7 @@ def get_memory_by_scope(
             """,
             (
                 [normalized_scope]
-                + ([record_status] if record_status else [])
+                + ([effective_status] if status_sql else [])
                 + [limit, offset]
             ),
         ).fetchall()
@@ -674,12 +702,17 @@ def get_memory_by_scopes(
     offset: int = 0,
     record_status: Optional[str] = None,
 ) -> list[dict]:
+    """See get_memory_by_scope: record_status=None defaults to 'active'; pass
+    "all" to deliberately see every status."""
     if not scopes:
         return []
     placeholders = ",".join(["?" for _ in scopes])
-    status_sql = " AND record_status = ?" if record_status else ""
+    effective_status = "active" if record_status is None else record_status
+    status_sql = "" if effective_status == "all" else " AND record_status = ?"
     expires_sql = " AND (expires_at IS NULL OR datetime(expires_at) > datetime('now'))"
-    params: list = list(scopes) + ([record_status] if record_status else []) + [limit, offset]
+    params: list = (
+        list(scopes) + ([effective_status] if status_sql else []) + [limit, offset]
+    )
     with get_db() as conn:
         rows = conn.execute(
             f"""

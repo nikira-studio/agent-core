@@ -52,6 +52,40 @@ def test_backup_maintenance_requires_admin(test_client, agent_token):
     assert r.status_code in (401, 403)
 
 
+def test_maintenance_status_requires_admin(test_client, agent_token):
+    r = test_client.get(
+        "/api/backup/maintenance/status",
+        headers={"Authorization": f"Bearer {agent_token}"},
+    )
+    assert r.status_code in (401, 403)
+
+
+def test_maintenance_status_reflects_manual_run(test_client, admin_token):
+    r = test_client.get(
+        "/api/backup/maintenance/status",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["data"]["last_run_at"] is None
+
+    r = test_client.post(
+        "/api/backup/maintenance",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert r.status_code == 200, r.text
+
+    r = test_client.get(
+        "/api/backup/maintenance/status",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    data = r.json()["data"]
+    assert data["last_run_at"] is not None
+    assert data["last_run_by"] == "manual"
+    assert data["last_run_summary"]["stale_activities_marked"] == 0
+    assert "interval_minutes" in data
+    assert "scheduler_enabled" in data
+
+
 def test_backup_startup_checks(test_client, admin_token):
     r = test_client.get(
         "/api/backup/startup-checks",

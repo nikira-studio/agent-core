@@ -203,6 +203,58 @@ def test_memory_get(test_client, agent_token):
     assert len(r.json()["data"]["records"]) >= 1
 
 
+def test_memory_get_excludes_retracted_records_by_default(test_client, agent_token):
+    """Regression test: memory_get (and its underlying service functions) used
+    to apply no record_status filter at all when the caller omitted it, so a
+    plain memory_get(scope=...) silently mixed retracted/superseded records in
+    with active ones -- contradicting the tool's own documented behavior
+    ("list active records")."""
+    write_r = test_client.post(
+        "/api/memory/write",
+        headers={"Authorization": f"Bearer {agent_token}"},
+        json={
+            "content": "Retracted-by-default regression probe",
+            "memory_class": "fact",
+            "scope": "agent:testagent",
+        },
+    )
+    assert write_r.status_code == 201, write_r.json()
+    record_id = write_r.json()["data"]["record"]["id"]
+
+    retract_r = test_client.post(
+        f"/api/memory/retract?record_id={record_id}",
+        headers={"Authorization": f"Bearer {agent_token}"},
+    )
+    assert retract_r.status_code == 200, retract_r.json()
+
+    default_r = test_client.post(
+        "/api/memory/get",
+        headers={"Authorization": f"Bearer {agent_token}"},
+        json={"scope": "agent:testagent", "limit": 50},
+    )
+    assert default_r.status_code == 200
+    default_ids = {r["id"] for r in default_r.json()["data"]["records"]}
+    assert record_id not in default_ids, "retracted record leaked into the default (unfiltered) view"
+
+    all_r = test_client.post(
+        "/api/memory/get",
+        headers={"Authorization": f"Bearer {agent_token}"},
+        json={"scope": "agent:testagent", "limit": 50, "record_status": "all"},
+    )
+    assert all_r.status_code == 200
+    all_ids = {r["id"] for r in all_r.json()["data"]["records"]}
+    assert record_id in all_ids, "record_status='all' should still surface retracted records"
+
+    retracted_only_r = test_client.post(
+        "/api/memory/get",
+        headers={"Authorization": f"Bearer {agent_token}"},
+        json={"scope": "agent:testagent", "limit": 50, "record_status": "retracted"},
+    )
+    assert retracted_only_r.status_code == 200
+    retracted_ids = {r["id"] for r in retracted_only_r.json()["data"]["records"]}
+    assert record_id in retracted_ids
+
+
 def test_memory_search_scope_filter_limits_results(test_client, admin_token):
     user_r = test_client.post(
         "/api/memory/write",
@@ -369,6 +421,68 @@ def test_memory_retract(test_client, agent_token):
         headers={"Authorization": f"Bearer {agent_token}"},
     )
     assert r.status_code == 200
+
+
+def test_memory_retract_stamps_status_changed_at(clean_db):
+    from app.services.memory_service import write_memory, retract_memory, restore_memory
+    from app.database import get_db
+
+    record, _ = write_memory(
+        content="retraction timestamp probe",
+        memory_class="fact",
+        scope="agent:testagent",
+    )
+    record_id = record["id"]
+
+    with get_db() as conn:
+        before = conn.execute(
+            "SELECT status_changed_at FROM memory_records WHERE id = ?", (record_id,)
+        ).fetchone()["status_changed_at"]
+    assert before is None
+
+    assert retract_memory(record_id) is True
+
+    with get_db() as conn:
+        after = conn.execute(
+            "SELECT status_changed_at FROM memory_records WHERE id = ?", (record_id,)
+        ).fetchone()["status_changed_at"]
+    assert after is not None
+
+    assert restore_memory(record_id) is True
+
+    with get_db() as conn:
+        restored = conn.execute(
+            "SELECT status_changed_at, record_status FROM memory_records WHERE id = ?", (record_id,)
+        ).fetchone()
+    assert restored["record_status"] == "active"
+    assert restored["status_changed_at"] is None
+
+
+def test_memory_supersede_on_write_stamps_status_changed_at(clean_db):
+    from app.services.memory_service import write_memory
+    from app.database import get_db
+
+    original, _ = write_memory(
+        content="original preference",
+        memory_class="preference",
+        scope="agent:testagent",
+        slot_key="favorite-color",
+    )
+
+    write_memory(
+        content="updated preference",
+        memory_class="preference",
+        scope="agent:testagent",
+        slot_key="favorite-color",
+    )
+
+    with get_db() as conn:
+        row = conn.execute(
+            "SELECT record_status, status_changed_at FROM memory_records WHERE id = ?",
+            (original["id"],),
+        ).fetchone()
+    assert row["record_status"] == "superseded"
+    assert row["status_changed_at"] is not None
 
 
 def test_memory_retract_accepts_json_body_and_uses_correct_error_code(test_client, agent_token):

@@ -178,6 +178,7 @@ Agent or session authentication accepted, with scope enforcement on every operat
 | `POST` | `/api/memory/restore` | Restore a retracted record |
 | `GET` | `/api/memory/{record_id}` | Get one record |
 | `GET` | `/api/memory/{record_id}/chain` | Get the supersession chain for a record |
+| `DELETE` | `/api/memory/{record_id}` | Permanently delete a record and its embedding (unlike retract, this is not recoverable) |
 
 Write:
 ```json
@@ -424,6 +425,8 @@ If the connector and credential are enough on their own, leave `config_json` emp
 | `POST` | `/api/connectors/{binding_id}/run` | Agent/session | Alias of the line above (intuitive path for plug-in scripts) |
 | `GET` | `/api/connector-bindings/{binding_id}/tools` | Agent/session | List the actions exposed by this binding |
 | `GET` | `/api/connector-bindings/{binding_id}/executions` | Agent/session | List execution history for a binding |
+| `POST` | `/api/connector-bindings/{binding_id}/oauth/start` | Agent/session (write scope) | Begin the browser OAuth authorization flow for an oauth2 adapter binding; returns the provider authorization URL |
+| `GET` | `/api/connector-bindings/oauth/callback` | Session | OAuth redirect target; exchanges the authorization code and stores tokens on the binding's credential |
 
 ### Running a connector action directly over REST
 
@@ -601,6 +604,24 @@ Dispatch:
 | `connectors_actions_list` | List actions supported by a connector type |
 | `connectors_summary` | Summarize visible connector capability, binding, credential-presence, action, and health state |
 | `connectors_run` | Run one connector action server-side using a binding |
+| `result_fetch` | Retrieve a slice of a previously offloaded large tool result by handle |
+
+### Large tool results (offloading)
+
+When any MCP tool's output exceeds `AGENT_CORE_TOOL_RESULT_SPILL_THRESHOLD` characters (default 8000), the full payload is stored server-side (encrypted at rest) and the tool returns a compact envelope instead:
+
+```json
+{
+  "offloaded": true,
+  "handle": "abc123...",
+  "total_chars": 32732,
+  "expires_at": "2026-07-06T21:40:30Z",
+  "summary": {"preview": "...", "structure": "object", "top_level_keys": ["..."]},
+  "retrieve_with": {"tool": "result_fetch", "params": {"handle": "abc123...", "offset": 0, "limit": 4000}}
+}
+```
+
+Call `result_fetch` with the handle to read the full payload in chunks, following `next_offset` until `has_more` is false. Handles are scoped to the agent that made the original call and expire after `AGENT_CORE_TOOL_RESULT_SPILL_TTL_HOURS` (default 24h).
 
 ---
 
@@ -684,7 +705,10 @@ Session authentication required. These routes power the setup page that generate
 | `GET` | `/api/backup/export/credentials` | Session | Export credential metadata only (no raw values) |
 | `GET` | `/api/backup/export/audit?fmt=csv` | Admin | Export audit log as CSV |
 | `GET` | `/api/backup/startup-checks` | Admin | Run operational health checks |
-| `POST` | `/api/backup/maintenance` | Admin | Run maintenance (prune stale activity and scratchpad memory) |
+| `POST` | `/api/backup/maintenance` | Admin | Run maintenance now (mark stale activities, prune expired scratchpad memories, sweep `expires_at` TTL'd records, purge retracted/superseded records past retention) |
+| `GET` | `/api/backup/maintenance/status` | Admin | Last maintenance run time, trigger (scheduled/manual), result counts, and the automatic schedule |
+
+Maintenance also runs automatically on an interval (default every 60 minutes; see `AGENT_CORE_MAINTENANCE_INTERVAL_MINUTES` in [configuration](configuration.md)), so calling it manually is optional.
 
 Restore uses multipart form data:
 

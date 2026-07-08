@@ -127,7 +127,7 @@ Checks include:
 
 ## Maintenance
 
-Maintenance cleans up stale activity records and prunes old scratchpad memory. Run it periodically or on a schedule.
+Maintenance runs automatically in-process (default: every 60 minutes, first run 5 minutes after startup; see `AGENT_CORE_MAINTENANCE_INTERVAL_MINUTES` in [configuration](configuration.md)). You can also trigger it manually from **Settings → Backup & Restore** or the API:
 
 ```bash
 curl -X POST http://localhost:3500/api/backup/maintenance \
@@ -138,5 +138,7 @@ What it does:
 
 - Marks any activity record `stale` if its heartbeat has exceeded the stale threshold
 - Hard-deletes `scratchpad` memory records older than `scratchpad_retention_days` in system settings (default: 7 days)
+- Hard-deletes any memory record whose `expires_at` TTL has passed
+- Hard-deletes retracted and superseded memory records `retracted_retention_days` after they stopped being active (default: 30 days) — measured from retraction/supersession time, not creation time, so a fresh retraction always gets its full grace window to be restored first
 
-Pruned scratchpad records can't be recovered. All other memory classes (`fact`, `preference`, `decision`) are untouched.
+Deleted records can't be recovered. Active `fact`, `preference`, and `decision` records without an `expires_at` are never touched. The last run's time, trigger, and per-step counts are shown on the Settings page and at `GET /api/backup/maintenance/status`.

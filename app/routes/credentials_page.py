@@ -1,5 +1,4 @@
-"""Credentials dashboard page. Split from connectors_page.py — see
-private/dashboard-split-plan.md."""
+"""Credentials dashboard page."""
 
 from fastapi import APIRouter, Request, Depends
 

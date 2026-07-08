@@ -1,5 +1,4 @@
-"""Webhooks dashboard page. Split from dashboard.py — see
-private/dashboard-split-plan.md."""
+"""Webhooks dashboard page."""
 
 from fastapi import APIRouter, Request, Depends
 

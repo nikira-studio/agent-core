@@ -189,7 +189,9 @@ def verify(body: bytes, secret: str, header: str) -> bool:
     return hmac.compare_digest(expected, header)
 ```
 
-**Manual pruning.** Audit and activity history can be manually pruned by an admin from the dashboard using a cutoff date. This is an explicit maintenance action, not an automatic retention job, and it only deletes the targeted historical rows.
+**Manual pruning.** Audit and activity history can be manually pruned by an admin from the dashboard using a cutoff date. This is an explicit action that only deletes the targeted historical rows.
+
+**Automatic retention.** A built-in maintenance sweep (default: hourly) prunes expired scratchpad memories, TTL'd records, and retracted/superseded records past their retention window. Retention windows are configurable in **Settings → System Behavior**; the schedule is configurable via `AGENT_CORE_MAINTENANCE_INTERVAL_MINUTES` (set `0` to disable). Active fact/preference/decision records are never auto-deleted.
 
 ---
 

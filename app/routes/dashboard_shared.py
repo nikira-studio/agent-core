@@ -1,9 +1,7 @@
 """Shared dashboard helpers.
 
 Page rendering, auth, HTML escaping, and small formatting/pagination utilities
-used across the dashboard page modules. Extracted from dashboard.py so feature
-modules depend on this module rather than on a monolithic dashboard.py
-(see private/dashboard-split-plan.md).
+used across the dashboard page modules.
 """
 
 import json

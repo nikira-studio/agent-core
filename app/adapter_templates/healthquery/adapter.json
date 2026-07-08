@@ -1,0 +1,267 @@
+{
+  "spec_version": "1.0",
+  "id": "healthquery",
+  "display_name": "HealthQuery",
+  "version": "1.0.0",
+  "author": "agent-core team",
+  "description": "HealthQuery read API connector for a self-hosted personal health dashboard. Read sync status, overview/activity/sleep/vitals/body views, timelines, batches, operational config, guarded SQL query results, reports, and health Q&A. All actions are read-only.",
+  "setup": {
+    "instructions": "Connect Agent Core to a self-hosted HealthQuery install.\n\n1. Run HealthQuery and confirm its API is reachable: GET {base_url}/api/health returns 200.\n2. Use the HealthQuery read token, not the ingest token. The read token is HEALTHQUERY_READ_TOKEN in HealthQuery's api container environment.\n3. Create the binding:\n   - base_url: the HealthQuery service root only, e.g. https://health.example.com or http://healthquery-api:3136 if Agent Core shares the Docker network. Do NOT include /api/health or /api/reports; each action appends its own path.\n   - read_token: the HealthQuery read token. It is sent as a Bearer token.\n\nThe connector intentionally does not expose the ingest webhook or config update endpoint. Agent Core blocks private/loopback base_url values unless the host is on the internal-host allowlist.",
+    "documentation_url": "https://github.com/nikira-studio/healthquery"
+  },
+  "credential_schema": {
+    "fields": [
+      {
+        "name": "read_token",
+        "type": "string",
+        "secret": true,
+        "required": true,
+        "description": "HealthQuery read token (HEALTHQUERY_READ_TOKEN). Sent as a Bearer token."
+      }
+    ]
+  },
+  "requires": { "config": ["base_url"] },
+  "actions": [
+    {
+      "name": "get_health_check",
+      "description": "Check HealthQuery API liveness and database connectivity.",
+      "side_effect": "read",
+      "input_schema": { "type": "object", "properties": {} }
+    },
+    {
+      "name": "get_health_status",
+      "description": "Return HealthQuery sync status, last sync time, and database record counts.",
+      "side_effect": "read",
+      "input_schema": { "type": "object", "properties": {} }
+    },
+    {
+      "name": "get_health_overview",
+      "description": "Return HealthQuery overview dashboard data and latest health snapshot.",
+      "side_effect": "read",
+      "input_schema": { "type": "object", "properties": {} }
+    },
+    {
+      "name": "get_health_summary",
+      "description": "Return the summary view used by HealthQuery's overview dashboard.",
+      "side_effect": "read",
+      "input_schema": { "type": "object", "properties": {} }
+    },
+    {
+      "name": "get_health_activity",
+      "description": "Return daily activity summaries and workout data.",
+      "side_effect": "read",
+      "input_schema": { "type": "object", "properties": {} }
+    },
+    {
+      "name": "get_health_sleep",
+      "description": "Return sleep sessions, stages, and sleep summary data.",
+      "side_effect": "read",
+      "input_schema": { "type": "object", "properties": {} }
+    },
+    {
+      "name": "get_health_vitals",
+      "description": "Return vitals such as heart rate, resting heart rate, HRV, SpO2, temperature, respiratory rate, blood pressure, and glucose when present.",
+      "side_effect": "read",
+      "input_schema": { "type": "object", "properties": {} }
+    },
+    {
+      "name": "get_health_body",
+      "description": "Return body metrics such as weight, body fat, height, lean mass, bone mass, and body water when present.",
+      "side_effect": "read",
+      "input_schema": { "type": "object", "properties": {} }
+    },
+    {
+      "name": "get_health_timeline",
+      "description": "Return recent timeline events across HealthQuery categories.",
+      "side_effect": "read",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "days": {
+            "type": "integer",
+            "description": "Lookback window in days. HealthQuery defaults to 14."
+          }
+        }
+      }
+    },
+    {
+      "name": "get_health_batches",
+      "description": "Return recent ingest batch summaries.",
+      "side_effect": "read",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "integer",
+            "description": "Maximum number of recent batches to return. HealthQuery defaults to 10."
+          }
+        }
+      }
+    },
+    {
+      "name": "get_health_config",
+      "description": "Return non-secret operational read configuration, including report windows and whether an LLM is configured.",
+      "side_effect": "read",
+      "input_schema": { "type": "object", "properties": {} }
+    },
+    {
+      "name": "execute_health_query",
+      "description": "Execute a read-only SQL SELECT through HealthQuery's SQL guard. Results are capped by HealthQuery.",
+      "side_effect": "read",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "sql": {
+            "type": "string",
+            "description": "A single read-only SELECT statement accepted by HealthQuery's SQL guard."
+          }
+        },
+        "required": ["sql"]
+      }
+    },
+    {
+      "name": "generate_doctor_visit_report",
+      "description": "Generate HealthQuery's deterministic doctor-visit report for an optional date range.",
+      "side_effect": "read",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "start_date": {
+            "type": "string",
+            "description": "Optional inclusive start date as YYYY-MM-DD."
+          },
+          "end_date": {
+            "type": "string",
+            "description": "Optional inclusive end date as YYYY-MM-DD."
+          }
+        }
+      }
+    },
+    {
+      "name": "ask_health_question",
+      "description": "Ask HealthQuery's optional LLM-backed health assistant a question over an optional date range.",
+      "side_effect": "read",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "question": {
+            "type": "string",
+            "description": "Question to ask about the stored health data."
+          },
+          "start_date": {
+            "type": "string",
+            "description": "Optional inclusive start date as YYYY-MM-DD."
+          },
+          "end_date": {
+            "type": "string",
+            "description": "Optional inclusive end date as YYYY-MM-DD."
+          }
+        },
+        "required": ["question"]
+      }
+    }
+  ],
+  "backend": {
+    "type": "http",
+    "base_url": { "from": "config", "field": "base_url" },
+    "auth": { "type": "bearer" },
+    "test_action": "get_health_status",
+    "requests": {
+      "get_health_check": {
+        "method": "GET",
+        "path": "/api/health",
+        "response": { "success_when": "$.status >= 200 and $.status < 300" }
+      },
+      "get_health_status": {
+        "method": "GET",
+        "path": "/api/health/status",
+        "response": { "success_when": "$.status >= 200 and $.status < 300" }
+      },
+      "get_health_overview": {
+        "method": "GET",
+        "path": "/api/health/overview",
+        "response": { "success_when": "$.status >= 200 and $.status < 300" }
+      },
+      "get_health_summary": {
+        "method": "GET",
+        "path": "/api/health/summary",
+        "response": { "success_when": "$.status >= 200 and $.status < 300" }
+      },
+      "get_health_activity": {
+        "method": "GET",
+        "path": "/api/health/activity",
+        "response": { "success_when": "$.status >= 200 and $.status < 300" }
+      },
+      "get_health_sleep": {
+        "method": "GET",
+        "path": "/api/health/sleep",
+        "response": { "success_when": "$.status >= 200 and $.status < 300" }
+      },
+      "get_health_vitals": {
+        "method": "GET",
+        "path": "/api/health/vitals",
+        "response": { "success_when": "$.status >= 200 and $.status < 300" }
+      },
+      "get_health_body": {
+        "method": "GET",
+        "path": "/api/health/body",
+        "response": { "success_when": "$.status >= 200 and $.status < 300" }
+      },
+      "get_health_timeline": {
+        "method": "GET",
+        "path": "/api/health/timeline",
+        "query_params": {
+          "days": "{{ params.days | default('', as=omit) }}"
+        },
+        "response": { "success_when": "$.status >= 200 and $.status < 300" }
+      },
+      "get_health_batches": {
+        "method": "GET",
+        "path": "/api/health/batches",
+        "query_params": {
+          "limit": "{{ params.limit | default('', as=omit) }}"
+        },
+        "response": { "success_when": "$.status >= 200 and $.status < 300" }
+      },
+      "get_health_config": {
+        "method": "GET",
+        "path": "/api/health/config",
+        "response": { "success_when": "$.status >= 200 and $.status < 300" }
+      },
+      "execute_health_query": {
+        "method": "POST",
+        "path": "/api/health/query",
+        "body": {
+          "template": {
+            "sql": "{{ params.sql }}"
+          }
+        },
+        "response": { "success_when": "$.status >= 200 and $.status < 300" }
+      },
+      "generate_doctor_visit_report": {
+        "method": "POST",
+        "path": "/api/reports/doctor-visit",
+        "body": {
+          "template": {
+            "stream": false,
+            "start_date": "{{ params.start_date | default('', as=omit) }}",
+            "end_date": "{{ params.end_date | default('', as=omit) }}"
+          }
+        },
+        "response": { "success_when": "$.status >= 200 and $.status < 300" }
+      },
+      "ask_health_question": {
+        "method": "POST",
+        "path": "/api/reports/ask",
+        "body": {
+          "template": {
+            "question": "{{ params.question }}",
+            "start_date": "{{ params.start_date | default('', as=omit) }}",
+            "end_date": "{{ params.end_date | default('', as=omit) }}"
+          }
+        },
+        "response": { "success_when": "$.status >= 200 and $.status < 300" }
+      }
+    }
+  }
+}

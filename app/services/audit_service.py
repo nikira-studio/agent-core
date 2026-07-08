@@ -60,6 +60,7 @@ AUDIT_ACTIONS = (
     "audit_pruned",
     "scratchpad_pruned",
     "memory_ttl_swept",
+    "retracted_records_purged",
     "password_change",
     "otp_enrolled",
     "otp_disabled",

@@ -32,6 +32,26 @@ Never commit:
 - Agents receive `AC_SECRET_*` reference names, not plaintext credentials.
 - The local Credential Broker resolves references only after broker authentication and agent scope validation.
 - Backup ZIP files include both the database and credential key, so they are as sensitive as the running credential store.
+- Offloaded (spilled) large tool results are encrypted at rest with the credential keyring, since they can contain data returned by an authenticated external service.
+
+## CLI Adapter Trust Model
+
+A `cli` adapter runs a real local binary (`backend.bin`) with a fixed, non-shell
+argument vector. Agent Core refuses to install a CLI adapter whose `bin` is a
+shell or interpreter (`bash`, `sh`, `python`, `node`, `env`, …), because such a
+`bin` would turn a fixed argv into arbitrary code execution. This check is a
+guardrail, not a sandbox: installing a CLI adapter still means trusting it to run
+a program on the host. Only install CLI adapters you trust, and review the
+manifest's `bin`, `args`, and `env` before installing.
+
+## Outbound Request Filtering (SSRF)
+
+Server-side outbound calls (webhooks, OpenAPI/MCP import, HTTP connectors) run
+through a URL validator. Blocking of private, loopback, and link-local hosts is
+**opt-in** via `AC_BLOCK_INTERNAL_HOSTS=true`, because the local-first design
+routinely needs to reach `localhost` and Docker-network services. When enabled,
+use `AC_ALLOWED_INTERNAL_HOSTS` to allow specific internal hosts. Operators who
+expose Agent Core beyond a trusted host should enable internal-host blocking.
 
 Run a secret scan before publishing:
 

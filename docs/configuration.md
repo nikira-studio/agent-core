@@ -49,6 +49,17 @@ These control how long dashboard logins stay active.
 | `AGENT_CORE_TOOL_RESULT_SPILL_THRESHOLD` | `8000` | MCP tool outputs larger than this many serialized characters are stored in Agent Core and returned as a `result_fetch` handle. Set to `0` to disable spilling |
 | `AGENT_CORE_TOOL_RESULT_SPILL_TTL_HOURS` | `24` | How long spilled tool results remain retrievable before cleanup |
 
+---
+
+## Automatic Maintenance
+
+| Variable | Default | What it does |
+| --- | --- | --- |
+| `AGENT_CORE_MAINTENANCE_INTERVAL_MINUTES` | `60` | How often the in-process maintenance sweep runs: marks stale activities, prunes scratchpad memories past retention, sweeps `expires_at` TTL'd records, and purges retracted/superseded records past their retention window. Set to `0` to disable the automatic schedule — the manual **Run Maintenance** button in Settings still works |
+| `AGENT_CORE_MAINTENANCE_INITIAL_DELAY_SECONDS` | `300` | Delay before the first automatic run after startup |
+
+The scratchpad and retracted/superseded retention windows themselves (7 and 30 days by default) are configured from **Settings → System Behavior** in the dashboard. The last run's time, trigger, and results are shown in **Settings → Backup & Restore** and available from `GET /api/backup/maintenance/status`.
+
 **Vector search** — the embedding provider, endpoint URL, model, and auth type — is configured from **Settings → Vector Search** in the dashboard, not through environment variables. Semantic search is off by default. When it's disabled or the embedding backend is unreachable, Agent Core falls back to full-text search automatically.
 
 ---

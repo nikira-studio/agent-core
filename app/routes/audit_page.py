@@ -1,5 +1,4 @@
-"""Audit log dashboard page (admin-only). Split from dashboard.py — see
-private/dashboard-split-plan.md."""
+"""Audit log dashboard page (admin-only)."""
 
 import json
 from collections import Counter

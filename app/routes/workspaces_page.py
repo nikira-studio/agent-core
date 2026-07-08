@@ -1,5 +1,4 @@
-"""Workspaces (projects) dashboard page. Split from dashboard.py — see
-private/dashboard-split-plan.md."""
+"""Workspaces (projects) dashboard page."""
 
 from fastapi import APIRouter, Request, Depends
 

@@ -47,32 +47,25 @@ def test_spec_endpoint_allows_agent_discovery(test_client, agent_token):
 
 
 def test_spec_includes_all_mcp_tools(test_client, admin_token):
+    """The /spec capability listing must exactly match the MCP manifest.
+
+    Exact equality, not subset: a subset check let three tools
+    (activity_pickup, connectors_summary, result_fetch) ship in the MCP
+    manifest without ever appearing in /spec, so the "full capability spec"
+    silently under-reported capabilities."""
+    from app.routes.mcp import MANIFEST
+
     r = test_client.get(
         "/spec",
         headers={"Authorization": f"Bearer {admin_token}"},
     )
     assert r.status_code == 200
-    tools = r.json()["data"]["mcp_tools"]
-    tool_names = {t["name"] for t in tools}
-    expected = {
-        "memory_search",
-        "memory_get",
-        "memory_write",
-        "memory_retract",
-        "credential_get",
-        "credential_list",
-        "activity_update",
-        "activity_get",
-        "activity_list",
-        "connectors_list",
-        "connectors_actions_list",
-        "connectors_bindings_list",
-        "connectors_bindings_test",
-        "connectors_run",
-        "get_briefing",
-        "briefing_list",
-    }
-    assert expected.issubset(tool_names)
+    spec_tool_names = {t["name"] for t in r.json()["data"]["mcp_tools"]}
+    manifest_tool_names = {t["name"] for t in MANIFEST["tools"]}
+    assert spec_tool_names == manifest_tool_names, (
+        f"missing from /spec: {manifest_tool_names - spec_tool_names}; "
+        f"stale in /spec: {spec_tool_names - manifest_tool_names}"
+    )
 
 
 def test_spec_includes_connector_endpoints(test_client, admin_token):

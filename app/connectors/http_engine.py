@@ -320,7 +320,11 @@ class HttpEngine(BaseConnector):
     ) -> None:
         if isinstance(config, dict) and config.get("auth_mode") == "none":
             return
-        if not credential:
+        # `credential is None` here, NOT `not credential`: Credential.__bool__ is
+        # keyed off `.raw`, but basic/oauth2 auth is keyed off `.fields` and a
+        # resolved multi-field credential can legitimately have a falsy `.raw`.
+        # Gating on truthiness silently skipped auth for exactly those two types.
+        if credential is None:
             return
         auth = self.spec.get("auth", {})
         auth_type = auth.get("type")

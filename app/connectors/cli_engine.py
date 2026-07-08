@@ -43,6 +43,15 @@ class CliEngine(BaseConnector):
                 "error": f"No command defined for action: {action}",
             }
 
+        # Belt-and-suspenders: install/update already reject shell/interpreter
+        # bins, but re-check at execution time so a row that reached the DB by any
+        # other path can never spawn `bash -c ...` / `python -c ...`.
+        from app.security.dangerous_pattern_scanner import validate_cli_bin
+
+        ok, reason = validate_cli_bin(self.bin)
+        if not ok:
+            return {"success": False, "error_code": "BLOCKED_BIN", "error": reason}
+
         config = _parse_json(config_json)
 
         env = self._build_env(params, config, credential)
@@ -121,15 +130,12 @@ class CliEngine(BaseConnector):
 
     def _apply_omit_sentinel(self, argv: list[str]) -> list[str]:
         result = []
-        skip_next = False
-        for i, item in enumerate(argv):
-            if skip_next:
-                skip_next = False
-                continue
+        for item in argv:
             if item == _OMIT_SENTINEL:
+                # Drop the sentinel, and drop a preceding flag token (e.g. an
+                # omitted `--limit <value>` pair) so no dangling flag is emitted.
                 if result and result[-1].startswith("-"):
                     result.pop()
-                    skip_next = False
                 continue
             result.append(item)
         return result

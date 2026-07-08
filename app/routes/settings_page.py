@@ -1,5 +1,4 @@
-"""Settings pages (general, password, OTP) and settings/prune/vector APIs.
-Split from dashboard.py — see private/dashboard-split-plan.md."""
+"""Settings pages (general, password, OTP) and settings/prune/vector APIs."""
 
 import httpx
 from urllib.parse import urlparse
@@ -15,6 +14,7 @@ from app.routes.dashboard_shared import (
     render_page,
     require_auth,
     escape_html,
+    local_dt,
     _parse_manual_prune_cutoff,
 )
 
@@ -69,6 +69,27 @@ async def update_dashboard_system_settings(
             "Scratchpad retention must be between 1 and 365 days",
             400,
         )
+
+    # Optional (backward compatible): only validate/save if the caller sent it,
+    # so existing callers that don't yet know about this field are unaffected.
+    retracted_retention_days = None
+    if "retracted_retention_days" in body:
+        retracted_retention_raw = str(body.get("retracted_retention_days", "")).strip()
+        try:
+            retracted_retention_days = int(retracted_retention_raw)
+        except ValueError:
+            return error_response(
+                "INVALID_RETRACTED_RETENTION",
+                "Retracted/superseded retention must be a whole number of days",
+                400,
+            )
+        if retracted_retention_days < 1 or retracted_retention_days > 365:
+            return error_response(
+                "INVALID_RETRACTED_RETENTION",
+                "Retracted/superseded retention must be between 1 and 365 days",
+                400,
+            )
+
     if solo_raw not in ("true", "false"):
         return error_response(
             "INVALID_SOLO_MODE", "Solo mode must be true or false", 400
@@ -78,6 +99,8 @@ async def update_dashboard_system_settings(
         "scratchpad_retention_days": str(retention_days),
         "solo_mode_enabled": solo_raw,
     }
+    if retracted_retention_days is not None:
+        settings_to_save["retracted_retention_days"] = str(retracted_retention_days)
     with get_db() as conn:
         for key, value in settings_to_save.items():
             conn.execute(
@@ -329,6 +352,7 @@ async def settings_page(request: Request, session: dict = Depends(require_auth))
             return int(row["count"] if row else 0)
 
     scratchpad_retention_days = get_system_setting("scratchpad_retention_days", "7")
+    retracted_retention_days = get_system_setting("retracted_retention_days", "30")
     solo_mode_enabled = (
         get_system_setting("solo_mode_enabled", "true").lower() == "true"
     )
@@ -409,6 +433,28 @@ async def settings_page(request: Request, session: dict = Depends(require_auth))
 
     backup_html = ""
     if is_admin:
+        from app.services.backup_service import get_maintenance_status
+
+        maint_status = get_maintenance_status()
+        if maint_status["scheduler_enabled"]:
+            schedule_line = f"Runs automatically every {maint_status['interval_minutes']} minutes."
+        else:
+            schedule_line = (
+                f"Automatic scheduling is disabled (<code>{ENV_PREFIX}MAINTENANCE_INTERVAL_MINUTES=0</code>); "
+                "use the button below to run it manually."
+            )
+        if maint_status["last_run_at"]:
+            summary = maint_status["last_run_summary"] or {}
+            by = maint_status["last_run_by"] or "unknown"
+            last_run_line = (
+                f"Last run: {local_dt(maint_status['last_run_at'])} ({escape_html(by)}) — "
+                f"stale activities marked: <code>{summary.get('stale_activities_marked', 0)}</code>, "
+                f"scratchpad pruned: <code>{summary.get('scratchpad_pruned', 0)}</code>, "
+                f"TTL swept: <code>{summary.get('ttl_swept', 0)}</code>, "
+                f"retracted/superseded purged: <code>{summary.get('retracted_purged', 0)}</code>."
+            )
+        else:
+            last_run_line = "Last run: never — check back after the next scheduled run, or run it manually now."
         backup_html = f"""
     <div class="card">
       <div class="section-header">
@@ -420,7 +466,8 @@ async def settings_page(request: Request, session: dict = Depends(require_auth))
         <button class="btn btn-secondary" onclick="openModal('restore-modal')">Restore from Backup</button>
         <button class="btn btn-secondary" onclick="runMaintenance()">Run Maintenance</button>
       </div>
-      <p class="form-hint">Maintenance marks stale activities using <code>{ENV_PREFIX}STALE_THRESHOLD_MINUTES</code> and deletes transient scratchpad memories older than the retention setting below. This does not touch credentials or connector bindings.</p>
+      <p class="form-hint">Maintenance marks stale activities using <code>{ENV_PREFIX}STALE_THRESHOLD_MINUTES</code>, deletes transient scratchpad memories older than the scratchpad retention setting below, and permanently deletes retracted/superseded memory records past the retention setting below. This does not touch credentials or connector bindings. {schedule_line}</p>
+      <p class="form-hint" id="maintenance-last-run">{last_run_line}</p>
       <div id="backup-result" style="margin-top:12px"></div>
       <hr class=divider>
       <h4 class="section-title">Startup Checks</h4>
@@ -462,6 +509,11 @@ async def settings_page(request: Request, session: dict = Depends(require_auth))
           <label>Scratchpad Retention</label>
           <input type="number" id="scratchpad-retention-days" min="1" max="365" value="{escape_html(scratchpad_retention_days)}" style="width:120px">
           <p class="form-hint">Used by Run Maintenance. Transient scratchpad memories older than this many days are permanently deleted.</p>
+        </div>
+        <div class="form-group">
+          <label>Retracted/Superseded Record Retention</label>
+          <input type="number" id="retracted-retention-days" min="1" max="365" value="{escape_html(retracted_retention_days)}" style="width:120px">
+          <p class="form-hint">Used by Run Maintenance. Retracted and superseded memory records are permanently deleted this many days after they stopped being active (not after creation) — giving time to notice and restore an accidental retraction first.</p>
         </div>
         <label class="checkbox-label">
           <input type="checkbox" id="solo-mode-enabled" {solo_checked}>
@@ -660,7 +712,11 @@ async def settings_page(request: Request, session: dict = Depends(require_auth))
       const j = await r.json();
       if (j.ok) {{
         document.getElementById('backup-result').innerHTML =
-          '<div class="alert alert-success">Maintenance complete. Stale activities marked: <code>' + j.data.stale_activities_marked + '</code>. Scratchpad memories pruned: <code>' + j.data.scratchpad_pruned + '</code>.</div>';
+          '<div class="alert alert-success">Maintenance complete. Stale activities marked: <code>' + j.data.stale_activities_marked + '</code>. Scratchpad memories pruned: <code>' + j.data.scratchpad_pruned + '</code>. Retracted/superseded purged: <code>' + j.data.retracted_purged + '</code>.</div>';
+        const lastRunEl = document.getElementById('maintenance-last-run');
+        if (lastRunEl) {{
+          lastRunEl.innerHTML = 'Last run: just now (manual) — stale activities marked: <code>' + j.data.stale_activities_marked + '</code>, scratchpad pruned: <code>' + j.data.scratchpad_pruned + '</code>, TTL swept: <code>' + j.data.ttl_swept + '</code>, retracted/superseded purged: <code>' + j.data.retracted_purged + '</code>.';
+        }}
         showToast('Maintenance complete');
       }} else {{ showToast(j.error?.message || 'Failed', 'danger'); }}
     }}
@@ -735,6 +791,7 @@ async def settings_page(request: Request, session: dict = Depends(require_auth))
       e.preventDefault();
       const body = {{
         scratchpad_retention_days: document.getElementById('scratchpad-retention-days').value,
+        retracted_retention_days: document.getElementById('retracted-retention-days').value,
         solo_mode_enabled: document.getElementById('solo-mode-enabled').checked ? 'true' : 'false',
       }};
       const j = await apiFetch('/api/dashboard/system-settings', {{

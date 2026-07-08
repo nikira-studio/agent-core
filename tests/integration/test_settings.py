@@ -71,6 +71,39 @@ def test_admin_settings_exposes_real_system_behavior_controls(admin_client):
     assert "/api/dashboard/system-settings" in html
     assert "Run Maintenance" in html
     assert "Scratchpad memories pruned" in html
+    assert "Retracted/Superseded Record Retention" in html
+    assert 'id="retracted-retention-days"' in html
+    assert 'value="30"' in html
+
+
+def test_admin_settings_shows_maintenance_never_run(admin_client):
+    r = admin_client.get("/settings")
+    assert r.status_code == 200
+    html = r.text
+    assert "Last run: never" in html
+    assert "Runs automatically every 60 minutes." in html
+
+
+def test_admin_settings_shows_maintenance_last_run_after_manual_trigger(admin_client):
+    r = admin_client.post("/api/backup/maintenance")
+    assert r.status_code == 200, r.json()
+
+    html = admin_client.get("/settings").text
+    assert "Last run: never" not in html
+    assert "(manual)" in html
+    assert "stale activities marked: <code>0</code>" in html
+    assert "scratchpad pruned: <code>0</code>" in html
+    assert "TTL swept: <code>0</code>" in html
+
+
+def test_admin_settings_shows_scheduler_disabled_message(admin_client, monkeypatch):
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "MAINTENANCE_INTERVAL_MINUTES", 0)
+
+    html = admin_client.get("/settings").text
+    assert "Automatic scheduling is disabled" in html
+    assert "AGENT_CORE_MAINTENANCE_INTERVAL_MINUTES=0" in html
 
 
 def test_admin_settings_exposes_vector_controls(admin_client):
@@ -564,6 +597,49 @@ def test_admin_can_update_system_behavior_settings(admin_client):
 
     assert retention["value"] == "14"
     assert solo["value"] == "false"
+
+
+def test_admin_can_update_retracted_retention_days(admin_client):
+    r = admin_client.post(
+        "/api/dashboard/system-settings",
+        json={
+            "scratchpad_retention_days": "14",
+            "retracted_retention_days": "45",
+            "solo_mode_enabled": "false",
+        },
+    )
+    assert r.status_code == 200, r.json()
+
+    from app.database import get_db
+
+    with get_db() as conn:
+        row = conn.execute(
+            "SELECT value FROM system_settings WHERE key = 'retracted_retention_days'"
+        ).fetchone()
+    assert row["value"] == "45"
+
+
+def test_retracted_retention_days_omitted_is_backward_compatible(admin_client):
+    # Callers that don't yet know about this field (older scripts, the
+    # existing test above) must not be broken by its addition.
+    r = admin_client.post(
+        "/api/dashboard/system-settings",
+        json={"scratchpad_retention_days": "14", "solo_mode_enabled": "false"},
+    )
+    assert r.status_code == 200, r.json()
+
+
+def test_retracted_retention_days_rejects_out_of_range(admin_client):
+    r = admin_client.post(
+        "/api/dashboard/system-settings",
+        json={
+            "scratchpad_retention_days": "14",
+            "retracted_retention_days": "0",
+            "solo_mode_enabled": "false",
+        },
+    )
+    assert r.status_code == 400
+    assert r.json()["error"]["code"] == "INVALID_RETRACTED_RETENTION"
 
 
 def test_system_behavior_settings_validate_real_ranges(admin_client):

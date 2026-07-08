@@ -1,5 +1,6 @@
 import logging
 import os
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
@@ -63,27 +64,56 @@ if _ip_list:
 MAX_REQUEST_SIZE = 1024 * 1024
 
 
+@asynccontextmanager
+async def _lifespan(app: FastAPI):
+    from app.services.scheduler_service import (
+        start_maintenance_scheduler,
+        stop_maintenance_scheduler,
+    )
+
+    app.state.maintenance_task = start_maintenance_scheduler()
+    try:
+        yield
+    finally:
+        await stop_maintenance_scheduler(app.state.maintenance_task)
+
+
 def create_app() -> FastAPI:
     app = FastAPI(
         title=APP_NAME,
         version="1.0.0",
         description=f"{APP_NAME} local-first AI agent control layer",
+        lifespan=_lifespan,
     )
 
     @app.middleware("http")
     async def size_limit_middleware(request: Request, call_next):
         content_length = request.headers.get("content-length")
-        if content_length and int(content_length) > MAX_REQUEST_SIZE:
-            return JSONResponse(
-                status_code=413,
-                content={
-                    "ok": False,
-                    "error": {
-                        "code": "PAYLOAD_TOO_LARGE",
-                        "message": "Request body too large",
+        if content_length:
+            try:
+                declared_size = int(content_length)
+            except ValueError:
+                return JSONResponse(
+                    status_code=400,
+                    content={
+                        "ok": False,
+                        "error": {
+                            "code": "INVALID_CONTENT_LENGTH",
+                            "message": "Malformed Content-Length header",
+                        },
                     },
-                },
-            )
+                )
+            if declared_size > MAX_REQUEST_SIZE:
+                return JSONResponse(
+                    status_code=413,
+                    content={
+                        "ok": False,
+                        "error": {
+                            "code": "PAYLOAD_TOO_LARGE",
+                            "message": "Request body too large",
+                        },
+                    },
+                )
         return await call_next(request)
 
     @app.middleware("http")

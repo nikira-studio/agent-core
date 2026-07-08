@@ -132,6 +132,96 @@ def test_search_returns_hybrid_mode_with_semantic_results(test_client, agent_tok
     assert [r["id"] for r in data["records"]] == [record_id]
 
 
+def test_search_hybrid_exact_fts_match_outranks_weak_semantic_hits(
+    test_client, agent_token
+):
+    """Regression test: in hybrid mode, a record matching EVERY query token
+    exactly (here: only via its topic) used to rank by its importance fallback
+    (importance*0.5), so dozens of loosely-related semantic candidates buried
+    it past the result limit — exact topic lookups returned nothing. Exact FTS
+    matches now get a score floor above weak semantic hits."""
+    mock_vector_bytes = b"\x00" * (384 * 4)
+
+    def _write(content, topic=None, importance=0.5):
+        r = test_client.post(
+            "/api/memory/write",
+            headers={"Authorization": f"Bearer {agent_token}"},
+            json={
+                "content": content,
+                "memory_class": "fact",
+                "scope": "agent:testagent",
+                "topic": topic,
+                "importance": importance,
+            },
+        )
+        assert r.status_code == 201, r.json()
+        return r.json()["data"]["record"]["id"]
+
+    with (
+        patch(
+            "app.services.embedding_service.get_embedding_backend_status"
+        ) as mock_status,
+        patch("app.services.embedding_service.generate_embedding") as mock_gen,
+        patch("app.services.vector_service.is_sqlite_vec_available") as mock_vec,
+        patch(
+            "app.services.vector_settings_service.is_vector_search_enabled"
+        ) as mock_vec_enabled,
+        patch("app.services.vector_service.cosine_search_top_k") as mock_cosine,
+    ):
+        mock_status.return_value = {"backend": "healthy", "model_configured": True}
+        mock_gen.return_value = (mock_vector_bytes, "ok")
+        mock_vec.return_value = True
+        mock_vec_enabled.return_value = True
+        mock_cosine.return_value = []
+
+        # Target: query tokens appear ONLY in the topic, importance is low.
+        target_id = _write(
+            "Numbers reviewed and signed off by finance.",
+            topic="quarterly-forecasting",
+            importance=0.2,
+        )
+        # Fillers: no query tokens anywhere, but they'll get semantic scores.
+        filler_ids = [
+            _write(f"Unrelated operational note number {i}.") for i in range(3)
+        ]
+
+    # Semantic backend scores the fillers as weak-but-nonzero matches and does
+    # not surface the target at all — the pre-fix worst case.
+    scored = [(fid, 0.55 - i * 0.01) for i, fid in enumerate(filler_ids)]
+    with (
+        patch(
+            "app.services.embedding_service.get_embedding_backend_status"
+        ) as mock_status,
+        patch("app.services.embedding_service.generate_embedding") as mock_gen,
+        patch("app.services.vector_service.is_sqlite_vec_available") as mock_vec,
+        patch(
+            "app.services.vector_settings_service.is_vector_search_enabled"
+        ) as mock_vec_enabled,
+        patch(
+            "app.services.vector_service.cosine_search_top_k",
+            MagicMock(return_value=scored),
+        ),
+    ):
+        mock_status.return_value = {"backend": "healthy", "model_configured": True}
+        mock_gen.return_value = (mock_vector_bytes, "ok")
+        mock_vec.return_value = True
+        mock_vec_enabled.return_value = True
+
+        search_r = test_client.post(
+            "/api/memory/search",
+            headers={"Authorization": f"Bearer {agent_token}"},
+            json={"query": "quarterly forecasting", "limit": 2},
+        )
+
+    assert search_r.status_code == 200
+    data = search_r.json()["data"]
+    assert data["retrieval_mode"] == "hybrid"
+    ids = [r["id"] for r in data["records"]]
+    assert ids and ids[0] == target_id, (
+        f"exact topic match must rank first, got {ids}"
+    )
+
+
 def test_search_hybrid_pagination_applies_after_merge(test_client, agent_token):
     mock_vector_bytes = b"\x00" * (384 * 4)
     record_ids = []

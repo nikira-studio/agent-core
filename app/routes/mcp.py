@@ -76,7 +76,9 @@ MANIFEST = {
         {
             "name": "memory_get",
             "description": (
-                "Get memory records by scope or list active records. Use "
+                "Get memory records by scope. Defaults to active records only; pass "
+                "record_status='all' to also see retracted/superseded records, or a "
+                "specific status to inspect just that one. Use "
                 "view='compact' to survey/audit a scope (metadata + a short content "
                 "preview, no full bodies); then memory_search or "
                 "memory_get(view='full', limit=…) for full content. Defaults to "
@@ -86,7 +88,10 @@ MANIFEST = {
                 "type": "object",
                 "properties": {
                     "scope": {"type": "string"},
-                    "record_status": {"type": "string"},
+                    "record_status": {
+                        "type": "string",
+                        "description": "Defaults to 'active'. Use 'all' to include retracted/superseded records, or name a specific status.",
+                    },
                     "view": {"type": "string", "enum": ["full", "compact"]},
                     "limit": {"type": "integer", "default": 50},
                     "offset": {"type": "integer", "default": 0},

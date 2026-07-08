@@ -463,7 +463,9 @@ def _ensure_memory_metadata_columns(conn) -> None:
         ("valid_to", "TEXT"),
         ("last_confirmed_at", "TEXT"),
         ("expires_at", "TEXT"),
+        ("status_changed_at", "TEXT"),
     ]
+    status_changed_at_added = "status_changed_at" not in columns
     for column_name, column_type in additions:
         if column_name not in columns:
             conn.execute(
@@ -472,6 +474,24 @@ def _ensure_memory_metadata_columns(conn) -> None:
                 ADD COLUMN {column_name} {column_type}
                 """
             )
+    if status_changed_at_added:
+        # One-time backfill: existing retracted/superseded rows predate this
+        # column, so we genuinely don't know when they stopped being active.
+        # Stamp them "now" rather than leaving NULL (which would make the
+        # retention prune below skip them forever) or backdating to created_at
+        # (which could make an old-but-just-retracted record immediately
+        # purge-eligible with zero grace period). This gives every existing
+        # non-active record a fresh, full grace period starting from upgrade.
+        from app.time_utils import utc_now_iso
+
+        conn.execute(
+            """
+            UPDATE memory_records
+            SET status_changed_at = ?
+            WHERE record_status IN ('retracted', 'superseded') AND status_changed_at IS NULL
+            """,
+            (utc_now_iso(),),
+        )
     conn.commit()
 
 

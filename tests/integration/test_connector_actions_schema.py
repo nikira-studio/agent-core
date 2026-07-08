@@ -221,14 +221,11 @@ class TestConnectorActionsSchema:
 
 class TestTransmissionActionsSchema:
     def test_transmission_adapter_actions_have_schemas(self, clean_db):
-        from pathlib import Path
+        from app.adapter_paths import SYSTEM_ADAPTER_DIR
         from app.services import adapter_loader
         from app.services import connector_service
 
-        real_adapters_dir = Path(
-            "/srv/docker-data/projects/Apps/agent-core/data/adapters"
-        )
-        adapter_loader.discover_and_seed_adapters(adapters_dir=real_adapters_dir)
+        adapter_loader.discover_and_seed_adapters(adapters_dir=str(SYSTEM_ADAPTER_DIR))
 
         ct = connector_service.get_connector_type("transmission")
         assert ct is not None
@@ -267,14 +264,11 @@ class TestTransmissionActionsSchema:
     def test_transmission_adapter_actions_validate_from_structured_manifest(
         self, clean_db
     ):
-        from pathlib import Path
+        from app.adapter_paths import SYSTEM_ADAPTER_DIR
         from app.services import adapter_loader
         from app.services import connector_service
 
-        real_adapters_dir = Path(
-            "/srv/docker-data/projects/Apps/agent-core/data/adapters"
-        )
-        adapter_loader.discover_and_seed_adapters(adapters_dir=real_adapters_dir)
+        adapter_loader.discover_and_seed_adapters(adapters_dir=str(SYSTEM_ADAPTER_DIR))
 
         ct = connector_service.get_connector_type("transmission")
         assert ct is not None
