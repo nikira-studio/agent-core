@@ -3,11 +3,12 @@ from typing import Optional
 
 import bcrypt
 import pyotp
+import jwt
+from jwt.exceptions import InvalidTokenError
 
 from app.branding import APP_ISSUER
 from app.database import get_db
 from app.models.enums import USER_ROLES
-from jose import jwt
 from app.services import cleanup_service
 from app.time_utils import parse_utc_datetime, utc_now, utc_now_iso
 
@@ -40,7 +41,7 @@ def decode_jwt(token: str) -> Optional[str]:
         try:
             payload = jwt.decode(token, key, algorithms=["HS256"])
             return payload.get("sub")
-        except Exception:
+        except InvalidTokenError:
             continue
     return None
 
