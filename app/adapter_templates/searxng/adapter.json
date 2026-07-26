@@ -1,0 +1,122 @@
+{
+  "spec_version": "1.0",
+  "id": "searxng",
+  "display_name": "SearXNG",
+  "version": "1.0.0",
+  "author": "agent-core team",
+  "description": "Generic SearXNG connector for privacy-respecting metasearch against any SearXNG instance. Read-only, no auth by default. Configure each binding with the base URL of the target instance.",
+  "setup": {
+    "instructions": "Connect Agent Core to a SearXNG instance.\n\n1. Run or choose a SearXNG deployment reachable from Agent Core.\n2. Create the binding with base_url set to the SearXNG origin only, for example http://searxng:8080 or https://search.example.com. Each action appends its own path.\n3. The instance must allow the JSON output format. In settings.yml set:\n   search:\n     formats:\n       - html\n       - json\n   Without json in that list, /search?format=json returns HTTP 403.\n4. No credential is required. Leave the credential empty and create the binding with config auth_mode set to none if your instance is open. If your instance sits behind a reverse-proxy auth layer, put the required header on the proxy side rather than in this connector.\n\nAgent Core validates outbound URLs. Private, loopback, and Docker-internal hosts may require the Agent Core internal-host allowlist (ALLOWED_INTERNAL_HOSTS) before they can be used as base_url values.",
+    "documentation_url": "https://docs.searxng.org/"
+  },
+  "requires": {
+    "config": [
+      "base_url"
+    ]
+  },
+  "actions": [
+    {
+      "name": "healthcheck",
+      "description": "Check that the configured SearXNG instance is reachable and healthy.",
+      "side_effect": "read",
+      "input_schema": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "search",
+      "description": "Run a metasearch query and return JSON results. Each entry in results[] carries title, url, content (snippet), engine, engines, category/positions and score when the upstream engine supplies them. Top-level fields include query, number_of_results, answers, infoboxes, suggestions, and unresponsive_engines.",
+      "side_effect": "read",
+      "input_schema": {
+        "type": "object",
+        "required": [
+          "q"
+        ],
+        "properties": {
+          "q": {
+            "type": "string",
+            "description": "Search query. SearXNG bang syntax (for example '!images cats') is supported."
+          },
+          "categories": {
+            "type": "string",
+            "description": "Comma-separated category list, for example general, images, news, science, it, videos, map, music, files, social+media."
+          },
+          "engines": {
+            "type": "string",
+            "description": "Comma-separated engine list to restrict the search to, for example duckduckgo,brave,wikipedia."
+          },
+          "language": {
+            "type": "string",
+            "description": "Language or locale code, for example en, en-US, or all."
+          },
+          "safesearch": {
+            "type": "integer",
+            "description": "Safe search level: 0 off, 1 moderate, 2 strict."
+          },
+          "time_range": {
+            "type": "string",
+            "description": "Time filter: day, week, month, or year. Only honored by engines that support it."
+          },
+          "page": {
+            "type": "integer",
+            "description": "1-based result page. Sent upstream as pageno."
+          }
+        }
+      }
+    },
+    {
+      "name": "get_config",
+      "description": "Return the instance configuration, including enabled engines, categories, and default settings. Useful for discovering which engines and categories a binding can use.",
+      "side_effect": "read",
+      "input_schema": {
+        "type": "object",
+        "properties": {}
+      }
+    }
+  ],
+  "backend": {
+    "type": "http",
+    "base_url": {
+      "from": "config",
+      "field": "base_url"
+    },
+    "auth": {
+      "type": "none"
+    },
+    "test_action": "healthcheck",
+    "requests": {
+      "healthcheck": {
+        "method": "GET",
+        "path": "/healthz",
+        "header_params": {
+          "User-Agent": "Agent-Core SearXNG Connector/1.0"
+        }
+      },
+      "search": {
+        "method": "GET",
+        "path": "/search",
+        "query_params": {
+          "q": "{{ params.q }}",
+          "format": "json",
+          "categories": "{{ params.categories | default('', as=omit) }}",
+          "engines": "{{ params.engines | default('', as=omit) }}",
+          "language": "{{ params.language | default('', as=omit) }}",
+          "safesearch": "{{ params.safesearch | default('', as=omit) }}",
+          "time_range": "{{ params.time_range | default('', as=omit) }}",
+          "pageno": "{{ params.page | default('', as=omit) }}"
+        },
+        "header_params": {
+          "User-Agent": "Agent-Core SearXNG Connector/1.0"
+        }
+      },
+      "get_config": {
+        "method": "GET",
+        "path": "/config",
+        "header_params": {
+          "User-Agent": "Agent-Core SearXNG Connector/1.0"
+        }
+      }
+    }
+  }
+}

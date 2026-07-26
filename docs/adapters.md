@@ -518,6 +518,8 @@ A future agent-core registry would make this `agent-core adapters install <slug>
 | `transmission` | `http` | session-handshake (`challenge_retry`), multi-field basic auth, destructive actions, optional-field omission for `list_torrents`/`add_torrent` |
 | `google_workspace` | `http` | one OAuth2 client spanning six Google services across different API hosts (absolute-URL request paths override `base_url`), token refresh, RFC822 message construction via the `rfc822_base64url` filter |
 | `github_cli` | `cli` | subprocess execution, `requires.bins` gating, JSON output parsing, env-var token injection, optional CLI-flag omission |
+| `searxng` | `http` | no-auth self-hosted service, per-binding `base_url`, GET query-param omission, renaming a param on the wire (`page` -> `pageno`) |
+| `firecrawl` | `http` | optional bearer auth (works with or without a credential via `auth_mode: none`), configurable API prefix in the request `path`, POST bodies with type-preserving optional fields, async job id + poll/cancel actions |
 
 Browse their manifests in `app/adapter_templates/<id>/adapter.json` for working, tested examples of every feature.
 

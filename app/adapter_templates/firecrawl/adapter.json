@@ -1,0 +1,589 @@
+{
+  "spec_version": "1.0",
+  "id": "firecrawl",
+  "display_name": "Firecrawl",
+  "version": "1.0.0",
+  "author": "agent-core team",
+  "description": "Generic Firecrawl connector for scrape, crawl, map, search, batch scrape, and extract against any Firecrawl deployment, self-hosted or cloud. Targets the v2 API by default; the API prefix and bearer auth are both configurable per binding.",
+  "setup": {
+    "instructions": "Connect Agent Core to a Firecrawl deployment.\n\n1. Run or choose a Firecrawl instance reachable from Agent Core. Set base_url to the origin only, for example http://firecrawl:3002 or https://api.firecrawl.dev. Do not include the /v2 path; each action appends its own path.\n2. The default API prefix is /v2. To target a different version, set config api_prefix, for example /v1.\n3. Authentication is optional. Self-hosted Firecrawl usually runs without auth: omit the credential and set config auth_mode to none. For Firecrawl Cloud or a self-hosted instance with USE_DB_AUTHENTICATION enabled, store the key as api_key; the connector sends it as Authorization: Bearer <key>.\n4. crawl, batch_scrape, and extract are asynchronous: they return a job id. Poll get_crawl_status, get_batch_scrape_status, or get_extract_status with that id, and use cancel_crawl to stop a running crawl.\n\nAgent Core validates outbound URLs. Private, loopback, and Docker-internal hosts may require the Agent Core internal-host allowlist (ALLOWED_INTERNAL_HOSTS) before they can be used as base_url values.",
+    "documentation_url": "https://docs.firecrawl.dev/api-reference/introduction"
+  },
+  "credential_schema": {
+    "fields": [
+      {
+        "name": "api_key",
+        "type": "string",
+        "secret": true,
+        "required": false,
+        "description": "Optional Firecrawl API key. Sent as Authorization: Bearer <key>. Leave unset for self-hosted instances with authentication disabled."
+      }
+    ]
+  },
+  "requires": {
+    "config": [
+      "base_url"
+    ]
+  },
+  "actions": [
+    {
+      "name": "healthcheck",
+      "description": "Check that the configured Firecrawl instance is reachable. Returns the API root document.",
+      "side_effect": "read",
+      "input_schema": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "scrape",
+      "description": "Scrape a single URL and return the requested formats synchronously.",
+      "side_effect": "read",
+      "input_schema": {
+        "type": "object",
+        "required": [
+          "url"
+        ],
+        "properties": {
+          "url": {
+            "type": "string",
+            "description": "Absolute URL to scrape."
+          },
+          "formats": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Output formats, for example [\"markdown\"], [\"html\"], [\"rawHtml\"], [\"links\"], [\"summary\"], or [\"screenshot\"]. Defaults to markdown when omitted."
+          },
+          "only_main_content": {
+            "type": "boolean",
+            "description": "Strip navigation, headers, and footers. Defaults to true upstream."
+          },
+          "include_tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "CSS selectors or tags to keep."
+          },
+          "exclude_tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "CSS selectors or tags to drop."
+          },
+          "headers": {
+            "type": "object",
+            "description": "Extra request headers the scraper should send to the target site."
+          },
+          "wait_for": {
+            "type": "integer",
+            "description": "Milliseconds to wait for the page to settle before capture."
+          },
+          "timeout": {
+            "type": "integer",
+            "description": "Upstream scrape timeout in milliseconds."
+          },
+          "mobile": {
+            "type": "boolean",
+            "description": "Emulate a mobile viewport."
+          },
+          "max_age": {
+            "type": "integer",
+            "description": "Accept a cached result younger than this many milliseconds."
+          },
+          "proxy": {
+            "type": "string",
+            "description": "Proxy mode: basic, stealth, or auto."
+          },
+          "parsers": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Content parsers to apply, for example [\"pdf\"]."
+          },
+          "actions": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            },
+            "description": "Browser interaction steps to run before capture, for example [{\"type\":\"wait\",\"milliseconds\":1000}]."
+          }
+        }
+      }
+    },
+    {
+      "name": "crawl",
+      "description": "Start an asynchronous crawl of a site and return a job id. Poll get_crawl_status for results.",
+      "side_effect": "read",
+      "input_schema": {
+        "type": "object",
+        "required": [
+          "url"
+        ],
+        "properties": {
+          "url": {
+            "type": "string",
+            "description": "Absolute URL to start crawling from."
+          },
+          "prompt": {
+            "type": "string",
+            "description": "Natural-language crawl intent; Firecrawl derives crawl options from it."
+          },
+          "limit": {
+            "type": "integer",
+            "description": "Maximum pages to crawl."
+          },
+          "max_discovery_depth": {
+            "type": "integer",
+            "description": "Maximum link depth from the start URL."
+          },
+          "include_paths": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Regex path patterns to include."
+          },
+          "exclude_paths": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Regex path patterns to exclude."
+          },
+          "sitemap": {
+            "type": "string",
+            "description": "Sitemap handling: include, skip, or only."
+          },
+          "crawl_entire_domain": {
+            "type": "boolean",
+            "description": "Follow links outside the start path but inside the domain."
+          },
+          "allow_external_links": {
+            "type": "boolean",
+            "description": "Follow links to other domains."
+          },
+          "allow_subdomains": {
+            "type": "boolean",
+            "description": "Follow links to subdomains of the start host."
+          },
+          "delay": {
+            "type": "integer",
+            "description": "Delay in seconds between page requests."
+          },
+          "scrape_options": {
+            "type": "object",
+            "description": "Per-page scrape options object passed through verbatim, for example {\"formats\":[\"markdown\"],\"onlyMainContent\":true}."
+          }
+        }
+      }
+    },
+    {
+      "name": "get_crawl_status",
+      "description": "Get status and completed page data for a crawl job.",
+      "side_effect": "read",
+      "input_schema": {
+        "type": "object",
+        "required": [
+          "id"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Crawl job id returned by crawl."
+          },
+          "skip": {
+            "type": "integer",
+            "description": "Number of result documents to skip when paging through a large crawl."
+          }
+        }
+      }
+    },
+    {
+      "name": "cancel_crawl",
+      "description": "Cancel a running crawl job.",
+      "side_effect": "write",
+      "input_schema": {
+        "type": "object",
+        "required": [
+          "id"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Crawl job id returned by crawl."
+          }
+        }
+      }
+    },
+    {
+      "name": "map",
+      "description": "Discover URLs on a site and return the link list synchronously.",
+      "side_effect": "read",
+      "input_schema": {
+        "type": "object",
+        "required": [
+          "url"
+        ],
+        "properties": {
+          "url": {
+            "type": "string",
+            "description": "Absolute site URL to map."
+          },
+          "search": {
+            "type": "string",
+            "description": "Filter discovered URLs by this term."
+          },
+          "limit": {
+            "type": "integer",
+            "description": "Maximum links to return."
+          },
+          "sitemap": {
+            "type": "string",
+            "description": "Sitemap handling: include, skip, or only."
+          },
+          "include_subdomains": {
+            "type": "boolean",
+            "description": "Include subdomain URLs."
+          },
+          "ignore_query_parameters": {
+            "type": "boolean",
+            "description": "Collapse URLs that differ only by query string."
+          }
+        }
+      }
+    },
+    {
+      "name": "search",
+      "description": "Search the web through Firecrawl and optionally scrape the results. Requires a search provider configured on the Firecrawl instance (SearXNG or Serper for self-hosted deployments).",
+      "side_effect": "read",
+      "input_schema": {
+        "type": "object",
+        "required": [
+          "query"
+        ],
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "Search query."
+          },
+          "limit": {
+            "type": "integer",
+            "description": "Maximum results to return."
+          },
+          "sources": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Result sources, for example [\"web\"], [\"news\"], or [\"images\"]."
+          },
+          "categories": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Result categories, for example [\"github\"] or [\"research\"]."
+          },
+          "tbs": {
+            "type": "string",
+            "description": "Time-based search filter, for example qdr:d for the past day."
+          },
+          "location": {
+            "type": "string",
+            "description": "Geographic bias for results, for example 'Germany'."
+          },
+          "timeout": {
+            "type": "integer",
+            "description": "Upstream search timeout in milliseconds."
+          },
+          "scrape_options": {
+            "type": "object",
+            "description": "Scrape options object applied to each result, for example {\"formats\":[\"markdown\"]}."
+          }
+        }
+      }
+    },
+    {
+      "name": "batch_scrape",
+      "description": "Start an asynchronous batch scrape of several URLs and return a job id. Poll get_batch_scrape_status for results.",
+      "side_effect": "read",
+      "input_schema": {
+        "type": "object",
+        "required": [
+          "urls"
+        ],
+        "properties": {
+          "urls": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Absolute URLs to scrape."
+          },
+          "formats": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Output formats applied to every URL."
+          },
+          "only_main_content": {
+            "type": "boolean",
+            "description": "Strip navigation, headers, and footers."
+          },
+          "max_concurrency": {
+            "type": "integer",
+            "description": "Maximum concurrent scrapes for this job."
+          },
+          "ignore_invalid_urls": {
+            "type": "boolean",
+            "description": "Skip invalid URLs instead of failing the job."
+          }
+        }
+      }
+    },
+    {
+      "name": "get_batch_scrape_status",
+      "description": "Get status and completed documents for a batch scrape job.",
+      "side_effect": "read",
+      "input_schema": {
+        "type": "object",
+        "required": [
+          "id"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Batch scrape job id returned by batch_scrape."
+          },
+          "skip": {
+            "type": "integer",
+            "description": "Number of result documents to skip when paging."
+          }
+        }
+      }
+    },
+    {
+      "name": "extract",
+      "description": "Start an asynchronous structured-extraction job over one or more URLs and return a job id. Poll get_extract_status for results.",
+      "side_effect": "read",
+      "input_schema": {
+        "type": "object",
+        "required": [
+          "urls"
+        ],
+        "properties": {
+          "urls": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Absolute URLs to extract from. A trailing /* wildcard crawls the site first."
+          },
+          "prompt": {
+            "type": "string",
+            "description": "Natural-language description of the data to extract."
+          },
+          "schema": {
+            "type": "object",
+            "description": "JSON Schema describing the desired output shape."
+          },
+          "enable_web_search": {
+            "type": "boolean",
+            "description": "Allow following external links for missing data."
+          }
+        }
+      }
+    },
+    {
+      "name": "get_extract_status",
+      "description": "Get status and structured output for an extract job.",
+      "side_effect": "read",
+      "input_schema": {
+        "type": "object",
+        "required": [
+          "id"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Extract job id returned by extract."
+          }
+        }
+      }
+    }
+  ],
+  "backend": {
+    "type": "http",
+    "base_url": {
+      "from": "config",
+      "field": "base_url"
+    },
+    "auth": {
+      "type": "bearer"
+    },
+    "test_action": "healthcheck",
+    "requests": {
+      "healthcheck": {
+        "method": "GET",
+        "path": "/",
+        "header_params": {
+          "User-Agent": "Agent-Core Firecrawl Connector/1.0"
+        }
+      },
+      "scrape": {
+        "method": "POST",
+        "path": "{{ config.api_prefix | default(\"/v2\", as=str) }}/scrape",
+        "header_params": {
+          "User-Agent": "Agent-Core Firecrawl Connector/1.0"
+        },
+        "body": {
+          "template": {
+            "url": "{{ params.url }}",
+            "formats": "{{ params.formats | default('', as=omit) }}",
+            "onlyMainContent": "{{ params.only_main_content | default('', as=omit) }}",
+            "includeTags": "{{ params.include_tags | default('', as=omit) }}",
+            "excludeTags": "{{ params.exclude_tags | default('', as=omit) }}",
+            "headers": "{{ params.headers | default('', as=omit) }}",
+            "waitFor": "{{ params.wait_for | default('', as=omit) }}",
+            "timeout": "{{ params.timeout | default('', as=omit) }}",
+            "mobile": "{{ params.mobile | default('', as=omit) }}",
+            "maxAge": "{{ params.max_age | default('', as=omit) }}",
+            "proxy": "{{ params.proxy | default('', as=omit) }}",
+            "parsers": "{{ params.parsers | default('', as=omit) }}",
+            "actions": "{{ params.actions | default('', as=omit) }}"
+          }
+        }
+      },
+      "crawl": {
+        "method": "POST",
+        "path": "{{ config.api_prefix | default(\"/v2\", as=str) }}/crawl",
+        "header_params": {
+          "User-Agent": "Agent-Core Firecrawl Connector/1.0"
+        },
+        "body": {
+          "template": {
+            "url": "{{ params.url }}",
+            "prompt": "{{ params.prompt | default('', as=omit) }}",
+            "limit": "{{ params.limit | default('', as=omit) }}",
+            "maxDiscoveryDepth": "{{ params.max_discovery_depth | default('', as=omit) }}",
+            "includePaths": "{{ params.include_paths | default('', as=omit) }}",
+            "excludePaths": "{{ params.exclude_paths | default('', as=omit) }}",
+            "sitemap": "{{ params.sitemap | default('', as=omit) }}",
+            "crawlEntireDomain": "{{ params.crawl_entire_domain | default('', as=omit) }}",
+            "allowExternalLinks": "{{ params.allow_external_links | default('', as=omit) }}",
+            "allowSubdomains": "{{ params.allow_subdomains | default('', as=omit) }}",
+            "delay": "{{ params.delay | default('', as=omit) }}",
+            "scrapeOptions": "{{ params.scrape_options | default('', as=omit) }}"
+          }
+        }
+      },
+      "get_crawl_status": {
+        "method": "GET",
+        "path": "{{ config.api_prefix | default(\"/v2\", as=str) }}/crawl/{{ params.id }}",
+        "query_params": {
+          "skip": "{{ params.skip | default('', as=omit) }}"
+        },
+        "header_params": {
+          "User-Agent": "Agent-Core Firecrawl Connector/1.0"
+        }
+      },
+      "cancel_crawl": {
+        "method": "DELETE",
+        "path": "{{ config.api_prefix | default(\"/v2\", as=str) }}/crawl/{{ params.id }}",
+        "header_params": {
+          "User-Agent": "Agent-Core Firecrawl Connector/1.0"
+        }
+      },
+      "map": {
+        "method": "POST",
+        "path": "{{ config.api_prefix | default(\"/v2\", as=str) }}/map",
+        "header_params": {
+          "User-Agent": "Agent-Core Firecrawl Connector/1.0"
+        },
+        "body": {
+          "template": {
+            "url": "{{ params.url }}",
+            "search": "{{ params.search | default('', as=omit) }}",
+            "limit": "{{ params.limit | default('', as=omit) }}",
+            "sitemap": "{{ params.sitemap | default('', as=omit) }}",
+            "includeSubdomains": "{{ params.include_subdomains | default('', as=omit) }}",
+            "ignoreQueryParameters": "{{ params.ignore_query_parameters | default('', as=omit) }}"
+          }
+        }
+      },
+      "search": {
+        "method": "POST",
+        "path": "{{ config.api_prefix | default(\"/v2\", as=str) }}/search",
+        "header_params": {
+          "User-Agent": "Agent-Core Firecrawl Connector/1.0"
+        },
+        "body": {
+          "template": {
+            "query": "{{ params.query }}",
+            "limit": "{{ params.limit | default('', as=omit) }}",
+            "sources": "{{ params.sources | default('', as=omit) }}",
+            "categories": "{{ params.categories | default('', as=omit) }}",
+            "tbs": "{{ params.tbs | default('', as=omit) }}",
+            "location": "{{ params.location | default('', as=omit) }}",
+            "timeout": "{{ params.timeout | default('', as=omit) }}",
+            "scrapeOptions": "{{ params.scrape_options | default('', as=omit) }}"
+          }
+        }
+      },
+      "batch_scrape": {
+        "method": "POST",
+        "path": "{{ config.api_prefix | default(\"/v2\", as=str) }}/batch/scrape",
+        "header_params": {
+          "User-Agent": "Agent-Core Firecrawl Connector/1.0"
+        },
+        "body": {
+          "template": {
+            "urls": "{{ params.urls }}",
+            "formats": "{{ params.formats | default('', as=omit) }}",
+            "onlyMainContent": "{{ params.only_main_content | default('', as=omit) }}",
+            "maxConcurrency": "{{ params.max_concurrency | default('', as=omit) }}",
+            "ignoreInvalidURLs": "{{ params.ignore_invalid_urls | default('', as=omit) }}"
+          }
+        }
+      },
+      "get_batch_scrape_status": {
+        "method": "GET",
+        "path": "{{ config.api_prefix | default(\"/v2\", as=str) }}/batch/scrape/{{ params.id }}",
+        "query_params": {
+          "skip": "{{ params.skip | default('', as=omit) }}"
+        },
+        "header_params": {
+          "User-Agent": "Agent-Core Firecrawl Connector/1.0"
+        }
+      },
+      "extract": {
+        "method": "POST",
+        "path": "{{ config.api_prefix | default(\"/v2\", as=str) }}/extract",
+        "header_params": {
+          "User-Agent": "Agent-Core Firecrawl Connector/1.0"
+        },
+        "body": {
+          "template": {
+            "urls": "{{ params.urls }}",
+            "prompt": "{{ params.prompt | default('', as=omit) }}",
+            "schema": "{{ params.schema | default('', as=omit) }}",
+            "enableWebSearch": "{{ params.enable_web_search | default('', as=omit) }}"
+          }
+        }
+      },
+      "get_extract_status": {
+        "method": "GET",
+        "path": "{{ config.api_prefix | default(\"/v2\", as=str) }}/extract/{{ params.id }}",
+        "header_params": {
+          "User-Agent": "Agent-Core Firecrawl Connector/1.0"
+        }
+      }
+    }
+  }
+}
