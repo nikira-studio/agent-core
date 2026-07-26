@@ -1301,13 +1301,16 @@ async def _handle_custom_mcp_tool(body: dict, ctx: RequestContext):
         if scope:
             if not enforcer.can_read(scope):
                 return _mcp_error("SCOPE_DENIED", "Access denied to this scope", 403)
+        # `enabled_only` restricts the listing; it is not a tri-state filter.
+        # False means "include disabled bindings too", so the enabled filter must
+        # be dropped entirely rather than inverted to enabled=False, which would
+        # return ONLY disabled bindings.
+        enabled_filter = True if params.get("enabled_only", True) else None
         if ctx.is_admin:
             bindings = connector_service.list_bindings(
                 scope=scope,
                 connector_type_id=params.get("connector_type_id"),
-                enabled=params.get("enabled_only", True)
-                if params.get("enabled_only") is not None
-                else True,
+                enabled=enabled_filter,
             )
         else:
             allowed = enforcer.filter_readable_scopes(ctx.read_scopes)
@@ -1316,9 +1319,7 @@ async def _handle_custom_mcp_tool(body: dict, ctx: RequestContext):
                 bindings = connector_service.list_bindings(
                     scope=effective_scope,
                     connector_type_id=params.get("connector_type_id"),
-                    enabled=params.get("enabled_only", True)
-                    if params.get("enabled_only") is not None
-                    else True,
+                    enabled=enabled_filter,
                 )
             else:
                 all_bindings = []
@@ -1327,9 +1328,7 @@ async def _handle_custom_mcp_tool(body: dict, ctx: RequestContext):
                         connector_service.list_bindings(
                             scope=s,
                             connector_type_id=params.get("connector_type_id"),
-                            enabled=params.get("enabled_only", True)
-                            if params.get("enabled_only") is not None
-                            else True,
+                            enabled=enabled_filter,
                         )
                     )
                 all_bindings.sort(key=lambda b: b.get("created_at", ""), reverse=True)
@@ -1396,9 +1395,7 @@ async def _handle_custom_mcp_tool(body: dict, ctx: RequestContext):
             enforcer,
             connector_type_id=params.get("connector_type_id"),
             scope=params.get("scope"),
-            enabled_only=params.get("enabled_only", True)
-            if params.get("enabled_only") is not None
-            else True,
+            enabled_only=bool(params.get("enabled_only", True)),
         )
         return JSONResponse(content={"ok": True, "data": summary})
 

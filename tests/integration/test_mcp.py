@@ -143,6 +143,63 @@ def test_mcp_connectors_summary_respects_scope_and_hides_secret_values(
     assert "value_encrypted" not in json.dumps(data)
 
 
+def test_mcp_enabled_only_false_includes_enabled_and_disabled_bindings(
+    test_client, agent_token
+):
+    """enabled_only=False must widen the listing, not invert it.
+
+    It used to be forwarded straight into the tri-state `enabled` filter, so
+    enabled_only=False returned ONLY disabled bindings — an agent asking for
+    "everything" got an empty list back whenever all its bindings were healthy.
+    """
+    from app.services import connector_service
+
+    enabled = connector_service.create_binding(
+        connector_type_id="generic_http",
+        name="enabled-listing-binding",
+        scope="agent:testagent",
+    )
+    disabled = connector_service.create_binding(
+        connector_type_id="generic_http",
+        name="disabled-listing-binding",
+        scope="agent:testagent",
+    )
+    connector_service.update_binding(disabled["id"], enabled=False)
+
+    def bindings_for(params):
+        r = test_client.post(
+            "/mcp",
+            headers={"Authorization": f"Bearer {agent_token}"},
+            json={"tool": "connectors_bindings_list", "params": params},
+        )
+        assert r.status_code == 200, r.json()
+        return {b["id"] for b in r.json()["data"]["bindings"]}
+
+    both = bindings_for({"enabled_only": False})
+    assert enabled["id"] in both
+    assert disabled["id"] in both
+
+    only_enabled = bindings_for({})
+    assert enabled["id"] in only_enabled
+    assert disabled["id"] not in only_enabled
+
+    r = test_client.post(
+        "/mcp",
+        headers={"Authorization": f"Bearer {agent_token}"},
+        json={
+            "tool": "connectors_summary",
+            "params": {"connector_type_id": "generic_http", "enabled_only": False},
+        },
+    )
+    assert r.status_code == 200, r.json()
+    generic = next(
+        c for c in r.json()["data"]["connectors"] if c["id"] == "generic_http"
+    )
+    summary_ids = {b["id"] for b in generic["bindings"]}
+    assert enabled["id"] in summary_ids
+    assert disabled["id"] in summary_ids
+
+
 def test_mcp_jsonrpc_tools_call(test_client, agent_token):
     r = test_client.post(
         "/mcp",

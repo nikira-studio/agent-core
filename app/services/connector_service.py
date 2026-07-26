@@ -701,6 +701,10 @@ def build_capability_summary(
 ) -> dict:
     from app.services import credential_service
 
+    # `enabled_only` is a restriction, not a tri-state filter: False means "also
+    # include disabled bindings" (no filter), never "only disabled ones".
+    enabled_filter = True if enabled_only else None
+
     connector_types = list_connector_types()
     if connector_type_id:
         connector_types = [
@@ -716,15 +720,15 @@ def build_capability_summary(
                 "visible_bindings": 0,
                 "usable_bindings": 0,
             }
-        visible_bindings = list_bindings(scope=scope, enabled=enabled_only)
+        visible_bindings = list_bindings(scope=scope, enabled=enabled_filter)
     elif getattr(enforcer, "is_admin", False):
-        visible_bindings = list_bindings(enabled=enabled_only)
+        visible_bindings = list_bindings(enabled=enabled_filter)
     else:
         for readable_scope in enforcer.filter_readable_scopes(
             list(enforcer.read_scopes)
         ):
             visible_bindings.extend(
-                list_bindings(scope=readable_scope, enabled=enabled_only)
+                list_bindings(scope=readable_scope, enabled=enabled_filter)
             )
 
     if connector_type_id:
