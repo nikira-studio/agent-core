@@ -94,10 +94,6 @@ def get_embedding_backend_status() -> dict:
     return _cached_status
 
 
-def is_embedding_backend_healthy() -> bool:
-    return get_embedding_backend_status()["backend"] == "healthy"
-
-
 def generate_embedding(text: str) -> tuple[Optional[bytes], str]:
     status = get_embedding_backend_status()
     if status["backend"] != "healthy" or not status["model_configured"]:
@@ -122,3 +118,20 @@ def generate_embedding(text: str) -> tuple[Optional[bytes], str]:
         return vector_bytes, "ok"
     except Exception as e:
         return None, f"exception:{type(e).__name__}"
+
+
+def backend_label(status: dict) -> str:
+    return status.get("backend", "unknown")
+
+
+def retrieval_is_degraded(status: dict) -> bool:
+    """True when search fell back to text matching because embeddings are unusable."""
+    return status.get("backend") != "healthy" or not status.get("model_configured", False)
+
+
+def safe_backend_status() -> dict:
+    """Backend status that never raises — search must not fail because a probe did."""
+    try:
+        return get_embedding_backend_status()
+    except Exception:
+        return {"backend": "error", "model_configured": False}

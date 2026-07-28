@@ -46,14 +46,14 @@ def test_memory_search_special_characters_handled(test_client, agent_token):
     assert r.status_code == 200
 
 
-def test_memory_search_matches_topic_and_domain(test_client, agent_token):
-    """Regression test: the FTS table indexes content, domain, AND topic (the
-    triggers maintain all three), but the search SQL used `fts.content MATCH`,
+def test_memory_search_matches_topic_as_well_as_content(test_client, agent_token):
+    """Regression test: the FTS table indexes content AND topic (the triggers
+    maintain both), but the search SQL used `fts.content MATCH`,
     column-restricting to content — so a record could never be found by its own
-    topic or domain. That broke the documented recall workflow ("retry with
-    exact topic values") and mixed queries where one token only appears in
-    topic (e.g. content mentions pgvector, topic is "database", query
-    "pgvector database" → zero results under AND semantics)."""
+    topic. That broke the documented recall workflow ("retry with exact topic
+    values") and mixed queries where one token only appears in the topic (e.g.
+    content mentions pgvector, topic is "database", query "pgvector database" →
+    zero results under AND semantics)."""
     r = test_client.post(
         "/api/memory/write",
         headers={"Authorization": f"Bearer {agent_token}"},
@@ -61,14 +61,13 @@ def test_memory_search_matches_topic_and_domain(test_client, agent_token):
             "content": "DECISION: We use PostgreSQL 16 with pgvector for embeddings.",
             "memory_class": "decision",
             "scope": "agent:testagent",
-            "domain": "engineering",
             "topic": "database",
         },
     )
     assert r.status_code == 201, r.json()
     record_id = r.json()["data"]["record"]["id"]
 
-    for query in ("database", "engineering", "pgvector database"):
+    for query in ("database", "pgvector database"):
         r = test_client.post(
             "/api/memory/search",
             headers={"Authorization": f"Bearer {agent_token}"},
@@ -76,4 +75,4 @@ def test_memory_search_matches_topic_and_domain(test_client, agent_token):
         )
         assert r.status_code == 200
         ids = {rec["id"] for rec in r.json()["data"]["records"]}
-        assert record_id in ids, f"query {query!r} should find the record via topic/domain"
+        assert record_id in ids, f"query {query!r} should find the record via its topic"

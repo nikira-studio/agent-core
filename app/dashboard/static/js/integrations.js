@@ -194,3 +194,13 @@ document.addEventListener('DOMContentLoaded', applyStoredIntegrationConnectionKe
 document.addEventListener('DOMContentLoaded', restoreSetupScrollPosition);
 window.addEventListener('beforeunload', saveSetupScrollPosition);
 
+
+
+// The filename is derived from the selected output, and carried as data so it
+// never becomes part of an inline handler's source.
+document.addEventListener('click', function(ev) {
+  const btn = ev.target.closest('[data-download-filename]');
+  if (!btn) return;
+  ev.preventDefault();
+  downloadCurrentOutput(btn.dataset.downloadFilename);
+});

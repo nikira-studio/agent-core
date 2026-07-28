@@ -3,6 +3,7 @@
 from fastapi import APIRouter, Request, Depends
 
 from app.routes.dashboard_shared import (
+    escape_html,
     render_page,
     require_auth,
     local_dt,
@@ -57,11 +58,11 @@ async def workspaces_page(request: Request, session: dict = Depends(require_auth
 
     def workspace_row(p):
         read_tags = "".join(
-            f"<span class='scope-tag' title='Read'>{a}</span>"
+            f"<span class='scope-tag' title='Read'>{escape_html(a)}</span>"
             for a in project_agent_access[p["id"]][0]
         )
         write_tags = "".join(
-            f"<span class='scope-tag scope-write' title='Write'>{a}</span>"
+            f"<span class='scope-tag scope-write' title='Write'>{escape_html(a)}</span>"
             for a in project_agent_access[p["id"]][1]
         )
         read_tags = read_tags or "<span class='text-muted'>none</span>"
@@ -69,15 +70,15 @@ async def workspaces_page(request: Request, session: dict = Depends(require_auth
         is_active = p.get("is_active")
         active_label = "active" if is_active else "inactive"
         if is_active:
-            toggle_btn = f"<button type='button' class='btn btn-sm btn-warning' data-workspace-action='deactivate' data-workspace-id='{p['id']}'>Deactivate</button>"
+            toggle_btn = f"<button type='button' class='btn btn-sm btn-warning' data-workspace-action='deactivate' data-workspace-id='{escape_html(p['id'])}'>Deactivate</button>"
         else:
-            toggle_btn = f"<button type='button' class='btn btn-sm btn-secondary' data-workspace-action='reactivate' data-workspace-id='{p['id']}'>Reactivate</button>"
+            toggle_btn = f"<button type='button' class='btn btn-sm btn-secondary' data-workspace-action='reactivate' data-workspace-id='{escape_html(p['id'])}'>Reactivate</button>"
         return (
             f"<tr>"
-            f"<td><code>{p['id']}</code></td>"
-            f"<td>{p.get('name', '')}</td>"
+            f"<td><code>{escape_html(p['id'])}</code></td>"
+            f"<td>{escape_html(p.get('name', ''))}</td>"
             f"<td><span class='badge badge-{active_label}'>{active_label}</span></td>"
-            f"<td>{p.get('owner_user_id', '')}</td>"
+            f"<td>{escape_html(p.get('owner_user_id', ''))}</td>"
             f"<td class='agent-access-cell'>"
             f"<div class='agent-read-list'><span class='access-label'>Read</span>{read_tags}</div>"
             f"<div class='agent-write-list'><span class='access-label'>Write</span>{write_tags}</div>"
@@ -204,7 +205,7 @@ async def workspaces_page(request: Request, session: dict = Depends(require_auth
           '<div class="card" style="padding:12px;margin-bottom:12px">' +
             '<form data-workspace-collaborator-form="true" data-workspace-id="' + escapeHtml(workspaceId) + '">' +
               '<div class="form-row" style="display:grid;grid-template-columns:1.4fr .7fr .7fr auto;gap:8px;align-items:end">' +
-                '<div class="form-group" style="margin:0"><label>User ID</label><input type="text" name="user_id" placeholder="e.g. brian" autocomplete="off"></div>' +
+                '<div class="form-group" style="margin:0"><label>User ID</label><input type="text" name="user_id" placeholder="e.g. alex" autocomplete="off"></div>' +
                 '<label class="checkbox-label" style="margin:0"><input type="checkbox" name="can_read" checked> Read</label>' +
                 '<label class="checkbox-label" style="margin:0"><input type="checkbox" name="can_write"> Write</label>' +
                 '<button type="submit" class="btn">Add</button>' +

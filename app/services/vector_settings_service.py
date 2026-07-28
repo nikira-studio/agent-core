@@ -63,23 +63,8 @@ def get_vector_model() -> str:
     return get_vector_setting("vector_model")
 
 
-def get_vector_dimension() -> int:
-    try:
-        return int(get_vector_setting("vector_dimension"))
-    except ValueError:
-        return 768
-
-
 def get_vector_auth_type() -> str:
     return get_vector_setting("vector_auth_type")
-
-
-def get_vector_provider() -> str:
-    return get_vector_setting("vector_provider")
-
-
-def has_vector_api_key() -> bool:
-    return bool(_get_stored_api_key_plaintext())
 
 
 def _system_settings_columns() -> set[str]:

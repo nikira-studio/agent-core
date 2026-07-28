@@ -14,9 +14,24 @@ def success_response_with_headers(data: Any, headers: dict, status_code: int = 2
     return resp
 
 
-def error_response(code: str, message: str, status_code: int = 400) -> JSONResponse:
+def error_response(
+    code: str,
+    message: str,
+    status_code: int = 400,
+    details: Any = None,
+) -> JSONResponse:
+    """A failure, optionally carrying structured detail about what did happen.
+
+    Some operations are partial: a merge restore can bring twelve tables across
+    and fail on the thirteenth. Reporting only the message loses everything the
+    operator needs to know about the twelve. `details` is omitted entirely when
+    absent, so the error shape is unchanged for every other caller.
+    """
+    error: dict[str, Any] = {"code": code, "message": message}
+    if details is not None:
+        error["details"] = details
     return JSONResponse(
-        content={"ok": False, "error": {"code": code, "message": message}},
+        content={"ok": False, "error": error},
         status_code=status_code,
     )
 

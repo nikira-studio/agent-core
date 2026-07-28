@@ -20,6 +20,13 @@ def _hf(s):
 
 
 def escape_html(s):
+    """Escape a value for interpolation into dashboard HTML.
+
+    Single quotes are escaped too: much of this dashboard uses single-quoted
+    attributes (`class='...'`, `title='...'`), and a value that escapes only
+    double quotes can still break out of one of those and add an event handler.
+    Matches escapeHtml in dashboard.js so both sides of a page agree.
+    """
     if s is None:
         return ""
     return (
@@ -28,6 +35,7 @@ def escape_html(s):
         .replace("<", "&lt;")
         .replace(">", "&gt;")
         .replace('"', "&quot;")
+        .replace("'", "&#39;")
     )
 
 
@@ -193,16 +201,6 @@ def render_page(
 </html>""",
         status_code=status_code,
     )
-
-
-def api_key_modal(id: str, title: str, body_content: str) -> str:
-    return f"""
-<div class="modal-overlay" id="{id}" style="display:none">
-  <div class="modal">
-    <h3>{title}</h3>
-    {body_content}
-  </div>
-</div>"""
 
 
 def _parse_manual_prune_cutoff(before_date: str) -> tuple[str, str]:

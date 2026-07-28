@@ -6,6 +6,38 @@ This document explains how that works, what other protections are in place, and 
 
 ---
 
+## Shared Memory and Cross-Agent Influence
+
+Memory here is shared on purpose: several agents read and write one corpus, which is what lets you swap agents without losing what they knew. That also makes memory a channel between agents, so a wrong or malicious record does not end when a session does — it persists and is re-read.
+
+What limits the blast radius:
+
+- **Scopes** decide what any agent can read or write; nothing is global by default.
+- **Provenance is server-stamped** — who wrote a record, through which channel, during which activity — and cannot be supplied by the caller.
+- **Standing context is granted, not taken.** Agents can *request* that a record be pinned, but only an operator applies it. A pinned record enters every session in the scope without anyone searching for it, so it is the highest-value target for a poisoned write and the one place an agent's reach is deliberately cut short.
+- **Removal is reversible.** Retraction hides a record and keeps it restorable for the retention window; only the maintenance sweep deletes.
+- **The clean-up rules propose, never act,** so no automated judgement removes a record without a person agreeing.
+
+What is *not* solved: nothing detects a plausible-but-wrong record written in good faith, and any agent with write access to a scope can add to it. Treat write access to a shared scope as trust in that agent's output.
+
+---
+
+## Where Memory Content Can Leave the Machine
+
+Secrets have one controlled path out (below). Memory *content* has three, all off until an operator configures them, and all pointed wherever that operator chose:
+
+| Feature | What is sent | Sent where |
+| --- | --- | --- |
+| **Embedding backend** | Record content, on write and on search | The embedding endpoint you configured |
+| **Review model** | Record content of the records being judged | The model endpoint or connector binding you configured |
+| **Verification bindings** | The anchor value only — never record content | The binding's service |
+
+Point any of these at a service on a machine you control and nothing leaves it. Point one at a hosted API and your memory content is sent there. That is the entire trade-off, and it is why none of them has a default and why the features that use them stay off until switched on.
+
+Connector actions are the fourth outbound path, but those are explicit by nature: an agent asked for a call to be made.
+
+---
+
 ## How Secrets Are Stored
 
 When you store a credential, the value is encrypted with [Fernet](https://cryptography.io/en/latest/fernet/) before it's written to the database. The encryption key lives at `data/credential.key`, and a history of all keys (used after rotation) is in `data/credential.keyring`.
@@ -86,7 +118,12 @@ Connectors are the server-side path for external actions:
 2. You create a connector binding that points to that credential and has its own scope.
 3. An agent calls `connectors_run` with a binding ID, action, and parameters.
 4. Agent Core verifies the agent can read the binding scope.
-5. Agent Core resolves the credential internally, calls the external service, logs the execution, and returns the result.
+5. **If the action changes state, Agent Core also requires write access to that scope.** Read access to a binding means the agent may query the service, not that it may act through it.
+6. Agent Core resolves the credential internally, calls the external service, logs the execution, and returns the result.
+
+An action counts as read-only when its metadata says so or its HTTP method is `GET`, `HEAD`, or `OPTIONS`. **Anything that cannot be identified requires write.** That is the opposite of the verification pass, where an inconclusive check leaves the record alone — the difference is what a wrong guess costs. There it would delete a true memory; here it would run someone else's `DELETE`.
+
+Both transports enforce this identically: `connectors_run` over MCP and `POST /api/connector-bindings/{id}/run` over REST call the same check.
 
 Credential scope controls access to the stored secret. Binding scope controls where the connector is available. In normal workspace use, set both to the same workspace.
 

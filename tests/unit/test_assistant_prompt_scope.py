@@ -1,7 +1,7 @@
 """Phase 5 regression: the generated assistant-onboarding prompt must never tell a
 no-workspace agent to treat its private agent scope as a durable/shared store.
 
-This is the contradiction that led Clawdia to silo personal facts in her private
+This is the contradiction that led the assistant to silo personal facts in her private
 agent scope. The remediation routes durable writes to a workspace (and tells a
 no-workspace agent to request one); these tests lock that in so it can't silently
 regress.
@@ -10,8 +10,8 @@ regress.
 from app.routes.integrations_page import _build_assistants_md
 
 BASE = "http://core.example.com"
-USER = "user:brian"
-AGENT = "agent:clawdia"
+USER = "user:alex"
+AGENT = "agent:assistant"
 WORKSPACE = "workspace:agent-core"
 
 

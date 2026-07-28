@@ -2,7 +2,7 @@ import os
 import sqlite3
 from pathlib import Path
 from contextlib import contextmanager
-from typing import Generator
+from collections.abc import Generator
 
 from app.branding import ENV_PREFIX
 from app.config import settings
@@ -14,15 +14,6 @@ def get_db_path() -> Path:
     if DB_PATH_OVERRIDE:
         return Path(DB_PATH_OVERRIDE)
     return settings.db_path
-
-
-def reset_test_db(path: str) -> None:
-    global DB_PATH_OVERRIDE
-    DB_PATH_OVERRIDE = path
-
-
-def init_test_db() -> None:
-    init_db()
 
 
 _sqlite_vec_available: bool | None = None

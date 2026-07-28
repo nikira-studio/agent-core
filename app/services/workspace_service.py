@@ -1,4 +1,5 @@
-from typing import Optional, Iterable
+from typing import Optional
+from collections.abc import Iterable
 
 from app.database import get_db
 from app.models.enums import normalize_id
@@ -68,16 +69,19 @@ def list_workspaces(
         if subject_user_id:
             query += """
                 LEFT JOIN workspace_collaborators wc
-                  ON wc.workspace_id = w.id AND wc.user_id = ?
+                  ON wc.workspace_id = w.id AND wc.user_id = ? AND wc.can_read = 1
             """
             params.append(subject_user_id)
         query += " WHERE 1=1"
-        if owner_user_id is not None and user_id is None:
+        # The join alone narrows nothing — it is a LEFT join, so every workspace
+        # survives it. Whenever a subject is named, the predicate is what limits
+        # the result to what that subject may actually see: their own workspaces
+        # plus the ones they were granted read on. Without it, naming a subject
+        # returned the whole table, which is the opposite of what the caller
+        # asked for.
+        if subject_user_id is not None:
             query += " AND (w.owner_user_id = ? OR wc.user_id IS NOT NULL)"
-            params.append(owner_user_id)
-        elif owner_user_id is not None:
-            query += " AND w.owner_user_id = ?"
-            params.append(owner_user_id)
+            params.append(subject_user_id)
         if is_active is not None:
             query += " AND w.is_active = ?"
             params.append(is_active)
@@ -207,18 +211,6 @@ def get_accessible_workspace_ids(user_id: str, workspace_ids: Iterable[str]) -> 
             [user_id, *normalized_ids, user_id],
         ).fetchall()
         return frozenset(row["id"] for row in rows)
-
-
-def get_workspace_ids_with_bindings() -> frozenset[str]:
-    with get_db() as conn:
-        rows = conn.execute(
-            "SELECT DISTINCT scope FROM connector_bindings WHERE scope LIKE 'workspace:%'",
-        ).fetchall()
-        return frozenset(
-            scope.split(":", 1)[1]
-            for row in rows
-            if (scope := row["scope"]).startswith("workspace:")
-        )
 
 
 def get_active_workspace_ids(workspace_ids: Iterable[str]) -> frozenset[str]:

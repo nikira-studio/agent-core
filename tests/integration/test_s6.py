@@ -222,6 +222,10 @@ def _build_test_backup(
     backup_db = tmp_path / "backup.db"
     con = sqlite3.connect(backup_db)
     con.executescript(SCHEMA_SQL)
+    # Simulate a backup taken before event_time was retired: an older archive
+    # carries columns the current schema no longer has, and restore must ignore
+    # them rather than fail.
+    con.execute("ALTER TABLE memory_records ADD COLUMN event_time TEXT")
     encrypted = Fernet(backup_key).encrypt(b"backup-secret").decode()
     con.execute(
         """

@@ -124,19 +124,19 @@ async def activity_page(request: Request, session: dict = Depends(require_auth))
     )
 
     rows = "".join(
-        f"<tr class='activity-row' data-status='{a.get('status', '')}'>"
-        f"<td class='activity-task-cell'>{a.get('task_description', '')[:120]}</td>"
+        f"<tr class='activity-row' data-status='{escape_html(a.get('status', ''))}'>"
+        f"<td class='activity-task-cell'>{escape_html(a.get('task_description', '')[:120])}</td>"
         f"<td class='activity-scope-cell'><code>{escape_html((a.get('memory_scope') or '').replace('workspace:', '')) or '—'}</code></td>"
-        f"<td class='activity-status-cell'><span class='badge badge-{a.get('status', 'active')}'>{a.get('status', '')}</span></td>"
+        f"<td class='activity-status-cell'><span class='badge badge-{escape_html(a.get('status', 'active'))}'>{escape_html(a.get('status', ''))}</span></td>"
         f"<td class='activity-agent-cell'>{escape_html(agent_labels.get(a.get('assigned_agent_id', ''), a.get('assigned_agent_id', '')))}</td>"
         f"<td class='activity-handoff-cell'>{escape_html(agent_labels.get(a.get('reassigned_from_agent_id', ''), a.get('reassigned_from_agent_id', '')))}</td>"
         f"<td class='activity-updated-cell'>{local_dt(a.get('updated_at'), style='date')}<br>{local_dt(a.get('updated_at'), style='time')}</td>"
         f"<td><div class='actions-cell activity-actions-cell'>"
-        f"<button type='button' class='btn btn-sm btn-secondary' onclick=\"createHandoff('{a['id']}')\">Briefing</button>"
-        f"<button type='button' class='btn btn-sm btn-secondary' onclick=\"reassignActivity('{a['id']}')\" title='Reassign'>Reassign</button>"
-        f"<button type='button' class='btn btn-sm btn-secondary' onclick=\"updateActivity('{a['id']}','active')\" {'disabled' if a.get('status') not in ('stale', 'blocked', 'reassigned') else ''} title='Reactivate'>Start</button>"
-        f"<button type='button' class='btn btn-sm btn-secondary' onclick=\"updateActivity('{a['id']}','completed')\" {'disabled' if a.get('status') not in ('active', 'stale', 'blocked', 'reassigned') else ''} title='Complete'>Done</button>"
-        f"<button type='button' class='btn btn-sm btn-danger' onclick=\"cancelActivity('{a['id']}')\" {'disabled' if a.get('status') not in ('active', 'stale', 'blocked', 'reassigned') else ''} title='Cancel'>Cancel</button>"
+        f"<button type='button' class='btn btn-sm btn-secondary' data-activity-briefing='{escape_html(a['id'])}'>Briefing</button>"
+        f"<button type='button' class='btn btn-sm btn-secondary' data-activity-reassign='{escape_html(a['id'])}' title='Reassign'>Reassign</button>"
+        f"<button type='button' class='btn btn-sm btn-secondary' data-activity-start='{escape_html(a['id'])}' {'disabled' if a.get('status') not in ('stale', 'blocked', 'reassigned') else ''} title='Reactivate'>Start</button>"
+        f"<button type='button' class='btn btn-sm btn-secondary' data-activity-done='{escape_html(a['id'])}' {'disabled' if a.get('status') not in ('active', 'stale', 'blocked', 'reassigned') else ''} title='Complete'>Done</button>"
+        f"<button type='button' class='btn btn-sm btn-danger' data-activity-cancel='{escape_html(a['id'])}' {'disabled' if a.get('status') not in ('active', 'stale', 'blocked', 'reassigned') else ''} title='Cancel'>Cancel</button>"
         f"</div></td></tr>"
         for a in activities
     )
@@ -160,6 +160,22 @@ async def activity_page(request: Request, session: dict = Depends(require_auth))
       var table = document.querySelector('.activity-table');
       if (table && table.parentNode) table.parentNode.insertBefore(banner, table);
     };
+    // Row actions carry the activity id as data. Ids here are server-generated,
+    // but the shape is the point: a value inside an inline handler is JavaScript
+    // source, and the next field rendered that way may not be server-generated.
+    document.addEventListener('click', function(ev) {
+      const briefing = ev.target.closest('[data-activity-briefing]');
+      if (briefing) { ev.preventDefault(); createHandoff(briefing.dataset.activityBriefing); return; }
+      const reassign = ev.target.closest('[data-activity-reassign]');
+      if (reassign) { ev.preventDefault(); reassignActivity(reassign.dataset.activityReassign); return; }
+      const start = ev.target.closest('[data-activity-start]');
+      if (start) { ev.preventDefault(); updateActivity(start.dataset.activityStart, 'active'); return; }
+      const done = ev.target.closest('[data-activity-done]');
+      if (done) { ev.preventDefault(); updateActivity(done.dataset.activityDone, 'completed'); return; }
+      const cancel = ev.target.closest('[data-activity-cancel]');
+      if (cancel) { ev.preventDefault(); cancelActivity(cancel.dataset.activityCancel); }
+    });
+
     async function updateActivity(id, status) {
       const j = await apiFetch('/api/activity/' + id, { method: 'PUT', body: JSON.stringify({ status }) });
       if (j.ok) { showToast('Updated'); refreshActivity(); }
@@ -262,9 +278,6 @@ async def activity_page(request: Request, session: dict = Depends(require_auth))
       copyToClipboard(document.querySelector('#ig-output pre').textContent, btn);
     }
 
-    function escapeHtml(s) {
-      return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-    }
     </script>"""
     js = js.replace("window.onAgentCoreEvent", "window." + JS_WINDOW_EVENT)
 

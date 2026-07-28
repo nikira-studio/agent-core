@@ -338,9 +338,8 @@ class HttpEngine(BaseConnector):
             self._apply_custom_header(req, auth, credential)
         elif auth_type == "oauth2":
             self._apply_oauth2(req, auth, credential, session)
-        else:
-            if credential is not None and getattr(credential, "raw", None) is not None:
-                req["headers"]["Authorization"] = f"Bearer {credential.raw}"
+        elif credential is not None and getattr(credential, "raw", None) is not None:
+            req["headers"]["Authorization"] = f"Bearer {credential.raw}"
 
     def _apply_api_key(self, req: dict, auth: dict, credential: Credential) -> None:
         name = auth.get("name", "X-API-Key")

@@ -121,17 +121,17 @@ def _render_adapter_cards(adapter_entries: list[dict], ctx) -> str:
                 if update_available:
                     action_btn += (
                         f"<button type='button' class='btn btn-sm btn-primary' "
-                        f"onclick='updateAdapter(this, \"{adapter['id']}\")'>Update</button>"
+                        f'data-adapter-update="{escape_html(adapter["id"])}">Update</button>'
                     )
                 action_btn += (
                     f"<button type='button' class='btn btn-sm btn-danger' "
-                    f"onclick='uninstallAdapter(this, \"{adapter['id']}\")'>Uninstall</button>"
+                    f'data-adapter-uninstall="{escape_html(adapter["id"])}">Uninstall</button>'
                 )
         elif installable:
             state_badge = '<span class="badge badge-warning">Available</span>'
             action_btn = (
                 f"<button type='button' class='btn btn-sm btn-primary' "
-                f"onclick='installAdapter(this, \"{adapter['id']}\")'>Install</button>"
+                f'data-adapter-install="{escape_html(adapter["id"])}">Install</button>'
                 if ctx.is_admin
                 else ""
             )
@@ -219,6 +219,8 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
     }
 
     all_bindings = connector_service.list_bindings()
+    # Indexed once for the binding table below; see failing_actions_by_binding.
+    failing_by_binding = connector_service.failing_actions_by_binding()
     visible_bindings = [b for b in all_bindings if enforcer.can_read(b["scope"])]
     connector_type_count = len(connector_types)
     visible_binding_count = len(visible_bindings)
@@ -338,6 +340,17 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
             status_text = f"Error: {str(b['last_error'])[:40]}"
         elif b.get("last_tested_at"):
             status_text = f"OK ({b['last_tested_at'][:10]})"
+
+        # A passing health check only proves the connection works. Report actions
+        # that keep failing, which the probe cannot see.
+        failing = failing_by_binding.get(b["id"], [])
+        if failing:
+            worst = failing[0]
+            status_cls = "status-error"
+            status_text = (
+                f"{worst['action']} failing {worst['failures']}/{worst['calls']}"
+                + (f" (+{len(failing) - 1} more)" if len(failing) > 1 else "")
+            )
         oauth_button = ""
         if ct and ct.get("auth_type") == "oauth2":
             oauth_label = (
@@ -347,7 +360,7 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
             )
             oauth_button = (
                 f"<button type='button' class='btn btn-sm btn-primary' "
-                f"onclick='authorizeBindingOAuth(\"{b['id']}\")'>{oauth_label}</button>"
+                f'data-binding-oauth="{escape_html(b["id"])}">{escape_html(oauth_label)}</button>'
             )
         bindings_rows += f"""
         <tr data-binding-id="{b["id"]}" data-connector-type-id="{escape_html(b.get("connector_type_id", ""))}">
@@ -357,10 +370,10 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
           <td class="{status_cls}" style="{text_style}">{escape_html(status_text)}</td>
           <td class='actions-cell'>
             {oauth_button}
-            <button type='button' class='btn btn-sm btn-secondary' onclick='editBinding("{b["id"]}")'>Edit</button>
-            <button type='button' class='btn btn-sm btn-secondary' onclick='viewExecutions("{b["id"]}")'>History</button>
-            <button type='button' class='btn btn-sm btn-secondary' onclick='testBinding("{b["id"]}")'>Test</button>
-            <button type='button' class='btn btn-sm btn-danger icon-delete-btn' onclick='deleteBinding("{b["id"]}")' title='Delete binding' aria-label='Delete binding'>{get_icon("delete")}</button>
+            <button type='button' class='btn btn-sm btn-secondary' data-binding-edit="{escape_html(b["id"])}">Edit</button>
+            <button type='button' class='btn btn-sm btn-secondary' data-binding-history="{escape_html(b["id"])}">History</button>
+            <button type='button' class='btn btn-sm btn-secondary' data-binding-test="{escape_html(b["id"])}">Test</button>
+            <button type='button' class='btn btn-sm btn-danger icon-delete-btn' data-binding-delete="{escape_html(b["id"])}" title='Delete binding' aria-label='Delete binding'>{get_icon("delete")}</button>
           </td>
         </tr>"""
 
@@ -384,7 +397,7 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
             badge_style = "background:rgba(107,114,128,0.15);color:var(--muted)"
         execution_rows_html += f"""
         <tr>
-          <td><button type="button" class="btn btn-sm btn-secondary" onclick='viewExecutions("{execution.get("binding_id", "")}")'>{escape_html(execution.get("binding_name", ""))}</button></td>
+          <td><button type="button" class="btn btn-sm btn-secondary" data-binding-history="{escape_html(execution.get("binding_id", ""))}">{escape_html(execution.get("binding_name", ""))}</button></td>
           <td><code>{escape_html(execution.get("action", ""))}</code></td>
           <td><span class="badge" style="{badge_style}">{escape_html(status)}</span></td>
           <td>{local_dt(execution.get("executed_at"))}</td>
@@ -422,7 +435,14 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
             0,
         )
         view_actions_btn = (
-            f'<button type="button" class="btn btn-sm btn-secondary" onclick=\'viewActions("{ct["id"]}", "{escape_html(ct["display_name"])}", {action_count})\'>View Actions</button>'
+            # Carried as data rather than spliced into the handler: HTML
+            # entities are decoded before the JavaScript is parsed, so an
+            # escaped quote in an imported connector's name would still end the
+            # argument and start executing.
+            f'<button type="button" class="btn btn-sm btn-secondary"'
+            f' data-actions-type-id="{escape_html(ct["id"])}"'
+            f' data-actions-name="{escape_html(ct["display_name"])}"'
+            f' data-actions-count="{action_count}">View Actions</button>'
             if action_count
             else ""
         )
@@ -457,7 +477,7 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
         if adapter_update_available and ctx.is_admin:
             update_btn = (
                 f"<button type='button' class='btn btn-sm btn-primary' "
-                f"onclick='updateAdapter(this, \"{ct['id']}\")'>Update</button>"
+                f'data-adapter-update="{escape_html(ct["id"])}">Update</button>'
             )
         binding_recipe_line = (
             f'<div style="font-size:0.8em;color:var(--text-muted);margin-top:0.25rem">{escape_html(recipe_line)}</div>'
@@ -476,9 +496,9 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
             <div style="display:flex;align-items:center;gap:0.4rem;min-width:0;overflow:hidden;">{type_chip}{health_badge}{adapter_badges}</div>
             <div class="connector-card-actions">
               {view_actions_btn}
-              <button type='button' class='btn btn-sm btn-secondary' onclick='openNewBinding("{ct["id"]}", "{escape_html(ct["display_name"])}")'>Add Binding</button>
+              <button type='button' class='btn btn-sm btn-secondary' data-newbinding-type-id="{escape_html(ct["id"])}" data-newbinding-name="{escape_html(ct["display_name"])}">Add Binding</button>
               {update_btn}
-              <button type='button' class='btn btn-sm btn-danger icon-delete-btn' onclick='deleteConnectorType("{ct["id"]}")' title='{ "Uninstall adapter" if adapter_installed else "Delete connector type" }' aria-label='{ "Uninstall adapter" if adapter_installed else "Delete connector type" }'>{get_icon("delete")}</button>
+              <button type='button' class='btn btn-sm btn-danger icon-delete-btn' data-connector-type-delete="{escape_html(ct["id"])}" title='{ "Uninstall adapter" if adapter_installed else "Delete connector type" }' aria-label='{ "Uninstall adapter" if adapter_installed else "Delete connector type" }'>{get_icon("delete")}</button>
             </div>
           </div>
         </div>"""

@@ -103,18 +103,6 @@ ADAPTER_MANIFEST_SCHEMA = {
     },
 }
 
-ADAPTER_MANIFEST_URI = "https://schemas.agent-core.dev/adapter-manifest/v1.0.json"
-
-
-def _make_resolver() -> jsonschema.RefResolver:
-    schema_store = {
-        "https://schemas.agent-core.dev/adapter-manifest/v1.0.json": ADAPTER_MANIFEST_SCHEMA
-    }
-    return jsonschema.RefResolver.from_schema(
-        {"$ref": ADAPTER_MANIFEST_SCHEMA["$id"]}, store=schema_store
-    )
-
-
 class ManifestValidationError:
     def __init__(self, message: str, path: Optional[str] = None):
         self.message = message

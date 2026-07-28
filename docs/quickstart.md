@@ -146,7 +146,9 @@ After the MCP connection is working, run the generated **Verification Prompt** i
 
 Once connected, agents write memory records with three required fields: a class (what kind of thing it is), a scope (who can see it), and the content itself.
 
-If you are writing a preference, you can optionally add a `slot_key` so one active value exists per preference slot. Freshness hints like `valid_from`, `valid_to`, and `last_confirmed_at` are also supported for records that age out or need confirmation over time.
+The class matters more than it looks. A **fact** is settled by checking — someone or something could verify it against the code, a host, or a service. A **decision** is settled by someone deciding, and nothing can verify it. That split is what lets Agent Core re-check facts on a schedule while leaving your decisions alone. Reporting what you just did is neither, and belongs in the activity trail instead.
+
+If you are writing a preference, add a `slot_key` to keep one active value per slot — a new preference with the same scope and slot supersedes the previous one. `valid_from` and `valid_to` describe when the content was true in the world, which is a separate timeline from when it was written; set them when a record covers a period other than "from now on".
 
 ```bash
 curl -X POST http://localhost:3500/api/memory/write \
@@ -240,6 +242,7 @@ This keeps ownership and attribution separate from collaboration. The shared wor
 
 ## What's Next
 
+- [How It Works](how-it-works.md) — the whole system end to end, and the reasoning behind it
 - [Integrations](integrations.md) — tool-specific setup for Claude Code, Cursor, Codex, and others
 - [Configuration](configuration.md) — customize port, data path, session timeouts, and more
 - [Credential Broker](credential-broker.md) — inject real credential values at runtime without exposing them to models

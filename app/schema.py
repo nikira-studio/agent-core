@@ -119,7 +119,6 @@ CREATE TABLE IF NOT EXISTS memory_records (
     confidence REAL NOT NULL DEFAULT 0.5 CHECK (confidence >= 0.0 AND confidence <= 1.0),
     importance REAL NOT NULL DEFAULT 0.5 CHECK (importance >= 0.0 AND importance <= 1.0),
     source_kind TEXT NOT NULL DEFAULT 'agent_inference' CHECK (source_kind IN ('operator_authored', 'human_direct', 'tool_output', 'agent_inference', 'episodic_inference', 'semantic_inference', 'external_import')),
-    event_time TEXT,
     created_at TEXT NOT NULL,
     record_status TEXT NOT NULL DEFAULT 'active' CHECK (record_status IN ('active', 'superseded', 'retracted', 'held')),
     superseded_by_id TEXT,
@@ -137,30 +136,6 @@ CREATE INDEX IF NOT EXISTS idx_memory_status ON memory_records(record_status);
 CREATE INDEX IF NOT EXISTS idx_memory_supersedes ON memory_records(supersedes_id);
 CREATE INDEX IF NOT EXISTS idx_memory_superseded_by ON memory_records(superseded_by_id);
 
--- FTS5 virtual table for memory search
-CREATE VIRTUAL TABLE IF NOT EXISTS memory_records_fts USING fts5(
-    content, domain, topic,
-    content='memory_records',
-    content_rowid='rowid'
-);
-
--- FTS triggers
-CREATE TRIGGER IF NOT EXISTS memory_records_ai AFTER INSERT ON memory_records BEGIN
-    INSERT INTO memory_records_fts(rowid, content, domain, topic)
-    VALUES (new.rowid, new.content, new.domain, new.topic);
-END;
-
-CREATE TRIGGER IF NOT EXISTS memory_records_au AFTER UPDATE ON memory_records BEGIN
-    INSERT INTO memory_records_fts(memory_records_fts, rowid, content, domain, topic)
-    VALUES('delete', old.rowid, old.content, old.domain, old.topic);
-    INSERT INTO memory_records_fts(rowid, content, domain, topic)
-    VALUES (new.rowid, new.content, new.domain, new.topic);
-END;
-
-CREATE TRIGGER IF NOT EXISTS memory_records_ad AFTER DELETE ON memory_records BEGIN
-    INSERT INTO memory_records_fts(memory_records_fts, rowid, content, domain, topic)
-    VALUES('delete', old.rowid, old.content, old.domain, old.topic);
-END;
 
 -- Memory embeddings table (for vector search)
 CREATE TABLE IF NOT EXISTS memory_embeddings (
@@ -398,11 +373,44 @@ CREATE INDEX IF NOT EXISTS idx_tool_result_spill_expires ON tool_result_spill(ex
 """
 
 
+SCHEMA_SQL_MEMORY_FTS = """
+-- FTS5 virtual table for memory search
+CREATE VIRTUAL TABLE IF NOT EXISTS memory_records_fts USING fts5(
+    content, topic,
+    content='memory_records',
+    content_rowid='rowid'
+);
+
+-- FTS triggers
+CREATE TRIGGER IF NOT EXISTS memory_records_ai AFTER INSERT ON memory_records BEGIN
+    INSERT INTO memory_records_fts(rowid, content, topic)
+    VALUES (new.rowid, new.content, new.topic);
+END;
+
+CREATE TRIGGER IF NOT EXISTS memory_records_au AFTER UPDATE ON memory_records BEGIN
+    INSERT INTO memory_records_fts(memory_records_fts, rowid, content, topic)
+    VALUES('delete', old.rowid, old.content, old.topic);
+    INSERT INTO memory_records_fts(rowid, content, topic)
+    VALUES (new.rowid, new.content, new.topic);
+END;
+
+CREATE TRIGGER IF NOT EXISTS memory_records_ad AFTER DELETE ON memory_records BEGIN
+    INSERT INTO memory_records_fts(memory_records_fts, rowid, content, topic)
+    VALUES('delete', old.rowid, old.content, old.topic);
+END;
+"""
+
+
 def create_schema(conn) -> None:
     conn.executescript(SCHEMA_SQL)
+    conn.executescript(SCHEMA_SQL_MEMORY_FTS)
     _ensure_activity_columns(conn)
+    _ensure_activity_fts(conn)
+    _ensure_memory_proposals_table(conn)
+    _widen_proposal_actions(conn)
     _ensure_agents_default_recall_column(conn)
     _ensure_memory_metadata_columns(conn)
+    _drop_retired_memory_columns(conn)
     _ensure_connector_type_provider_columns(conn)
     _ensure_adapter_installations_table(conn)
     conn.execute(
@@ -418,6 +426,33 @@ def create_schema(conn) -> None:
     )
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_memory_freshness ON memory_records(valid_from, valid_to, last_confirmed_at)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_memory_subject_anchor ON memory_records(subject_anchor, record_status)"
+    )
+    # The nightly verification pass: anchored facts, oldest confirmation first.
+    # Partial, because the overwhelming majority of records have no anchor and
+    # indexing them would only make the index bigger without making it useful.
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_memory_verification ON memory_records"
+        "(memory_class, record_status, last_verify_attempt_at) WHERE subject_anchor IS NOT NULL"
+    )
+    # Both the retention sweep and the per-action health rollup filter the
+    # execution log by time; without this each was a full table scan.
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_executions_time ON connector_executions(executed_at)"
+    )
+    # Answering "what did that session actually conclude?" — the reverse of the
+    # citation a record already carries. An expression index rather than a
+    # duplicated column, so provenance stays the single source of truth and
+    # records written before this existed are queryable without a backfill.
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_memory_source_activity ON memory_records"
+        "(json_extract(provenance_json, '$.activity_id'))"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_memory_pinned ON memory_records(scope) "
+        "WHERE pinned = 1 AND record_status = 'active'"
     )
     conn.commit()
     _ensure_user_timezone_column(conn)
@@ -451,6 +486,176 @@ def _ensure_activity_columns(conn) -> None:
     conn.commit()
 
 
+def _widen_proposal_actions(conn) -> None:
+    """Allow the 'pin' action on databases created before it existed.
+
+    SQLite cannot alter a CHECK constraint in place, so the table is rebuilt.
+    Only runs when the old constraint is actually present.
+    """
+    row = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='memory_proposals'"
+    ).fetchone()
+    if not row or not row["sql"] or "'pin'" in row["sql"]:
+        return
+    conn.executescript(
+        """
+        ALTER TABLE memory_proposals RENAME TO memory_proposals_old;
+        CREATE TABLE memory_proposals (
+            id TEXT PRIMARY KEY,
+            rule TEXT NOT NULL,
+            action TEXT NOT NULL CHECK (action IN ('retract', 'confirm', 'pin')),
+            scope TEXT NOT NULL,
+            target_ids_json TEXT NOT NULL,
+            rationale TEXT NOT NULL,
+            evidence_json TEXT,
+            status TEXT NOT NULL DEFAULT 'pending'
+                CHECK (status IN ('pending', 'accepted', 'rejected', 'stale')),
+            created_at TEXT NOT NULL,
+            decided_at TEXT,
+            decided_by TEXT,
+            applied_count INTEGER NOT NULL DEFAULT 0
+        );
+        INSERT INTO memory_proposals SELECT * FROM memory_proposals_old;
+        DROP TABLE memory_proposals_old;
+        """
+    )
+    conn.commit()
+
+
+def _ensure_memory_proposals_table(conn) -> None:
+    """Review queue for consolidation proposals, plus the operator's verdicts.
+
+    Verdicts are the point, not a side effect. Every accept/reject is labelled
+    data for the rule that produced it, so a rule's precision can be measured
+    from real decisions before anyone considers letting it act unattended.
+    Nothing here applies itself.
+    """
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS memory_proposals (
+            id TEXT PRIMARY KEY,
+            rule TEXT NOT NULL,
+            action TEXT NOT NULL CHECK (action IN ('retract', 'confirm', 'pin')),
+            scope TEXT NOT NULL,
+            target_ids_json TEXT NOT NULL,
+            rationale TEXT NOT NULL,
+            evidence_json TEXT,
+            status TEXT NOT NULL DEFAULT 'pending'
+                CHECK (status IN ('pending', 'accepted', 'rejected', 'stale')),
+            created_at TEXT NOT NULL,
+            decided_at TEXT,
+            decided_by TEXT,
+            applied_count INTEGER NOT NULL DEFAULT 0
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_memory_proposals_status
+            ON memory_proposals(status, created_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_memory_proposals_rule
+            ON memory_proposals(rule, status);
+
+        -- One open proposal per rule per target set. Without this a second
+        -- generation pass would queue the same suggestion again.
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_memory_proposals_open
+            ON memory_proposals(rule, target_ids_json)
+            WHERE status = 'pending';
+        """
+    )
+    conn.commit()
+
+
+def _ensure_activity_fts(conn) -> None:
+    """Index the activity trail for full-text search, backfilling existing rows.
+
+    Activity records are the episodic tier of memory: what an agent actually
+    worked on, one row per task, with a result. They were write-only — reachable
+    through activity_list and briefings but never searchable — so agents wrote
+    per-task work logs into memory_records instead, where nothing ages them out.
+    Indexing the trail gives that content a queryable home of its own.
+
+    Runs after _ensure_activity_columns because the trigger bodies reference
+    task_note / task_result, which SQLite resolves at CREATE TRIGGER time; on a
+    pre-existing database missing those columns, creating the triggers first
+    would fail.
+    """
+    already_indexed = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'agent_activity_fts'"
+    ).fetchone()
+    conn.executescript(
+        """
+        CREATE VIRTUAL TABLE IF NOT EXISTS agent_activity_fts USING fts5(
+            task_description, task_note, task_result,
+            content='agent_activity',
+            content_rowid='rowid'
+        );
+
+        CREATE TRIGGER IF NOT EXISTS agent_activity_ai AFTER INSERT ON agent_activity BEGIN
+            INSERT INTO agent_activity_fts(rowid, task_description, task_note, task_result)
+            VALUES (new.rowid, new.task_description, new.task_note, new.task_result);
+        END;
+
+        CREATE TRIGGER IF NOT EXISTS agent_activity_au AFTER UPDATE ON agent_activity BEGIN
+            INSERT INTO agent_activity_fts(agent_activity_fts, rowid, task_description, task_note, task_result)
+            VALUES('delete', old.rowid, old.task_description, old.task_note, old.task_result);
+            INSERT INTO agent_activity_fts(rowid, task_description, task_note, task_result)
+            VALUES (new.rowid, new.task_description, new.task_note, new.task_result);
+        END;
+
+        CREATE TRIGGER IF NOT EXISTS agent_activity_ad AFTER DELETE ON agent_activity BEGIN
+            INSERT INTO agent_activity_fts(agent_activity_fts, rowid, task_description, task_note, task_result)
+            VALUES('delete', old.rowid, old.task_description, old.task_note, old.task_result);
+        END;
+        """
+    )
+    # Triggers only cover rows written from here on, so a trail that predates
+    # this migration stays invisible until the index is rebuilt once. Keyed off
+    # whether the table existed before this call rather than off whether the
+    # index looks empty: this is an external-content table, so reading from it
+    # (SELECT ... FROM agent_activity_fts) returns rows out of agent_activity
+    # even when nothing is indexed, which makes any "is it empty" probe against
+    # it report false. A rebuild on a fresh empty database costs nothing.
+    if not already_indexed:
+        conn.execute(
+            "INSERT INTO agent_activity_fts(agent_activity_fts) VALUES('rebuild')"
+        )
+    conn.commit()
+
+
+def _drop_retired_memory_columns(conn) -> None:
+    """Drop columns that duplicated something else and are no longer written.
+
+    event_time was identical to created_at on all but 2 of 425 records in the
+    first real corpus — it recorded when a write happened, which created_at
+    already does. Restores stay compatible because _insert_missing_rows
+    intersects the backup's columns with the current schema.
+    """
+    columns = {
+        row["name"]
+        for row in conn.execute("PRAGMA table_info(memory_records)").fetchall()
+    }
+    if "event_time" in columns:
+        conn.execute("ALTER TABLE memory_records DROP COLUMN event_time")
+        conn.commit()
+
+    if "domain" in columns:
+        # The FTS index and its triggers reference the column, so they are
+        # rebuilt before it can go. Rebuilding also re-tokenises every record
+        # against the new (content, topic) shape rather than leaving a stale
+        # index that still believes it has three columns.
+        conn.executescript(
+            """
+            DROP TRIGGER IF EXISTS memory_records_ai;
+            DROP TRIGGER IF EXISTS memory_records_au;
+            DROP TRIGGER IF EXISTS memory_records_ad;
+            DROP TABLE IF EXISTS memory_records_fts;
+            """
+        )
+        conn.execute("ALTER TABLE memory_records DROP COLUMN domain")
+        conn.commit()
+        conn.executescript(SCHEMA_SQL_MEMORY_FTS)
+        conn.execute("INSERT INTO memory_records_fts(memory_records_fts) VALUES('rebuild')")
+        conn.commit()
+
+
 def _ensure_memory_metadata_columns(conn) -> None:
     columns = {
         row["name"]
@@ -464,6 +669,29 @@ def _ensure_memory_metadata_columns(conn) -> None:
         ("last_confirmed_at", "TEXT"),
         ("expires_at", "TEXT"),
         ("status_changed_at", "TEXT"),
+        # What a later session would go and look at to check this record: a repo
+        # path, a host, or a connector binding. The one thing retrieval cannot
+        # infer from the content, and the prerequisite for verifying a fact
+        # rather than merely noting that nobody has checked it.
+        ("subject_anchor", "TEXT"),
+        # Observed usefulness, to replace the self-assigned scores. A writer
+        # rating its own record produces no variance (confidence sits at >=0.95
+        # on most of the corpus); how often a record is actually recalled, and
+        # whether anyone said it helped, are signals nobody can inflate.
+        ("recall_count", "INTEGER NOT NULL DEFAULT 0"),
+        ("last_recalled_at", "TEXT"),
+        ("helpful_count", "INTEGER NOT NULL DEFAULT 0"),
+        ("unhelpful_count", "INTEGER NOT NULL DEFAULT 0"),
+        # When verification last LOOKED at this record, whatever the answer.
+        # Distinct from last_confirmed_at, which only moves on a successful
+        # check: ordering a capped nightly sweep by confirmation starves it,
+        # because records that can never be confirmed keep sorting to the front
+        # and consume the whole budget every run.
+        ("last_verify_attempt_at", "TEXT"),
+        # Records the operator wants every session to see without having to
+        # search for them. Ranking can bury a constraint, and a buried
+        # constraint is the same as no constraint.
+        ("pinned", "INTEGER NOT NULL DEFAULT 0"),
     ]
     status_changed_at_added = "status_changed_at" not in columns
     for column_name, column_type in additions:

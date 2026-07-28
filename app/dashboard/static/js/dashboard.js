@@ -145,6 +145,15 @@ document.addEventListener('keydown', function(e) {
 // Clipboard Operations
 // ============================================================
 
+// Buttons that carry their text as data, so a secret never becomes part of an
+// inline handler's source. `copyToClipboard` stays available for direct calls.
+document.addEventListener('click', function(ev) {
+  var btn = ev.target.closest('[data-copy-value]');
+  if (!btn) return;
+  ev.preventDefault();
+  copyToClipboard(btn.dataset.copyValue, btn);
+});
+
 function copyToClipboard(text, button) {
   if (!button) return;
   text = String(text || '');
@@ -330,27 +339,6 @@ function formatRelativeTime(dateString) {
   if (diff < 86400) return Math.floor(diff / 3600) + 'h ago';
   if (diff < 604800) return Math.floor(diff / 86400) + 'd ago';
   return date.toLocaleDateString();
-}
-
-
-// ============================================================
-// Pagination Helpers
-// ============================================================
-
-function buildPagination(total, page, perPage, onPageChange) {
-  var totalPages = Math.ceil(total / perPage);
-  if (totalPages <= 1) return '';
-
-  var html = '<div class="pagination">';
-  if (page > 1) {
-    html += '<button class="btn btn-sm" onclick="' + onPageChange + '(' + (page - 1) + ')">&laquo; Prev</button>';
-  }
-  html += '<span class="page-info">Page ' + page + ' of ' + totalPages + '</span>';
-  if (page < totalPages) {
-    html += '<button class="btn btn-sm" onclick="' + onPageChange + '(' + (page + 1) + ')">Next &raquo;</button>';
-  }
-  html += '</div>';
-  return html;
 }
 
 

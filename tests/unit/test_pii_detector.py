@@ -16,7 +16,7 @@ def test_clean_text_not_flagged():
     assert contains_pii("meeting at 3pm") is False
     assert contains_pii("phone: 1-800-555-0199") is False
     assert contains_pii("api key: EXAMPLE_LIVE_ABC123XYZ") is False
-    assert contains_pii("server at 192.168.1.100") is False
+    assert contains_pii("server at 192.0.2.11") is False
 
 
 def test_scan_pii_email_found():

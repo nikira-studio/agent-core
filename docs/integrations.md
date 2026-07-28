@@ -2,6 +2,8 @@
 
 Agent Core exposes memory, credentials, connector actions, and activity tracking over **MCP** (Model Context Protocol) and **REST**. It doesn't schedule or orchestrate. Agents call it when they need memory, credentials, connectors, or activity tracking.
 
+This doc is about wiring tools up. For what the pieces are and why they behave as they do, read [How It Works](how-it-works.md) first.
+
 The dashboard **Integrations** page at `/integrations` generates ready-to-paste configs for specific tools and is usually the fastest path. This doc explains what's happening under the hood and covers cases the generator doesn't handle. The current presets include Claude Code, Codex, Cursor, Windsurf, Antigravity, and a generic MCP/REST path.
 
 The dashboard **Connectors** page at `/connectors` is where you register external capabilities for Agent Core itself. It supports:
@@ -71,9 +73,16 @@ Once connected, these tools are available in any session:
 | `credential_get` | Get an `AC_SECRET_*` reference for a stored credential |
 | `credential_list` | List credential entries the agent can access (metadata and references only — no raw values) |
 | `activity_update` | Create or update an activity record, including progress notes and a completion result |
-| `activity_get` | Get the status of an activity |
+| `activity_get` | Get one activity, together with the memory records written during it |
 | `activity_list` | List activities visible to the current agent or user |
 | `activity_pickup` | Claim the next active work item a human assigned to this agent in authorized scopes |
+| `activity_search` | Search the activity trail for what agents have already worked on |
+| `memory_pinned` | Standing context for your scopes — call once at session start |
+| `memory_pin` | **Request** that a record become standing context, or stop being it. Queues the request for operator review rather than pinning directly |
+| `memory_confirm` | Mark a record verified against the world (requires evidence saying what you checked) |
+| `memory_feedback` | Report whether a recalled record actually helped |
+| `memory_verify` | Check anchored facts against the code, host or service they describe |
+| `memory_reanchor` | Fix a record's pointer when the file moved or the anchor was wrong |
 | `get_briefing` | Pull a briefing when taking over from another agent |
 | `briefing_list` | List generated briefings visible to the current agent or user |
 | `connectors_list` | List installed connector types as lean summaries (no full specs); supports `limit`/`offset`. Use `connectors_actions_list` for a type's actions |
@@ -82,10 +91,11 @@ Once connected, these tools are available in any session:
 | `connectors_actions_list` | List actions supported by a connector type |
 | `connectors_summary` | Summarize visible connector types, bindings, credentials, actions, and health state |
 | `connectors_run` | Run one connector action server-side using a binding |
+| `result_fetch` | Read a large tool result that was offloaded to a handle, in chunks |
 
 Agents connect, discover authorized tools, and call what they need. Agent Core provides the capabilities and logs the results. It is not a workflow engine.
 
-For memory writes, `slot_key` can make a preference deterministic by keeping one active value per slot, and `valid_from`, `valid_to`, and `last_confirmed_at` are optional freshness hints.
+For memory writes, `slot_key` keeps one active value per slot for preference records, which makes "the current answer" deterministic instead of something retrieval has to guess at. `valid_from` and `valid_to` say when the content was **true in the world**, which is a separate timeline from when the system learned it — set them when a record describes a period other than "from now on", and pass `as_of` to a search to ask what the corpus held to be true at a past moment. See [How It Works](how-it-works.md#two-clocks).
 
 If one agent needs to hand work to another, write the durable state into the shared workspace scope and generate or link a briefing. If you are reviewing prior work, use `memory_search`, `activity_list`, and `briefing_list` together before changing anything. The private `agent:<id>` scope is only for scratch notes for that specific agent and should not be treated as the handoff channel.
 
@@ -561,7 +571,7 @@ When writing the config, use the MCP URL and bearer token from the connection va
 
 Expected Agent Core tools:
 - `memory_search`, `memory_get`, `memory_write`, `memory_retract`
-- `activity_pickup`, `activity_update`, `activity_get`, `activity_list`
+- `activity_pickup`, `activity_update`, `activity_get`, `activity_list`, `activity_search`
 - `briefing_list`, `get_briefing`
 - `credential_list`, `credential_get`
 - `connectors_list`, `connectors_summary`, `connectors_bindings_list`, `connectors_actions_list`, `connectors_bindings_test`, `connectors_run`
@@ -635,6 +645,8 @@ The Integrations page generates the canonical setup text and downloadable files.
 | Assistants | Reusable onboarding instructions for assistant-style agents that update their own MCP config |
 | Session Prompt | A startup prompt the agent can run at the beginning of each session |
 | Verification Prompt | A one-time prompt that confirms the full end-to-end connection is working |
+
+**Regenerate these after an upgrade.** `CLAUDE.md`, `AGENTS.md`, the Assistants text, and the session prompt are how an agent learns what the system can do — an agent whose instructions predate a capability will not use it. They are repository-level guidance, identical for every agent, and contain no key, so regenerating them is safe at any time and does not invalidate anything. Only the outputs that embed a key (MCP Config, Environment Variables, Assistants) mint a new one, and only when you press **Generate connection**.
 
 ---
 
@@ -1015,7 +1027,6 @@ httpx.post(f"{BASE_URL}/api/memory/write", headers=headers, json={
     "content": "User prefers two-space indentation",
     "memory_class": "preference",
     "scope": "agent:coding-agent",
-    "domain": "engineering",
     "topic": "style"
 })
 

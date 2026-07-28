@@ -51,6 +51,8 @@ Agent Core is a local HTTP server. It speaks REST and MCP (Model Context Protoco
 
 Everything — memory, credentials, and configuration — lives on your disk. The only intentional outbound call in the UI is the public API directory browser for connector imports; operational data still stays local unless you explicitly run a connector against an external service.
 
+For the full picture — how memory is modelled, what keeps the corpus honest, how connectors and credentials fit together, and the reasoning behind each — read **[How It Works](docs/how-it-works.md)**.
+
 ```
 ┌──────────────┐     MCP or REST     ┌──────────────────┐
 │  Claude Code │ ──────────────────► │                  │
@@ -88,6 +90,14 @@ Codex searches:     memory_search("database decision") → gets that record back
 ```
 
 Memory is scoped. Agents only see what they're allowed to: their own private agent scope, shared project context, or your personal preferences. Nothing bleeds across unless you want it to.
+
+Memory records are one of two kinds, and the difference decides what the system can do with them. A **fact** is settled by checking — someone could verify it against the code, a host, or a service. A **decision** is settled by someone deciding, and nothing can verify it. That split is what lets Agent Core re-check facts on a schedule while leaving your decisions alone.
+
+Facts can name what would confirm them (`repo:<path>`, `host:<name>`, `service:<binding>`), and the maintenance sweep checks them, recording what it found. Search results say how long it has been since anyone confirmed a record, so an agent can tell a fact verified today from one nobody has checked in months. Ranking follows the same principle: how often a record actually gets recalled and whether callers said it helped, rather than a score its author gave itself.
+
+A few records can be **pinned** as standing context — the rules that apply whatever the task is. Those are loaded at the start of a session rather than retrieved, because a constraint that has to win a search can be missed. The list is capped so it stays short enough to actually read.
+
+There is also a **clean-up review** in the dashboard. Rules look for records that no longer earn their place — one-off job logs, repeats, claims whose subject has vanished — and propose them. Nothing is applied until you answer, retracting is reversible, and each kind of suggestion keeps a record of how often you agreed with it.
 
 > Without semantic search configured, exact keywords matter more than fuzzy phrasing — `memory_search("authentication")` won't match a record that says "login logic". Use terms that match what was actually written. See [Requirements](#requirements) for how to enable semantic search.
 
@@ -133,10 +143,13 @@ The activity dashboard lists active agent tasks, flags sessions that have gone s
 
 Activity tracking is self-reported — there is no automatic detection of agent work. A working agent must call `activity_update` at the start of a task and periodically as a heartbeat; without that, nothing appears in the dashboard and no briefing can be generated.
 
+The trail is searchable, and it is the right home for "what did we do on X last month". Durable memory is for what stays true; the activity trail is for what happened. Agents that record per-task progress in memory instead get told so on write.
+
 You can assign work to an agent directly from the dashboard (**Activity → Assign Work**). The agent session discovers that work on the next pickup check:
 
 ```
 activity_pickup  → check for work a human assigned to this agent in this workspace
+activity_search  → search what agents have already worked on ("what did we do on X")
 activity_list    → find what's stale or pending (for reviews and handoffs)
 get_briefing     → pull the prior task description, decisions, and workspace memory
 memory_search    → fill in any gaps with a targeted query
@@ -213,6 +226,7 @@ For REST-based clients or custom integrations, every feature is also available t
 
 | Doc | What's in it |
 | --- | --- |
+| [How It Works](docs/how-it-works.md) | The whole system end to end: memory, activity, credentials, connectors, and why each part works the way it does |
 | [Quickstart](docs/quickstart.md) | Install, first agent, first memory write — end to end |
 | [Integrations](docs/integrations.md) | Connecting Claude Code, Cursor, Codex, and other tools |
 | [Credential Broker](docs/credential-broker.md) | How `AC_SECRET_*` references work and how to resolve them at runtime |

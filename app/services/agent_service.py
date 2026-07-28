@@ -54,11 +54,6 @@ def generate_api_key() -> tuple[str, str]:
     return plaintext, key_hash
 
 
-def verify_api_key(plaintext: str, key_hash: str) -> bool:
-    expected = hashlib.sha256(plaintext.encode()).hexdigest()
-    return secrets.compare_digest(expected, key_hash)
-
-
 def is_solo_mode_enabled() -> bool:
     with get_db() as conn:
         row = conn.execute(

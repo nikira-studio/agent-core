@@ -701,3 +701,53 @@ def test_mcp_memory_get_rejects_bad_view(test_client, agent_token):
     body = r.json()
     assert body["ok"] is False
     assert body["error"]["code"] == "INVALID_PARAMS"
+
+
+def test_a_missing_required_param_is_a_clean_error_not_a_500(test_client, agent_token):
+    """Seen in production: memory_write without memory_class raised KeyError and
+    returned a 500 with a traceback. Handlers read required params directly, so
+    the check is driven by the manifest rather than added per handler."""
+    r = test_client.post(
+        "/mcp",
+        headers={"Authorization": f"Bearer {agent_token}"},
+        json={
+            "tool": "memory_write",
+            "params": {"content": "A record with no class.", "scope": "agent:testagent"},
+        },
+    )
+    assert r.status_code == 400, r.text[:200]
+    error = r.json()["error"]
+    assert error["code"] == "INVALID_PARAMS"
+    assert "memory_class" in error["message"]
+
+
+def test_every_declared_requirement_is_enforced(test_client, agent_token):
+    """Each tool that declares required params rejects a call with none."""
+    from app.routes.mcp import _REQUIRED_PARAMS
+
+    for tool, required in _REQUIRED_PARAMS.items():
+        if not required:
+            continue
+        r = test_client.post(
+            "/mcp",
+            headers={"Authorization": f"Bearer {agent_token}"},
+            json={"tool": tool, "params": {}},
+        )
+        assert r.status_code != 500, f"{tool} returned a 500 for missing params"
+        assert r.json()["error"]["code"] == "INVALID_PARAMS", tool
+
+
+def test_a_complete_call_still_works(test_client, agent_token):
+    r = test_client.post(
+        "/mcp",
+        headers={"Authorization": f"Bearer {agent_token}"},
+        json={
+            "tool": "memory_write",
+            "params": {
+                "content": "A record with every required field.",
+                "memory_class": "fact",
+                "scope": "agent:testagent",
+            },
+        },
+    )
+    assert r.status_code == 201, r.json()

@@ -14,6 +14,7 @@ def normalize_id(value: str) -> str:
 
 
 def validate_id(value: str) -> bool:
+    """True when `value` is an acceptable id. The non-raising form of normalize_id."""
     try:
         normalize_id(value)
         return True
@@ -48,13 +49,3 @@ USER_ROLES = ("admin", "user")
 
 SCOPE_PREFIXES = ("user", "agent", "workspace", "shared", "system")
 
-BOOLEAN_TRUE = ("true", "1", "yes")
-BOOLEAN_FALSE = ("false", "0", "no")
-
-
-def is_boolean_true(value: str) -> bool:
-    return value.lower() in BOOLEAN_TRUE
-
-
-def is_boolean_false(value: str) -> bool:
-    return value.lower() in BOOLEAN_FALSE

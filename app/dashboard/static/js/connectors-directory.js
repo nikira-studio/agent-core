@@ -38,13 +38,13 @@
 
       const cards = entries.map(function(e) {
         const btn = e.variant_count > 1
-          ? '<button type="button" class="btn btn-sm btn-primary" onclick="showDirectoryDetail(&apos;' + escapeHtml(e.id) + '&apos;)">View Variants</button>'
+          ? '<button type="button" class="btn btn-sm btn-primary" data-directory-detail="' + escapeHtml(e.id) + '">View Variants</button>'
           : (e.installed
             ? '<button type="button" class="btn btn-sm btn-secondary" disabled>Already imported</button>'
-            : '<button type="button" class="btn btn-sm btn-primary" onclick="importFromDirectory(&apos;' + escapeHtml(e.id) + '&apos;)">Import</button>');
+            : '<button type="button" class="btn btn-sm btn-primary" data-directory-import="' + escapeHtml(e.id) + '">Import</button>');
         return '<div class="connector-type-card">' +
           '<div class="connector-type-head"><div>' +
-          '<div class="connector-type-name"><a href="#" onclick="event.preventDefault();showDirectoryDetail(&apos;' + escapeHtml(e.id) + '&apos;)" style="color:var(--text);text-decoration:none">' + escapeHtml(e.display_name) + '</a></div>' +
+          '<div class="connector-type-name"><a href="#" data-directory-detail="' + escapeHtml(e.id) + '" style="color:var(--text);text-decoration:none">' + escapeHtml(e.display_name) + '</a></div>' +
           '<div class="connector-type-desc">' + escapeHtml((e.description || '').substring(0, 150)) + '</div>' +
           '</div></div>' +
           '<div class="connector-type-meta">' +
@@ -101,7 +101,7 @@
         const installed = v.installed ? '<span class="badge badge-stale">Imported</span>' : '';
         const importBtn = v.installed
           ? '<button class="btn btn-sm btn-secondary" disabled>Already imported</button>'
-          : '<button class="btn btn-sm btn-primary" onclick="startDirectoryImport(&apos;' + escapeHtml(v.id) + '&apos;, &apos;' + escapeHtml(v.spec_url) + '&apos;, &apos;' + escapeHtml(v.display_name) + '&apos;)">Import</button>';
+          : '<button class="btn btn-sm btn-primary" data-variant-id="' + escapeHtml(v.id) + '" data-variant-spec="' + escapeHtml(v.spec_url || '') + '" data-variant-name="' + escapeHtml(v.display_name || '') + '">Import</button>';
         return '<tr>' +
           '<td><code>' + escapeHtml(v.id) + '</code></td>' +
           '<td>' + escapeHtml(v.version || '-') + '</td>' +
@@ -121,8 +121,8 @@
         '<table style="width:100%;font-size:0.85em">' +
           '<tr><td style="color:var(--muted);padding:4px 8px 4px 0;white-space:nowrap">Provider</td><td>' + escapeHtml(entry.provider || '-') + '</td></tr>' +
           '<tr><td style="color:var(--muted);padding:4px 8px 4px 0;white-space:nowrap">Version</td><td>' + escapeHtml(entry.version || '-') + '</td></tr>' +
-          (entry.website ? '<tr><td style="color:var(--muted);padding:4px 8px 4px 0;white-space:nowrap">Website</td><td><a href="' + escapeHtml(entry.website) + '" target="_blank" rel="noopener">' + escapeHtml(entry.website) + '</a></td></tr>' : '') +
-          (entry.origin_url ? '<tr><td style="color:var(--muted);padding:4px 8px 4px 0;white-space:nowrap">Spec source</td><td><a href="' + escapeHtml(entry.origin_url) + '" target="_blank" rel="noopener">' + escapeHtml(entry.origin_url.substring(0, 80)) + '</a></td></tr>' : '') +
+          (safeUrl(entry.website) ? '<tr><td style="color:var(--muted);padding:4px 8px 4px 0;white-space:nowrap">Website</td><td><a href="' + escapeHtml(safeUrl(entry.website)) + '" target="_blank" rel="noopener">' + escapeHtml(entry.website) + '</a></td></tr>' : '') +
+          (safeUrl(entry.origin_url) ? '<tr><td style="color:var(--muted);padding:4px 8px 4px 0;white-space:nowrap">Spec source</td><td><a href="' + escapeHtml(safeUrl(entry.origin_url)) + '" target="_blank" rel="noopener">' + escapeHtml(entry.origin_url.substring(0, 80)) + '</a></td></tr>' : '') +
           '<tr><td style="color:var(--muted);padding:4px 8px 4px 0;white-space:nowrap">Spec URL</td><td style="word-break:break-all">' + escapeHtml(entry.spec_url) + '</td></tr>' +
         '</table>';
       if (entry.variant_count > 1) {
@@ -140,7 +140,11 @@
       } else {
         actions.innerHTML = entry.variant_count > 1
           ? '<button class="btn btn-secondary" onclick="closeModal(&apos;dir-detail-modal&apos;)">Close</button>'
-          : '<button class="btn" onclick="closeModal(&apos;dir-detail-modal&apos;);startDirectoryImport(&apos;' + escapeHtml(entry.id) + '&apos;, &apos;' + escapeHtml(entry.spec_url) + '&apos;, &apos;' + escapeHtml(entry.display_name) + '&apos;)">Import</button> <button class="btn btn-secondary" onclick="closeModal(&apos;dir-detail-modal&apos;)">Close</button>';
+          : '<button class="btn" data-variant-id="' + escapeHtml(entry.id) + '"'
+            + ' data-variant-spec="' + escapeHtml(entry.spec_url || '') + '"'
+            + ' data-variant-name="' + escapeHtml(entry.display_name || '') + '"'
+            + ' data-close-modal="dir-detail-modal">Import</button>'
+            + ' <button class="btn btn-secondary" onclick="closeModal(&apos;dir-detail-modal&apos;)">Close</button>';
       }
       openModal('dir-detail-modal');
     }
@@ -328,9 +332,48 @@
       location.reload();
     }
 
+    // A remote directory entry can name any URL it likes, and `javascript:` in an
+    // href runs on click. Only the two schemes that make sense for a link are
+    // allowed through; anything else renders as inert text.
+    function safeUrl(u) {
+      const value = String(u || '').trim();
+      return /^https?:\/\//i.test(value) ? value : '';
+    }
+
     function escapeHtml(s) {
       if (!s) return '';
-      return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+      return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+        .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
     }
+
+    // Directory entries come from a remote index, so none of their values are
+    // ours to trust. They are rendered as data attributes and read back here:
+    // an HTML-escaped value spliced into an onclick is decoded before the
+    // handler is parsed, which turns &#39; back into a quote that ends the
+    // argument early. Delegation keeps the data out of executable context.
+    document.addEventListener('click', function(ev) {
+      const detail = ev.target.closest('[data-directory-detail]');
+      if (detail) {
+        ev.preventDefault();
+        showDirectoryDetail(detail.dataset.directoryDetail);
+        return;
+      }
+      const imp = ev.target.closest('[data-directory-import]');
+      if (imp) {
+        ev.preventDefault();
+        importFromDirectory(imp.dataset.directoryImport);
+        return;
+      }
+      const variant = ev.target.closest('[data-variant-id]');
+      if (variant) {
+        ev.preventDefault();
+        if (variant.dataset.closeModal) closeModal(variant.dataset.closeModal);
+        startDirectoryImport(
+          variant.dataset.variantId,
+          variant.dataset.variantSpec,
+          variant.dataset.variantName
+        );
+      }
+    });
 
     (typeof apiFetch !== 'undefined') ? loadDirectory() : document.addEventListener('DOMContentLoaded', function() { loadDirectory(); });

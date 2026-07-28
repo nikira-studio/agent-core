@@ -1,6 +1,7 @@
 import hashlib
 import io
 import json
+import logging
 import os
 import secrets
 import shutil
@@ -15,6 +16,26 @@ from app.branding import APP_VERSION, DB_FILENAME, MANIFEST_VERSION_KEY
 from app.config import settings
 from app.database import get_db
 from app.time_utils import parse_utc_datetime, utc_now, utc_now_iso
+
+
+logger = logging.getLogger(__name__)
+
+
+def _system_setting_int(key: str, default: int) -> int:
+    """Read an integer system setting, falling back to the default on anything odd.
+
+    Maintenance must never fail because a setting row is missing or malformed —
+    a sweep that refuses to run is how the logs grew to 142 MB in the first place.
+    """
+    try:
+        with get_db() as conn:
+            row = conn.execute(
+                "SELECT value FROM system_settings WHERE key = ?", (key,)
+            ).fetchone()
+        return int(row["value"]) if row else default
+    except (ValueError, TypeError, sqlite3.Error):
+        return default
+
 
 
 def _configured_env_key_bytes() -> bytes | None:
@@ -296,29 +317,284 @@ def _table_columns(conn, table: str) -> list[str]:
     ]
 
 
+# What a merge restore brings across. The test is whether a person would call
+# it "their data": records, the things that own them, and the configuration that
+# makes an installation behave the way they set it up.
+#
+# Deliberately excluded, and why: audit_log and webhook_delivery_log are logs of
+# events that happened on the other installation, not state; sessions,
+# otp_secrets and broker_credentials are this machine's login and identity, and
+# importing them would hand out access; connector_oauth_states,
+# connector_session_cache and tool_result_spill are caches that regenerate.
+MERGED_TABLES = (
+    "users",
+    "workspaces",
+    "workspace_collaborators",
+    "agents",
+    "memory_records",
+    "memory_embeddings",
+    "memory_proposals",
+    "credentials",
+    "agent_activity",
+    "connector_types",
+    "connector_bindings",
+    "connector_executions",
+    "adapter_installations",
+    "webhook_registrations",
+    "system_settings",
+)
+
+
+# Which columns point at rows in another merged table. Merging table by table
+# with "current wins" is safe only for rows that stand alone: when a key exists
+# in both databases with different content, the backup's row is dropped, and any
+# row that referenced it would silently re-point at this installation's
+# unrelated record of the same name. A binding whose credential was dropped this
+# way would authenticate with a stranger's secret.
+#
+# Four kinds, because relationships here are not all plain foreign keys:
+#   "id"          the column holds the parent's key directly
+#   "scope"       the column holds a scope string, `workspace:x` / `agent:x` /
+#                 `user:x`, which names a row in the matching table
+#   "json_ids"    the column holds JSON containing a list of parent keys
+#   "json_scopes" the column holds JSON containing a list of scope strings
+#
+# The scope arrays on `agents` are the sharpest case: they are the agent's
+# permissions. An imported agent carrying ["workspace:proj"] would be granted
+# access to whatever `proj` means *here*, which is how a restore hands a
+# stranger's agent the keys to your workspace.
+FOREIGN_REFERENCES = {
+    "connector_bindings": (
+        ("id", "credential_id", "credentials"),
+        ("id", "connector_type_id", "connector_types"),
+        ("scope", "scope", None),
+        ("id", "created_by", "users"),
+    ),
+    "connector_executions": (("id", "binding_id", "connector_bindings"),),
+    "memory_embeddings": (("id", "record_id", "memory_records"),),
+    "adapter_installations": (("id", "installed_connector_type_id", "connector_types"),),
+    "workspace_collaborators": (
+        ("id", "workspace_id", "workspaces"),
+        ("id", "user_id", "users"),
+        ("id", "created_by", "users"),
+    ),
+    "agents": (
+        ("id", "owner_user_id", "users"),
+        ("id", "default_user_id", "users"),
+        ("json_scopes", "read_scopes_json", None),
+        ("json_scopes", "write_scopes_json", None),
+        ("json_scopes", "default_recall_scopes_json", None),
+    ),
+    "workspaces": (("id", "owner_user_id", "users"),),
+    "credentials": (("scope", "scope", None), ("id", "created_by", "users")),
+    # A memory record belongs to a scope, and can point at the record it
+    # replaced. Both are relationships even though neither is a foreign key.
+    "memory_records": (
+        ("scope", "scope", None),
+        ("id", "supersedes_id", "memory_records"),
+        ("id", "superseded_by_id", "memory_records"),
+    ),
+    "memory_proposals": (
+        ("scope", "scope", None),
+        ("json_ids", "target_ids_json", "memory_records"),
+        ("id", "decided_by", "users"),
+    ),
+    # assigned_agent_id decides who may claim a piece of work, so a conflicting
+    # agent id here is an authorization relationship, not just provenance.
+    "agent_activity": (
+        ("id", "agent_id", "agents"),
+        ("id", "user_id", "users"),
+        ("id", "assigned_agent_id", "agents"),
+        ("id", "reassigned_from_agent_id", "agents"),
+        ("scope", "memory_scope", None),
+    ),
+    "webhook_registrations": (("id", "created_by", "users"),),
+}
+
+# A scope string names a row in one of these tables.
+SCOPE_PREFIXES = {"workspace": "workspaces", "agent": "agents", "user": "users"}
+
+
+def _scope_parent(value) -> tuple[Optional[str], Optional[str]]:
+    """Split `workspace:proj` into ("workspaces", "proj"). (None, None) if not a scope."""
+    if not isinstance(value, str) or ":" not in value:
+        return None, None
+    prefix, _, name = value.partition(":")
+    return SCOPE_PREFIXES.get(prefix), name or None
+
+
+def _json_ids(value) -> list:
+    try:
+        parsed = json.loads(value) if isinstance(value, str) else value
+    except (TypeError, ValueError):
+        return []
+    if isinstance(parsed, list):
+        return [item for item in parsed if isinstance(item, str)]
+    return []
+
+
+def _row_is_blocked(table: str, row: dict, blocked: dict[str, set]) -> bool:
+    """Whether this row points at something that means something else here."""
+    for kind, column, parent in FOREIGN_REFERENCES.get(table, ()):
+        value = row.get(column)
+        if value is None:
+            continue
+        if kind == "id":
+            if value in blocked.get(parent, ()):
+                return True
+        elif kind == "scope":
+            scope_table, key = _scope_parent(value)
+            if scope_table and key in blocked.get(scope_table, ()):
+                return True
+        elif kind == "json_ids":
+            if any(item in blocked.get(parent, ()) for item in _json_ids(value)):
+                return True
+        elif kind == "json_scopes":
+            for scope in _json_ids(value):
+                scope_table, key = _scope_parent(scope)
+                if scope_table and key in blocked.get(scope_table, ()):
+                    return True
+    return False
+
+
+def _rows_differ(left: dict, right: dict) -> bool:
+    shared = set(left) & set(right)
+    return any(left[column] != right[column] for column in shared)
+
+
+def _conflicting_keys(current_con, backup_con, table: str) -> set:
+    """Single-column keys that exist in both databases with different content.
+
+    These are the identities that mean two different things on the two
+    installations. Same key, same content is a genuine match and not a conflict.
+    """
+    current_cols = _table_columns(current_con, table)
+    backup_cols = _table_columns(backup_con, table)
+    if not backup_cols or not current_cols:
+        return set()
+    key_cols = _primary_key_columns(current_con, table)
+    if len(key_cols) != 1:
+        return set()
+    key = key_cols[0]
+    shared = [c for c in current_cols if c in backup_cols]
+    quoted = ",".join(shared)
+
+    current_rows = {
+        _row_dict(r)[key]: _row_dict(r)
+        for r in current_con.execute(f"SELECT {quoted} FROM {table}").fetchall()
+    }
+    conflicts = set()
+    for row in backup_con.execute(f"SELECT {quoted} FROM {table}").fetchall():
+        row_dict = _row_dict(row)
+        existing = current_rows.get(row_dict[key])
+        if existing is not None and _rows_differ(existing, row_dict):
+            conflicts.add(row_dict[key])
+    return conflicts
+
+
+def _blocked_keys(current_con, backup_con) -> dict[str, set]:
+    """Every key that must not be imported, including everything downstream.
+
+    Seeded with the keys that exist in both databases meaning different things,
+    then grown to a fixpoint: a row that cannot be imported because its parent
+    conflicts is itself missing here, so anything referencing *it* cannot be
+    imported either. Without the closure, an execution whose binding was
+    skipped is inserted and hits a foreign key constraint, failing the merge
+    rather than declining one row.
+    """
+    parents = {
+        parent
+        for refs in FOREIGN_REFERENCES.values()
+        for _, _, parent in refs
+        if parent
+    } | set(SCOPE_PREFIXES.values())
+
+    blocked = {
+        table: _conflicting_keys(current_con, backup_con, table) for table in parents
+    }
+    for table in FOREIGN_REFERENCES:
+        blocked.setdefault(table, set())
+
+    for _ in range(len(FOREIGN_REFERENCES) + 1):
+        grew = False
+        for table in FOREIGN_REFERENCES:
+            key_cols = _primary_key_columns(current_con, table)
+            backup_cols = _table_columns(backup_con, table)
+            if len(key_cols) != 1 or key_cols[0] not in backup_cols:
+                continue
+            key = key_cols[0]
+            rows = backup_con.execute(
+                f"SELECT * FROM {table}"
+            ).fetchall()
+            for row in rows:
+                row_dict = _row_dict(row)
+                if row_dict[key] in blocked[table]:
+                    continue
+                if _row_is_blocked(table, row_dict, blocked):
+                    blocked[table].add(row_dict[key])
+                    grew = True
+        if not grew:
+            break
+    return blocked
+
+
+def _primary_key_columns(con, table: str) -> list[str]:
+    """The table's real key, so tables not keyed on `id` can still be merged.
+
+    Keying on `id` alone quietly skipped every table with a composite or named
+    key — collaborator grants, settings, adapter installs — and reported the
+    skip as "0 rows inserted", which is indistinguishable from "nothing to do".
+    """
+    rows = con.execute(f"PRAGMA table_info({table})").fetchall()
+    keyed = sorted(
+        (r for r in rows if r["pk"]), key=lambda r: r["pk"]
+    )
+    return [r["name"] for r in keyed]
+
+
 def _insert_missing_rows(
     current_con,
     backup_con,
     table: str,
     transform=None,
-) -> int:
+    conflicts: Optional[dict[str, set]] = None,
+) -> tuple[int, int]:
+    """Copy rows the current database does not have. Returns (inserted, skipped).
+
+    `conflicts` maps a parent table to the keys that mean different things on
+    the two installations. A row pointing at one of those is not imported: it
+    would keep its own id while silently adopting this installation's unrelated
+    parent.
+    """
     current_cols = _table_columns(current_con, table)
     backup_cols = _table_columns(backup_con, table)
+    if not backup_cols:
+        # The backup predates this table. There is nothing to bring across, which
+        # is an ordinary outcome for an older archive rather than a failure —
+        # restoring a backup taken before a feature existed must still work.
+        return 0, 0
     insert_cols = [c for c in current_cols if c in backup_cols]
-    if "id" not in insert_cols:
-        return 0
+    key_cols = [c for c in _primary_key_columns(current_con, table) if c in insert_cols]
+    if not key_cols:
+        raise ValueError(f"{table} has no usable primary key to merge on")
+
 
     inserted = 0
+    skipped = 0
     quoted_cols = ",".join(insert_cols)
     placeholders = ",".join(["?" for _ in insert_cols])
+    key_match = " AND ".join(f"{c} = ?" for c in key_cols)
 
     for row in backup_con.execute(f"SELECT {quoted_cols} FROM {table}").fetchall():
         row_dict = _row_dict(row)
         existing = current_con.execute(
-            f"SELECT id FROM {table} WHERE id = ?",
-            (row_dict["id"],),
+            f"SELECT 1 FROM {table} WHERE {key_match}",
+            tuple(row_dict[c] for c in key_cols),
         ).fetchone()
         if existing is not None:
+            continue
+        if conflicts and _row_is_blocked(table, row_dict, conflicts):
+            skipped += 1
             continue
         if transform:
             row_dict = transform(row_dict)
@@ -329,7 +605,7 @@ def _insert_missing_rows(
         )
         inserted += 1
 
-    return inserted
+    return inserted, skipped
 
 
 def merge_restore_from_zip(
@@ -374,46 +650,44 @@ def merge_restore_from_zip(
             return row
 
         inserted_counts = {}
+        failures: dict[str, str] = {}
         backup_dir_str = str(backup_dir)
         _backup_existing_file(db_path, backup_dir_str, timestamp, "merge-pre-db")
         _backup_existing_file(
             credential_key_path, backup_dir_str, timestamp, "merge-pre-key"
         )
 
+        skipped_conflicts: dict[str, int] = {}
+
         with get_db() as current_con:
             current_con.execute("BEGIN IMMEDIATE")
 
-            for table in (
-                "users",
-                "workspaces",
-                "agents",
-                "memory_records",
-                "credentials",
-                "agent_activity",
-                "connector_types",
-                "connector_bindings",
-                "connector_executions",
-            ):
+            # Worked out before anything is written, because a row's parent may
+            # live in a table that is merged after it, and because a blocked row
+            # blocks its own dependants in turn.
+            conflicts = _blocked_keys(current_con, backup_con)
+
+            for table in MERGED_TABLES:
                 try:
-                    inserted_counts[table] = _insert_missing_rows(
+                    inserted, skipped = _insert_missing_rows(
                         current_con,
                         backup_con,
                         table,
                         transform=transform_credential
                         if table == "credentials"
                         else None,
+                        conflicts=conflicts,
                     )
-                except Exception:
-                    inserted_counts[table] = 0
-
-            try:
-                inserted_counts["memory_embeddings"] = _insert_missing_rows(
-                    current_con,
-                    backup_con,
-                    "memory_embeddings",
-                )
-            except Exception:
-                inserted_counts["memory_embeddings"] = 0
+                    inserted_counts[table] = inserted
+                    if skipped:
+                        skipped_conflicts[table] = skipped
+                except Exception as exc:
+                    # A table that could not be merged is a partial restore, and
+                    # the operator has to know which one. Recording it as "0
+                    # inserted" made a failure look exactly like a table that had
+                    # nothing new in it.
+                    logger.exception("Merge restore failed on table %s", table)
+                    failures[table] = str(exc)
 
             current_con.commit()
         backup_con.close()
@@ -433,7 +707,26 @@ def merge_restore_from_zip(
         "conflict_behavior": "existing records kept; backup records with conflicting primary keys skipped",
         "credential_key_handling": "current effective key preserved; imported credentials re-encrypted when backup key differs",
         "inserted_counts": inserted_counts,
+        "tables_merged": list(MERGED_TABLES),
+        "failed_tables": failures,
+        "skipped_conflicts": skipped_conflicts,
     }
+    if skipped_conflicts:
+        manifest_data["merge"]["conflict_note"] = (
+            "Rows referencing a record whose id already means something different "
+            "here were not imported, because importing them would have attached "
+            "them to this installation's unrelated record."
+        )
+    if failures:
+        # Partial is not success. The rows that did merge are kept — undoing
+        # them would be its own risk — but the caller is told plainly which
+        # tables did not, because "Restore complete" over a half-restored
+        # database is the failure that gets discovered weeks later.
+        return (
+            False,
+            "Restore was incomplete: " + ", ".join(sorted(failures)),
+            manifest_data,
+        )
     return True, "", manifest_data
 
 
@@ -490,7 +783,7 @@ def restore_from_zip(
 def export_memory_jsonl(user_id: Optional[str] = None) -> io.StringIO:
     buf = io.StringIO()
     with get_db() as conn:
-        query = "SELECT id, content, memory_class, scope, domain, topic, confidence, importance, source_kind, event_time, created_at, record_status FROM memory_records WHERE record_status = 'active'"
+        query = "SELECT id, content, memory_class, scope, topic, confidence, importance, source_kind, created_at, record_status FROM memory_records WHERE record_status = 'active'"
         params = []
         if user_id:
             query += " AND scope = ?"
@@ -503,12 +796,10 @@ def export_memory_jsonl(user_id: Optional[str] = None) -> io.StringIO:
                 "content": row["content"],
                 "memory_class": row["memory_class"],
                 "scope": row["scope"],
-                "domain": row["domain"],
                 "topic": row["topic"],
                 "confidence": row["confidence"],
                 "importance": row["importance"],
                 "source_kind": row["source_kind"],
-                "event_time": row["event_time"],
                 "created_at": row["created_at"],
                 "record_status": row["record_status"],
             }
@@ -528,19 +819,17 @@ def export_memory_csv(user_id: Optional[str] = None) -> io.StringIO:
             "content",
             "memory_class",
             "scope",
-            "domain",
             "topic",
             "confidence",
             "importance",
             "source_kind",
-            "event_time",
             "created_at",
             "record_status",
         ]
     )
 
     with get_db() as conn:
-        query = "SELECT id, content, memory_class, scope, domain, topic, confidence, importance, source_kind, event_time, created_at, record_status FROM memory_records WHERE record_status = 'active'"
+        query = "SELECT id, content, memory_class, scope, topic, confidence, importance, source_kind, created_at, record_status FROM memory_records WHERE record_status = 'active'"
         params = []
         if user_id:
             query += " AND scope = ?"
@@ -554,12 +843,10 @@ def export_memory_csv(user_id: Optional[str] = None) -> io.StringIO:
                     row["content"],
                     row["memory_class"],
                     row["scope"],
-                    row["domain"],
                     row["topic"],
                     row["confidence"],
                     row["importance"],
                     row["source_kind"],
-                    row["event_time"],
                     row["created_at"],
                     row["record_status"],
                 ]
@@ -774,16 +1061,7 @@ def run_scheduled_maintenance(triggered_by: str = "manual") -> dict:
 
     stale_count = mark_stale_activities()
 
-    retention_days = 7
-    try:
-        with get_db() as conn:
-            row = conn.execute(
-                "SELECT value FROM system_settings WHERE key = 'scratchpad_retention_days'"
-            ).fetchone()
-            if row:
-                retention_days = int(row["value"])
-    except Exception:
-        pass
+    retention_days = _system_setting_int("scratchpad_retention_days", 7)
 
     cutoff = utc_now() - timedelta(days=retention_days)
     with get_db() as conn:
@@ -861,16 +1139,7 @@ def run_scheduled_maintenance(triggered_by: str = "manual") -> dict:
     # forever. status_changed_at (not created_at) is the cutoff basis: an old
     # record retracted five minutes ago must still get its full grace period,
     # not be immediately purge-eligible because it happens to be old.
-    retracted_retention_days = 30
-    try:
-        with get_db() as conn:
-            row = conn.execute(
-                "SELECT value FROM system_settings WHERE key = 'retracted_retention_days'"
-            ).fetchone()
-            if row:
-                retracted_retention_days = int(row["value"])
-    except Exception:
-        pass
+    retracted_retention_days = _system_setting_int("retracted_retention_days", 30)
 
     retracted_cutoff = utc_now() - timedelta(days=retracted_retention_days)
     with get_db() as conn:
@@ -911,11 +1180,87 @@ def run_scheduled_maintenance(triggered_by: str = "manual") -> dict:
             },
         )
 
+    # Operational logs. Memory had retention from the start; the logs that
+    # record what agents *did* had none, and on the first real deployment the
+    # connector execution log alone reached 142 MB of a 180 MB database. These
+    # are diagnostics with a short useful life, not durable records.
+    execution_retention_days = _system_setting_int("execution_log_retention_days", 30)
+    webhook_retention_days = _system_setting_int("webhook_log_retention_days", 30)
+
+    from app.services import connector_service
+
+    executions_pruned = 0
+    try:
+        executions_pruned = connector_service.prune_executions(execution_retention_days)
+    except Exception:
+        logger.exception("Could not prune the connector execution log")
+
+    webhook_deliveries_pruned = 0
+    if webhook_retention_days > 0:
+        try:
+            with get_db() as conn:
+                cursor = conn.execute(
+                    "DELETE FROM webhook_delivery_log WHERE delivered_at < datetime('now', ?)",
+                    (f"-{webhook_retention_days} days",),
+                )
+                conn.commit()
+                webhook_deliveries_pruned = cursor.rowcount or 0
+        except Exception:
+            logger.exception("Could not prune the webhook delivery log")
+
+    if executions_pruned or webhook_deliveries_pruned:
+        audit_service.write_event(
+            actor_type="system",
+            actor_id="maintenance",
+            action="operational_logs_pruned",
+            result="success",
+            details={
+                "connector_executions": executions_pruned,
+                "webhook_deliveries": webhook_deliveries_pruned,
+                "execution_retention_days": execution_retention_days,
+                "webhook_retention_days": webhook_retention_days,
+            },
+        )
+
+    # Verification runs unattended because it can: it only writes evidence on a
+    # clean pass, and anything it cannot confirm becomes a proposal for a human
+    # rather than an action. Capped per run so a large corpus is worked through
+    # over several nights instead of hammering repos and services in one go —
+    # oldest-confirmation-first, so attention goes where it is most overdue.
+    verification = {"checked": 0, "verified": 0, "missing": 0}
+    if _system_setting_int("verification_pass_enabled", 1):
+        try:
+            from app.services import verification_service
+
+            outcome = verification_service.verify_scope(
+                limit=_system_setting_int("verification_pass_limit", 50)
+            )
+            verification = {
+                "checked": outcome["checked"],
+                "verified": outcome["verified"],
+                "missing": outcome["missing"],
+            }
+            if outcome["proposals_queued"]:
+                audit_service.write_event(
+                    actor_type="system",
+                    actor_id="maintenance",
+                    action="memory_verified",
+                    result="success",
+                    details={**verification, "proposals_queued": outcome["proposals_queued"]},
+                )
+        except Exception:
+            logger.exception("Verification pass failed; continuing with maintenance")
+
     result = {
         "stale_activities_marked": stale_count,
         "scratchpad_pruned": pruned,
         "ttl_swept": ttl_deleted,
         "retracted_purged": purged,
+        "executions_pruned": executions_pruned,
+        "webhook_deliveries_pruned": webhook_deliveries_pruned,
+        "records_verified": verification["verified"],
+        "records_unverifiable": verification["checked"] - verification["verified"],
+        "anchors_missing": verification["missing"],
     }
 
     # Record last-run status so it's visible (Settings page, status endpoint)

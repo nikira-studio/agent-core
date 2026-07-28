@@ -1,10 +1,12 @@
 """Agents dashboard page."""
 
 import json
+from urllib.parse import quote
 
 from fastapi import APIRouter, Request, Depends
 
 from app.routes.dashboard_shared import (
+    escape_html,
     render_page,
     require_auth,
     local_dt,
@@ -49,11 +51,11 @@ async def agents_page(request: Request, session: dict = Depends(require_auth)):
         if all_workspaces:
             h += "<h4>Workspaces</h4>"
             for p in all_workspaces:
-                h += f'<label class="checkbox-label" data-scope-row="workspace:{p["id"]}"><input type="checkbox" data-scope="workspace:{p["id"]}"> <span>{p["name"]} <code>workspace:{p["id"]}</code></span></label>'
+                h += f'<label class="checkbox-label" data-scope-row="workspace:{escape_html(p["id"])}"><input type="checkbox" data-scope="workspace:{escape_html(p["id"])}"> <span>{escape_html(p["name"])} <code>workspace:{escape_html(p["id"])}</code></span></label>'
         if agents:
             h += "<h4>Other Agent Private Scopes</h4>"
             for a in agents:
-                h += f'<label class="checkbox-label" data-scope-row="agent:{a["id"]}"><input type="checkbox" data-scope="agent:{a["id"]}"> <span>{a["display_name"]} ({a["id"]})</span></label>'
+                h += f'<label class="checkbox-label" data-scope-row="agent:{escape_html(a["id"])}"><input type="checkbox" data-scope="agent:{escape_html(a["id"])}"> <span>{escape_html(a["display_name"])} ({escape_html(a["id"])})</span></label>'
         h += "</div>"
         return h
 
@@ -78,35 +80,35 @@ async def agents_page(request: Request, session: dict = Depends(require_auth)):
             else ""
         )
         access_summary = (
-            f"<span class='scope-tag' title='Implicit private scope'>{own_scope}</span>"
+            f"<span class='scope-tag' title='Implicit private scope'>{escape_html(own_scope)}</span>"
             f"{shared_badge}"
             f"<span class='text-muted'> + {len(read_extra)} read / {len(write_extra)} write grants</span>"
         )
         can_manage = is_admin or a.get("owner_user_id") == session["user_id"]
         if can_manage:
             if active:
-                toggle_btn = f"<button type='button' class='btn btn-sm btn-warning' onclick=\"deactivateAgent('{a['id']}')\">Deactivate</button>"
+                toggle_btn = f"<button type='button' class='btn btn-sm btn-warning' data-agent-deactivate='{escape_html(a['id'])}'>Deactivate</button>"
             else:
-                toggle_btn = f"<button type='button' class='btn btn-sm btn-secondary' onclick=\"reactivateAgent('{a['id']}')\">Reactivate</button>"
+                toggle_btn = f"<button type='button' class='btn btn-sm btn-secondary' data-agent-reactivate='{escape_html(a['id'])}'>Reactivate</button>"
         else:
             toggle_btn = ""
         owner_id = a.get("owner_user_id", "")
         default_user_id = a.get("default_user_id", "") or owner_id
         if can_manage:
             action_buttons = (
-                f"<button type='button' class='btn btn-sm btn-secondary' onclick=\"editAgent('{a['id']}')\">Edit</button>"
-                f"<a class='btn btn-sm btn-secondary' href='/integrations?agent_id={a['id']}'>Integrations</a>"
+                f"<button type='button' class='btn btn-sm btn-secondary' data-agent-edit='{escape_html(a['id'])}'>Edit</button>"
+                f"<a class='btn btn-sm btn-secondary' href='/integrations?agent_id={quote(a['id'])}'>Integrations</a>"
                 f"{toggle_btn}"
-                f"<button type='button' class='btn btn-sm btn-danger icon-delete-btn' onclick=\"purgeAgent('{a['id']}')\" title='Permanently delete' aria-label='Permanently delete'>{get_icon('delete')}</button>"
+                f"<button type='button' class='btn btn-sm btn-danger icon-delete-btn' data-agent-purge='{escape_html(a['id'])}' title='Permanently delete' aria-label='Permanently delete'>{get_icon('delete')}</button>"
             )
         else:
             action_buttons = (
-                f"<button type='button' class='btn btn-sm btn-secondary' onclick=\"viewAgent('{a['id']}')\">View</button>"
+                f"<button type='button' class='btn btn-sm btn-secondary' data-agent-view='{escape_html(a['id'])}'>View</button>"
             )
         return (
             f"<tr>"
-            f"<td><strong>{a.get('display_name', '')}</strong><br><code>{a['id']}</code>"
-            f"<div class='text-muted'>Owner: {owner_id} · Default user: {default_user_id}</div></td>"
+            f"<td><strong>{escape_html(a.get('display_name', ''))}</strong><br><code>{escape_html(a['id'])}</code>"
+            f"<div class='text-muted'>Owner: {escape_html(owner_id)} · Default user: {escape_html(default_user_id)}</div></td>"
             f"<td>{status_badge}</td>"
             f"<td>{access_summary}</td>"
             f"<td>{local_dt(a.get('created_at'), style='date')}</td>"
@@ -123,6 +125,19 @@ async def agents_page(request: Request, session: dict = Depends(require_auth)):
     const CURRENT_USER_ID = __CURRENT_USER_ID__;
     let agentModalReadOnly = false;
     async function refreshAgents() { location.reload(); }
+    document.addEventListener('click', function(ev) {
+      const edit = ev.target.closest('[data-agent-edit]');
+      if (edit) { ev.preventDefault(); editAgent(edit.dataset.agentEdit); return; }
+      const view = ev.target.closest('[data-agent-view]');
+      if (view) { ev.preventDefault(); viewAgent(view.dataset.agentView); return; }
+      const deactivate = ev.target.closest('[data-agent-deactivate]');
+      if (deactivate) { ev.preventDefault(); deactivateAgent(deactivate.dataset.agentDeactivate); return; }
+      const reactivate = ev.target.closest('[data-agent-reactivate]');
+      if (reactivate) { ev.preventDefault(); reactivateAgent(reactivate.dataset.agentReactivate); return; }
+      const purge = ev.target.closest('[data-agent-purge]');
+      if (purge) { ev.preventDefault(); purgeAgent(purge.dataset.agentPurge); }
+    });
+
     async function deactivateAgent(id) {
       if (!confirm('Deactivate this agent? It will no longer be able to authenticate.')) return;
       const j = await apiFetch('/api/agents/' + id, { method: 'DELETE' });
@@ -150,8 +165,8 @@ async def agents_page(request: Request, session: dict = Depends(require_auth)):
       if (j.ok) {
         document.getElementById('rotate-modal-body').innerHTML =
           '<div class="alert alert-danger"><strong>Save this key now - it will not be shown again!</strong></div>' +
-          '<div class="api-key-display"><code>' + j.data.api_key + '</code></div>' +
-          '<button class="copy-btn" onclick="copyToClipboard(' + JSON.stringify(j.data.api_key) + ', this)">Copy</button>';
+          '<div class="api-key-display"><code>' + escapeHtml(j.data.api_key) + '</code></div>' +
+          '<button class="copy-btn" data-copy-value="' + escapeHtml(j.data.api_key) + '">Copy</button>';
         openModal('rotate-modal');
       } else { showToast(j.error.message || 'Failed', 'danger'); }
     }

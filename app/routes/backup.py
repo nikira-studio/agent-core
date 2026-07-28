@@ -98,7 +98,13 @@ async def backup_restore(
         )
 
     if not ok:
-        return error_response("RESTORE_FAILED", msg, 400)
+        # A failed merge is usually a partial one: rows that did land are kept,
+        # so the counts are the operator's only view of what the database now
+        # holds. Dropping them here left the message naming a table and nothing
+        # else — the state was unknowable without opening the database.
+        return error_response(
+            "RESTORE_FAILED", msg, 400, details=manifest.get("merge") if manifest else None
+        )
 
     from app.services import audit_service
     from app.routes.auth import get_client_ip
@@ -116,17 +122,20 @@ async def backup_restore(
         ip_address=get_client_ip(request),
     )
 
-    return success_response(
-        {
-            "message": "Restore complete",
-            "mode": mode,
-            "manifest": {
-                "exported_by": manifest.get("exported_by"),
-                "exported_at": manifest.get("exported_at"),
-                MANIFEST_VERSION_KEY: manifest.get(MANIFEST_VERSION_KEY),
-            },
-        }
-    )
+    payload = {
+        "message": "Restore complete",
+        "mode": mode,
+        "manifest": {
+            "exported_by": manifest.get("exported_by"),
+            "exported_at": manifest.get("exported_at"),
+            MANIFEST_VERSION_KEY: manifest.get(MANIFEST_VERSION_KEY),
+        },
+    }
+    # A merge is a partial operation by design — the operator needs to see what
+    # actually came across, not just that the request succeeded.
+    if manifest.get("merge"):
+        payload["merge"] = manifest["merge"]
+    return success_response(payload)
 
 
 @router.get("/export/memory")

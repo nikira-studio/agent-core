@@ -18,6 +18,7 @@ from app.routes import (
     credentials_router,
     internal_router,
     memory_router,
+    memory_proposals_router,
     activity_router,
     briefings_router,
     mcp_router,
@@ -192,6 +193,9 @@ def create_app() -> FastAPI:
     app.include_router(workspaces_router, tags=["workspaces"])
     app.include_router(credentials_router, tags=["credentials"])
     app.include_router(internal_router, tags=["internal"])
+    # Before memory_router: its GET /api/memory/{record_id} would otherwise
+    # match /api/memory/proposals and look for a record called "proposals".
+    app.include_router(memory_proposals_router, tags=["memory"])
     app.include_router(memory_router, tags=["memory"])
     app.include_router(activity_router, tags=["activity"])
     app.include_router(briefings_router, tags=["briefings"])
@@ -217,7 +221,10 @@ def create_app() -> FastAPI:
     app.include_router(webhooks_router, tags=["webhooks"])
     app.include_router(integrations_page_router, prefix="", tags=["integrations_page"])
 
-    settings.data_dir
+    # settings.data_dir creates the directory as a side effect of being read.
+    # Calling mkdir explicitly says so, instead of relying on a bare attribute
+    # access that reads like dead code to anyone tidying up.
+    settings.data_dir.mkdir(parents=True, exist_ok=True)
     init_db()
     ensure_broker_credential()
     from app.connectors import generic_http  # noqa: F401 - registers Generic HTTP connector

@@ -101,6 +101,67 @@ async def update_dashboard_system_settings(
     }
     if retracted_retention_days is not None:
         settings_to_save["retracted_retention_days"] = str(retracted_retention_days)
+
+    # Optional (backward compatible), same as retracted_retention_days above.
+    if "episodic_memory_ttl_days" in body:
+        try:
+            episodic_ttl = int(str(body.get("episodic_memory_ttl_days", "")).strip())
+        except ValueError:
+            return error_response(
+                "INVALID_EPISODIC_TTL",
+                "Episodic memory expiry must be a whole number of days",
+                400,
+            )
+        # 0 is meaningful: store episodic writes permanently, like any other record.
+        if episodic_ttl < 0 or episodic_ttl > 365:
+            return error_response(
+                "INVALID_EPISODIC_TTL",
+                "Episodic memory expiry must be between 0 and 365 days",
+                400,
+            )
+        settings_to_save["episodic_memory_ttl_days"] = str(episodic_ttl)
+
+    for key, label in (
+        ("execution_log_retention_days", "Connector execution log retention"),
+        ("webhook_log_retention_days", "Webhook delivery log retention"),
+    ):
+        if key in body:
+            try:
+                days = int(str(body.get(key, "")).strip())
+            except ValueError:
+                return error_response(
+                    "INVALID_LOG_RETENTION",
+                    f"{label} must be a whole number of days",
+                    400,
+                )
+            # 0 is meaningful: keep the log forever, which is the pre-retention
+            # behaviour and the reason a 180 MB database was 142 MB of log.
+            if days < 0 or days > 365:
+                return error_response(
+                    "INVALID_LOG_RETENTION",
+                    f"{label} must be between 0 and 365 days",
+                    400,
+                )
+            settings_to_save[key] = str(days)
+
+    if "memory_dedupe_similarity" in body:
+        try:
+            dedupe_similarity = float(
+                str(body.get("memory_dedupe_similarity", "")).strip()
+            )
+        except ValueError:
+            return error_response(
+                "INVALID_DEDUPE_SIMILARITY",
+                "Duplicate warning threshold must be a number",
+                400,
+            )
+        if not 0.5 <= dedupe_similarity <= 1.0:
+            return error_response(
+                "INVALID_DEDUPE_SIMILARITY",
+                "Duplicate warning threshold must be between 0.5 and 1.0",
+                400,
+            )
+        settings_to_save["memory_dedupe_similarity"] = str(dedupe_similarity)
     with get_db() as conn:
         for key, value in settings_to_save.items():
             conn.execute(
@@ -273,6 +334,103 @@ async def update_dashboard_vector_settings(
     return success_response({"settings": updated})
 
 
+@router.post("/api/dashboard/review-model")
+async def update_review_model_settings(
+    request: Request, session: dict = Depends(require_admin)
+):
+    """Configure how Agent Core reaches a model for the judgement-based features.
+
+    Everything here is optional. Saving an empty provider turns the capability
+    off, and the features that use it go back to reporting themselves as
+    unconfigured rather than failing.
+    """
+    from app.database import get_db
+    from app.services import audit_service, model_service
+    from app.routes.auth import get_client_ip
+
+    body = await request.json()
+    provider = str(body.get("review_model_provider", "")).strip().lower()
+    if provider not in model_service.PROVIDERS:
+        return error_response(
+            "INVALID_PROVIDER",
+            f"review_model_provider must be one of: {', '.join(p or '(none)' for p in model_service.PROVIDERS)}",
+            400,
+        )
+
+    url = str(body.get("review_model_url", "")).strip()
+    name = str(body.get("review_model_name", "")).strip()
+    binding_id = str(body.get("review_model_binding_id", "")).strip()
+    action = str(body.get("review_model_action", "")).strip() or "POST /chat/completions"
+
+    # Refuse a half-configuration rather than storing something that can only
+    # fail later: an operator who picks a provider means to switch it on.
+    if provider == "ollama" and not (url and name):
+        return error_response(
+            "INCOMPLETE_CONFIG",
+            "A local model needs both an endpoint URL and a model name.",
+            400,
+        )
+    if provider == "binding" and not binding_id:
+        return error_response(
+            "INCOMPLETE_CONFIG", "Using a connector binding needs a binding selected.", 400
+        )
+
+    try:
+        timeout_seconds = int(body.get("review_model_timeout_seconds") or model_service.DEFAULT_TIMEOUT_SECONDS)
+    except (TypeError, ValueError):
+        return error_response("INVALID_TIMEOUT", "Timeout must be a whole number of seconds", 400)
+    if not 5 <= timeout_seconds <= 600:
+        return error_response("INVALID_TIMEOUT", "Timeout must be between 5 and 600 seconds", 400)
+
+    usefulness_raw = str(body.get("usefulness_review_enabled", "")).strip().lower()
+    settings_to_save = {
+        "review_model_provider": provider,
+        "review_model_url": url,
+        "review_model_name": name,
+        "review_model_binding_id": binding_id,
+        "review_model_action": action,
+        "review_model_timeout_seconds": str(timeout_seconds),
+    }
+    if usefulness_raw in ("true", "false"):
+        settings_to_save["usefulness_review_enabled"] = "1" if usefulness_raw == "true" else "0"
+
+    with get_db() as conn:
+        for key, value in settings_to_save.items():
+            conn.execute(
+                """
+                INSERT INTO system_settings (key, value, updated_at)
+                VALUES (?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP
+                """,
+                (key, value),
+            )
+        conn.commit()
+
+    audit_service.write_event(
+        actor_type="user",
+        actor_id=session["user_id"],
+        action="system_setting_updated",
+        resource_type="system_settings",
+        result="success",
+        details=settings_to_save,
+        ip_address=get_client_ip(request),
+    )
+    return success_response({"settings": settings_to_save, "available": model_service.is_available()})
+
+
+@router.post("/api/dashboard/review-model/test")
+async def test_review_model(session: dict = Depends(require_admin)):
+    """Probe the configured review model and report what came back.
+
+    Configuration is not the same as a working model, and these features fail
+    quietly when one does not answer — so the check is explicit rather than
+    something an operator infers from empty results days later.
+    """
+    from app.services import model_service
+
+    return success_response(model_service.validate())
+
+
 @router.post("/api/dashboard/vector-settings/test")
 async def test_dashboard_vector_settings(
     request: Request, session: dict = Depends(require_admin)
@@ -298,10 +456,15 @@ async def test_dashboard_vector_settings(
     )
 
 
-@router.get("/api/dashboard/vector-settings/models")
-async def list_dashboard_vector_models(
-    url: str, session: dict = Depends(require_admin)
-):
+@router.get("/api/dashboard/ollama-models")
+async def list_ollama_models(url: str, session: dict = Depends(require_admin)):
+    """List what an Ollama-compatible endpoint has installed.
+
+    Shared by the embedding and review-model cards: both ask the same endpoint
+    the same question, and the answer is not specific to either. Filtering by
+    kind is deliberately not attempted — the tag list does not reliably say
+    which models are embedding models, and guessing would hide a usable one.
+    """
     parsed = urlparse(url.strip())
     if parsed.scheme not in ("http", "https") or not parsed.netloc:
         return error_response("INVALID_URL", "vector_url must be an http(s) URL", 400)
@@ -353,6 +516,17 @@ async def settings_page(request: Request, session: dict = Depends(require_auth))
 
     scratchpad_retention_days = get_system_setting("scratchpad_retention_days", "7")
     retracted_retention_days = get_system_setting("retracted_retention_days", "30")
+    episodic_memory_ttl_days = get_system_setting("episodic_memory_ttl_days", "30")
+    review_provider = get_system_setting("review_model_provider", "")
+    review_url = get_system_setting("review_model_url", "")
+    review_name = get_system_setting("review_model_name", "")
+    review_binding_id = get_system_setting("review_model_binding_id", "")
+    review_action = get_system_setting("review_model_action", "POST /chat/completions")
+    review_timeout = get_system_setting("review_model_timeout_seconds", "60")
+    usefulness_enabled = get_system_setting("usefulness_review_enabled", "0") in ("1", "true")
+    execution_log_retention_days = get_system_setting("execution_log_retention_days", "30")
+    webhook_log_retention_days = get_system_setting("webhook_log_retention_days", "30")
+    memory_dedupe_similarity = get_system_setting("memory_dedupe_similarity", "0.92")
     solo_mode_enabled = (
         get_system_setting("solo_mode_enabled", "true").lower() == "true"
     )
@@ -515,6 +689,26 @@ async def settings_page(request: Request, session: dict = Depends(require_auth))
           <input type="number" id="retracted-retention-days" min="1" max="365" value="{escape_html(retracted_retention_days)}" style="width:120px">
           <p class="form-hint">Used by Run Maintenance. Retracted and superseded memory records are permanently deleted this many days after they stopped being active (not after creation) — giving time to notice and restore an accidental retraction first.</p>
         </div>
+        <div class="form-group">
+          <label>Episodic Memory Expiry</label>
+          <input type="number" id="episodic-memory-ttl-days" min="0" max="365" value="{escape_html(episodic_memory_ttl_days)}" style="width:120px">
+          <p class="form-hint">Facts and decisions that read as per-occurrence work logs — heartbeat ticks, routine fires, per-run reviews, ticket closeouts — are stored with this expiry instead of living forever. The write still succeeds and the agent is told the content belongs in the activity trail. Set to 0 to store them permanently, like any other record.</p>
+        </div>
+        <div class="form-group">
+          <label>Duplicate Warning Threshold</label>
+          <input type="number" id="memory-dedupe-similarity" min="0.5" max="1" step="0.01" value="{escape_html(memory_dedupe_similarity)}" style="width:120px">
+          <p class="form-hint">Cosine similarity above which a new memory write is flagged as a possible duplicate of an existing record in the same scope. Advisory only — the write is never blocked. Requires vector search; without it no duplicate check runs. Lower catches more, at the cost of false alarms.</p>
+        </div>
+        <div class="form-group">
+          <label>Connector Execution Log Retention</label>
+          <input type="number" id="execution-log-retention-days" min="0" max="365" value="{escape_html(execution_log_retention_days)}" style="width:120px">
+          <p class="form-hint">Used by Run Maintenance. Records of connector calls older than this are deleted. These are diagnostics, not durable records — response bodies are also capped at 16,000 characters when stored. Set to 0 to keep them forever.</p>
+        </div>
+        <div class="form-group">
+          <label>Webhook Delivery Log Retention</label>
+          <input type="number" id="webhook-log-retention-days" min="0" max="365" value="{escape_html(webhook_log_retention_days)}" style="width:120px">
+          <p class="form-hint">Used by Run Maintenance. Webhook delivery attempts older than this are deleted. Set to 0 to keep them forever.</p>
+        </div>
         <label class="checkbox-label">
           <input type="checkbox" id="solo-mode-enabled" {solo_checked}>
           New API-created agents automatically read their owner's user scope
@@ -523,6 +717,67 @@ async def settings_page(request: Request, session: dict = Depends(require_auth))
         <button type="submit" class="btn">Save Behavior Settings</button>
       </form>
       <div id="system-settings-result" style="margin-top:12px"></div>
+    </div>"""
+
+    review_model_html = ""
+    if is_admin:
+        usefulness_checked = "checked" if usefulness_enabled else ""
+        review_model_html = f"""
+    <div class="card">
+      <h3>Review Model <span class="text-muted" style="font-weight:normal;font-size:0.8rem">(optional)</span></h3>
+      <p class="text-muted" style="margin-bottom:12px">Some judgements cannot be made by rules because they depend on meaning rather than shape — whether a record is still worth keeping, for instance. Agent Core can use a language model for those. <strong>Everything else works without one.</strong> Leave this unset and the features that need judgement simply report themselves as unconfigured.</p>
+      <p class="text-muted" style="margin-bottom:12px">Point this at a model running on a machine you control and record content never leaves it. Point it at a hosted API and it does. That trade-off is why there is no default.</p>
+      <form id="review-model-form" onsubmit="saveReviewModel(event)">
+        <div class="form-group">
+          <label>Provider</label>
+          <select id="review-model-provider" style="width:260px" onchange="onReviewProviderChange(this.value)">
+            <option value="" {"selected" if not review_provider else ""}>None — features that need a model stay off</option>
+            <option value="ollama" {"selected" if review_provider == "ollama" else ""}>Local endpoint (Ollama-compatible)</option>
+            <option value="binding" {"selected" if review_provider == "binding" else ""}>Connector binding</option>
+          </select>
+        </div>
+        <div id="review-ollama-fields" style="display:{"block" if review_provider == "ollama" else "none"}">
+          <div class="form-group">
+            <label>URL</label>
+            <input type="text" id="review-model-url" value="{escape_html(review_url)}" placeholder="http://localhost:11434" style="width:280px">
+            <p class="form-hint">The same endpoint style as the embedding model above. They can be the same server running different models.</p>
+          </div>
+          <div class="form-group">
+            <label>Model</label>
+            <input type="text" id="review-model-name" value="{escape_html(review_name)}" placeholder="qwen3:8b" style="width:240px" list="review-model-options" autocomplete="off">
+            <datalist id="review-model-options"></datalist>
+            <div style="margin-top:8px">
+              <button type="button" class="btn btn-secondary btn-sm" onclick="loadReviewModels()">Load Models</button>
+            </div>
+            <p class="form-hint" id="review-model-hint">A chat model, not an embedding model. It needs to be able to follow a "reply with JSON" instruction — the test below checks exactly that. Load Models lists what the endpoint above has installed; you can also type a name it does not know about.</p>
+          </div>
+        </div>
+        <div id="review-binding-fields" style="display:{"block" if review_provider == "binding" else "none"}">
+          <div class="form-group">
+            <label>Binding ID</label>
+            <input type="text" id="review-model-binding-id" value="{escape_html(review_binding_id)}" style="width:280px">
+            <p class="form-hint">Any connector binding that exposes a chat-completions action. Credentials stay in the connector layer.</p>
+          </div>
+          <div class="form-group">
+            <label>Action</label>
+            <input type="text" id="review-model-action" value="{escape_html(review_action)}" style="width:280px">
+          </div>
+        </div>
+        <div class="form-group">
+          <label>Timeout (seconds)</label>
+          <input type="number" id="review-model-timeout" min="5" max="600" value="{escape_html(review_timeout)}" style="width:120px">
+        </div>
+        <label class="checkbox-label">
+          <input type="checkbox" id="usefulness-review-enabled" {usefulness_checked}>
+          Let it review whether records are still worth keeping
+        </label>
+        <p class="form-hint">Sends record content to the model above and queues what it judges unhelpful for your review. It never removes anything itself.</p>
+        <div style="margin-top:12px">
+          <button type="submit" class="btn">Save Review Model</button>
+          <button type="button" class="btn btn-secondary" onclick="testReviewModel()">Test</button>
+        </div>
+      </form>
+      <div id="review-model-result" style="margin-top:12px"></div>
     </div>"""
 
     vector_settings_html = ""
@@ -698,7 +953,7 @@ async def settings_page(request: Request, session: dict = Depends(require_auth))
         a.href = url; a.download = '{APP_SLUG}-backup.zip.enc'; a.click();
         URL.revokeObjectURL(url);
         const keyHtml = backupKey
-          ? '<div class="alert alert-warning"><strong>Save this backup key now.</strong> It will not be shown again.<div class="api-key-display" style="margin-top:8px"><code>' + backupKey + '</code></div><button class="copy-btn" onclick="copyToClipboard(' + JSON.stringify(backupKey) + ', this)">Copy</button></div>'
+          ? '<div class="alert alert-warning"><strong>Save this backup key now.</strong> It will not be shown again.<div class="api-key-display" style="margin-top:8px"><code>' + escapeHtml(backupKey) + '</code></div><button class="copy-btn" data-copy-value="' + escapeHtml(backupKey) + '">Copy</button></div>'
           : '<div class="alert alert-warning"><strong>Backup key missing from response.</strong></div>';
         document.getElementById('backup-result').innerHTML = keyHtml;
         showToast('Encrypted backup downloaded');
@@ -734,8 +989,8 @@ async def settings_page(request: Request, session: dict = Depends(require_auth))
       if (j.ok) {{
         document.getElementById('broker-result').innerHTML =
           '<div class="alert alert-danger"><strong>Save this credential now - it will not be shown again!</strong></div>' +
-          '<div class="api-key-display"><code>' + j.data.credential + '</code></div>' +
-          '<button class="copy-btn" onclick="copyToClipboard(' + JSON.stringify(j.data.credential) + ', this)">Copy</button>';
+          '<div class="api-key-display"><code>' + escapeHtml(j.data.credential) + '</code></div>' +
+          '<button class="copy-btn" data-copy-value="' + escapeHtml(j.data.credential) + '">Copy</button>';
       }} else {{ showToast(j.error.message || 'Failed', 'danger'); }}
     }}
     async function loadCredentialKeyStatus() {{
@@ -792,6 +1047,10 @@ async def settings_page(request: Request, session: dict = Depends(require_auth))
       const body = {{
         scratchpad_retention_days: document.getElementById('scratchpad-retention-days').value,
         retracted_retention_days: document.getElementById('retracted-retention-days').value,
+        episodic_memory_ttl_days: document.getElementById('episodic-memory-ttl-days').value,
+        memory_dedupe_similarity: document.getElementById('memory-dedupe-similarity').value,
+        execution_log_retention_days: document.getElementById('execution-log-retention-days').value,
+        webhook_log_retention_days: document.getElementById('webhook-log-retention-days').value,
         solo_mode_enabled: document.getElementById('solo-mode-enabled').checked ? 'true' : 'false',
       }};
       const j = await apiFetch('/api/dashboard/system-settings', {{
@@ -802,6 +1061,37 @@ async def settings_page(request: Request, session: dict = Depends(require_auth))
         document.getElementById('system-settings-result').innerHTML = '<div class="alert alert-success">Behavior settings saved.</div>';
       }} else {{
         showToast(j.error?.message || 'Failed to save settings', 'danger');
+      }}
+    }}
+    function onReviewProviderChange(provider) {{
+      document.getElementById('review-ollama-fields').style.display = provider === 'ollama' ? 'block' : 'none';
+      document.getElementById('review-binding-fields').style.display = provider === 'binding' ? 'block' : 'none';
+    }}
+    async function saveReviewModel(e) {{
+      e.preventDefault();
+      const body = {{
+        review_model_provider: document.getElementById('review-model-provider').value,
+        review_model_url: document.getElementById('review-model-url').value.trim(),
+        review_model_name: document.getElementById('review-model-name').value.trim(),
+        review_model_binding_id: document.getElementById('review-model-binding-id').value.trim(),
+        review_model_action: document.getElementById('review-model-action').value.trim(),
+        review_model_timeout_seconds: document.getElementById('review-model-timeout').value,
+        usefulness_review_enabled: document.getElementById('usefulness-review-enabled').checked ? 'true' : 'false',
+      }};
+      const j = await apiFetch('/api/dashboard/review-model', {{ method: 'POST', body: JSON.stringify(body) }});
+      if (!j.ok) {{ showToast(j.error?.message || 'Save failed', 'danger'); return; }}
+      // Saving is not proof it answers, so say so and point at the check.
+      showToast(j.data.available ? 'Saved — run Test to confirm the model answers' : 'Saved — no model configured');
+    }}
+    async function testReviewModel() {{
+      const out = document.getElementById('review-model-result');
+      out.innerHTML = '<span class="text-muted">Asking the model for a small JSON reply...</span>';
+      const j = await apiFetch('/api/dashboard/review-model/test', {{ method: 'POST' }});
+      const r = j.data || {{}};
+      if (j.ok && r.ok) {{
+        out.innerHTML = '<div class="alert alert-success">Working: <code>' + escapeHtml(r.model || r.provider) + '</code> answered and followed the format.</div>';
+      }} else {{
+        out.innerHTML = '<div class="alert alert-warning">' + escapeHtml(r.error || j.error?.message || 'Could not reach the model') + '</div>';
       }}
     }}
     async function saveVectorSettings(e) {{
@@ -861,7 +1151,7 @@ async def settings_page(request: Request, session: dict = Depends(require_auth))
         return;
       }}
       try {{
-        const fullUrl = '/api/dashboard/vector-settings/models?url=' + encodeURIComponent(url);
+        const fullUrl = '/api/dashboard/ollama-models?url=' + encodeURIComponent(url);
         const resp = await fetch(fullUrl, {{ method: 'GET', credentials: 'same-origin' }});
         if (!resp.ok) throw new Error('Failed to fetch');
         const data = await resp.json();
@@ -878,6 +1168,29 @@ async def settings_page(request: Request, session: dict = Depends(require_auth))
         document.getElementById('vector-model-hint-select').textContent = 'Could not fetch models from Ollama. Ensure Ollama is running.';
       }}
     }}
+    async function loadReviewModels() {{
+      const url = document.getElementById('review-model-url').value.trim();
+      const hint = document.getElementById('review-model-hint');
+      if (!url) {{
+        hint.textContent = 'Enter the URL above first, then load models.';
+        return;
+      }}
+      hint.textContent = 'Loading models…';
+      try {{
+        const resp = await fetch('/api/dashboard/ollama-models?url=' + encodeURIComponent(url), {{ method: 'GET', credentials: 'same-origin' }});
+        const data = await resp.json();
+        if (!resp.ok || !data.ok) throw new Error(data.error?.message || 'Failed to fetch');
+        const models = data.data?.models || [];
+        if (models.length === 0) throw new Error('No models installed');
+        document.getElementById('review-model-options').innerHTML =
+          models.map(name => `<option value="${{escapeHtml(name)}}"></option>`).join('');
+        hint.textContent = models.length + ' model(s) available — click the field to pick one. Embedding models will be listed too; this needs a chat model.';
+      }} catch (e) {{
+        // The field stays a free-text input on purpose, so a failed load never
+        // blocks configuring a model the endpoint did not report.
+        hint.textContent = 'Could not list models (' + e.message + '). Type the model name instead.';
+      }}
+    }}
     function initVectorProvider() {{
       const provider = document.getElementById('vector-provider').value;
       if (provider === 'ollama') {{
@@ -887,6 +1200,10 @@ async def settings_page(request: Request, session: dict = Depends(require_auth))
       }}
     }}
     document.addEventListener('DOMContentLoaded', initVectorProvider);
+    window.saveReviewModel = saveReviewModel;
+    window.testReviewModel = testReviewModel;
+    window.onReviewProviderChange = onReviewProviderChange;
+    window.loadReviewModels = loadReviewModels;
     window.saveVectorSettings = saveVectorSettings;
     window.testVectorSettings = testVectorSettings;
     window.onProviderChange = onProviderChange;
@@ -902,6 +1219,7 @@ async def settings_page(request: Request, session: dict = Depends(require_auth))
     {preferences_html}
     {secrets_snapshot_html}
     {system_settings_html}
+    {review_model_html}
     {vector_settings_html}
     {encryption_key_html}
     {broker_html}
@@ -1092,7 +1410,7 @@ async def settings_otp_page(request: Request, session: dict = Depends(require_au
                   '<div class="mono" style="word-break:break-all;margin:12px 0">' + escapeHtml(j.data.secret) + '</div>' +
                   '<label for="otp-confirm-code">Enter the 6-digit code from your app</label>' +
                   '<input type="text" id="otp-confirm-code" maxlength="6" pattern="[0-9]*" inputmode="numeric" style="width:160px">' +
-                  '<div style="margin-top:10px"><button class="btn" onclick="confirmOtpEnrollment(\\'' + targetId + '\\')">Verify and Enable OTP</button></div>' +
+                  '<div style="margin-top:10px"><button class="btn" data-otp-confirm="' + escapeHtml(targetId) + '">Verify and Enable OTP</button></div>' +
                 '</div>' +
               '</div>';
           } else {
@@ -1100,6 +1418,16 @@ async def settings_otp_page(request: Request, session: dict = Depends(require_au
             showToast(j.error?.message || 'Failed', 'danger');
           }
         }
+        // The button carrying this id is rendered by this page, so its
+        // listener belongs here: the main settings script is not loaded on
+        // /settings/otp.
+        document.addEventListener('click', function(ev) {
+          const otp = ev.target.closest('[data-otp-confirm]');
+          if (!otp) return;
+          ev.preventDefault();
+          confirmOtpEnrollment(otp.dataset.otpConfirm);
+        });
+
         async function confirmOtpEnrollment(targetId) {
           const code = document.getElementById('otp-confirm-code')?.value || '';
           if (!code) { showToast('Enter the authenticator code', 'warning'); return; }

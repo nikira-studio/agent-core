@@ -11,13 +11,13 @@ from app.services import activity_service
 
 @pytest.fixture
 def setup_integrations_data(clean_db):
-    create_user("brian", "brian@test.local", "password123", "Brian", "admin")
-    session = create_session("brian", channel="dashboard")
-    user = get_user_by_id("brian")
+    create_user("alex", "alex@test.local", "password123", "Alex", "admin")
+    session = create_session("alex", channel="dashboard")
+    user = get_user_by_id("alex")
 
     create_workspace(
         "agent-core",
-        owner_user_id="brian",
+        owner_user_id="alex",
         name="Agent Core",
         description="Self-hosted agent infrastructure",
     )
@@ -25,8 +25,8 @@ def setup_integrations_data(clean_db):
     create_agent(
         agent_id="claude-code",
         display_name="Claude Code",
-        owner_user_id="brian",
-        read_scopes=["agent:claude-code", "workspace:agent-core", "user:brian"],
+        owner_user_id="alex",
+        read_scopes=["agent:claude-code", "workspace:agent-core", "user:alex"],
         write_scopes=["agent:claude-code", "workspace:agent-core"],
     )
 
@@ -35,17 +35,17 @@ def setup_integrations_data(clean_db):
         name="github-token",
         value_plaintext="ghp_secret",
         label="GitHub Token",
-        created_by="brian",
+        created_by="alex",
     )
 
     activity_service.create_activity(
         agent_id="claude-code",
-        user_id="brian",
+        user_id="alex",
         task_description="Test task for Agent Core",
         memory_scope="workspace:agent-core",
     )
 
-    return {"user_id": "brian", "user": user, "session_id": session["session_id"]}
+    return {"user_id": "alex", "user": user, "session_id": session["session_id"]}
 
 
 @pytest.fixture
@@ -74,14 +74,14 @@ def test_integrations_shows_selectors(integrations_client):
     r = integrations_client.get("/integrations")
     assert r.status_code == 200
     html = r.text
-    assert 'value="brian"' in html
+    assert 'value="alex"' in html
     assert 'value="agent-core"' in html
     assert 'value="claude-code"' in html
 
 
 def test_integrations_generates_claude_md(integrations_client):
     r = integrations_client.get(
-        "/integrations?user_id=brian&workspace_id=agent-core&agent_id=claude-code&target=claude_code&output_type=claude_md"
+        "/integrations?user_id=alex&workspace_id=agent-core&agent_id=claude-code&target=claude_code&output_type=claude_md"
     )
     assert r.status_code == 200
     html = r.text
@@ -93,7 +93,7 @@ def test_integrations_generates_claude_md(integrations_client):
     assert "task_note" in output
     assert "workspace:agent-core" in output
     assert "task_result" in output
-    assert "user:brian" not in output
+    assert "user:alex" not in output
     assert "Agent ID:" not in output
 
 
@@ -144,7 +144,7 @@ def test_all_generated_prompts_include_memory_discipline_guidance():
 
 def test_integrations_generates_env_vars(integrations_client):
     r = integrations_client.get(
-        "/integrations?user_id=brian&workspace_id=agent-core&agent_id=claude-code&target=claude_code&output_type=env"
+        "/integrations?user_id=alex&workspace_id=agent-core&agent_id=claude-code&target=claude_code&output_type=env"
     )
     assert r.status_code == 200
     html = r.text
@@ -156,7 +156,7 @@ def test_integrations_generates_env_vars(integrations_client):
 
 def test_integrations_project_is_optional_for_env(integrations_client):
     r = integrations_client.get(
-        "/integrations?user_id=brian&agent_id=claude-code&target=claude_code&output_type=env"
+        "/integrations?user_id=alex&agent_id=claude-code&target=claude_code&output_type=env"
     )
     assert r.status_code == 200
     html = r.text
@@ -168,7 +168,7 @@ def test_integrations_project_is_optional_for_env(integrations_client):
 
 def test_integrations_generates_verification_prompt(integrations_client):
     r = integrations_client.get(
-        "/integrations?user_id=brian&workspace_id=agent-core&agent_id=claude-code&target=generic_mcp&output_type=verification"
+        "/integrations?user_id=alex&workspace_id=agent-core&agent_id=claude-code&target=generic_mcp&output_type=verification"
     )
     assert r.status_code == 200
     html = r.text
@@ -187,7 +187,7 @@ def test_integrations_generates_verification_prompt(integrations_client):
 
 def test_integrations_access_checks_show_ok_for_good_agent(integrations_client):
     r = integrations_client.get(
-        "/integrations?user_id=brian&workspace_id=agent-core&agent_id=claude-code&target=claude_code&output_type=instructions"
+        "/integrations?user_id=alex&workspace_id=agent-core&agent_id=claude-code&target=claude_code&output_type=instructions"
     )
     assert r.status_code == 200
     html = r.text
@@ -199,7 +199,7 @@ def test_integrations_access_checks_show_ok_for_good_agent(integrations_client):
 
 def test_integrations_no_raw_credential_values_in_output(integrations_client):
     r = integrations_client.get(
-        "/integrations?user_id=brian&workspace_id=agent-core&agent_id=claude-code&target=claude_code&output_type=instructions"
+        "/integrations?user_id=alex&workspace_id=agent-core&agent_id=claude-code&target=claude_code&output_type=instructions"
     )
     assert r.status_code == 200
     html = r.text
@@ -209,7 +209,7 @@ def test_integrations_no_raw_credential_values_in_output(integrations_client):
 def test_integrations_generate_connection_endpoint(integrations_client):
     r = integrations_client.post(
         "/api/integrations/generate-connection",
-        json={"user_id": "brian", "workspace_id": "agent-core", "agent_id": "claude-code", "output_type": "env"},
+        json={"user_id": "alex", "workspace_id": "agent-core", "agent_id": "claude-code", "output_type": "env"},
     )
     assert r.status_code == 200
     data = r.json()["data"]
@@ -221,7 +221,7 @@ def test_integrations_preview_and_apply_access_endpoints(integrations_client):
     preview = integrations_client.post(
         "/api/integrations/preview",
         json={
-            "user_id": "brian",
+            "user_id": "alex",
             "workspace_id": "agent-core",
             "agent_id": "claude-code",
             "target": "claude_code",
@@ -236,7 +236,7 @@ def test_integrations_preview_and_apply_access_endpoints(integrations_client):
     apply_access = integrations_client.post(
         "/api/integrations/apply-access",
         json={
-            "user_id": "brian",
+            "user_id": "alex",
             "workspace_id": "agent-core",
             "agent_id": "claude-code",
             "include_user_write": False,
@@ -248,9 +248,90 @@ def test_integrations_preview_and_apply_access_endpoints(integrations_client):
 
 def test_integrations_page_surfaces_artifact_validation(integrations_client):
     r = integrations_client.get(
-        "/integrations?user_id=brian&workspace_id=agent-core&agent_id=claude-code&target=claude_code&output_type=mcp_json"
+        "/integrations?user_id=alex&workspace_id=agent-core&agent_id=claude-code&target=claude_code&output_type=mcp_json"
     )
     assert r.status_code == 200
     html = r.text
     assert "Check Setup" not in html
     assert "Artifact validation:" not in html
+
+
+def test_generating_a_repo_instruction_file_does_not_rotate_the_key(test_client, admin_token):
+    """Generating AGENTS.md must not knock a running agent offline.
+
+    The file contains no agent-specific content, but every generate call used to
+    rotate the selected agent's key, invalidating whatever a live session was
+    already using.
+    """
+    from app.services import agent_service
+
+    test_client.post(
+        "/api/agents",
+        headers={"Authorization": f"Bearer {admin_token}"},
+        json={"id": "rotation-probe", "display_name": "Probe", "description": "t"},
+    )
+    first = test_client.post(
+        "/api/integrations/generate-connection",
+        headers={"Authorization": f"Bearer {admin_token}"},
+        json={"user_id": "admin", "agent_id": "rotation-probe", "output_type": "env"},
+    )
+    assert first.status_code == 200, first.json()
+    key_hash_before = agent_service.get_agent_by_id("rotation-probe")["api_key_hash"]
+
+    for output_type in ("agents_md", "claude_md", "instructions", "session"):
+        r = test_client.post(
+            "/api/integrations/generate-connection",
+            headers={"Authorization": f"Bearer {admin_token}"},
+            json={
+                "user_id": "admin",
+                "agent_id": "rotation-probe",
+                "output_type": output_type,
+            },
+        )
+        assert r.status_code == 200, f"{output_type}: {r.json()}"
+        after = agent_service.get_agent_by_id("rotation-probe")["api_key_hash"]
+        assert after == key_hash_before, f"{output_type} rotated the agent's key"
+
+
+def test_generating_a_connection_config_still_rotates(test_client, admin_token):
+    """The key-bearing outputs must still issue a fresh key."""
+    from app.services import agent_service
+
+    test_client.post(
+        "/api/agents",
+        headers={"Authorization": f"Bearer {admin_token}"},
+        json={"id": "rotation-probe-2", "display_name": "Probe 2", "description": "t"},
+    )
+    test_client.post(
+        "/api/integrations/generate-connection",
+        headers={"Authorization": f"Bearer {admin_token}"},
+        json={"user_id": "admin", "agent_id": "rotation-probe-2", "output_type": "env"},
+    )
+    before = agent_service.get_agent_by_id("rotation-probe-2")["api_key_hash"]
+
+    for output_type in ("mcp_json", "env"):
+        r = test_client.post(
+            "/api/integrations/generate-connection",
+            headers={"Authorization": f"Bearer {admin_token}"},
+            json={
+                "user_id": "admin",
+                "agent_id": "rotation-probe-2",
+                "output_type": output_type,
+            },
+        )
+        assert r.status_code == 200, r.json()
+        after = agent_service.get_agent_by_id("rotation-probe-2")["api_key_hash"]
+        assert after != before, f"{output_type} should have issued a fresh key"
+        before = after
+
+
+def test_the_form_says_what_the_agent_choice_affects(test_client, admin_token):
+    """Rotation is invisible otherwise: nothing on screen said generating a
+    config would invalidate the key a running session is using."""
+    r = test_client.get(
+        "/integrations", headers={"Authorization": f"Bearer {admin_token}"}
+    )
+    assert r.status_code == 200
+    assert "only re-renders the preview" in r.text
+    assert "mints a fresh API key" in r.text
+    assert "identical for every agent" in r.text

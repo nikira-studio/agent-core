@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel
 from typing import Optional
 
-from app.services import memory_service, audit_service
+from app.services import memory_service, audit_service, embedding_service
 
 try:
     from app.services import embedding_service
@@ -25,37 +25,19 @@ from app.security.pii_detector import contains_pii
 router = APIRouter(prefix="/api/memory", tags=["memory"])
 
 
-def _embedding_backend_status() -> dict:
-    if not _EMBED_AVAILABLE:
-        return {"backend": "unavailable", "model_configured": False}
-    try:
-        return embedding_service.get_embedding_backend_status()
-    except Exception:
-        return {"backend": "error", "model_configured": False}
 
 
-def _embedding_backend_label(status: dict) -> str:
-    return status.get("backend", "unknown")
 
-
-def _retrieval_is_degraded(status: dict) -> bool:
-    return status.get("backend") != "healthy" or not status.get("model_configured", False)
-
-
-def _memory_provenance(
-    ctx: RequestContext,
-    source_kind: str,
-    scope: str,
-) -> str:
-    return memory_service.build_provenance(
+def _memory_provenance(ctx: RequestContext, source_kind: str, scope: str) -> str:
+    return memory_service.provenance_for_write(
         actor_type=ctx.actor_type,
         actor_id=ctx.actor_id,
         channel="api",
+        route="/api/memory/write",
         source_kind=source_kind,
         scope=scope,
         user_id=ctx.user_id,
         agent_id=ctx.agent_id,
-        extras={"route": "/api/memory/write"},
     )
 
 
@@ -87,12 +69,11 @@ class WriteMemoryRequest(BaseModel):
     content: str
     memory_class: str
     scope: str
-    domain: Optional[str] = None
     topic: Optional[str] = None
     confidence: float = 0.5
     importance: float = 0.5
     source_kind: str = "agent_inference"
-    event_time: Optional[str] = None
+    subject_anchor: Optional[str] = None
     supersedes_id: Optional[str] = None
     slot_key: Optional[str] = None
     valid_from: Optional[str] = None
@@ -110,7 +91,6 @@ class ImportMemoryRequest(BaseModel):
     scope: str
     sources: list[ImportMemorySource]
     memory_class: str = "fact"
-    domain: Optional[str] = "import"
     topic: Optional[str] = None
     confidence: float = 0.85
     importance: float = 0.6
@@ -119,10 +99,13 @@ class ImportMemoryRequest(BaseModel):
 class SearchMemoryRequest(BaseModel):
     query: str
     scope: Optional[str] = None
-    domain: Optional[str] = None
     topic: Optional[str] = None
     memory_class: Optional[str] = None
     min_confidence: float = 0.0
+    subject_anchor: Optional[str] = None
+    activity_id: Optional[str] = None
+    as_of: Optional[str] = None
+    view: Optional[str] = None
     limit: int = 20
     offset: int = 0
     include_retracted: bool = False
@@ -180,15 +163,14 @@ async def write_memory(
     try:
         record, pii_flag = memory_service.write_memory(
             content=body.content,
-            memory_class=body.memory_class,
+                memory_class=body.memory_class,
             scope=body.scope,
-            domain=body.domain,
-            topic=body.topic,
+                topic=body.topic,
             confidence=body.confidence,
             importance=body.importance,
             source_kind=body.source_kind,
-            event_time=body.event_time,
             supersedes_id=body.supersedes_id,
+                subject_anchor=body.subject_anchor,
             provenance_json=_memory_provenance(ctx, body.source_kind, body.scope),
             slot_key=body.slot_key,
             valid_from=body.valid_from,
@@ -215,7 +197,21 @@ async def write_memory(
         result="success",
     )
 
-    return success_response_with_headers({"record": record}, rate_headers, status_code=201)
+    # Advisory only, and computed after the write so a slow embedding check can
+    # never cost the caller its record.
+    payload = {"record": record}
+    warnings = memory_service.assess_memory_write(
+        content=body.content,
+        scope=body.scope,
+        memory_class=body.memory_class,
+        topic=body.topic,
+        exclude_id=record["id"],
+        subject_anchor=body.subject_anchor,
+    )
+    if warnings:
+        payload["warnings"] = warnings
+
+    return success_response_with_headers(payload, rate_headers, status_code=201)
 
 
 @router.post("/import")
@@ -289,8 +285,7 @@ async def import_memory(
                     content=chunk["content"],
                     memory_class=body.memory_class,
                     scope=body.scope,
-                    domain=body.domain,
-                    topic=body.topic or parsed["filename"],
+                            topic=body.topic or parsed["filename"],
                     confidence=body.confidence,
                     importance=body.importance,
                     source_kind="external_import",
@@ -391,28 +386,37 @@ async def search_memory(
                 ctx.default_recall_scopes or ctx.read_scopes
             )
         if not allowed_scopes:
-            embedding_status = _embedding_backend_status()
+            embedding_status = embedding_service.safe_backend_status()
             return success_response_with_headers({
                 "records": [],
                 "retrieval_mode": "fts_only",
-                "embedding_backend_status": _embedding_backend_label(embedding_status),
+                "embedding_backend_status": embedding_service.backend_label(embedding_status),
                 "total": 0,
             }, rate_headers)
 
-        records, retrieval_mode = memory_service.search_memory(
-            query=body.query,
-            authorized_scopes=allowed_scopes,
-            domain=body.domain,
-            topic=body.topic,
-            memory_class=body.memory_class,
-            min_confidence=body.min_confidence,
-            limit=min(body.limit, 100),
-            offset=body.offset,
-            include_retracted=body.include_retracted,
-            include_superseded=body.include_superseded,
-        )
+        try:
+            records, retrieval_mode = memory_service.search_memory(
+                query=body.query,
+                authorized_scopes=allowed_scopes,
+                topic=body.topic,
+                memory_class=body.memory_class,
+                min_confidence=body.min_confidence,
+                limit=min(body.limit, 100),
+                offset=body.offset,
+                include_retracted=body.include_retracted,
+                include_superseded=body.include_superseded,
+                subject_anchor=body.subject_anchor,
+                activity_id=body.activity_id,
+                as_of=body.as_of,
+            )
+        except ValueError as e:
+            return error_response("INVALID_INPUT", str(e), 400)
 
-        embedding_status = _embedding_backend_status()
+        # Lean by default; see MEMORY_RESULT_FIELDS for what a result keeps.
+        if body.view != "full":
+            records = [memory_service.lean_record(r) for r in records]
+
+        embedding_status = embedding_service.safe_backend_status()
 
         audit_service.write_event(
             actor_type=ctx.actor_type,
@@ -425,11 +429,11 @@ async def search_memory(
                 "query": body.query,
                 "results": len(records),
                 "retrieval_mode": retrieval_mode,
-                "embedding_backend_status": _embedding_backend_label(embedding_status),
+                "embedding_backend_status": embedding_service.backend_label(embedding_status),
             },
         )
 
-        if retrieval_mode == "fts_only" and _retrieval_is_degraded(embedding_status):
+        if retrieval_mode == "fts_only" and embedding_service.retrieval_is_degraded(embedding_status):
             audit_service.write_event(
                 actor_type=ctx.actor_type,
                 actor_id=ctx.actor_id,
@@ -439,7 +443,7 @@ async def search_memory(
                 result="success",
                 details={
                     "retrieval_mode": retrieval_mode,
-                    "embedding_backend_status": _embedding_backend_label(embedding_status),
+                    "embedding_backend_status": embedding_service.backend_label(embedding_status),
                     "model_configured": bool(embedding_status.get("model_configured", False)),
                 },
             )
@@ -447,7 +451,7 @@ async def search_memory(
         return success_response_with_headers({
             "records": records,
             "retrieval_mode": retrieval_mode,
-            "embedding_backend_status": _embedding_backend_label(embedding_status),
+            "embedding_backend_status": embedding_service.backend_label(embedding_status),
             "total": len(records),
         }, rate_headers)
     finally:
@@ -472,8 +476,8 @@ async def get_memory(
             return error_response("SCOPE_DENIED", "Access denied to this scope", 403)
         records = memory_service.get_memory_by_scope(
             scope=body.scope,
-            limit=min(body.limit, 100),
-            offset=body.offset,
+                limit=min(body.limit, 100),
+                offset=body.offset,
             record_status=body.record_status,
         )
     else:
@@ -482,8 +486,8 @@ async def get_memory(
         )
         records = memory_service.get_memory_by_scopes(
             scopes=allowed_scopes,
-            limit=min(body.limit, 100),
-            offset=body.offset,
+                limit=min(body.limit, 100),
+                offset=body.offset,
         )
 
     return success_response({"records": records, "total": len(records)})

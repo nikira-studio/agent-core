@@ -4,6 +4,8 @@ Agent Core is configured through environment variables. For local development, c
 
 **The short version:** for a basic local setup, you probably don't need to change anything.
 
+For what these settings actually affect — the memory model, verification, the review queue — see [How It Works](how-it-works.md).
+
 ---
 
 ## Core Settings
@@ -60,7 +62,93 @@ These control how long dashboard logins stay active.
 
 The scratchpad and retracted/superseded retention windows themselves (7 and 30 days by default) are configured from **Settings → System Behavior** in the dashboard. The last run's time, trigger, and results are shown in **Settings → Backup & Restore** and available from `GET /api/backup/maintenance/status`.
 
+The maintenance sweep also prunes the connector execution and webhook delivery logs (30 days by default, `0` keeps them forever) and runs the memory verification pass described below. All of these windows are set from **Settings → System Behavior**.
+
 **Vector search** — the embedding provider, endpoint URL, model, and auth type — is configured from **Settings → Vector Search** in the dashboard, not through environment variables. Semantic search is off by default. When it's disabled or the embedding backend is unreachable, Agent Core falls back to full-text search automatically.
+
+---
+
+## Memory Verification
+
+Facts can carry a `subject_anchor` naming what would confirm them — `repo:<path>`, `host:<name-or-ip>`, or `service:<binding_id>`. The maintenance sweep checks anchored facts against the real thing and records what it found.
+
+To make `repo:` anchors resolvable, map each workspace scope to a directory on the machine running Agent Core. Set `workspace_repo_roots` in `system_settings` to a JSON object:
+
+```json
+{
+  "workspace:my-project": "/srv/projects/my-project",
+  "workspace:docs": "/srv/projects/docs"
+}
+```
+
+**Anchor paths are relative to that root, never absolute.** The same directory has a different absolute path inside every agent's container, so an absolute anchor is resolvable only by whoever wrote it. Agent Core resolves the relative path against this installation's root, which is what lets agents with different mounts share the same memory.
+
+A scope with no configured root reports `unverifiable` rather than guessing — it never treats "I could not check this" as "this is wrong". `host:` anchors are verified through a connector binding that already targets that host, so credentials stay in the connector layer.
+
+| Setting (in `system_settings`) | Default | What it does |
+| --- | --- | --- |
+| `workspace_repo_roots` | `{}` | JSON map of workspace scope to filesystem root |
+| `verification_pass_enabled` | `1` | Whether the maintenance sweep verifies anchored facts |
+| `verification_pass_limit` | `50` | Records checked per run, least-recently-attempted first |
+
+---
+
+## Review Model (optional)
+
+Some judgements cannot be made by rules, because they depend on meaning rather than shape: whether a record is still worth keeping, or whether a newer memory supersedes an older one. Agent Core can use a language model for those.
+
+**It is a capability, not a dependency.** Memory, search, credentials, connectors and the mechanical clean-up rules all work with no model configured. Configuring one turns on the features that need judgement — including for records written long before it existed. Leave it unset and those features report themselves as unconfigured rather than failing.
+
+Configure it from **Settings → Review Model** in the dashboard, or set these directly:
+
+| Setting (in `system_settings`) | What it does |
+| --- | --- |
+| `review_model_provider` | `ollama` for a direct endpoint, `binding` to use a connector binding, empty for none |
+| `review_model_url` / `review_model_name` | For `ollama`: where the model runs and which model to use. **Load Models** on that card lists what the endpoint has installed, the same way the embedding card does; the field stays free text so a model the endpoint does not report still works |
+| `review_model_binding_id` / `review_model_action` | For `binding`: which binding to call, and its chat-completions action |
+| `review_model_timeout_seconds` | Defaults to 60 |
+
+Point it at a model on a machine you control and record content never leaves it. Point it at a hosted API and it does — that is the trade-off, and it is why there is no default.
+
+The **Test** button on that card (or `POST /api/dashboard/review-model/test`) checks it. Configuration alone does not mean a model answers, and these features need one that can follow a format instruction, so the check asks for a small JSON reply and reports what came back.
+
+---
+
+## Verification Beyond Code
+
+`repo:`, `host:` and `service:` are what Agent Core can check on its own. What actually settles a record depends on what the record is about — a web page, a policy document, a contact, a ticket — so **anchor types are open**, and an installation teaches the system to check its own by mapping a type to a connector binding it already has:
+
+```json
+{
+  "url":   {"binding_id": "<firecrawl-or-http-binding>", "action": "GET /scrape", "value_param": "url"},
+  "doc":   {"binding_id": "<drive-binding>", "action": "GET /files", "value_param": "q"}
+}
+```
+
+Stored in `system_settings` under `verification_bindings`. The anchor's value is passed as `value_param` (default `target`), along with any fixed `params`.
+
+A binding that answers verifies the anchor. One that reports 404/not-found is evidence the subject is gone, and becomes a review proposal. **Anything else — a timeout, an error, an unconfigured type — leaves the record unverifiable rather than condemning it.** An outage is not a false memory, and a system that forgets that will delete true records the first time the network hiccups.
+
+Writing a record with an anchor type nothing can check is allowed and warned about, not refused: the anchor still records what *would* settle it, which is useful to a human even when no automation can follow it.
+
+---
+
+## Usefulness Review (optional, off by default)
+
+Agent Core can ask a language model whether a memory record is actionable for a future session — the one judgement the mechanical rules cannot make, since a record can be perfectly accurate and still useless.
+
+**This sends record content to whatever model you point it at.** Point it at a model running on your own machine and nothing leaves it; point it at a hosted API and your memory content is sent there. That is why it is off by default and why there is no default provider.
+
+Configure a review model (above), then turn this feature on:
+
+| Setting (in `system_settings`) | Default | What it does |
+| --- | --- | --- |
+| `usefulness_review_enabled` | `0` | Must be `1` for anything to run |
+| `usefulness_review_limit` | `20` | Records judged per run |
+
+It uses the review model configured above, so a model is set up once for the whole system rather than per feature.
+
+Run it with `POST /api/memory/proposals/review-usefulness` (admin). Records that plainly name a path, command, version, address, or rule are skipped without a model call. Anything the model judges unhelpful becomes a **proposal in the review queue with the model's reason attached** — it is never applied automatically, no matter how accurate it proves, because the cost of a wrong call is deleting a constraint someone depended on.
 
 ---
 

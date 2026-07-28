@@ -1,46 +1,27 @@
+"""Embedding storage and similarity, in plain SQLite.
+
+Vectors live in `memory_embeddings` as float32 blobs and similarity is computed
+in Python. That is fast enough at this scale — the candidate set is already
+narrowed by scope and status before anything is scored — and it means semantic
+search works on any SQLite build.
+
+There was previously a `vec_version()` probe gating every function here, left
+over from an approach that stored vectors in a sqlite-vec virtual table. Nothing
+in this module calls a vec_* function any more, so the probe only had the effect
+of silently disabling semantic search on installs without the extension.
+"""
+
+import logging
 import struct
 from typing import Optional
 
 from app.database import get_db
 from app.services.vector_settings_service import get_vector_model
 
-
-_vec_available: Optional[bool] = None
-
-
-def is_sqlite_vec_available() -> bool:
-    global _vec_available
-    if _vec_available is not None:
-        return _vec_available
-    try:
-        with get_db() as conn:
-            conn.execute("SELECT vec_version()")
-        _vec_available = True
-    except Exception:
-        _vec_available = False
-    return _vec_available
-
-
-def ensure_vector_table() -> bool:
-    if not is_sqlite_vec_available():
-        return False
-    try:
-        with get_db() as conn:
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS memory_embeddings_vec (
-                    rowid INTEGER PRIMARY KEY,
-                    embedding BLOB NOT NULL
-                )
-            """)
-            conn.commit()
-        return True
-    except Exception:
-        return False
+logger = logging.getLogger(__name__)
 
 
 def store_embedding(record_id: str, vector_bytes: bytes) -> bool:
-    if not is_sqlite_vec_available():
-        return False
     try:
         with get_db() as conn:
             conn.execute(
@@ -50,12 +31,14 @@ def store_embedding(record_id: str, vector_bytes: bytes) -> bool:
             conn.commit()
         return True
     except Exception:
+        # Never fatal to a memory write, but never silent either: a store that
+        # keeps failing means search quietly degrades to text matching, which is
+        # exactly the kind of fault that hides for months.
+        logger.warning("Could not store embedding for %s", record_id, exc_info=True)
         return False
 
 
 def get_embedding(record_id: str) -> Optional[bytes]:
-    if not is_sqlite_vec_available():
-        return None
     try:
         with get_db() as conn:
             row = conn.execute(
@@ -64,13 +47,14 @@ def get_embedding(record_id: str) -> Optional[bytes]:
             ).fetchone()
         return bytes(row[0]) if row else None
     except Exception:
+        logger.warning("Could not read embedding for %s", record_id, exc_info=True)
         return None
 
 
 def cosine_search_top_k(
     query_vector: bytes, top_k: int, record_ids: list[str]
 ) -> list[tuple[str, float]]:
-    if not is_sqlite_vec_available() or not record_ids:
+    if not record_ids:
         return []
     try:
         import array
@@ -105,4 +89,5 @@ def cosine_search_top_k(
         results.sort(key=lambda x: x[1], reverse=True)
         return results[:top_k]
     except Exception:
+        logger.warning("Vector similarity search failed", exc_info=True)
         return []

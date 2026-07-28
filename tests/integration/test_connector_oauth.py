@@ -103,11 +103,11 @@ def test_oauth_start_endpoint_uses_forwarded_public_url(test_client, admin_token
         headers={
             "Authorization": f"Bearer {admin_token}",
             "X-Forwarded-Proto": "https",
-            "X-Forwarded-Host": "core.veditz.com",
+            "X-Forwarded-Host": "core.example.com",
         },
     )
     assert response.status_code == 200, response.text
     data = response.json()["data"]
     assert data["callback_url"] == (
-        "https://core.veditz.com/api/connector-bindings/oauth/callback"
+        "https://core.example.com/api/connector-bindings/oauth/callback"
     )

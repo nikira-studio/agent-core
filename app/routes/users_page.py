@@ -57,15 +57,18 @@ async def users_page(request: Request, session: dict = Depends(require_auth)):
         delete_action = (
             "<span class='text-muted' style='font-size:0.8rem'>current session</span>"
             if is_self
-            else f"<button type='button' class='btn btn-sm btn-danger icon-delete-btn' onclick=\"deleteUser('{u['id']}', '{escape_html(u['display_name'])}')\" title='Delete user' aria-label='Delete user'>{get_icon('delete')}</button>"
+            # The name is carried as data, not spliced into a JS call: an
+            # HTML-escaped value inside onclick is decoded before the script is
+            # parsed, so &#39; would become a quote and end the string early.
+            else f"<button type='button' class='btn btn-sm btn-danger icon-delete-btn' data-user-id='{escape_html(u['id'])}' data-user-name='{escape_html(u['display_name'])}' onclick=\"deleteUser(this)\" title='Delete user' aria-label='Delete user'>{get_icon('delete')}</button>"
         )
         actions = f"<div class='actions-cell'><button type='button' class='btn btn-sm btn-secondary' data-user='{user_payload}' onclick=\"editUser(this)\">Edit</button>{delete_action}</div>"
         return (
             f"<tr>"
             f"<td>{escape_html(u.get('display_name', ''))}</td>"
-            f"<td><code>{u['id']}</code></td>"
+            f"<td><code>{escape_html(u['id'])}</code></td>"
             f"<td>{escape_html(u.get('email', ''))}</td>"
-            f"<td><span class='badge badge-{'active' if u.get('role') == 'admin' else 'inactive'}'>{u.get('role', 'user')}</span></td>"
+            f"<td><span class='badge badge-{'active' if u.get('role') == 'admin' else 'inactive'}'>{escape_html(u.get('role', 'user'))}</span></td>"
             f"<td>{otp}</td>"
             f"<td>{local_dt(u.get('created_at'), style='date')}</td>"
             f"<td>{actions}</td>"
@@ -115,7 +118,9 @@ async def users_page(request: Request, session: dict = Depends(require_auth)):
         location.reload();
       } else { showToast(j.error?.message || 'Failed', 'danger'); }
     }
-    async function deleteUser(id, name) {
+    async function deleteUser(btn) {
+      const id = btn.dataset.userId;
+      const name = btn.dataset.userName;
       if (!confirm('Delete user "' + name + '"? This cannot be undone.')) return;
       const j = await apiFetch('/api/auth/users/' + id, { method: 'DELETE' });
       if (j.ok) { showToast('User deleted'); location.reload(); }

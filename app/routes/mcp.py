@@ -1,4 +1,5 @@
 import json
+import logging
 import re
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse, Response
@@ -14,31 +15,14 @@ from app.services import (
     activity_service,
     briefing_service,
     audit_service,
-    webhook_service,
     tool_spill_service,
+    embedding_service,
 )
 from app.config import settings
 from app.models.enums import MEMORY_CLASSES, SOURCE_KINDS
 
+logger = logging.getLogger(__name__)
 
-def _activity_event_data(activity: dict, **extra) -> dict:
-    event_data = {
-        "activity_id": activity.get("id"),
-        "task_description": activity.get("task_description"),
-        "task_note": activity.get("task_note"),
-        "task_result": activity.get("task_result"),
-        "agent_id": activity.get("agent_id"),
-        "assigned_agent_id": activity.get("assigned_agent_id"),
-        "user_id": activity.get("user_id"),
-        "memory_scope": activity.get("memory_scope"),
-        "status": activity.get("status"),
-        "started_at": activity.get("started_at"),
-        "updated_at": activity.get("updated_at"),
-        "heartbeat_at": activity.get("heartbeat_at"),
-        "ended_at": activity.get("ended_at"),
-    }
-    event_data.update({k: v for k, v in extra.items() if v is not None})
-    return event_data
 
 
 router = APIRouter(prefix="", tags=["mcp"])
@@ -62,10 +46,26 @@ MANIFEST = {
                 "properties": {
                     "query": {"type": "string"},
                     "scope": {"type": "string"},
-                    "domain": {"type": "string"},
                     "topic": {"type": "string"},
                     "memory_class": {"type": "string", "enum": list(MEMORY_CLASSES)},
                     "min_confidence": {"type": "number"},
+                    "subject_anchor": {
+                        "type": "string",
+                        "description": "Only records anchored to this repo path, host, or service — prefix match, so 'repo:app/services' matches everything under it.",
+                    },
+                    "activity_id": {
+                        "type": "string",
+                        "description": "Only records written during that activity — what a given piece of work concluded.",
+                    },
+                    "as_of": {
+                        "type": "string",
+                        "description": "ISO date/datetime. Answers what was held to be true at that moment rather than now — superseded records come back while their validity window covers it. Use for 'what did we think in March', not for current state.",
+                    },
+                    "view": {
+                        "type": "string",
+                        "enum": ["lean", "full"],
+                        "description": "Defaults to lean (content plus the fields you can act on). Use full only when you need lifecycle columns such as provenance or supersession.",
+                    },
                     "limit": {"type": "integer", "default": 20},
                     "include_retracted": {"type": "boolean", "default": False},
                     "include_superseded": {"type": "boolean", "default": False},
@@ -100,21 +100,59 @@ MANIFEST = {
         },
         {
             "name": "memory_write",
-            "description": "Write a new memory record",
+            "description": (
+                "Write a durable memory record — something that will still be worth "
+                "knowing in a future session. Reporting what you just did belongs in "
+                "activity_update instead."
+            ),
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "content": {"type": "string"},
-                    "memory_class": {"type": "string", "enum": list(MEMORY_CLASSES)},
+                    "memory_class": {
+                        "type": "string",
+                        "enum": list(MEMORY_CLASSES),
+                        "description": (
+                            "What would settle this record if someone doubted it? "
+                            "'fact' = an observation about how things ARE, checkable "
+                            "against code/a host/a service, and false once the world "
+                            "changes (e.g. 'the build server is 192.0.2.10'). 'decision' = a "
+                            "choice about how things SHOULD be, which only a person can "
+                            "revise and nothing can verify (e.g. 'do not edit vendored "
+                            "dependencies directly'). 'preference' = a standing user or "
+                            "team preference. "
+                            "'scratchpad' = a temporary note. Settled by checking -> fact; "
+                            "settled by deciding -> decision."
+                        ),
+                    },
                     "scope": {"type": "string"},
-                    "domain": {"type": "string"},
-                    "topic": {"type": "string"},
-                    "confidence": {"type": "number", "default": 0.5},
+                    "topic": {
+                        "type": "string",
+                        "description": "Short human-readable label for this record, shown in listings.",
+                    },
+                    "confidence": {
+                        "type": "number",
+                        "default": 0.5,
+                        "description": "Deprecated. Self-assessment does not vary in practice; freshness is derived from last_confirmed_at instead.",
+                    },
                     "importance": {"type": "number", "default": 0.5},
                     "source_kind": {
                         "type": "string",
                         "enum": list(SOURCE_KINDS),
                         "default": "agent_inference",
+                    },
+                    "subject_anchor": {
+                        "type": "string",
+                        "description": (
+                            "What a later session would look at to check this record, as "
+                            "'type:value' — 'repo:app/services/memory_service.py', "
+                            "'host:192.0.2.10', or 'service:<binding_id>'. Repo paths must "
+                            "be RELATIVE to the workspace root: the same directory has a "
+                            "different absolute path in every agent's container, so an "
+                            "absolute path is only resolvable by whoever wrote it. Name the "
+                            "thing you actually looked at; omit it if nothing could verify "
+                            "this (which is normal for a decision)."
+                        ),
                     },
                     "supersedes_id": {"type": "string"},
                     "slot_key": {"type": "string"},
@@ -124,6 +162,103 @@ MANIFEST = {
                     "expires_at": {"type": "string", "description": "ISO datetime after which this record is excluded from search results and swept on next maintenance run"},
                 },
                 "required": ["content", "memory_class", "scope"],
+            },
+        },
+        {
+            "name": "memory_pinned",
+            "description": (
+                "The standing context for your scopes: rules and constraints the operator "
+                "wants applied to every session. Call this once at the start of a session — "
+                "these are loaded, not searched for, because a constraint that has to win a "
+                "search can be missed."
+            ),
+            "inputSchema": {"type": "object", "properties": {}},
+        },
+        {
+            "name": "memory_pin",
+            "description": (
+                "Request that a record become standing context shown to every session, or "
+                "that it stop being. Reserved for the few rules that should apply regardless "
+                "of the task. This queues the request for an operator: standing context "
+                "reaches every session in the scope, so it is granted rather than taken."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "record_id": {"type": "string"},
+                    "pinned": {"type": "boolean", "default": True},
+                },
+                "required": ["record_id"],
+            },
+        },
+        {
+            "name": "memory_confirm",
+            "description": (
+                "Mark a record as verified against the world, as of now. Only call this "
+                "after actually checking — reading the record is not checking it. Clears "
+                "the record's staleness so later sessions can tell a checked fact from an "
+                "unchecked one."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "record_id": {"type": "string"},
+                    "evidence": {
+                        "type": "string",
+                        "description": "What you looked at, e.g. 'adapter.json reports version 1.0.1' or 'ssh router: /etc/version = v3.0.1.5862409'.",
+                    },
+                },
+                "required": ["record_id", "evidence"],
+            },
+        },
+        {
+            "name": "memory_reanchor",
+            "description": (
+                "Repoint a record at what actually describes it. Use when a verification "
+                "check reports a missing anchor but the memory itself is still good — the "
+                "file moved, or the anchor was wrong to begin with."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "record_id": {"type": "string"},
+                    "subject_anchor": {
+                        "type": "string",
+                        "description": "New anchor as 'repo:<path>', 'host:<name-or-ip>' or 'service:<binding_id>'. Pass an empty string to remove it.",
+                    },
+                },
+                "required": ["record_id", "subject_anchor"],
+            },
+        },
+        {
+            "name": "memory_verify",
+            "description": (
+                "Check anchored facts against the thing they describe — a repo path or a "
+                "connector binding — and record evidence on the ones that pass. Records "
+                "whose anchor has vanished are queued for review rather than retracted. "
+                "Reports verified / missing / unverifiable counts."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "scope": {"type": "string", "description": "Limit to one scope."},
+                    "limit": {"type": "integer", "default": 50},
+                },
+            },
+        },
+        {
+            "name": "memory_feedback",
+            "description": (
+                "Say whether a recalled record actually helped. Feeds ranking with "
+                "observed usefulness instead of the writer's own estimate."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "record_id": {"type": "string"},
+                    "helpful": {"type": "boolean"},
+                },
+                "required": ["record_id", "helpful"],
             },
         },
         {
@@ -197,7 +332,7 @@ MANIFEST = {
         },
         {
             "name": "activity_get",
-            "description": "Get a specific activity by ID",
+            "description": "Get an activity by ID, together with the memory records that were written during it",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -218,6 +353,32 @@ MANIFEST = {
                     "limit": {"type": "integer", "default": 50},
                     "offset": {"type": "integer", "default": 0},
                 },
+            },
+        },
+        {
+            "name": "activity_search",
+            "description": "Search the activity trail — what agents actually worked on, one record per task, with results. Use this for 'what did we do on X', 'what has been tried', or 'what happened last week' questions; use memory_search for durable facts and decisions. Returns newest-first.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string"},
+                    "agent_id": {
+                        "type": "string",
+                        "description": "Limit to work this agent did or was assigned",
+                    },
+                    "memory_scope": {
+                        "type": "string",
+                        "description": "Limit to one workspace/agent scope, e.g. workspace:my-project",
+                    },
+                    "status": {"type": "string"},
+                    "since": {
+                        "type": "string",
+                        "description": "ISO date/datetime; only activities started on or after it",
+                    },
+                    "limit": {"type": "integer", "default": 20},
+                    "offset": {"type": "integer", "default": 0},
+                },
+                "required": ["query"],
             },
         },
         {
@@ -349,6 +510,37 @@ MANIFEST = {
 }
 
 
+_REQUIRED_PARAMS = {
+    tool["name"]: tuple(tool.get("inputSchema", {}).get("required", []))
+    for tool in MANIFEST["tools"]
+}
+
+# The schema already explains each parameter. Reusing those descriptions means a
+# caller that omits one is told what it is for, not just that it is missing.
+_PARAM_DESCRIPTIONS = {
+    tool["name"]: {
+        name: spec.get("description", "")
+        for name, spec in tool.get("inputSchema", {}).get("properties", {}).items()
+    }
+    for tool in MANIFEST["tools"]
+}
+
+
+def _missing_required_params(tool: str, params: dict) -> list[str]:
+    """Required parameters the caller left out, per the published manifest."""
+    required = _REQUIRED_PARAMS.get(tool, ())
+    return [name for name in required if params.get(name) is None]
+
+
+def _missing_params_message(tool: str, missing: list[str]) -> str:
+    described = _PARAM_DESCRIPTIONS.get(tool, {})
+    parts = []
+    for name in missing:
+        detail = described.get(name, "")
+        parts.append(f"{name} ({detail.rstrip('.')})" if detail else name)
+    return f"{tool} requires {', '.join(parts)}"
+
+
 def _mcp_error(code: str, message: str, status: int = 200) -> JSONResponse:
     return JSONResponse(
         content={"ok": False, "error": {"code": code, "message": message}},
@@ -446,39 +638,19 @@ def _query_noise_free(query: str) -> bool:
     return True
 
 
-def _embedding_backend_status() -> dict:
-    try:
-        from app.services import embedding_service
-
-        return embedding_service.get_embedding_backend_status()
-    except Exception:
-        return {"backend": "unavailable", "model_configured": False}
 
 
-def _embedding_backend_label(status: dict) -> str:
-    return status.get("backend", "unknown")
 
-
-def _retrieval_is_degraded(status: dict) -> bool:
-    return status.get("backend") != "healthy" or not status.get(
-        "model_configured", False
-    )
-
-
-def _memory_provenance(
-    ctx: RequestContext,
-    source_kind: str,
-    scope: str,
-) -> str:
-    return memory_service.build_provenance(
+def _memory_provenance(ctx: RequestContext, source_kind: str, scope: str) -> str:
+    return memory_service.provenance_for_write(
         actor_type=ctx.actor_type,
         actor_id=ctx.actor_id,
         channel="mcp",
+        route="/mcp",
         source_kind=source_kind,
         scope=scope,
         user_id=ctx.user_id,
         agent_id=ctx.agent_id,
-        extras={"route": "/mcp"},
     )
 
 
@@ -488,8 +660,6 @@ def _memory_audit_details(record: dict, **extra) -> dict:
         "memory_class": record.get("memory_class"),
         "scope": record.get("scope"),
     }
-    if record.get("domain"):
-        details["domain"] = record.get("domain")
     if record.get("topic"):
         details["topic"] = record.get("topic")
     if record.get("slot_key"):
@@ -497,28 +667,6 @@ def _memory_audit_details(record: dict, **extra) -> dict:
     details.update({k: v for k, v in extra.items() if v is not None})
     return details
 
-
-def _activity_audit_details(activity: dict, **extra) -> dict:
-    details = {
-        "activity_id": activity.get("id"),
-        "task_description": activity.get("task_description"),
-        "memory_scope": activity.get("memory_scope"),
-        "agent_id": activity.get("agent_id"),
-    }
-    if activity.get("task_result") is not None:
-        details["task_result"] = activity.get("task_result")
-    if activity.get("task_note") is not None:
-        details["task_note"] = activity.get("task_note")
-    if activity.get("assigned_agent_id"):
-        details["assigned_agent_id"] = activity.get("assigned_agent_id")
-    details.update({k: v for k, v in extra.items() if v is not None})
-    return details
-
-
-# Number of records past which memory_get defaults to a compact projection
-# (full bodies for a large page blow the MCP tool-output token budget).
-_MEMORY_COMPACT_THRESHOLD = 25
-_MEMORY_PREVIEW_CHARS = 200
 
 
 def _connector_action_count(ct: dict) -> int:
@@ -556,6 +704,12 @@ def _connector_summary(ct: dict) -> dict:
     }
 
 
+# Number of records past which memory_get defaults to a compact projection
+# (full bodies for a large page blow the MCP tool-output token budget).
+_MEMORY_COMPACT_THRESHOLD = 25
+_MEMORY_PREVIEW_CHARS = 200
+
+
 def _compact_memory_record(record: dict) -> dict:
     """Compact projection of a memory record: metadata + a short content preview,
     dropping the full content body and verbose provenance_json."""
@@ -567,7 +721,6 @@ def _compact_memory_record(record: dict) -> dict:
         "id": record.get("id"),
         "memory_class": record.get("memory_class"),
         "scope": record.get("scope"),
-        "domain": record.get("domain"),
         "topic": record.get("topic"),
         "slot_key": record.get("slot_key"),
         "record_status": record.get("record_status"),
@@ -681,13 +834,21 @@ async def _handle_custom_mcp_tool(body: dict, ctx: RequestContext):
     if not tool:
         return _mcp_error("TOOL_REQUIRED", "tool name is required", 400)
 
+    missing = _missing_required_params(tool, params)
+    if missing:
+        # Handlers read required parameters directly, so a caller that omits one
+        # used to surface as a KeyError and a 500 with a traceback. The manifest
+        # already declares what each tool requires, so check against that rather
+        # than adding a guard per handler and forgetting one.
+        return _mcp_error("INVALID_PARAMS", _missing_params_message(tool, missing), 400)
+
     if tool == "result_fetch":
         handle = (params.get("handle") or "").strip()
         if not handle:
             return _mcp_error("INVALID_PARAMS", "handle is required", 400)
         result = tool_spill_service.fetch(
             handle=handle,
-            offset=params.get("offset", 0),
+                offset=params.get("offset", 0),
             limit=min(max(params.get("limit", 4000), 1), 50000),
             agent_id=ctx.agent_id,
         )
@@ -730,33 +891,43 @@ async def _handle_custom_mcp_tool(body: dict, ctx: RequestContext):
                 ctx.default_recall_scopes or ctx.read_scopes
             )
         if not allowed:
-            embedding_status = _embedding_backend_status()
+            embedding_status = embedding_service.safe_backend_status()
             return JSONResponse(
                 content={
                     "ok": True,
                     "data": {
                         "records": [],
                         "retrieval_mode": "fts_only",
-                        "embedding_backend_status": _embedding_backend_label(
+                        "embedding_backend_status": embedding_service.backend_label(
                             embedding_status
                         ),
                         "total": 0,
                     },
                 }
             )
-        records, mode = memory_service.search_memory(
-            query=query_text,
-            authorized_scopes=allowed,
-            domain=params.get("domain"),
-            topic=params.get("topic"),
-            memory_class=memory_class,
-            min_confidence=min_confidence,
-            limit=min(params.get("limit", 20), 100),
-            offset=params.get("offset", 0),
-            include_retracted=params.get("include_retracted", False),
-            include_superseded=params.get("include_superseded", False),
-        )
-        embedding_status = _embedding_backend_status()
+        try:
+            records, mode = memory_service.search_memory(
+                query=query_text,
+                authorized_scopes=allowed,
+                topic=params.get("topic"),
+                memory_class=memory_class,
+                min_confidence=min_confidence,
+                limit=min(params.get("limit", 20), 100),
+                offset=params.get("offset", 0),
+                include_retracted=params.get("include_retracted", False),
+                include_superseded=params.get("include_superseded", False),
+                subject_anchor=params.get("subject_anchor"),
+                activity_id=params.get("activity_id"),
+                as_of=params.get("as_of"),
+            )
+        except ValueError as e:
+            return _mcp_error("INVALID_INPUT", str(e), 400)
+        # Lean by default: a search result is for deciding what is relevant, and
+        # the bookkeeping columns cost more context than they inform. view="full"
+        # is there for a caller that genuinely needs the lifecycle fields.
+        if params.get("view") != "full":
+            records = [memory_service.lean_record(r) for r in records]
+        embedding_status = embedding_service.safe_backend_status()
         audit_service.write_event(
             actor_type="agent",
             actor_id=ctx.agent_id,
@@ -768,10 +939,10 @@ async def _handle_custom_mcp_tool(body: dict, ctx: RequestContext):
                 "query": query_text,
                 "results": len(records),
                 "retrieval_mode": mode,
-                "embedding_backend_status": _embedding_backend_label(embedding_status),
+                "embedding_backend_status": embedding_service.backend_label(embedding_status),
             },
         )
-        if mode == "fts_only" and _retrieval_is_degraded(embedding_status):
+        if mode == "fts_only" and embedding_service.retrieval_is_degraded(embedding_status):
             audit_service.write_event(
                 actor_type="agent",
                 actor_id=ctx.agent_id,
@@ -781,7 +952,7 @@ async def _handle_custom_mcp_tool(body: dict, ctx: RequestContext):
                 result="success",
                 details={
                     "retrieval_mode": mode,
-                    "embedding_backend_status": _embedding_backend_label(
+                    "embedding_backend_status": embedding_service.backend_label(
                         embedding_status
                     ),
                     "model_configured": bool(
@@ -795,7 +966,7 @@ async def _handle_custom_mcp_tool(body: dict, ctx: RequestContext):
                 "data": {
                     "records": records,
                     "retrieval_mode": mode,
-                    "embedding_backend_status": _embedding_backend_label(
+                    "embedding_backend_status": embedding_service.backend_label(
                         embedding_status
                     ),
                     "total": len(records),
@@ -892,13 +1063,13 @@ async def _handle_custom_mcp_tool(body: dict, ctx: RequestContext):
                 content=params["content"],
                 memory_class=params["memory_class"],
                 scope=scope,
-                domain=params.get("domain"),
-                topic=params.get("topic"),
+                    topic=params.get("topic"),
                 confidence=confidence,
                 importance=importance,
                 source_kind=source_kind,
                 supersedes_id=supersedes_id,
                 provenance_json=_memory_provenance(ctx, source_kind, scope),
+                subject_anchor=params.get("subject_anchor"),
                 slot_key=params.get("slot_key"),
                 valid_from=params.get("valid_from"),
                 valid_to=params.get("valid_to"),
@@ -926,8 +1097,222 @@ async def _handle_custom_mcp_tool(body: dict, ctx: RequestContext):
                 source_kind=source_kind,
             ),
         )
+        # Advisory only, and computed after the write so a slow embedding check
+        # can never cost the caller its record.
+        payload = {"record": record}
+        warnings = memory_service.assess_memory_write(
+            content=params["content"],
+            scope=scope,
+            memory_class=params["memory_class"],
+                topic=params.get("topic"),
+            exclude_id=record["id"],
+                subject_anchor=params.get("subject_anchor"),
+        )
+        if warnings:
+            payload["warnings"] = warnings
         return JSONResponse(
-            content={"ok": True, "data": {"record": record}}, status_code=201
+            content={"ok": True, "data": payload}, status_code=201
+        )
+
+    elif tool == "memory_pinned":
+        scopes = enforcer.filter_readable_scopes(
+            ctx.default_recall_scopes or ctx.read_scopes
+        )
+        records = memory_service.pinned_records(scopes)
+        return JSONResponse(
+            content={
+                "ok": True,
+                "data": {
+                    "records": [memory_service.lean_record(r) for r in records],
+                    "count": len(records),
+                },
+            }
+        )
+
+    elif tool == "memory_pin":
+        record = memory_service.get_memory_record(params["record_id"])
+        if not record:
+            return _mcp_error("NOT_FOUND", "Record not found", 404)
+        if not enforcer.can_write(record["scope"]):
+            return _mcp_error("SCOPE_DENIED", "Access denied to this scope", 403)
+        if record["record_status"] != "active":
+            return _mcp_error("NOT_ACTIVE", "Only an active record can be pinned", 400)
+
+        desired = bool(params.get("pinned", True))
+        # An agent asking is not an agent deciding. A pinned record enters every
+        # future session in the scope — including other agents' sessions —
+        # without anyone searching for it, which makes it the most influential
+        # thing an agent could write and the obvious target for a bad one. So
+        # agents request, and the operator grants, through the same queue that
+        # governs every other change to the corpus.
+        from app.services import memory_proposal_service
+
+        proposal_id = memory_proposal_service.queue_proposal(
+            rule="pin_request",
+            action="pin",
+            scope=record["scope"],
+            target_ids=[params["record_id"]],
+            evidence={
+                "pin": desired,
+                "requested_by": ctx.agent_id or ctx.actor_id,
+                "records": [memory_proposal_service._preview(record)],
+            },
+        )
+        audit_service.write_event(
+            actor_type="agent",
+            actor_id=ctx.agent_id,
+            action="memory_pin_requested",
+            resource_type="memory_record",
+            resource_id=params["record_id"],
+            result="success",
+            details={"pin": desired, "scope": record["scope"], "proposal_id": proposal_id},
+        )
+        return JSONResponse(
+            content={
+                "ok": True,
+                "data": {
+                    "queued": bool(proposal_id),
+                    "proposal_id": proposal_id,
+                    "message": (
+                        "Queued for review. Standing context applies to every session in "
+                        "the scope, so an operator grants it."
+                        if proposal_id
+                        else "Already requested; it is waiting in the review queue."
+                    ),
+                },
+            }
+        )
+
+    elif tool == "memory_confirm":
+        record = memory_service.get_memory_record(params["record_id"])
+        if not record:
+            return _mcp_error("NOT_FOUND", "Record not found", 404)
+        if not enforcer.can_write(record["scope"]):
+            return _mcp_error("SCOPE_DENIED", "Access denied to this scope", 403)
+        try:
+            confirmed = memory_service.confirm_memory(
+                params["record_id"],
+                evidence=params.get("evidence") or "",
+                verified_by=ctx.agent_id or ctx.actor_id,
+            )
+        except ValueError as e:
+            return _mcp_error("EVIDENCE_REQUIRED", str(e), 400)
+        if not confirmed:
+            return _mcp_error(
+                "NOT_ACTIVE", "Only an active record can be confirmed", 400
+            )
+        audit_service.write_event(
+            actor_type="agent",
+            actor_id=ctx.agent_id,
+            action="memory_confirmed",
+            resource_type="memory_record",
+            resource_id=params["record_id"],
+            result="success",
+            details={"scope": record["scope"], "evidence": params.get("evidence")},
+        )
+        return JSONResponse(
+            content={"ok": True, "data": {"record": memory_service.lean_record(confirmed)}}
+        )
+
+    elif tool == "memory_reanchor":
+        record = memory_service.get_memory_record(params["record_id"])
+        if not record:
+            return _mcp_error("NOT_FOUND", "Record not found", 404)
+        if not enforcer.can_write(record["scope"]):
+            return _mcp_error("SCOPE_DENIED", "Access denied to this scope", 403)
+        try:
+            updated = memory_service.set_subject_anchor(
+                params["record_id"],
+                params.get("subject_anchor"),
+                changed_by=ctx.agent_id or ctx.actor_id,
+            )
+        except ValueError as e:
+            return _mcp_error("INVALID_ANCHOR", str(e), 400)
+        if not updated:
+            return _mcp_error("NOT_ACTIVE", "Only an active record can be re-anchored", 400)
+        audit_service.write_event(
+            actor_type="agent",
+            actor_id=ctx.agent_id,
+            action="memory_reanchored",
+            resource_type="memory_record",
+            resource_id=params["record_id"],
+            result="success",
+            details={
+                "from": record.get("subject_anchor"),
+                "to": updated.get("subject_anchor"),
+            },
+        )
+        return JSONResponse(
+            content={"ok": True, "data": {"record": memory_service.lean_record(updated)}}
+        )
+
+    elif tool == "memory_verify":
+        from app.services import verification_service
+
+        verify_scope = params.get("scope")
+        if verify_scope and not enforcer.can_write(verify_scope):
+            # Verification writes confirmation onto records, so it needs the
+            # same authority as any other statement about a scope.
+            return _mcp_error("SCOPE_DENIED", "Access denied to this scope", 403)
+        if not verify_scope:
+            writable = enforcer.filter_readable_scopes(list(ctx.write_scopes))
+            if not writable:
+                return _mcp_error("SCOPE_DENIED", "No writable scope to verify", 403)
+
+        result = verification_service.verify_scope(
+            scope=verify_scope, limit=min(int(params.get("limit", 50) or 50), 200)
+        )
+        # Drop per-record detail for anything that passed: the interesting output
+        # is what could not be confirmed.
+        result["results"] = [
+            r for r in result["results"] if r["status"] != verification_service.VERIFIED
+        ]
+        audit_service.write_event(
+            actor_type="agent",
+            actor_id=ctx.agent_id,
+            action="memory_verified",
+            resource_type="memory_record",
+            result="success",
+            details={
+                "scope": verify_scope,
+                "checked": result["checked"],
+                "verified": result["verified"],
+                "missing": result["missing"],
+            },
+        )
+        return JSONResponse(content={"ok": True, "data": result})
+
+    elif tool == "memory_feedback":
+        record = memory_service.get_memory_record(params["record_id"])
+        if not record:
+            return _mcp_error("NOT_FOUND", "Record not found", 404)
+        # Read access is the bar: judging whether a record helped you is not a
+        # mutation of its content, and a reader who cannot rate what it was
+        # given is a reader whose experience never reaches the ranking.
+        if not enforcer.can_read(record["scope"]):
+            return _mcp_error("SCOPE_DENIED", "Access denied to this scope", 403)
+        helpful = bool(params.get("helpful"))
+        updated = memory_service.record_feedback(params["record_id"], helpful)
+        if not updated:
+            return _mcp_error("NOT_FOUND", "Record not found", 404)
+        audit_service.write_event(
+            actor_type="agent",
+            actor_id=ctx.agent_id,
+            action="memory_feedback",
+            resource_type="memory_record",
+            resource_id=params["record_id"],
+            result="success",
+            details={"helpful": helpful, "scope": record["scope"]},
+        )
+        return JSONResponse(
+            content={
+                "ok": True,
+                "data": {
+                    "record_id": params["record_id"],
+                    "helpful_count": updated.get("helpful_count"),
+                    "unhelpful_count": updated.get("unhelpful_count"),
+                },
+            }
         )
 
     elif tool == "memory_retract":
@@ -1083,7 +1468,7 @@ async def _handle_custom_mcp_tool(body: dict, ctx: RequestContext):
                 resource_type="activity",
                 resource_id=existing["id"],
                 result="success",
-                details=_activity_audit_details(
+                details=activity_service.audit_details(
                     _updated,
                     action="heartbeat"
                     if not params.get("status")
@@ -1097,7 +1482,6 @@ async def _handle_custom_mcp_tool(body: dict, ctx: RequestContext):
                     memory_scope=memory_scope or existing.get("memory_scope"),
                 ),
             )
-            _evt_data = _activity_event_data(_updated, previous_status=existing["status"])
             _new_status = params.get("status")
             if (
                 not _new_status
@@ -1106,11 +1490,14 @@ async def _handle_custom_mcp_tool(body: dict, ctx: RequestContext):
                 and not params.get("task_result")
                 and not memory_scope
             ):
-                webhook_service.dispatch_event("activity_heartbeat", _evt_data)
+                _event = "activity_heartbeat"
             elif _new_status == "cancelled":
-                webhook_service.dispatch_event("activity_cancelled", _evt_data)
+                _event = "activity_cancelled"
             else:
-                webhook_service.dispatch_event("activity_updated", _evt_data)
+                _event = "activity_updated"
+            activity_service.notify(
+                _event, _updated, previous_status=existing["status"]
+            )
             return JSONResponse(
                 content={"ok": True, "data": {"activity": _updated}},
             )
@@ -1135,13 +1522,13 @@ async def _handle_custom_mcp_tool(body: dict, ctx: RequestContext):
                 resource_type="activity",
                 resource_id=act["id"],
                 result="success",
-                details=_activity_audit_details(
+                details=activity_service.audit_details(
                     act,
                     action="create",
                     new_status=act.get("status"),
                 ),
             )
-            webhook_service.dispatch_event("activity_created", _activity_event_data(act))
+            activity_service.notify("activity_created", act)
             return JSONResponse(
                 content={"ok": True, "data": {"activity": act}}, status_code=201
             )
@@ -1156,7 +1543,25 @@ async def _handle_custom_mcp_tool(body: dict, ctx: RequestContext):
             and not ctx.is_admin
         ):
             return _mcp_error("FORBIDDEN", "Access denied", 403)
-        return JSONResponse(content={"ok": True, "data": {"activity": activity}})
+        # What the session concluded, scope-filtered for this caller: the task
+        # description says what was attempted, these say what came of it.
+        produced = memory_service.records_for_activity(
+            params["activity_id"],
+            authorized_scopes=None
+            if ctx.is_admin
+            else enforcer.filter_readable_scopes(ctx.read_scopes),
+        )
+        return JSONResponse(
+            content={
+                "ok": True,
+                "data": {
+                    "activity": activity,
+                    "produced_records": [
+                        memory_service.lean_record(r) for r in produced
+                    ],
+                },
+            }
+        )
 
     elif tool == "activity_list":
         agent_filter = params.get("agent_id")
@@ -1195,6 +1600,38 @@ async def _handle_custom_mcp_tool(body: dict, ctx: RequestContext):
             }
         )
 
+    elif tool == "activity_search":
+        query = params.get("query") or ""
+        limit = min(int(params.get("limit", 20) or 20), 100)
+        offset = max(int(params.get("offset", 0) or 0), 0)
+        # Scope filtering happens after the query, same as activity_list, so
+        # over-fetch to keep a page full once unreadable rows are dropped.
+        fetch_limit = min(max((limit + offset) * 3, 50), 300)
+        raw_activities = activity_service.search_activities(
+            query,
+            agent_id=params.get("agent_id"),
+            status=params.get("status"),
+            memory_scope=params.get("memory_scope"),
+            since=params.get("since"),
+            limit=fetch_limit,
+            offset=0,
+        )
+        activities = []
+        for activity in raw_activities:
+            memory_scope = (
+                activity.get("memory_scope") or f"agent:{activity['agent_id']}"
+            )
+            if not ctx.is_admin and not enforcer.can_read(memory_scope):
+                continue
+            activities.append(activity)
+        activities = activities[offset : offset + limit]
+        return JSONResponse(
+            content={
+                "ok": True,
+                "data": {"activities": activities, "count": len(activities)},
+            }
+        )
+
     elif tool == "activity_pickup":
         authorized_scopes = enforcer.filter_readable_scopes(ctx.read_scopes)
         activity = activity_service.claim_next_activity(ctx.agent_id, authorized_scopes)
@@ -1206,7 +1643,7 @@ async def _handle_custom_mcp_tool(body: dict, ctx: RequestContext):
                 resource_type="activity",
                 resource_id=activity["id"],
                 result="success",
-                details=_activity_audit_details(activity, action="pickup"),
+                details=activity_service.audit_details(activity, action="pickup"),
             )
         return JSONResponse(
             content={
@@ -1416,6 +1853,14 @@ async def _handle_custom_mcp_tool(body: dict, ctx: RequestContext):
         if not connector_type:
             return _mcp_error("NOT_FOUND", "Connector type not found", 200)
         action = params["action"]
+        if connector_service.action_requires_write(
+            connector_type, action
+        ) and not enforcer.can_write(binding["scope"]):
+            return _mcp_error(
+                "SCOPE_DENIED",
+                "This action changes state, which needs write access to the binding's scope",
+                200,
+            )
         result = connector_service.execute_binding_action_with_logging(
             params["binding_id"], action, params.get("params") or {}
         )

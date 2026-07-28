@@ -48,9 +48,8 @@ async def webhooks_page(request: Request, session: dict = Depends(require_auth))
             if wh["enabled"]
             else "<span class='badge badge-stale'>disabled</span>"
         )
-        events_str = ", ".join(f"<code>{e}</code>" for e in wh["event_types"]) or "—"
+        events_str = ", ".join(f"<code>{escape_html(e)}</code>" for e in wh["event_types"]) or "—"
         wh_id = wh["id"]
-        wh_name_js = escape_html(wh["name"]).replace("'", "\\'")
         rows += (
             "<tr>"
             f"<td><strong>{escape_html(wh['name'])}</strong></td>"
@@ -59,10 +58,14 @@ async def webhooks_page(request: Request, session: dict = Depends(require_auth))
             f"<td>{enabled_badge}</td>"
             "<td>"
             f"<div class='actions-cell'>"
-            f"<button class='btn btn-sm' onclick=\"openEditWebhook('{wh_id}')\">Edit</button> "
-            f"<button class='btn btn-sm btn-secondary' onclick=\"openTestWebhook('{wh_id}')\">Test</button> "
-            f"<button class='btn btn-sm btn-secondary' onclick=\"viewDeliveries('{wh_id}', '{wh_name_js}')\">Deliveries</button> "
-            f"<button type='button' class='btn btn-sm btn-danger icon-delete-btn' onclick=\"deleteWebhook('{wh_id}', '{wh_name_js}')\" title='Delete webhook' aria-label='Delete webhook'>{get_icon('delete')}</button>"
+            f"<button class='btn btn-sm' data-webhook-edit='{escape_html(wh_id)}'>Edit</button> "
+            f"<button class='btn btn-sm btn-secondary' data-webhook-test='{escape_html(wh_id)}'>Test</button> "
+            f"<button class='btn btn-sm btn-secondary' data-webhook-deliveries='{escape_html(wh_id)}'"
+            f" data-webhook-name='{escape_html(wh['name'])}'>Deliveries</button> "
+            f"<button type='button' class='btn btn-sm btn-danger icon-delete-btn'"
+            f" data-webhook-delete='{escape_html(wh_id)}'"
+            f" data-webhook-name='{escape_html(wh['name'])}'"
+            f" title='Delete webhook' aria-label='Delete webhook'>{get_icon('delete')}</button>"
             f"</div>"
             "</td>"
             "</tr>"
@@ -402,6 +405,24 @@ async function submitTestWebhook() {
   }
 }
 
+// Webhook names are operator-supplied text. They are carried as data because
+// an escaped quote inside an inline handler is decoded before the JavaScript is
+// parsed, which turns the name back into executable source.
+document.addEventListener('click', function(ev) {
+  const edit = ev.target.closest('[data-webhook-edit]');
+  if (edit) { ev.preventDefault(); openEditWebhook(edit.dataset.webhookEdit); return; }
+  const test = ev.target.closest('[data-webhook-test]');
+  if (test) { ev.preventDefault(); openTestWebhook(test.dataset.webhookTest); return; }
+  const deliveries = ev.target.closest('[data-webhook-deliveries]');
+  if (deliveries) {
+    ev.preventDefault();
+    viewDeliveries(deliveries.dataset.webhookDeliveries, deliveries.dataset.webhookName || '');
+    return;
+  }
+  const del = ev.target.closest('[data-webhook-delete]');
+  if (del) { ev.preventDefault(); deleteWebhook(del.dataset.webhookDelete, del.dataset.webhookName || ''); }
+});
+
 function viewDeliveries(id, name) {
   document.getElementById('deliveries-modal-title').textContent = 'Recent Deliveries — ' + name;
   document.getElementById('deliveries-content').innerHTML = '<p style="color:var(--text-muted)">Loading...</p>';
@@ -417,8 +438,10 @@ function viewDeliveries(id, name) {
         const badge = d.status === 'success'
           ? "<span class='badge badge-active'>success</span>"
           : "<span class='badge badge-stale'>failure</span>";
-        const detail = d.error_message ? `<br><small style='color:var(--text-muted)'>${d.error_message}</small>` : '';
-        return `<tr><td>${localDt(d.delivered_at)}</td><td><code>${d.event_type}</code></td><td>${badge} ${d.http_status ? 'HTTP ' + d.http_status : ''}${detail}</td></tr>`;
+        // error_message is whatever the remote endpoint returned, and
+        // event_type is stored per registration: neither is ours to trust.
+        const detail = d.error_message ? `<br><small style='color:var(--text-muted)'>${escapeHtml(d.error_message)}</small>` : '';
+        return `<tr><td>${localDt(d.delivered_at)}</td><td><code>${escapeHtml(d.event_type)}</code></td><td>${badge} ${d.http_status ? 'HTTP ' + escapeHtml(d.http_status) : ''}${detail}</td></tr>`;
       }).join('');
       document.getElementById('deliveries-content').innerHTML =
         '<table class="data-table"><thead><tr><th>Time</th><th>Event</th><th>Result</th></tr></thead><tbody>' + rows + '</tbody></table>';

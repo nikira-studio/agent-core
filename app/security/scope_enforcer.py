@@ -69,9 +69,6 @@ class ScopeEnforcer:
     def filter_readable_scopes(self, scopes: list[str]) -> list[str]:
         return [s for s in scopes if self.can_read(s)]
 
-    def filter_writable_scopes(self, scopes: list[str]) -> list[str]:
-        return [s for s in scopes if self.can_write(s)]
-
 
 def build_agent_context(agent: dict) -> "RequestContext":
     from app.security.context import RequestContext

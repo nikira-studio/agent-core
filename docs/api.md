@@ -1,5 +1,7 @@
 # API Reference
 
+Every REST endpoint and MCP tool. For what the concepts mean — scopes, memory classes, anchors, the review queue — see [How It Works](how-it-works.md).
+
 Base URL: `http://localhost:3500`
 
 All responses use a standard JSON envelope:
@@ -175,7 +177,7 @@ Agent or session authentication accepted, with scope enforcement on every operat
 | `POST` | `/api/memory/get` | List records by scope |
 | `POST` | `/api/memory/retract` | Soft-delete a record |
 | `POST` | `/api/memory/move` | Atomically relocate an active record to a new scope (write access to both scopes required) |
-| `POST` | `/api/memory/restore` | Restore a retracted record |
+| `POST` | `/api/memory/restore` | Restore a retracted record (retraction is reversible) |
 | `GET` | `/api/memory/{record_id}` | Get one record |
 | `GET` | `/api/memory/{record_id}/chain` | Get the supersession chain for a record |
 | `DELETE` | `/api/memory/{record_id}` | Permanently delete a record and its embedding (unlike retract, this is not recoverable) |
@@ -186,7 +188,6 @@ Write:
   "content": "Use two-space indentation for generated examples.",
   "memory_class": "preference",
   "scope": "agent:coding-agent",
-  "domain": "engineering",
   "topic": "style",
   "confidence": 0.9,
   "importance": 0.6,
@@ -194,25 +195,31 @@ Write:
   "slot_key": "style",
   "valid_from": null,
   "valid_to": null,
+  "subject_anchor": "repo:docs/style-guide.md",
   "last_confirmed_at": null,
   "expires_at": null,
   "supersedes_id": null
 }
 ```
 
+Choosing `memory_class`: a **fact** is settled by checking (someone could verify it against the code, a host, or a service), a **decision** is settled by someone deciding and nothing can verify it. Reporting what you just did is neither — that belongs in `activity_update`.
+
 Optional memory metadata:
 
+- `subject_anchor` names what would confirm a fact: `repo:<path>`, `host:<name-or-ip>`, or `service:<binding_id>`. Repo paths are **relative to the workspace root**, never absolute — the same directory has a different absolute path in every agent's container. Omit it when nothing could verify the record, which is normal for a decision.
+- `pinned` marks a record as standing context: returned by `memory_pinned` at session start rather than having to win a search, included in every handoff briefing, and skipped by the clean-up rules. **Agents request pinning rather than performing it** — `memory_pin` queues the request for operator review, because standing context reaches every session in the scope including other agents', which makes it the most influential thing an agent could write. Capped per scope (10 by default, `max_pinned_per_scope`) so the list stays short enough to read in full. Only `fact`, `decision` and `preference` records can be pinned.
 - `slot_key` is for preference records when you want one active value per slot. A new preference with the same `scope + slot_key` supersedes the previous active one.
-- `valid_from`, `valid_to`, and `last_confirmed_at` are freshness hints. They are optional and help retrieval prefer current records when present.
+- `last_confirmed_at` means the record was checked **against the world**. It is set by `memory_confirm` (which requires evidence naming what was checked) or by the verification pass, not by writing the record. Search results report `days_since_confirmed` so a caller can tell a fact verified today from one nobody has checked in months.
+- `valid_from` and `valid_to` bound **when the content was true in the world**, which is not the same question as when the system learned it (`created_at`, `status_changed_at`). Keeping the two apart is what lets the corpus answer "what was true in March" rather than only "what do we believe now". Left unset, a record is taken to start when it was written, so nothing silently claims to have always been true. Supersession closes the old record's `valid_to` automatically — at the successor's `valid_from` when one is given, otherwise at the moment of supersession — and never overwrites an end date the writer set deliberately.
 - `expires_at` is an ISO datetime after which the record is excluded from search results and swept on the next maintenance run. Useful for time-bounded facts or temporary scratchpad context.
-- `provenance` is server-generated on write and records who wrote the memory and from which channel; clients do not supply it directly.
+- `confidence` and `importance` are caller-assigned. Ranking uses observed evidence — how often a record is recalled, whether callers said it helped, and how long since it was confirmed — so there is no need to tune them.
+- `provenance` is server-generated on write and records who wrote the memory, from which channel, and which activity was open at the time; clients do not supply it directly.
 
 Import:
 ```json
 {
   "scope": "workspace:example",
   "memory_class": "fact",
-  "domain": "import",
   "topic": null,
   "sources": [
     {
@@ -233,11 +240,20 @@ Search:
   "query": "indentation examples",
   "scope": "agent:coding-agent",
   "memory_class": "preference",
+  "subject_anchor": "repo:docs",
   "limit": 20,
   "include_retracted": false,
   "include_superseded": false
 }
 ```
+
+`subject_anchor` filters by prefix, so `repo:app/services` matches everything anchored under it — useful for "what have we recorded about this part of the code".
+
+`as_of` asks the corpus what it held to be true at a given moment instead of now. A record is returned when the instant falls inside its validity window, so a fact that has since been replaced comes back for dates before the replacement and its successor comes back for dates after — useful when reconstructing why a past decision looked right at the time. Superseded records are eligible under `as_of` (that is the point); retracted records never are, because retraction says the record should not have been written rather than that it stopped being true. A value that is not a parseable timestamp is rejected with `INVALID_INPUT`.
+
+`activity_id` filters to records written during one piece of work. Every write already cites the activity that was open at the time, stamped server-side; this is the traversal back the other way. `activity_get` returns the same set as `produced_records`, and a handoff briefing includes it — so picking up someone else's work shows what it concluded, not only what it was attempting.
+
+**Search results are a lean projection**: `id`, `content`, `memory_class`, `scope`, `topic`, `subject_anchor`, `created_at`, `last_confirmed_at`, `record_status`, and a derived `days_since_confirmed`. Lifecycle columns and caller-assigned scores are omitted because a result is for deciding what is relevant, and on a full page that bookkeeping cost more context than the content it surrounded. Pass `"view": "full"` for every column, or use `memory_get` / `GET /api/memory/{id}` to inspect one record.
 
 Get (list by scope):
 ```json
@@ -253,6 +269,50 @@ Get (list by scope):
 **Valid source kinds:** `operator_authored`, `human_direct`, `tool_output`, `agent_inference`, `episodic_inference`, `semantic_inference`, `external_import`
 
 Writes and imports to `shared` are rejected if the content looks like PII or credentials. Very short, noisy, or credential-like search queries are also rejected.
+
+---
+
+## Memory Review Queue
+
+Admin only. These endpoints suggest and record decisions about what to retract or pin. **Rules propose; they never apply.** Agents write memory — they do not prune or elevate each other's, which is why nothing here is reachable with an agent key.
+
+| Method | Path | Description |
+| --- | --- | --- |
+| `GET` | `/api/memory/proposals` | List proposals (`status`, `scope`, `rule`, `limit`, `offset`; defaults to `status=pending`) |
+| `POST` | `/api/memory/proposals/generate` | Run the mechanical rules and queue what they find |
+| `POST` | `/api/memory/proposals/{id}/decide` | Record a verdict, applying the action on accept |
+| `POST` | `/api/memory/proposals/{id}/reanchor` | Repoint a record at what actually describes it |
+| `POST` | `/api/memory/proposals/review-usefulness` | Ask the configured review model which records are not actionable |
+| `GET` | `/api/memory/proposals/stats` | Per-rule verdict history: how often each rule has been right |
+
+Proposals come from two places. **Generation rules** are mechanical and run when you ask for them — from the dashboard's review page or `POST /api/memory/proposals/generate`:
+
+| Rule | Finds |
+| --- | --- |
+| `episodic_log` | A task log written as durable memory |
+| `ticket_closeout` | A record about work that has since closed |
+| `duplicate_cluster` | Near-identical records |
+| `stale_volatile` | Facts nobody has confirmed in a long time (facts only — a decision does not go stale because time passed) |
+
+**Event-driven proposals** are queued as things happen: `anchor_missing` when verification finds the subject gone, `pin_request` when an agent calls `memory_pin`, and `low_value` when the usefulness review finds nothing a future session could act on.
+
+Generate:
+```json
+{ "scope": "workspace:example", "rules": ["duplicate_cluster"] }
+```
+`rules` is optional; omitting it runs all of them. An unknown rule name is rejected with `UNKNOWN_RULE`. Proposals already queued for the same records are skipped rather than duplicated, so the queue converges instead of re-asking.
+
+Decide:
+```json
+{ "verdict": "accepted", "outcome": "no_longer_current" }
+```
+`verdict` is `accepted` or `rejected`. `outcome` applies to confirm-style proposals, where both answers are accepts because the rule was right to ask either way: `still_current` refreshes the record's confirmation, `no_longer_current` retracts it.
+
+Accepting a retraction is reversible with `POST /api/memory/restore`. That is deliberate — a review that cannot be wrong cheaply is a review nobody will run.
+
+`low_value` proposals can never be applied automatically, whatever their accept rate. The others could earn automation from a good enough record; a judgement about worth cannot, because the cost of a wrong call is deleting a constraint someone depended on.
+
+Every decision is written to the audit log with the rule, verdict, outcome, and the records affected.
 
 ---
 
@@ -449,7 +509,7 @@ Create:
   "name": "Workspace API",
   "scope": "workspace:my-workspace",
   "credential_id": "<credential-entry-id>",
-  "config_json": "{\"default_params\":{\"owner\":\"nikira\",\"repo\":\"agent-core\"},\"auth_scheme_name\":\"personalAccessToken\"}",
+  "config_json": "{\"default_params\":{\"owner\":\"your-org\",\"repo\":\"your-repo\"},\"auth_scheme_name\":\"personalAccessToken\"}",
   "enabled": true
 }
 ```
@@ -590,12 +650,17 @@ Dispatch:
 | `memory_write` | Write a memory record |
 | `memory_retract` | Soft-delete a memory record |
 | `memory_move` | Atomically relocate an active record to a new scope (preserves content/class/topic + lineage; write access to both scopes required) |
+| `memory_confirm` | Mark a record verified against the world as of now. Requires `evidence` naming what was checked — reading a record is not checking it |
+| `memory_feedback` | Say whether a recalled record actually helped; feeds observed usefulness into ranking |
+| `memory_verify` | Check anchored facts against the repo path, host or connector binding they describe. Records evidence on passes; queues review for anchors that have vanished |
+| `memory_reanchor` | Repoint a record at what actually describes it, when the file moved or the anchor was wrong |
 | `credential_get` | Get an `AC_SECRET_*` reference for a credential entry |
 | `credential_list` | List credential metadata and references in authorized scopes |
 | `activity_update` | Create or update an activity record, including progress notes and completion result |
 | `activity_get` | Get an activity record |
 | `activity_list` | List activities visible to the current caller |
 | `activity_pickup` | Claim the next active work item assigned to this agent in authorized scopes |
+| `activity_search` | Full-text search the activity trail — what agents worked on, per task, with results. Use for "what did we do on X"; use `memory_search` for durable facts and decisions |
 | `get_briefing` | Fetch a briefing |
 | `briefing_list` | List briefings visible to the current caller |
 | `connectors_list` | List installed connector types as lean summaries (id, name, auth/backend type, action_count; no full specs). Supports `limit`/`offset`; use `connectors_actions_list` for a type's actions |
@@ -643,7 +708,7 @@ Session authentication required. Global overview and audit routes require admin.
 | `POST` | `/api/dashboard/system-settings` | Update system settings (admin only) |
 | `POST` | `/api/dashboard/vector-settings` | Update vector search settings (admin only) |
 | `POST` | `/api/dashboard/vector-settings/test` | Test the vector search endpoint (admin only) |
-| `GET` | `/api/dashboard/vector-settings/models` | List available vector models from the configured endpoint (admin only) |
+| `GET` | `/api/dashboard/ollama-models?url=` | List the models an Ollama-compatible endpoint has installed; used by both the embedding and review-model settings cards (admin only) |
 | `POST` | `/api/dashboard/broker/rotate` | Rotate broker credential (admin only) |
 
 ---

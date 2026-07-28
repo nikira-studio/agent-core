@@ -55,3 +55,14 @@ async function submitEditCredential(e) {
     showToast(j.error?.message || 'Failed to update credential', 'danger');
   }
 }
+
+
+// Row actions carry their id as data. Interpolating it into an inline handler
+// puts a value into JavaScript source, where HTML escaping does not protect it:
+// entities are decoded before the handler is parsed.
+document.addEventListener('click', function(ev) {
+  const edit = ev.target.closest('[data-credential-edit]');
+  if (edit) { ev.preventDefault(); editCredential(edit.dataset.credentialEdit); return; }
+  const del = ev.target.closest('[data-credential-delete]');
+  if (del) { ev.preventDefault(); deleteCredential(del.dataset.credentialDelete); }
+});

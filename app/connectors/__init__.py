@@ -59,5 +59,3 @@ def get_connector(connector_type_id: str) -> Optional[BaseConnector]:
     return cls()
 
 
-def list_registered_connectors() -> list[str]:
-    return list(_CONNECTOR_REGISTRY.keys())

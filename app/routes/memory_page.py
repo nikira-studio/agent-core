@@ -63,8 +63,8 @@ async def memory_page(request: Request, session: dict = Depends(require_auth)):
             with get_db() as conn:
                 rows = conn.execute(
                     """
-                    SELECT id, content, memory_class, scope, domain, topic, confidence, importance,
-                           source_kind, event_time, created_at, record_status, superseded_by_id, supersedes_id
+                    SELECT id, content, memory_class, scope, topic, confidence, importance,
+                           source_kind, created_at, record_status, superseded_by_id, supersedes_id
                     FROM memory_records
                     WHERE record_status = ?
                     ORDER BY created_at DESC
@@ -90,8 +90,8 @@ async def memory_page(request: Request, session: dict = Depends(require_auth)):
 
     def active_row(r):
         modify_buttons = (
-            f"<button type='button' class='btn btn-sm btn-warning' onclick=\"retractRecord('{r['id']}')\">Retract</button>"
-            f"<button type='button' class='btn btn-sm btn-danger icon-delete-btn' onclick=\"deleteRecord('{r['id']}')\" title='Permanently delete' aria-label='Permanently delete'>{get_icon('delete')}</button>"
+            f"<button type='button' class='btn btn-sm btn-warning' data-memory-retract='{escape_html(r['id'])}'>Retract</button>"
+            f"<button type='button' class='btn btn-sm btn-danger icon-delete-btn' data-memory-delete='{escape_html(r['id'])}' title='Permanently delete' aria-label='Permanently delete'>{get_icon('delete')}</button>"
             if can_modify_record(r)
             else "<span class='text-muted'>Read only</span>"
         )
@@ -99,18 +99,17 @@ async def memory_page(request: Request, session: dict = Depends(require_auth)):
             f"<tr><td><span class='badge badge-{r.get('memory_class', '')}'>{r.get('memory_class', '')}</span></td>"
             f"<td>{escape_html(r.get('content', '')[:80])}</td>"
             f"<td><code>{(r.get('scope') or '').replace('workspace:', '')}</code></td>"
-            f"<td>{r.get('domain', '') or ''}</td>"
             f"<td>{r.get('confidence', 0.5):.1f}</td>"
             f"<td><div class='actions-cell'>"
-            f"<button type='button' class='btn btn-sm btn-secondary' onclick=\"viewMemory('{r['id']}')\">Detail</button>"
+            f"<button type='button' class='btn btn-sm btn-secondary' data-memory-detail='{escape_html(r['id'])}'>Detail</button>"
             f"{modify_buttons}"
             f"</div></td></tr>"
         )
 
     def retracted_row(r):
         modify_buttons = (
-            f"<button type='button' class='btn btn-sm btn-secondary' onclick=\"restoreRecord('{r['id']}')\">Restore</button>"
-            f"<button type='button' class='btn btn-sm btn-danger icon-delete-btn' onclick=\"deleteRecord('{r['id']}')\" title='Permanently delete' aria-label='Permanently delete'>{get_icon('delete')}</button>"
+            f"<button type='button' class='btn btn-sm btn-secondary' data-memory-restore='{escape_html(r['id'])}'>Restore</button>"
+            f"<button type='button' class='btn btn-sm btn-danger icon-delete-btn' data-memory-delete='{escape_html(r['id'])}' title='Permanently delete' aria-label='Permanently delete'>{get_icon('delete')}</button>"
             if can_modify_record(r)
             else "<span class='text-muted'>Read only</span>"
         )
@@ -118,7 +117,6 @@ async def memory_page(request: Request, session: dict = Depends(require_auth)):
             f"<tr style='opacity:0.65'><td><span class='badge badge-inactive'>{r.get('memory_class', '')}</span></td>"
             f"<td>{escape_html(r.get('content', '')[:80])}</td>"
             f"<td><code>{(r.get('scope') or '').replace('workspace:', '')}</code></td>"
-            f"<td>{r.get('domain', '') or ''}</td>"
             f"<td>{r.get('confidence', 0.5):.1f}</td>"
             f"<td><div class='actions-cell'>"
             f"{modify_buttons}"
@@ -127,9 +125,142 @@ async def memory_page(request: Request, session: dict = Depends(require_auth)):
 
     records_rows = (
         "".join(active_row(r) for r in active_records)
-        or "<tr><td colspan=6 class=empty>No active records.</td></tr>"
+        or "<tr><td colspan=5 class=empty>No active records.</td></tr>"
     )
     retracted_rows = "".join(retracted_row(r) for r in retracted_records)
+
+    # Consolidation review queue. Admin-only, and rendered server-side so the
+    # card reflects real queue state on load rather than appearing empty until
+    # a fetch lands.
+    review_html = ""
+    if is_admin:
+        from app.services import memory_proposal_service
+
+        pending = memory_proposal_service.list_proposals(status="pending", limit=200)
+        stats = memory_proposal_service.rule_stats()
+
+        def proposal_card(p: dict) -> str:
+            """One suggestion, phrased as a question with buttons named for what they do.
+
+            The reviewer needs three things and nothing else: the memory itself,
+            why it was flagged, and what each button will do to it. Rule names
+            and record ids are mechanism — kept available but out of the way.
+            """
+            evidence = p.get("evidence") or {}
+            records = evidence.get("records") or []
+            keep = evidence.get("keep")
+            pid = escape_html(p["id"])
+
+            memory_blocks = "".join(
+                f'<blockquote style="margin:8px 0;padding:8px 12px;border-left:3px solid var(--border);'
+                f'background:var(--bg-subtle)">{escape_html(r.get("content_preview") or "")}'
+                f'<br><span class="text-muted" style="font-size:0.8rem">'
+                f'{escape_html(r.get("topic") or "no topic")} · {escape_html(r.get("scope") or "")}'
+                f' · <code>{escape_html(r.get("id") or "")}</code></span></blockquote>'
+                for r in records
+            )
+            keep_line = (
+                f'<p class="form-hint">The newer copy stays: '
+                f'"{escape_html((keep.get("content_preview") or "")[:120])}"</p>'
+                if keep
+                else ""
+            )
+
+            # An anchor_missing card has a third honest answer: the memory is
+            # fine and the pointer is wrong. Without it the only alternatives
+            # are "retract a good memory" or "do nothing".
+            reanchor = ""
+            if p["rule"] == "anchor_missing":
+                current = escape_html((p.get("evidence") or {}).get("anchor") or "")
+                reanchor = f"""
+        <div class="form-group" style="margin-top:10px">
+          <label>Or point it at the right thing</label>
+          <input type="text" id="anchor-{pid}" value="{current}" placeholder="repo:path/to/file.py" style="width:min(420px,100%)">
+          <button class="btn btn-sm" data-proposal-reanchor="{pid}">Fix the pointer</button>
+          <p class="form-hint">Keeps the memory and re-checks it against the new location. Use this when the file moved or the pointer was wrong — the memory itself may be perfectly good.</p>
+        </div>"""
+
+            keep_label = (
+                "Yes, keep it" if p["rule"] == "anchor_missing" else "Yes, still current"
+            )
+            if p["action"] == "pin":
+                wants_pin = (p.get("evidence") or {}).get("pin", True)
+                verb = "Show it to every session" if wants_pin else "Stop showing it"
+                buttons = f"""
+            <button class="btn btn-sm btn-warning" data-proposal-id="{pid}" data-proposal-verdict="accepted">{verb}</button>
+            <button class="btn btn-sm btn-secondary" data-proposal-id="{pid}" data-proposal-verdict="rejected">No</button>"""
+                consequences = (
+                    f"<strong>{verb}</strong> applies it now. <strong>No</strong> declines, and "
+                    "the same request will not be raised again."
+                )
+            elif p["action"] == "confirm":
+                buttons = f"""
+            <button class="btn btn-sm" data-proposal-id="{pid}" data-proposal-verdict="accepted" data-proposal-outcome="still_current">{keep_label}</button>
+            <button class="btn btn-sm btn-warning" data-proposal-id="{pid}" data-proposal-verdict="accepted" data-proposal-outcome="no_longer_current">Retract — out of date</button>
+            <button class="btn btn-sm btn-warning" data-proposal-id="{pid}" data-proposal-verdict="accepted" data-proposal-outcome="not_useful">Retract — not worth keeping</button>
+            <button class="btn btn-sm btn-secondary" data-proposal-id="{pid}" data-proposal-verdict="rejected">Leave it, don't ask again</button>"""
+                consequences = (
+                    "<strong>Yes, still current</strong> marks it as checked today. "
+                    "Either <strong>Retract</strong> hides it from agents — it moves to "
+                    "Retracted Records below, where you can restore it. Pick <strong>out of "
+                    "date</strong> if the world moved on, or <strong>not worth keeping</strong> "
+                    "if it is still accurate but too vague to act on. "
+                    "<strong>Leave it</strong> keeps it and stops flagging it."
+                )
+            else:
+                buttons = f"""
+            <button class="btn btn-sm btn-warning" data-proposal-id="{pid}" data-proposal-verdict="accepted">Yes, retract it</button>
+            <button class="btn btn-sm btn-secondary" data-proposal-id="{pid}" data-proposal-verdict="rejected">No, keep it</button>"""
+                consequences = (
+                    "<strong>Yes, retract it</strong> hides it from agents — it moves to "
+                    "Retracted Records below, where you can restore it. "
+                    "<strong>No, keep it</strong> leaves it alone and stops flagging it."
+                )
+
+            return f"""
+      <div class="card" style="border-left:4px solid var(--text-muted);margin-bottom:12px" id="proposal-{pid}">
+        <h4 style="margin:0 0 4px">{escape_html(p.get('prompt') or 'Review this memory')}</h4>
+        <p class="text-muted" style="font-size:0.85rem;margin:0">{escape_html(p.get('rule_description') or '')}</p>
+        {memory_blocks}
+        <p style="margin:8px 0 4px">{escape_html(p['rationale'])}</p>
+        {keep_line}
+        <div class="actions-cell" style="margin-top:10px">{buttons}</div>
+        <p class="form-hint" style="margin-top:6px">{consequences}</p>
+        {reanchor}
+      </div>"""
+
+        def stat_row(s: dict) -> str:
+            accuracy = "—" if s["precision"] is None else f"{s['precision']:.0%}"
+            return (
+                f"<tr><td>{escape_html(s['description'])}<br>"
+                f"<span class='text-muted' style='font-size:0.8rem'><code>{escape_html(s['rule'])}</code></span></td>"
+                f"<td>{s['pending']}</td><td>{s['accepted']}</td><td>{s['rejected']}</td>"
+                f"<td>{accuracy}</td><td>{s['records_affected']}</td></tr>"
+            )
+
+        stat_rows = "".join(stat_row(s) for s in stats)
+
+        proposals_html = (
+            "".join(proposal_card(p) for p in pending)
+            or '<p class="text-muted">Nothing to look at right now.</p>'
+        )
+
+        review_html = f"""
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
+        <h3 style="margin:0">Memory Clean-up <span id="proposal-count" class="text-muted" style="font-weight:normal;font-size:0.8rem">({len(pending)} to look at)</span></h3>
+        <button class="btn btn-secondary" onclick="generateProposals()">Check for more</button>
+      </div>
+      <p class="text-muted" style="font-size:0.85rem;margin:8px 0 12px">Memories that may no longer be worth keeping — one-off job logs, ticket notes, repeats, or details that go out of date. Each one asks you a question. Nothing changes until you answer, and anything hidden can be restored from Retracted Records below.</p>
+      <div id="proposal-list">{proposals_html}</div>
+      <details style="margin-top:12px">
+        <summary class="text-muted" style="cursor:pointer">How good these suggestions have been</summary>
+        <p class="form-hint">How often you have agreed with each kind of suggestion. This is what would justify letting any of them run automatically later — a kind you have not answered yet shows no score rather than a perfect one.</p>
+        <table><thead><tr><th>Kind of suggestion</th><th>Waiting</th><th>Agreed</th><th>Disagreed</th><th>Agreed with</th><th>Memories changed</th></tr></thead>
+        <tbody>{stat_rows}</tbody></table>
+      </details>
+    </div>
+    """
 
     js = (
         """
@@ -164,7 +295,6 @@ async def memory_page(request: Request, session: dict = Depends(require_auth)):
       document.getElementById('mem-detail-content').textContent = r.content || '';
       document.getElementById('mem-detail-class').textContent = r.memory_class || '';
       document.getElementById('mem-detail-scope').textContent = (r.scope || '').replace('workspace:', '');
-      document.getElementById('mem-detail-domain').textContent = r.domain || '';
       document.getElementById('mem-detail-topic').textContent = r.topic || '';
       document.getElementById('mem-detail-confidence').textContent = r.confidence != null ? r.confidence.toFixed(2) : '';
       document.getElementById('mem-detail-importance').textContent = r.importance != null ? r.importance.toFixed(2) : '';
@@ -212,7 +342,6 @@ async def memory_page(request: Request, session: dict = Depends(require_auth)):
         const edge = i > 0 ? '<div class="text-muted" style="font-size:0.8rem;margin-bottom:2px">&larr; earlier version</div>' : '';
         const tag = i === chain.length - 1 ? 'Current' : 'Earlier';
         const metadataParts = [];
-        if (r.domain) metadataParts.push(r.domain);
         if (r.topic) metadataParts.push(r.topic);
         if (r.record_status) metadataParts.push(r.record_status);
         if (r.created_at) metadataParts.push(localDt(r.created_at));
@@ -232,13 +361,11 @@ async def memory_page(request: Request, session: dict = Depends(require_auth)):
       const query = document.getElementById('mem-query').value;
       const scope = document.getElementById('mem-scope').value;
       const memClass = document.getElementById('mem-class').value;
-      const domain = document.getElementById('mem-search-domain').value.trim();
       const topic = document.getElementById('mem-search-topic').value.trim();
       const minConfidence = parseFloat(document.getElementById('mem-min-confidence').value);
       const body = { query, limit: 50 };
       if (scope) body.scope = scope;
       if (memClass) body.memory_class = memClass;
-      if (domain) body.domain = domain;
       if (topic) body.topic = topic;
       if (!Number.isNaN(minConfidence) && minConfidence > 0) body.min_confidence = minConfidence;
       const j = await apiFetch('/api/memory/search', { method: 'POST', body: JSON.stringify(body) });
@@ -254,7 +381,6 @@ async def memory_page(request: Request, session: dict = Depends(require_auth)):
 	          scope: document.getElementById('mem-write-scope').value || '"""
         + user_scope
         + """',
-	          domain: document.getElementById('mem-domain').value || null,
 	          topic: document.getElementById('mem-topic').value || null,
 	          confidence: parseFloat(document.getElementById('mem-confidence').value) || 0.5,
 	          importance: parseFloat(document.getElementById('mem-importance').value) || 0.5,
@@ -307,7 +433,6 @@ async def memory_page(request: Request, session: dict = Depends(require_auth)):
         + user_scope
         + """',
           memory_class: document.getElementById('mem-import-class').value,
-          domain: document.getElementById('mem-import-domain').value.trim() || 'import',
           topic: document.getElementById('mem-import-topic').value.trim() || null,
           confidence: parseFloat(document.getElementById('mem-import-confidence').value) || 0.85,
           importance: parseFloat(document.getElementById('mem-import-importance').value) || 0.6,
@@ -337,23 +462,74 @@ async def memory_page(request: Request, session: dict = Depends(require_auth)):
     }
     function displayRecords(records) {
       const tbody = document.getElementById('mem-results-body');
-      if (!records.length) { tbody.innerHTML = '<tr><td colspan=6 class=empty>No records found.</td></tr>'; return; }
+      if (!records.length) { tbody.innerHTML = '<tr><td colspan=5 class=empty>No records found.</td></tr>'; return; }
       tbody.innerHTML = records.map(r => `
         <tr>
-          <td><span class="badge badge-${r.memory_class}">${r.memory_class}</span></td>
-          <td>${escapeHtml(r.content || '').substring(0, 80)}</td>
-          <td><code>${(r.scope || '').replace('workspace:', '')}</code></td>
-          <td>${r.domain || ''}</td>
+          <td><span class="badge badge-${escapeHtml(r.memory_class)}">${escapeHtml(r.memory_class)}</span></td>
+          <td>${escapeHtml((r.content || '').substring(0, 80))}</td>
+          <td><code>${escapeHtml((r.scope || '').replace('workspace:', ''))}</code></td>
           <td>${(r.confidence || 0.5).toFixed(1)}</td>
-          <td><button class="btn btn-sm btn-danger" onclick="retractRecord('${r.id}')">Retract</button></td>
+          <td><button class="btn btn-sm btn-danger" data-record-id="${escapeHtml(r.id)}" onclick="retractRecord(this.dataset.recordId)">Retract</button></td>
         </tr>`).join('');
     }
     function copyGeneratedOutput(btn) {
       copyToClipboard(document.querySelector('#ig-output pre').textContent, btn);
     }
 
-    function escapeHtml(s) {
-      return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    document.addEventListener('click', function(ev) {
+      const decide = ev.target.closest('[data-proposal-verdict]');
+      if (decide) {
+        ev.preventDefault();
+        decideProposal(
+          decide.dataset.proposalId,
+          decide.dataset.proposalVerdict,
+          decide.dataset.proposalOutcome
+        );
+        return;
+      }
+      const retract = ev.target.closest('[data-memory-retract]');
+      if (retract) { ev.preventDefault(); retractRecord(retract.dataset.memoryRetract); return; }
+      const del = ev.target.closest('[data-memory-delete]');
+      if (del) { ev.preventDefault(); deleteRecord(del.dataset.memoryDelete); return; }
+      const detail = ev.target.closest('[data-memory-detail]');
+      if (detail) { ev.preventDefault(); viewMemory(detail.dataset.memoryDetail); return; }
+      const restore = ev.target.closest('[data-memory-restore]');
+      if (restore) { ev.preventDefault(); restoreRecord(restore.dataset.memoryRestore); return; }
+      const reanchor = ev.target.closest('[data-proposal-reanchor]');
+      if (reanchor) { ev.preventDefault(); reanchorProposal(reanchor.dataset.proposalReanchor); }
+    });
+
+    async function generateProposals() {
+      const j = await apiFetch('/api/memory/proposals/generate', { method: 'POST', body: '{}' });
+      if (!j.ok) { showToast(j.error?.message || 'Review failed', 'danger'); return; }
+      const created = j.data.created;
+      if (created > 0) { showToast(created + ' memor' + (created === 1 ? 'y' : 'ies') + ' to look at'); refreshMemory(); }
+      // A pass that finds nothing is the expected steady state, not a failure.
+      else { showToast('Nothing new to look at', 'info'); }
+    }
+    async function reanchorProposal(id) {
+      const anchor = document.getElementById('anchor-' + id).value.trim();
+      const j = await apiFetch('/api/memory/proposals/' + id + '/reanchor', {
+        method: 'POST', body: JSON.stringify({ subject_anchor: anchor })
+      });
+      if (!j.ok) { showToast(j.error?.message || 'Failed', 'danger'); return; }
+      // Say whether the new pointer actually resolves, rather than just "saved".
+      const recheck = (j.data.proposal.recheck || [])[0];
+      if (recheck && recheck.status === 'verified') showToast('Pointer fixed and checked — the memory is confirmed');
+      else if (recheck && recheck.status === 'missing') showToast('Saved, but that location is not there either', 'warning');
+      else showToast('Pointer fixed; it could not be checked from here');
+      refreshMemory();
+    }
+    async function decideProposal(id, verdict, outcome) {
+      const j = await apiFetch('/api/memory/proposals/' + id + '/decide', {
+        method: 'POST', body: JSON.stringify({ verdict: verdict, outcome: outcome || null })
+      });
+      if (!j.ok) { showToast(j.error?.message || 'Failed', 'danger'); return; }
+      // Say what happened to the memory, not what happened to the suggestion.
+      if (verdict !== 'accepted') { showToast('Left alone — it will not be flagged again'); }
+      else if (outcome === 'still_current') { showToast('Marked as checked today'); }
+      else { showToast('Retracted — find it under Retracted Records to restore'); }
+      refreshMemory();
     }
     function toggleFilters() {
       const f = document.getElementById('filter-panel');
@@ -396,7 +572,6 @@ async def memory_page(request: Request, session: dict = Depends(require_auth)):
 	          <option value="decision">decision</option>
 	          <option value="scratchpad">scratchpad</option>
 	        </select>
-          <input type="text" id="mem-search-domain" placeholder="Domain, e.g. engineering">
           <input type="text" id="mem-search-topic" placeholder="Topic, e.g. docker">
           <input type="number" id="mem-min-confidence" placeholder="Min confidence" min="0" max="1" step="0.1">
         </div>
@@ -408,12 +583,14 @@ async def memory_page(request: Request, session: dict = Depends(require_auth)):
     <div class="card">
       <h3>Active Records <span id="mem-count" class="text-muted" style="font-weight:normal;font-size:0.8rem">({len(active_records)})</span></h3>
       <p class="text-muted" style="font-size:0.85rem;margin-bottom:8px">These are the active records you can read right now. Use Search for a narrower view.</p>
-      <table><thead><tr><th>Class</th><th>Content</th><th>Scope</th><th>Domain</th><th>Confidence</th><th class="actions-cell">Actions</th></tr></thead>
+      <table><thead><tr><th>Class</th><th>Content</th><th>Scope</th><th>Confidence</th><th class="actions-cell">Actions</th></tr></thead>
       <tbody id="mem-results-body">
         {records_rows}
       </tbody>
       <input type="hidden" id="current-scope" value="{user_scope}">
     </div>
+
+    {review_html}
 
     <!-- Retracted Records -->
     """
@@ -422,8 +599,8 @@ async def memory_page(request: Request, session: dict = Depends(require_auth)):
     <div class="card" style="border-left:4px solid var(--text-muted)">
       <h3 style="color:var(--text-muted)">Retracted Records <span class="text-muted" style="font-weight:normal;font-size:0.8rem">({len(retracted_records)})</span></h3>
       <p class="text-muted" style="font-size:0.85rem;margin-bottom:8px">These records are hidden from search. Restore to make them active again, or permanently delete.</p>
-      <table><thead><tr><th>Class</th><th>Content</th><th>Scope</th><th>Domain</th><th>Confidence</th><th class="actions-cell">Actions</th></tr></thead>
-      <tbody>{retracted_rows or "<tr><td colspan=6 class=empty>No retracted records.</td></tr>"}</tbody></table>
+      <table><thead><tr><th>Class</th><th>Content</th><th>Scope</th><th>Confidence</th><th class="actions-cell">Actions</th></tr></thead>
+      <tbody>{retracted_rows or "<tr><td colspan=5 class=empty>No retracted records.</td></tr>"}</tbody></table>
     </div>
     """
                 if retracted_records
@@ -467,8 +644,6 @@ async def memory_page(request: Request, session: dict = Depends(require_auth)):
             <summary class="text-muted" style="cursor:pointer">More options</summary>
             <div class="form-row" style="margin-top:10px">
               <div class="form-group">
-                <label>Domain</label>
-                <input type="text" id="mem-domain" placeholder="e.g. coding" autocomplete="off">
                 <p class="form-hint">Optional tag for searches and filtering.</p>
               </div>
               <div class="form-group">
@@ -572,8 +747,6 @@ async def memory_page(request: Request, session: dict = Depends(require_auth)):
             <summary class="text-muted" style="cursor:pointer">More options</summary>
             <div class="form-row" style="margin-top:10px">
             <div class="form-group">
-              <label>Domain</label>
-              <input type="text" id="mem-import-domain" value="import" autocomplete="off">
             </div>
             <div class="form-group">
               <label>Topic</label>
@@ -611,7 +784,6 @@ async def memory_page(request: Request, session: dict = Depends(require_auth)):
           <div class="form-group"><label>Scope</label><code id="mem-detail-scope"></code></div>
         </div>
         <div class="form-row">
-        <div class="form-group"><label>Domain</label><span id="mem-detail-domain"></span></div>
         <div class="form-group"><label>Topic</label><span id="mem-detail-topic"></span></div>
       </div>
       <div class="form-row">

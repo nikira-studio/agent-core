@@ -59,8 +59,8 @@ async def credentials_page(request: Request, session: dict = Depends(require_aut
           <td><code>{escape_html(e.get("scope", ""))}</code></td>
           <td><code>{escape_html(e.get("reference_name", ""))}</code></td>
           <td class='actions-cell'>
-            <button type='button' class='btn btn-sm btn-secondary' onclick='editCredential("{e["id"]}")'>Edit</button>
-            <button type='button' class='btn btn-sm btn-danger icon-delete-btn' onclick='deleteCredential("{e["id"]}")' title='Delete credential' aria-label='Delete credential'>{get_icon("delete")}</button>
+            <button type='button' class='btn btn-sm btn-secondary' data-credential-edit="{escape_html(e["id"])}">Edit</button>
+            <button type='button' class='btn btn-sm btn-danger icon-delete-btn' data-credential-delete="{escape_html(e["id"])}" title='Delete credential' aria-label='Delete credential'>{get_icon("delete")}</button>
           </td>
         </tr>"""
 

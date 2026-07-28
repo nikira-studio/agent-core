@@ -147,13 +147,13 @@ def test_vector_settings_api_saves_generic_auth_settings(admin_client):
     assert data["vector_api_key"] == "test-key"
 
 
-def test_vector_settings_models_rejects_invalid_url(admin_client):
-    r = admin_client.get("/api/dashboard/vector-settings/models?url=not-a-url")
+def test_model_listing_rejects_invalid_url(admin_client):
+    r = admin_client.get("/api/dashboard/ollama-models?url=not-a-url")
     assert r.status_code == 400
     assert r.json()["error"]["code"] == "INVALID_URL"
 
 
-def test_vector_settings_models_lists_ollama_models(admin_client, monkeypatch):
+def test_model_listing_returns_installed_models(admin_client, monkeypatch):
     import app.routes.settings_page as settings_page
 
     class FakeResponse:
@@ -184,7 +184,7 @@ def test_vector_settings_models_lists_ollama_models(admin_client, monkeypatch):
     monkeypatch.setattr(settings_page.httpx, "AsyncClient", FakeClient)
 
     r = admin_client.get(
-        "/api/dashboard/vector-settings/models?url=http%3A%2F%2Follama.test"
+        "/api/dashboard/ollama-models?url=http%3A%2F%2Follama.test"
     )
     assert r.status_code == 200
     assert r.json()["data"]["models"] == [

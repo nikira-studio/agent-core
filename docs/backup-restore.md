@@ -61,9 +61,24 @@ If any validation step fails, your existing data is untouched.
 A merge restore is more surgical:
 
 - Records with primary keys that already exist in the current database are skipped — current wins
-- Memory records, agents, workspaces, credential entries, connector types, connector bindings, and execution history are merged independently
 - Credential entries from the backup are automatically re-encrypted with your current key if the backup key differs, so they remain readable
 - The merge does not adopt the backup's encryption key — your current key stays in place
+
+**What comes across.** Users, workspaces and their collaborator grants, agents, memory records and their embeddings, review proposals, credential entries, activity, connector types, bindings and execution history, adapter installations, webhook registrations, and system settings.
+
+**What does not, and why.** Audit and webhook delivery logs are a record of what happened on the *other* installation, not state. Sessions, OTP secrets, and the broker credential are this machine's login and identity — importing them would hand out access. OAuth state, session caches, and spilled tool results regenerate on their own.
+
+**Related records are not re-pointed.** Tables merge independently and the current version wins, so a record whose id already exists here is skipped. Anything that referenced it is skipped too, and counted in `merge.skipped_conflicts`. Otherwise a connector binding from the backup would keep its own id, find its credential's id already taken, and quietly authenticate with *this* installation's unrelated secret. Same id with identical content is a genuine match, not a conflict, and merges normally.
+
+Relationships here are not all foreign keys, and all three forms are covered:
+
+- **direct references** — a binding's `credential_id`, an embedding's `record_id`
+- **scopes** — `workspace:proj` names a workspace, so a memory record or credential from a backup is not filed into a same-named workspace of yours that is a different project
+- **ids inside JSON** — a review proposal's `target_ids_json` names the records it would retract
+
+Skipping also cascades: if a binding is not imported because its credential conflicts, an execution belonging to that binding is not imported either. Without that, the execution would be inserted with no binding to attach to and the database constraint would fail the whole merge instead of declining one row.
+
+**A partial merge reports itself as one.** If any table cannot be merged, the response is an error naming that table, and the rows that did come across are kept — undoing a half-finished merge is its own risk. Both the success and failure responses carry `merge.inserted_counts` (how many rows each table gained), `merge.tables_merged`, `merge.failed_tables`, and `merge.skipped_conflicts` — on a failure they appear under `error.details` — so you can see what actually landed rather than inferring it from a message.
 
 ---
 

@@ -45,7 +45,7 @@ Other config (environment variables)
 ------------------------------------
 * ``AGENT_CORE_SCOPE``    Reserved for v2 write-back. NOT used for recall —
                           prefetch searches every scope the token can read.
-                          Default: ``agent:clawdia``
+                          Default: unset
 * ``AGENT_CORE_LIMIT``    Max records injected per turn. Default: ``5``
 * ``AGENT_CORE_TIMEOUT``  HTTP timeout in seconds. Default: ``4``
 
@@ -151,7 +151,10 @@ class AgentCoreMemoryProvider(MemoryProvider):
             if not url:
                 url = _rest_base_from_mcp_url(str(block.get("url", "")))
 
-        self._url = (url or "http://core.veditz.com").rstrip("/")
+        # Falls back to a local install, never to somebody else's server. This
+        # used to default to the author's own host, so an install that did not
+        # set AGENT_CORE_URL would quietly send its memory queries there.
+        self._url = (url or "http://localhost:3500").rstrip("/")
         self._token = token
         try:
             self._limit = max(1, min(20, int(_env("AGENT_CORE_LIMIT", default="5"))))

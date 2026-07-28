@@ -740,6 +740,10 @@ def build_capability_summary(
     for binding in visible_bindings:
         bindings_by_type.setdefault(binding["connector_type_id"], []).append(binding)
 
+    # One pass over the execution log for the whole summary, rather than one
+    # query per binding inside the loop below.
+    failing_by_binding = failing_actions_by_binding()
+
     summaries = []
     usable_total = 0
     for connector_type in connector_types:
@@ -796,6 +800,10 @@ def build_capability_summary(
             else:
                 test_status = "passed"
 
+            # A binding can pass its health check while one of its actions fails
+            # steadily; the probe only proves the connection works.
+            failing_actions = failing_by_binding.get(binding["id"], [])
+
             binding_summaries.append(
                 {
                     "id": binding["id"],
@@ -811,6 +819,7 @@ def build_capability_summary(
                         "test_status": test_status,
                         "last_tested_at": binding.get("last_tested_at"),
                         "last_error": binding.get("last_error"),
+                        "failing_actions": failing_actions,
                     },
                     "usable_by_caller": usable,
                 }
@@ -933,6 +942,40 @@ def _action_meta(connector_type: dict, action: str) -> dict:
         if isinstance(a, dict) and a.get("name") == action:
             return a
     return {}
+
+
+READ_ONLY_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
+
+
+def action_requires_write(connector_type: dict, action: str) -> bool:
+    """Whether running this action needs write access to the binding's scope.
+
+    Read access to a binding means "you may see and query this service"; it was
+    never meant to mean "you may change things through it". Actions carry an
+    HTTP method, either in the metadata or at the front of the action name, and
+    a GET is the one case we can positively identify as read-only.
+
+    Anything we cannot identify requires write. That is the opposite of the
+    verification pass, where an inconclusive check leaves the record alone —
+    the difference is what an error costs. There, guessing wrong deletes a true
+    memory; here, guessing wrong runs someone else's DELETE. When in doubt,
+    verification does nothing and this asks for the stronger grant.
+    """
+    meta = _action_meta(connector_type, action)
+    side_effect = str(meta.get("side_effect") or "").strip().lower()
+    # Explicit metadata wins over the method, in both directions. Inferring from
+    # the method alone let a manifest that declared `destructive` on a GET read
+    # as safe — an author who took the trouble to say what an action does is a
+    # better source than the verb it happens to use.
+    if side_effect in ("write", "writes", "destructive", "delete", "mutating"):
+        return True
+    if side_effect in ("none", "read", "readonly", "read_only"):
+        return False
+    method = str(meta.get("method") or "").strip().upper()
+    if not method:
+        head = str(action or "").strip().split(" ", 1)[0].upper()
+        method = head if head.isalpha() else ""
+    return method not in READ_ONLY_METHODS
 
 
 def _prepare_action_params(
@@ -1220,6 +1263,30 @@ def execute_binding_action_with_logging(
     return result
 
 
+# An execution log is a record that a call happened and how it went. It is not
+# a cache of what the call returned. Storing whole response bodies made the log
+# 142 MB of a 180 MB database on the first real deployment — 1,463 rows at an
+# average of 101 KB, one of them 3.5 MB — for a table nothing reads in full.
+# Truncation keeps the head, which is where the shape of a response and any
+# error detail live.
+EXECUTION_BODY_MAX_CHARS = 16_000
+
+# Failure rate at which an action is worth reporting, with a minimum call count
+# so one bad call out of two does not read as a broken connector.
+FAILING_ACTION_THRESHOLD = 0.2
+FAILING_ACTION_MIN_CALLS = 5
+
+
+def _truncate_execution_body(body: Optional[str]) -> Optional[str]:
+    if body is None or len(body) <= EXECUTION_BODY_MAX_CHARS:
+        return body
+    dropped = len(body) - EXECUTION_BODY_MAX_CHARS
+    return (
+        body[:EXECUTION_BODY_MAX_CHARS]
+        + f"\n…[execution log truncated: {dropped:,} more characters]"
+    )
+
+
 def log_execution(
     binding_id: str,
     action: str,
@@ -1230,6 +1297,7 @@ def log_execution(
     duration_ms: Optional[int] = None,
 ) -> str:
     execution_id = secrets.token_urlsafe(16)
+    result_body_json = _truncate_execution_body(result_body_json)
     with get_db() as conn:
         conn.execute(
             """
@@ -1250,6 +1318,81 @@ def log_execution(
         )
         conn.commit()
     return execution_id
+
+
+def failing_actions_by_binding(days: int = 30) -> dict[str, list[dict]]:
+    """Failing actions for every binding in one query.
+
+    The per-binding call is fine on its own, but the connectors page and the
+    capability summary both loop over bindings, which turned one report into one
+    query per row. Grouping once and indexing by binding keeps those O(1).
+    """
+    grouped: dict[str, list[dict]] = {}
+    for stat in action_health(days=days):
+        if stat["failure_rate"] >= FAILING_ACTION_THRESHOLD and stat["calls"] >= FAILING_ACTION_MIN_CALLS:
+            grouped.setdefault(stat["binding_id"], []).append(stat)
+    return grouped
+
+
+def action_health(binding_id: Optional[str] = None, days: int = 30) -> list[dict]:
+    """Per-action success rates from the execution log.
+
+    Surfaces what per-binding health checks cannot: a binding that connects
+    fine while one of its actions fails half the time. On the first real
+    deployment one binding's list action had been failing 81 times in 216 calls
+    for two months with nothing reporting it.
+    """
+    conditions = ["executed_at >= datetime('now', ?)"]
+    params: list = [f"-{max(days, 1)} days"]
+    if binding_id:
+        conditions.append("ce.binding_id = ?")
+        params.append(binding_id)
+
+    with get_db() as conn:
+        rows = conn.execute(
+            f"""
+            SELECT ce.binding_id, cb.name AS binding_name, ce.action,
+                   COUNT(*) AS calls,
+                   SUM(CASE WHEN ce.result_status != 'success' THEN 1 ELSE 0 END) AS failures,
+                   MAX(ce.executed_at) AS last_called_at
+            FROM connector_executions ce
+            LEFT JOIN connector_bindings cb ON cb.id = ce.binding_id
+            WHERE {' AND '.join(conditions)}
+            GROUP BY ce.binding_id, ce.action
+            ORDER BY failures DESC, calls DESC
+            """,
+            params,
+        ).fetchall()
+
+    health = []
+    for row in rows:
+        calls = int(row["calls"] or 0)
+        failures = int(row["failures"] or 0)
+        health.append(
+            {
+                "binding_id": row["binding_id"],
+                "binding_name": row["binding_name"],
+                "action": row["action"],
+                "calls": calls,
+                "failures": failures,
+                "failure_rate": round(failures / calls, 3) if calls else 0.0,
+                "last_called_at": row["last_called_at"],
+            }
+        )
+    return health
+
+
+def prune_executions(retention_days: int) -> int:
+    """Delete execution log rows older than the retention window."""
+    if retention_days <= 0:
+        return 0
+    with get_db() as conn:
+        cursor = conn.execute(
+            "DELETE FROM connector_executions WHERE executed_at < datetime('now', ?)",
+            (f"-{retention_days} days",),
+        )
+        conn.commit()
+        return cursor.rowcount or 0
 
 
 def list_executions(binding_id: str, limit: int = 50, offset: int = 0) -> list[dict]:

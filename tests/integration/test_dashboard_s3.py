@@ -131,8 +131,11 @@ class TestAgentsPage:
         r = user_client.get("/agents")
         assert r.status_code == 200
         assert "Shared Agent" in r.text
-        assert "onclick=\"viewAgent('sharedagent')\"" in r.text
-        assert "onclick=\"editAgent('sharedagent')\"" not in r.text
+        # Row actions are data attributes rather than inline handlers, so the
+        # assertion is about which action is offered, not how it is wired.
+        assert "data-agent-view='sharedagent'" in r.text
+        assert "data-agent-edit='sharedagent'" not in r.text
+        assert "data-agent-purge='sharedagent'" not in r.text
 
     def test_non_admin_navigation_hides_admin_pages(self, user_client):
         r = user_client.get("/")
@@ -249,7 +252,6 @@ class TestActivityPage:
         assert "Personal user memory (user:admin)" in r.text
         assert "{user_scope" not in r.text
         assert "{user_scope_label" not in r.text
-        assert "mem-search-domain" in r.text
         assert "mem-search-topic" in r.text
         assert "mem-min-confidence" in r.text
         assert "Use these only when you want to narrow the result set" in r.text

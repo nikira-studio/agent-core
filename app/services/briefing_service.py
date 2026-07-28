@@ -98,9 +98,27 @@ def generate_handoff_briefing(
         "task_note": activity.get("task_note"),
         "task_result": activity.get("task_result"),
         "started_at": activity["started_at"],
+        # Standing context first: these are the rules the operator wants applied
+        # regardless of what this particular task is about.
+        "pinned": [
+            {"id": r["id"], "memory_class": r["memory_class"], "content": r["content"]}
+            for r in memory_service.pinned_records([memory_scope])
+        ],
         "decisions": [{"id": r["id"], "content": r["content"]} for r in decisions[:10]],
         "facts": [{"id": r["id"], "content": r["content"]} for r in facts[:10]],
         "preferences": [{"id": r["id"], "content": r["content"]} for r in preferences[:10]],
+        # What the handed-off work actually concluded. The scope's decisions and
+        # facts above are the background; these are the records this specific
+        # session produced, which is what someone picking it up needs first.
+        "produced_records": [
+            {
+                "id": r["id"],
+                "memory_class": r["memory_class"],
+                "content": r["content"],
+                "subject_anchor": r.get("subject_anchor"),
+            }
+            for r in memory_service.records_for_activity(activity_id)
+        ],
         "recent_completed": [
             {
                 "id": a["id"],

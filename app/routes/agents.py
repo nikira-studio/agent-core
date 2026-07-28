@@ -36,15 +36,6 @@ class UpdateAgentRequest(BaseModel):
     reset_default_recall_scopes: bool = False
 
 
-def get_agent_auth(authorization: str = "") -> tuple[str, str]:
-    if not authorization.startswith("Bearer "):
-        return None, None
-    api_key = authorization[7:]
-    if not api_key.startswith("ac_sk_"):
-        return None, None
-    return api_key, None
-
-
 def _is_admin(session: dict) -> bool:
     return session.get("role") == "admin"
 
@@ -94,9 +85,8 @@ def _validate_agent_scopes(
             if write:
                 if workspace and workspace_service.can_user_write_workspace(session["user_id"], workspace["id"]):
                     continue
-            else:
-                if workspace and workspace_service.can_user_read_workspace(session["user_id"], workspace["id"]):
-                    continue
+            elif workspace and workspace_service.can_user_read_workspace(session["user_id"], workspace["id"]):
+                continue
             if workspace and workspace.get("owner_user_id") == session["user_id"]:
                 continue
         if scope.startswith("agent:"):

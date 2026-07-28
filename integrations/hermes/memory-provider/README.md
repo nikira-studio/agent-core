@@ -65,8 +65,8 @@ is needed** — the provider reuses that single source of truth for the secret.
 | Variable | Required | Default | Purpose |
 |---|---|---|---|
 | `AGENT_CORE_API_KEY` | no¹ | from `mcp_servers.agent_core` | Bearer token. `AGENT_CORE_BEARER` is an alias. |
-| `AGENT_CORE_URL` | no | from `mcp_servers.agent_core.url`, else `http://core.veditz.com` | Base URL of the Agent Core instance. |
-| `AGENT_CORE_SCOPE` | no | `agent:clawdia` | **Reserved for v2 write-back only.** Not used for recall — prefetch searches every scope the token can read. |
+| `AGENT_CORE_URL` | no | from `mcp_servers.agent_core.url`, else `http://localhost:3500` | Base URL of the Agent Core instance. |
+| `AGENT_CORE_SCOPE` | no | unset | **Reserved for v2 write-back only.** Not used for recall — prefetch searches every scope the token can read. |
 | `AGENT_CORE_LIMIT` | no | `5` | Max records injected per turn. |
 | `AGENT_CORE_TIMEOUT` | no | `4` | HTTP timeout (seconds). |
 

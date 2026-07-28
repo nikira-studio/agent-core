@@ -100,7 +100,6 @@ def test_memory_import_notes_creates_searchable_external_records(test_client, ag
         json={
             "scope": "agent:testagent",
             "memory_class": "fact",
-            "domain": "import",
             "sources": [
                 {
                     "filename": "memory.md",
@@ -289,13 +288,12 @@ def test_memory_search_scope_filter_limits_results(test_client, admin_token):
     assert all(record["scope"] == "agent:testagent" for record in records)
 
 
-def test_memory_search_uses_domain_topic_confidence_and_importance(test_client, admin_token):
+def test_memory_search_filters_by_topic_and_confidence(test_client, admin_token):
     records_to_write = [
         {
             "content": "Memory field behavior ranking token",
             "memory_class": "fact",
             "scope": "user:admin",
-            "domain": "engineering",
             "topic": "docker",
             "confidence": 0.4,
             "importance": 1.0,
@@ -304,7 +302,6 @@ def test_memory_search_uses_domain_topic_confidence_and_importance(test_client, 
             "content": "Memory field behavior ranking token",
             "memory_class": "fact",
             "scope": "user:admin",
-            "domain": "engineering",
             "topic": "docker",
             "confidence": 0.9,
             "importance": 0.2,
@@ -313,12 +310,12 @@ def test_memory_search_uses_domain_topic_confidence_and_importance(test_client, 
             "content": "Memory field behavior ranking token",
             "memory_class": "fact",
             "scope": "user:admin",
-            "domain": "personal",
-            "topic": "docker",
+            "topic": "unrelated",
             "confidence": 1.0,
             "importance": 1.0,
         },
     ]
+    written = []
     for payload in records_to_write:
         r = test_client.post(
             "/api/memory/write",
@@ -326,6 +323,8 @@ def test_memory_search_uses_domain_topic_confidence_and_importance(test_client, 
             json=payload,
         )
         assert r.status_code == 201, r.json()
+        written.append(r.json()["data"]["record"]["id"])
+    high_importance, low_importance, other_scope_record = written
 
     filtered = test_client.post(
         "/api/memory/search",
@@ -333,17 +332,17 @@ def test_memory_search_uses_domain_topic_confidence_and_importance(test_client, 
         json={
             "query": "ranking token",
             "scope": "user:admin",
-            "domain": "engineering",
             "topic": "docker",
             "min_confidence": 0.8,
         },
     )
     assert filtered.status_code == 200, filtered.json()
+    # Search results are a lean projection, so the filters are checked by which
+    # record comes back rather than by echoing the filter fields.
     filtered_records = filtered.json()["data"]["records"]
     assert len(filtered_records) == 1
-    assert filtered_records[0]["confidence"] == 0.9
-    assert filtered_records[0]["domain"] == "engineering"
-    assert filtered_records[0]["topic"] == "docker"
+    assert filtered_records[0]["id"] == low_importance
+    assert other_scope_record not in [r["id"] for r in filtered_records]
 
     ranked = test_client.post(
         "/api/memory/search",
@@ -351,15 +350,13 @@ def test_memory_search_uses_domain_topic_confidence_and_importance(test_client, 
         json={
             "query": "ranking token",
             "scope": "user:admin",
-            "domain": "engineering",
             "topic": "docker",
         },
     )
     assert ranked.status_code == 200, ranked.json()
     ranked_records = ranked.json()["data"]["records"]
     assert len(ranked_records) == 2
-    assert ranked_records[0]["importance"] == 1.0
-    assert ranked_records[1]["importance"] == 0.2
+    assert [r["id"] for r in ranked_records] == [high_importance, low_importance]
 
 
 def test_memory_detail_endpoint_enforces_scope(test_client, admin_token, agent_token):
@@ -370,7 +367,6 @@ def test_memory_detail_endpoint_enforces_scope(test_client, admin_token, agent_t
             "content": "Private detail record",
             "memory_class": "fact",
             "scope": "agent:testagent",
-            "domain": "validation",
             "topic": "detail",
         },
     )

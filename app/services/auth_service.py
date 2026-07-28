@@ -1,3 +1,5 @@
+import logging
+import sqlite3
 from datetime import timedelta
 from typing import Optional
 
@@ -11,6 +13,8 @@ from app.database import get_db
 from app.models.enums import USER_ROLES
 from app.services import cleanup_service
 from app.time_utils import parse_utc_datetime, utc_now, utc_now_iso
+
+logger = logging.getLogger(__name__)
 
 
 BCRYPT_COST = 12
@@ -183,6 +187,21 @@ def update_user(
 
 
 def delete_user(user_id: str) -> tuple[bool, str]:
+    """Remove a user and everything that belonged only to them.
+
+    Ordering matters: foreign keys are enforced, so dependants are cleared
+    before the rows they point at. Any constraint still left unsatisfied is
+    reported rather than raised — a purge that cannot complete should say so,
+    not surface as a 500 after it has already deleted half of someone's data.
+    """
+    try:
+        return _delete_user(user_id)
+    except sqlite3.IntegrityError as exc:
+        logger.exception("Purging user %s hit a constraint", user_id)
+        return False, f"User could not be fully removed: {exc}"
+
+
+def _delete_user(user_id: str) -> tuple[bool, str]:
     with get_db() as conn:
         user_row = conn.execute(
             "SELECT id FROM users WHERE id = ?", (user_id,)
@@ -215,6 +234,18 @@ def delete_user(user_id: str) -> tuple[bool, str]:
             conn.execute("DELETE FROM agents WHERE id = ?", (agent["id"],))
 
         cleanup_service.delete_scope_data(conn, f"user:{user_id}")
+        # Grants this user held on workspaces they do not own, and grants they
+        # issued on workspaces that outlive them. Both columns reference
+        # users(id) without a cascade, so either one left behind aborts the
+        # delete on the last statement — after everything above has already
+        # been removed.
+        conn.execute(
+            "DELETE FROM workspace_collaborators WHERE user_id = ?", (user_id,)
+        )
+        conn.execute(
+            "UPDATE workspace_collaborators SET created_by = NULL WHERE created_by = ?",
+            (user_id,),
+        )
         conn.execute(
             "UPDATE agents SET default_user_id = owner_user_id, updated_at = CURRENT_TIMESTAMP WHERE default_user_id = ?",
             (user_id,),

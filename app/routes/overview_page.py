@@ -362,9 +362,9 @@ async def dashboard_home(request: Request, session: dict = Depends(require_auth)
     attention_html = ""
     if attention:
         attention_rows = "".join(
-            f"<tr><td>{a.get('task_description', '')[:60]}</td>"
-            f"<td><span class='badge badge-{a.get('status', 'stale')}'>{a.get('status', '')}</span></td>"
-            f"<td>{a.get('assigned_agent_id', '')}</td>"
+            f"<tr><td>{escape_html(a.get('task_description', '')[:60])}</td>"
+            f"<td><span class='badge badge-{escape_html(a.get('status', 'stale'))}'>{escape_html(a.get('status', ''))}</span></td>"
+            f"<td>{escape_html(a.get('assigned_agent_id', ''))}</td>"
             f"<td><a href='/activity'>Open</a></td></tr>"
             for a in attention
         )
@@ -377,7 +377,7 @@ async def dashboard_home(request: Request, session: dict = Depends(require_auth)
     activity_rows = (
         "".join(
             f"<tr><td><div class='text-truncate' title='{escape_html(a.get('task_description', ''))}'>{escape_html(a.get('task_description', ''))}</div></td>"
-            f"<td><span class='badge badge-{a.get('status', 'active')}'>{a.get('status', '')}</span></td>"
+            f"<td><span class='badge badge-{escape_html(a.get('status', 'active'))}'>{escape_html(a.get('status', ''))}</span></td>"
             f"<td>{escape_html(a.get('assigned_agent_id', ''))}</td>"
             f"<td>{local_dt(a.get('updated_at') or a.get('started_at'))}</td></tr>"
             for a in recent_activity[:6]

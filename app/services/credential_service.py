@@ -193,16 +193,6 @@ def update_credential_value(reference_name: str, new_plaintext: str) -> bool:
     return update_credential(entry["id"], value_encrypted=encrypt_value(new_plaintext))
 
 
-def mask_preview(value_encrypted: str) -> str:
-    try:
-        plaintext = decrypt_value(value_encrypted)
-    except Exception:
-        return "***"
-    if len(plaintext) <= 4:
-        return "***"
-    return plaintext[:2] + "*" * (len(plaintext) - 4) + plaintext[-2:]
-
-
 def get_credential_scopes() -> list[str]:
     with get_db() as conn:
         rows = conn.execute(

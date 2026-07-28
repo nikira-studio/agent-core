@@ -46,14 +46,12 @@ def test_embedding_write_with_mocked_healthy_backend(test_client, agent_token):
             "app.services.embedding_service.get_embedding_backend_status"
         ) as mock_status,
         patch("app.services.embedding_service.generate_embedding") as mock_gen,
-        patch("app.services.vector_service.is_sqlite_vec_available") as mock_vec,
         patch(
             "app.services.vector_settings_service.is_vector_search_enabled"
         ) as mock_vec_enabled,
     ):
         mock_status.return_value = {"backend": "healthy", "model_configured": True}
         mock_gen.return_value = (mock_vector_bytes, "ok")
-        mock_vec.return_value = True
         mock_vec_enabled.return_value = True
 
         with patch("app.services.vector_service.store_embedding") as mock_store:
@@ -79,7 +77,6 @@ def test_search_returns_hybrid_mode_with_semantic_results(test_client, agent_tok
             "app.services.embedding_service.get_embedding_backend_status"
         ) as mock_status,
         patch("app.services.embedding_service.generate_embedding") as mock_gen,
-        patch("app.services.vector_service.is_sqlite_vec_available") as mock_vec,
         patch(
             "app.services.vector_settings_service.is_vector_search_enabled"
         ) as mock_vec_enabled,
@@ -87,7 +84,6 @@ def test_search_returns_hybrid_mode_with_semantic_results(test_client, agent_tok
     ):
         mock_status.return_value = {"backend": "healthy", "model_configured": True}
         mock_gen.return_value = (mock_vector_bytes, "ok")
-        mock_vec.return_value = True
         mock_vec_enabled.return_value = True
         mock_cosine.return_value = []
 
@@ -109,7 +105,6 @@ def test_search_returns_hybrid_mode_with_semantic_results(test_client, agent_tok
             "app.services.embedding_service.get_embedding_backend_status"
         ) as mock_status,
         patch("app.services.embedding_service.generate_embedding") as mock_gen,
-        patch("app.services.vector_service.is_sqlite_vec_available") as mock_vec,
         patch(
             "app.services.vector_settings_service.is_vector_search_enabled"
         ) as mock_vec_enabled,
@@ -117,7 +112,6 @@ def test_search_returns_hybrid_mode_with_semantic_results(test_client, agent_tok
     ):
         mock_status.return_value = {"backend": "healthy", "model_configured": True}
         mock_gen.return_value = (mock_vector_bytes, "ok")
-        mock_vec.return_value = True
         mock_vec_enabled.return_value = True
 
         search_r = test_client.post(
@@ -162,7 +156,6 @@ def test_search_hybrid_exact_fts_match_outranks_weak_semantic_hits(
             "app.services.embedding_service.get_embedding_backend_status"
         ) as mock_status,
         patch("app.services.embedding_service.generate_embedding") as mock_gen,
-        patch("app.services.vector_service.is_sqlite_vec_available") as mock_vec,
         patch(
             "app.services.vector_settings_service.is_vector_search_enabled"
         ) as mock_vec_enabled,
@@ -170,7 +163,6 @@ def test_search_hybrid_exact_fts_match_outranks_weak_semantic_hits(
     ):
         mock_status.return_value = {"backend": "healthy", "model_configured": True}
         mock_gen.return_value = (mock_vector_bytes, "ok")
-        mock_vec.return_value = True
         mock_vec_enabled.return_value = True
         mock_cosine.return_value = []
 
@@ -193,7 +185,6 @@ def test_search_hybrid_exact_fts_match_outranks_weak_semantic_hits(
             "app.services.embedding_service.get_embedding_backend_status"
         ) as mock_status,
         patch("app.services.embedding_service.generate_embedding") as mock_gen,
-        patch("app.services.vector_service.is_sqlite_vec_available") as mock_vec,
         patch(
             "app.services.vector_settings_service.is_vector_search_enabled"
         ) as mock_vec_enabled,
@@ -204,7 +195,6 @@ def test_search_hybrid_exact_fts_match_outranks_weak_semantic_hits(
     ):
         mock_status.return_value = {"backend": "healthy", "model_configured": True}
         mock_gen.return_value = (mock_vector_bytes, "ok")
-        mock_vec.return_value = True
         mock_vec_enabled.return_value = True
 
         search_r = test_client.post(
@@ -231,14 +221,12 @@ def test_search_hybrid_pagination_applies_after_merge(test_client, agent_token):
             "app.services.embedding_service.get_embedding_backend_status"
         ) as mock_status,
         patch("app.services.embedding_service.generate_embedding") as mock_gen,
-        patch("app.services.vector_service.is_sqlite_vec_available") as mock_vec,
         patch(
             "app.services.vector_settings_service.is_vector_search_enabled"
         ) as mock_vec_enabled,
     ):
         mock_status.return_value = {"backend": "healthy", "model_configured": True}
         mock_gen.return_value = (mock_vector_bytes, "ok")
-        mock_vec.return_value = True
         mock_vec_enabled.return_value = True
 
         for _ in range(3):
@@ -263,7 +251,6 @@ def test_search_hybrid_pagination_applies_after_merge(test_client, agent_token):
             "app.services.embedding_service.get_embedding_backend_status"
         ) as mock_status,
         patch("app.services.embedding_service.generate_embedding") as mock_gen,
-        patch("app.services.vector_service.is_sqlite_vec_available") as mock_vec,
         patch(
             "app.services.vector_settings_service.is_vector_search_enabled"
         ) as mock_vec_enabled,
@@ -271,7 +258,6 @@ def test_search_hybrid_pagination_applies_after_merge(test_client, agent_token):
     ):
         mock_status.return_value = {"backend": "healthy", "model_configured": True}
         mock_gen.return_value = (mock_vector_bytes, "ok")
-        mock_vec.return_value = True
         mock_vec_enabled.return_value = True
 
         search_r = test_client.post(

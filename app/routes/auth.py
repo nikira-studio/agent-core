@@ -247,7 +247,7 @@ async def login(body: LoginRequest, request: Request):
         "requires_otp": otp_required,
         "user_id": user["id"],
     })
-    
+
     if not otp_required:
         set_session_cookie(response, session["session_id"], request)
     return response

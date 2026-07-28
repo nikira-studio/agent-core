@@ -373,6 +373,15 @@ async def run_binding(
     params = body.get("params") or {}
     if not action:
         return error_response("INVALID_REQUEST", "Missing action", 400)
+    connector_type = connector_service.get_connector_type(binding["connector_type_id"])
+    if connector_service.action_requires_write(
+        connector_type or {}, action
+    ) and not enforcer.can_write(binding["scope"]):
+        return error_response(
+            "SCOPE_DENIED",
+            "This action changes state, which needs write access to the binding's scope",
+            403,
+        )
     result = connector_service.execute_binding_action_with_logging(
         binding_id, action, params
     )

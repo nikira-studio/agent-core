@@ -28,7 +28,43 @@ router = APIRouter()
 # refire / idle heartbeat (140+ near-duplicate records) because the generic
 # "no routine progress" rule didn't register for records they classified as
 # "findings". This block names that failure mode explicitly.
-MEMORY_DISCIPLINE_GUIDANCE = """One memory per insight, not per occurrence: when a recurring task (heartbeat, monitor tick, scheduled review, watchdog retry) keeps producing the same finding, write ONE record the first time and supersede it if the situation changes — never a new record per tick, per fire, or per re-check. Per-occurrence status belongs in `activity_update` (`task_note`/`task_result`) or the source system, not in memory. Before writing a `fact` or `decision`, search for an existing record on the same topic and supersede it (`supersedes_id`) instead of adding a near-duplicate. For notes that stop being true on their own (for example "service X is down right now"), use `scratchpad` or set `expires_at`."""
+# The classes only earn their keep if they mean the same thing to every agent
+# writing into the workspace. The dividing line is what could settle the
+# question: a fact can be checked against the world, a decision can only be
+# changed by whoever made it. That distinction is what lets an automated pass
+# ever re-verify facts without touching decisions, so it is stated in one place
+# and reused by every generator rather than paraphrased per template.
+MEMORY_CLASS_GUIDANCE = """Pick the class by asking what would settle it if someone doubted the record:
+
+- `fact` — an observation about how things ARE, which someone could go and check against the code, a host, or a service. It stops being true when the world changes. Examples: "the build server is 192.0.2.10", "the ingest route is POST /api/webhook/health", "the CDN blocks requests sent with a default Python user agent".
+- `decision` — a choice about how things SHOULD be, which holds until someone changes their mind. Nothing you could look up confirms or refutes it. Examples: "the app should support light and dark mode", "do not edit vendored dependencies directly", "prefer a deploy key over a personal SSH key".
+- `preference` — a standing preference of the user or team, in the user scope.
+- `scratchpad` — a temporary note that is expected to stop mattering.
+
+If it would be settled by checking, it is a `fact`. If it would be settled by someone deciding, it is a `decision`. Reporting what you just did is neither — that belongs in `activity_update`.
+
+On a `fact`, set `subject_anchor` to what a later session would check: `repo:<path>`, `host:<name-or-ip>`, or `service:<binding_id>`, with repo paths relative to the workspace root. Omit it when nothing could verify the record. Anchored facts are re-checked automatically; if a check reports the subject missing but it only moved, call `memory_reanchor` to repoint the record instead of letting it be proposed for removal.
+
+`valid_from` and `valid_to` say when the content was true in the world, separately from when you wrote it. Set them when a record covers a period other than "from now on", and pass `as_of` to `memory_search` to ask what was true at a past moment.
+
+Call `memory_pinned` once at the start of a session. It returns the standing rules for your scopes — loaded rather than searched for, because a constraint that has to win a search can be missed. Treat what it returns as applying to everything you do, not just the current task. Search results carry `days_since_confirmed`. Treat a fact nobody has confirmed in months as a lead, not as current truth: check it, then `memory_confirm` it with evidence naming what you checked, or supersede it if it has changed. Call `memory_feedback` when a recalled record clearly did or did not help. If something should apply to every session in the scope rather than only this task, call `memory_pin` to request it — an operator decides, because standing context reaches every agent in the scope."""
+
+# The record-shaping rules every template teaches. These were paraphrased
+# separately in each generator, which meant a capability could land in the
+# system and reach only whichever template someone remembered to edit. They are
+# defined once and interpolated, so an agent learns the same contract whichever
+# file its host reads.
+MEMORY_RECORD_GUIDANCE = """Choosing between `fact` and `decision`: if the record would be settled by checking something, it is a `fact`; if it would be settled by someone deciding, it is a `decision`. "the build server is 192.0.2.10" is a fact; "do not edit vendored dependencies directly" is a decision. Reporting what you just did is neither — that belongs in `activity_update`.
+
+When a record is a `fact`, set `subject_anchor` to the thing a later session would look at to check it: `repo:<path>`, `host:<name-or-ip>`, or `service:<binding_id>`. Repo paths must be **relative to the workspace root**, not absolute — the same directory is mounted at a different path in every agent's container, so an absolute path is only resolvable by whoever wrote it. Name what you actually looked at, and omit it when nothing could verify the record — which is normal for a `decision`.
+
+Anchored facts get re-checked automatically. If a check reports the subject missing but you can see it only moved, call `memory_reanchor` to repoint the record rather than letting it be proposed for removal; use `memory_verify` to check a scope's anchored facts on demand before you rely on them. A check that fails to run leaves the record alone — "could not check" is never treated as "wrong".
+
+`valid_from` and `valid_to` say when the content was true in the world, which is a different timeline from when you wrote it. Set them when a record covers a period other than "from now on". Superseding closes the previous record's window for you, and `memory_search` with `as_of` answers what was true at a past moment.
+
+Call `memory_pinned` once at the start of a session. It returns the standing rules for your scopes — loaded rather than searched for, because a constraint that has to win a search can be missed. Treat what it returns as applying to everything you do, not just the current task. Search results carry `days_since_confirmed`. Treat a fact nobody has confirmed in months as a lead rather than as current truth: check it, then call `memory_confirm` to mark it verified as of today, or supersede it if it has changed. Call `memory_feedback` when a recalled record clearly did or did not help — that is what ranks memory by what actually works instead of by what its author claimed. If something you learned should apply to every session in the scope rather than only this task, call `memory_pin` to request it; an operator decides, because standing context reaches every agent in the scope."""
+
+MEMORY_DISCIPLINE_GUIDANCE = """One memory per insight, not per occurrence: when a recurring task (heartbeat, monitor tick, scheduled review, watchdog retry) keeps producing the same finding, write ONE record the first time and supersede it if the situation changes — never a new record per tick, per fire, or per re-check. Per-occurrence status belongs in `activity_update` (`task_note`/`task_result`) or the source system, not in memory. To find what has already been done — "what did we do on X", "has this been tried" — search the activity trail with `activity_search` rather than memory; memory is for what stays true, the trail is for what happened. Before writing a `fact` or `decision`, search for an existing record on the same topic and supersede it (`supersedes_id`) instead of adding a near-duplicate. For notes that stop being true on their own (for example "service X is down right now"), use `scratchpad` or set `expires_at`."""
 
 
 # ─── INTEGRATIONS ─────────────────────────────────────────────────────────────
@@ -438,11 +474,18 @@ async def generate_agent_connection(
             400,
         )
 
-    api_key = agent_service.rotate_agent_key(agent["id"])
-    if not api_key:
-        return error_response(
-            "AGENT_INACTIVE", "Cannot rotate key for inactive agent", 400
-        )
+    # Only rotate when the output actually carries a key. Rotating is
+    # destructive — it invalidates the key any running session is using — and it
+    # was happening for every output type, including AGENTS.md, which contains
+    # no agent-specific content at all. Generating a repo instruction file must
+    # not knock a working agent offline.
+    api_key = None
+    if body.output_type in KEY_BEARING_OUTPUTS:
+        api_key = agent_service.rotate_agent_key(agent["id"])
+        if not api_key:
+            return error_response(
+                "AGENT_INACTIVE", "Cannot rotate key for inactive agent", 400
+            )
 
     output_label, output = _build_agent_setup_output(
         user=user,
@@ -457,7 +500,7 @@ async def generate_agent_connection(
     audit_service.write_event(
         actor_type="user",
         actor_id=session["user_id"],
-        action="agent_key_rotated",
+        action="agent_key_rotated" if api_key else "integration_output_generated",
         resource_type="agent",
         resource_id=agent["id"],
         result="success",
@@ -643,7 +686,10 @@ async def integrations_page(
             f"<pre class='output-block'>{escape_html(generated_output)}</pre>"
         )
         copy_btn = "<button type='button' class='btn btn-sm btn-secondary' onclick=\"copyGeneratedOutput(this)\">Copy</button>"
-        download_btn = f"<button type='button' class='btn btn-sm btn-secondary' onclick=\"downloadCurrentOutput('{escape_html(filename)}')\">Download</button>"
+        download_btn = (
+            f"<button type='button' class='btn btn-sm btn-secondary'"
+            f" data-download-filename='{escape_html(filename)}'>Download</button>"
+        )
         regenerate_btn = (
             "<button type='submit' class='btn btn-sm btn-secondary'>Regenerate</button>"
         )
@@ -715,6 +761,7 @@ async def integrations_page(
               <option value="">-- Select agent --</option>
               {agent_options}
             </select>
+            <p class="form-hint">Identifies which agent connects. Changing this selection only re-renders the preview below — nothing is issued until you press the amber <strong>Generate connection</strong> button, which mints a fresh API key for the selected agent and invalidates the previous one. That button appears only for the outputs that embed a key (MCP Config, Environment Variables, Assistants). CLAUDE.md, AGENTS.md, Instructions and the prompts are repository-level guidance — identical for every agent, and safe to regenerate at any time.</p>
           </div>
         </div>
       </div>
@@ -762,6 +809,14 @@ def _agent_setup_extra_js():
         "</script>"
     )
     return constants + '<script src="/static/js/integrations.js?v=20260626"></script>'
+
+
+# Outputs that embed the agent's API key, and therefore require rotating it.
+# Everything else — the repo instruction files and the prompts — is guidance
+# that carries no credential.
+KEY_BEARING_OUTPUTS = frozenset(
+    {"env", "mcp_json", "cursor_mcp_json", "windsurf_mcp_json", "assistants_md"}
+)
 
 
 def _build_agent_setup_output(
@@ -915,7 +970,7 @@ def _build_instructions(
 
 - The MCP endpoint is `{base_url}/mcp`. Your client should send requests as JSON with `{{"tool": "...", "params": {{...}}}}`.
 - Authenticate using `Authorization: Bearer ${ENV_PREFIX}API_KEY` header or your client's equivalent auth mechanism.
-- Available tools include: `memory_search`, `memory_get`, `memory_write`, `memory_retract`, `credential_get`, `credential_list`, `activity_update`, `activity_list`, `get_briefing`, `briefing_list`, `connectors_list`, `connectors_summary`, `connectors_bindings_list`, `connectors_bindings_test`, `connectors_actions_list`, and `connectors_run`.
+- Available tools include: `memory_search`, `memory_get`, `memory_pinned`, `memory_write`, `memory_confirm`, `memory_feedback`, `memory_retract`, `credential_get`, `credential_list`, `activity_update`, `activity_search`, `activity_list`, `get_briefing`, `briefing_list`, `connectors_list`, `connectors_summary`, `connectors_bindings_list`, `connectors_bindings_test`, `connectors_actions_list`, and `connectors_run`.
 """
 
     return f"""# {APP_NAME} Setup Instructions
@@ -943,13 +998,9 @@ You are connected to {APP_NAME}.
 
 ## Memory Write Rules
 
-- Choose `decision` for durable choices and rationale.
-- Choose `fact` for objective workspace state or implementation details.
-- Choose `preference` for stable user or team preferences.
-- Choose `scratchpad` only for temporary notes.
+{MEMORY_CLASS_GUIDANCE}
 - Use `{workspace_scope_label}` for workspace memory when a workspace is selected, `{user_scope}` for stable user preferences, and `{agent_scope}` for private scratch context.
-- Domain and topic are optional exact-match search filters. Add them only when they will help future retrieval.
-- Confidence is caller-assigned and can be filtered by search; importance affects result ranking.
+- `topic` is a short label for listings. `confidence` is caller-assigned and not used for ranking: ranking uses observed evidence (recall, feedback, confirmation age), not self-assessment.
 - {MEMORY_DISCIPLINE_GUIDANCE}
 
 ## Credentials And Connectors
@@ -1059,12 +1110,14 @@ def _build_session_prompt(
 
 Use {APP_NAME} MCP for durable workspace memory, handoffs, and workspace context. If this is a handoff, resume, or review of prior work, also inspect the recent activity trail and any generated briefing before making changes. Use `activity_list` and `briefing_list` when you need that trail from MCP.
 Default memory scope for this setup is `{default_scope}`.
-Core MCP tools include `memory_search`, `memory_get`, `memory_write`, `memory_retract`, `credential_get`, `credential_list`, `activity_update`, `activity_list`, `get_briefing`, `briefing_list`, `connectors_list`, `connectors_summary`, `connectors_bindings_list`, `connectors_bindings_test`, `connectors_actions_list`, and `connectors_run`.
+Core MCP tools include `memory_search`, `memory_get`, `memory_pinned`, `memory_write`, `memory_confirm`, `memory_feedback`, `memory_verify`, `memory_reanchor`, `memory_pin`, `memory_move`, `memory_retract`, `credential_get`, `credential_list`, `activity_update`, `activity_search`, `activity_list`, `activity_get`, `activity_pickup`, `get_briefing`, `briefing_list`, `connectors_list`, `connectors_summary`, `connectors_bindings_list`, `connectors_bindings_test`, `connectors_actions_list`, and `connectors_run`.
 Use your private scope `{agent_scope}` only for tool-specific scratch context.
 Use full prefixed scope names exactly as shown; do not use plain workspace IDs or agent IDs as memory scopes.
 Read `{user_scope}` for stable {user_display} preferences and other owner-context details when you have user-scope read access.
 Use credential references through {APP_NAME} MCP; never request or print raw secrets.
-Activity records are operational task tracking, not durable memory. At the start of every non-trivial user task, immediately call `activity_update` with a concise `task_description`, `memory_scope` set to `{default_scope}`, and `status` set to `active`. If the session reloads, a handoff begins, or no active activity exists yet, open a fresh activity first with `status: active` before attempting to close it. While actively working, use `task_note` for short progress updates and call `activity_update` again every 1-2 minutes as a heartbeat. Before your final response, call `activity_update` with `status: completed` and a short `task_result` summary when the task is complete, or `status: blocked` if you cannot proceed and need user input.
+Activity records are operational task tracking, not durable memory. At the start of every non-trivial user task, immediately call `activity_update` with a concise `task_description`, `memory_scope` set to `{default_scope}`, and `status` set to `active`. When you are starting fresh or have gone idle, call `activity_pickup` to claim work a human assigned to you in your scopes. It returns nothing when nothing is waiting; work is pulled, never pushed, so an agent that never asks never sees it.
+
+If the session reloads, a handoff begins, or no active activity exists yet, open a fresh activity first with `status: active` before attempting to close it. While actively working, use `task_note` for short progress updates and call `activity_update` again every 1-2 minutes as a heartbeat. Before your final response, call `activity_update` with `status: completed` and a short `task_result` summary when the task is complete, or `status: blocked` if you cannot proceed and need user input.
 If the session has to stop early or hits a token limit, leave the activity current and write durable decisions or handoff notes to memory so another agent can continue from the saved state.
 If work needs to move across users or workspaces, make that explicit in the activity scope and handoff notes rather than assuming a hidden policy layer.
 If the client has hooks or plugins, use them to automate memory/activity capture; if it does not, treat this prompt as the source of truth for those expectations.
@@ -1081,13 +1134,15 @@ At the start of a meaningful task:
 
 Write memory only when it will help a future session:
 
-- `decision` in `{default_scope}` for durable choices, tradeoffs, rejected options, and why they were chosen.
-- `fact` in `{default_scope}` for stable implementation facts, integration details, constraints, and verified behavior.
+- `decision` in `{default_scope}` for durable choices, tradeoffs, rejected options, and why they were chosen — things only a person can revise.
+- `fact` in `{default_scope}` for observations someone could re-check later: implementation details, integration details, constraints, and verified behavior.
 - `preference` in the authenticated/default user scope only if your key has user-scope write; otherwise treat the user scope as read-only owner context and write the preference to `{default_scope}` instead.
 - `scratchpad` in `{agent_scope}` for temporary private notes, or in `{default_scope}` only for short-lived workspace handoff notes.
 
+{MEMORY_RECORD_GUIDANCE}
+
 Do not write memory for routine progress, command output, facts already obvious from files, secrets, raw credentials, or noisy transient debugging notes.
-{MEMORY_DISCIPLINE_GUIDANCE} Use concise content, add domain/topic when useful for exact filtering, set confidence to match certainty, and set importance higher only for information likely to matter later.
+{MEMORY_DISCIPLINE_GUIDANCE} Use concise content and add a short `topic` as a label. Ranking uses observed evidence — how often a record is recalled, whether it helped, and when it was last confirmed — not self-assessment, so do not spend effort tuning `confidence` or `importance`.
 Use this prompt to bootstrap behavior in clients without lifecycle hooks; it is not a substitute for a configured MCP server or plugin.
 
 Start by confirming you can reach {APP_NAME} at {base_url}/mcp, then search `{default_scope}` for relevant context before making changes.
@@ -1108,7 +1163,7 @@ def _build_claude_md(
 You are working on the {workspace_name} workspace.
 
 Use {APP_NAME} for durable workspace memory, activity tracking, handoffs, and credential references. If this is a handoff, resume, or review of prior work, also inspect the recent activity trail and any generated briefing before making changes. Use `activity_list` and `briefing_list` when you need that trail from MCP.
-Core MCP tools include `memory_search`, `memory_get`, `memory_write`, `memory_retract`, `credential_get`, `credential_list`, `activity_update`, `activity_list`, `get_briefing`, `briefing_list`, `connectors_list`, `connectors_summary`, `connectors_bindings_list`, `connectors_bindings_test`, `connectors_actions_list`, and `connectors_run`.
+Core MCP tools include `memory_search`, `memory_get`, `memory_pinned`, `memory_write`, `memory_confirm`, `memory_feedback`, `memory_verify`, `memory_reanchor`, `memory_pin`, `memory_move`, `memory_retract`, `credential_get`, `credential_list`, `activity_update`, `activity_search`, `activity_list`, `activity_get`, `activity_pickup`, `get_briefing`, `briefing_list`, `connectors_list`, `connectors_summary`, `connectors_bindings_list`, `connectors_bindings_test`, `connectors_actions_list`, and `connectors_run`.
 
 ## Connection
 
@@ -1135,15 +1190,17 @@ At the start of a meaningful task:
 
 Write memory only when it will help a future session:
 
-- `decision` in `{default_scope}` for durable choices, tradeoffs, rejected options, and why they were chosen.
-- `fact` in `{default_scope}` for stable implementation facts, integration details, constraints, and verified behavior.
+- `decision` in `{default_scope}` for durable choices, tradeoffs, rejected options, and why they were chosen — things only a person can revise.
+- `fact` in `{default_scope}` for observations someone could re-check later: implementation details, integration details, constraints, and verified behavior.
 - `preference` in the authenticated/default user scope only if your key has user-scope write; otherwise treat the user scope as read-only owner context and write the preference to `{default_scope}` instead.
 - `scratchpad` in the authenticated private agent scope for temporary private notes, or in `{default_scope}` only for short-lived workspace handoff notes.
+
+{MEMORY_RECORD_GUIDANCE}
 
 Do not write memory for routine progress, command output, facts already obvious from files, secrets, raw credentials, or noisy transient debugging notes.
 {MEMORY_DISCIPLINE_GUIDANCE}
 
-Keep memory content concise. Add domain/topic when useful for exact filtering. Set confidence to match certainty. Set importance higher only for information likely to matter later.
+Keep memory content concise. Add a short `topic` as a label. Do not bother tuning `confidence` — ranking ignores it; what matters is the class, the anchor, and confirming a fact when you have actually checked it.
 
 ## Credentials
 
@@ -1177,6 +1234,8 @@ When the task is a handoff, resume, or review of prior work, inspect the recent 
 Use `activity_list` and `briefing_list` when you need to inspect that trail from MCP instead of the dashboard.
 
 While actively working, call `activity_update` again every 1-2 minutes as a heartbeat. Use `task_note` for interim progress updates and update `task_description` if the task changes materially.
+
+When you are starting fresh or have gone idle, call `activity_pickup` to claim work a human assigned to you in your scopes. It returns nothing when nothing is waiting; work is pulled, never pushed, so an agent that never asks never sees it.
 
 If the session reloads, a handoff begins, or no active activity exists yet, open a fresh activity first with `status: active` before attempting to close it. Before your final response, call `activity_update` with `status: completed` and a short `task_result` summary when the task is complete. Use `task_note` for in-flight updates. Use `status: blocked` if you cannot proceed and need user input. Do not create activity records for trivial one-shot answers that do not inspect or modify project state.
 If the session has to stop early or hits a token limit, leave the activity current and write durable decisions or handoff notes to memory so another agent can continue from the saved state.
@@ -1238,6 +1297,8 @@ Use `activity_list` and `briefing_list` when you need to inspect that trail from
 
 While actively working, call `activity_update` again every 1-2 minutes as a heartbeat. Use `task_note` for interim progress updates and update `task_description` if the task changes materially.
 
+When you are starting fresh or have gone idle, call `activity_pickup` to claim work a human assigned to you in your scopes. It returns nothing when nothing is waiting; work is pulled, never pushed, so an agent that never asks never sees it.
+
 If the session reloads, a handoff begins, or no active activity exists yet, open a fresh activity first with `status: active` before attempting to close it. Before your final response, call `activity_update` with `status: completed` and a short `task_result` summary when the task is complete. Use `task_note` for in-flight updates. Use `status: blocked` if you cannot proceed and need user input. Do not create activity records for trivial one-shot answers that do not inspect or modify project state.
 If the session has to stop early or hits a token limit, leave the activity current and write durable decisions or handoff notes to memory so another agent can continue from the saved state.
 If work needs to move across users or workspaces, make that explicit in the activity scope and handoff notes rather than assuming a hidden policy layer.
@@ -1256,15 +1317,17 @@ At the start of a meaningful task:
 
 Write memory only when it will help a future session:
 
-- `decision` in `{default_scope}` for durable choices, tradeoffs, rejected options, and why they were chosen.
-- `fact` in `{default_scope}` for stable implementation facts, integration details, constraints, and verified behavior.
+- `decision` in `{default_scope}` for durable choices, tradeoffs, rejected options, and why they were chosen — things only a person can revise.
+- `fact` in `{default_scope}` for observations someone could re-check later: implementation details, integration details, constraints, and verified behavior.
 - `preference` in the authenticated/default user scope only if your key has user-scope write; otherwise treat the user scope as read-only owner context and write the preference to `{default_scope}` instead.
 - `scratchpad` in the authenticated private agent scope for temporary private notes, or in `{default_scope}` only for short-lived workspace handoff notes.
+
+{MEMORY_RECORD_GUIDANCE}
 
 Do not write memory for routine progress, command output, facts already obvious from files, secrets, raw credentials, or noisy transient debugging notes.
 {MEMORY_DISCIPLINE_GUIDANCE}
 
-Keep memory content concise. Add domain/topic when useful for exact filtering. Set confidence to match certainty. Set importance higher only for information likely to matter later.
+Keep memory content concise. Add a short `topic` as a label. Do not bother tuning `confidence` — ranking ignores it; what matters is the class, the anchor, and confirming a fact when you have actually checked it.
 
 ## Credentials And Connectors
 
@@ -1389,6 +1452,8 @@ At the start of every meaningful task, call `activity_update` immediately with:
 
 While actively working, call `activity_update` again every 1-2 minutes as a heartbeat. Use `task_note` for interim progress updates and update `task_description` if the task changes materially.
 
+When you are starting fresh or have gone idle, call `activity_pickup` to claim work a human assigned to you in your scopes. It returns nothing when nothing is waiting; work is pulled, never pushed, so an agent that never asks never sees it.
+
 If the session reloads, a handoff begins, or no active activity exists yet, open a fresh activity first with `status: active` before attempting to close it. Before your final response, call `activity_update` with `status: completed` and a short `task_result` summary when the task is complete. Use `task_note` for in-flight updates. Use `status: blocked` if you cannot proceed and need user input.
 
 At the start of a meaningful task:
@@ -1404,6 +1469,8 @@ Write memory only when it will help a future session:
 - `fact` in {durable_label} for stable implementation facts, integration details, constraints, and verified behavior.
 - `preference` in `{user_scope}` only if your key has user-scope write; otherwise write it to {durable_label}. Preferences support `slot_key` to keep one active value per slot (`slot_key` is valid for the `preference` class only).
 - `scratchpad` in your agent scope `{agent_scope}` for temporary private notes.
+
+{MEMORY_RECORD_GUIDANCE}
 - To revise a `fact` or `decision`, write the new record with `supersedes_id` set to the prior record's id; reserve `memory_retract` for records that are simply wrong.
 
 Do not write memory for routine progress, command output, facts already obvious from files, secrets, raw credentials, or noisy transient debugging notes.
@@ -1585,13 +1652,15 @@ def _build_verification_prompt(user_scope, workspace_scope):
 1. Call `activity_update` with `task_description` set to "{APP_NAME} verification", `memory_scope` set to `{workspace_scope}`, and `status` set to `active`.
 2. Write a memory record to `{workspace_scope}` that says this agent is connected, includes the current verification context, and is safe to use for this workspace. Capture the returned record id.
 3. Call `memory_get` for that record id and confirm the record is readable from the workspace scope.
-4. Call `memory_search` in `{workspace_scope}` for an exact token from the record you just wrote and report the result. If the first search returns zero results, retry once with the exact token plus the `domain` and `topic` from the record.
-5. Call `credential_list` and report whether credential references are visible. Do not reveal or print raw secrets.
-6. Call `connectors_summary` to list visible connector capability and binding health. Then call `connectors_bindings_list` with no scope to see everything visible to this agent. If you can read `{user_scope}`, call `connectors_bindings_list` again with `scope` set to `{user_scope}`. If you can read `{workspace_scope}`, call `connectors_bindings_list` again with `scope` set to `{workspace_scope}`. Report user-scoped and workspace-scoped bindings separately if both exist.
-7. Call `connectors_actions_list` with a real connector type id from the `connectors_list` result and pass it as `connector_type_id` exactly. Report whether connector actions are visible.
-8. If at least one enabled binding is visible in any scope, call `connectors_bindings_test` on a non-destructive binding and report the result. If none are visible, say that clearly.
-9. Use `task_note` for intermediate verification updates and call `activity_update` with `status` set to `completed` and include a short `task_result` summary of the verification outcome. If the session reloads or no active activity exists yet, first open the fresh verification activity with `status: active` before closing it.
-10. Report which scope you wrote to and summarize the memory, credential, and connector checks.
+4. Call `memory_search` in `{workspace_scope}` for an exact token from the record you just wrote and report the result. If the first search returns zero results, retry once with the exact token plus the `topic` from the record.
+5. Call `memory_pinned` and report how many standing-context records came back — zero is a correct answer on a fresh install. This is the call you make at the start of every session, so it is worth proving it works now.
+6. Call `activity_search` for a word from your own task description and confirm this session's activity comes back — that proves the trail other agents read is being written.
+7. Call `credential_list` and report whether credential references are visible. Do not reveal or print raw secrets.
+8. Call `connectors_summary` to list visible connector capability and binding health. Then call `connectors_bindings_list` with no scope to see everything visible to this agent. If you can read `{user_scope}`, call `connectors_bindings_list` again with `scope` set to `{user_scope}`. If you can read `{workspace_scope}`, call `connectors_bindings_list` again with `scope` set to `{workspace_scope}`. Report user-scoped and workspace-scoped bindings separately if both exist.
+9. Call `connectors_actions_list` with a real connector type id from the `connectors_list` result and pass it as `connector_type_id` exactly. Report whether connector actions are visible.
+10. If at least one enabled binding is visible in any scope, call `connectors_bindings_test` on a non-destructive binding and report the result. If none are visible, say that clearly.
+11. Use `task_note` for intermediate verification updates and call `activity_update` with `status` set to `completed` and include a short `task_result` summary of the verification outcome. If the session reloads or no active activity exists yet, first open the fresh verification activity with `status: active` before closing it.
+12. Report which scope you wrote to and summarize the memory, credential, and connector checks.
 
 Use the full prefixed scope name exactly as shown. Do not use a plain workspace ID as a memory scope.
 """

@@ -851,6 +851,19 @@ async function uninstallAdapter(btn, adapterId) {
 
 let actionsState = { ctId: null, offset: 0, all: [] };
 
+// The connector name is operator- or import-supplied, so it is read from data
+// attributes instead of being interpolated into an inline handler.
+document.addEventListener('click', function(ev) {
+  const btn = ev.target.closest('[data-actions-type-id]');
+  if (!btn) return;
+  ev.preventDefault();
+  viewActions(
+    btn.dataset.actionsTypeId,
+    btn.dataset.actionsName || '',
+    Number(btn.dataset.actionsCount || 0)
+  );
+});
+
 async function viewActions(ctId, displayName, totalCount) {
   actionsState = { ctId: ctId, offset: 0, all: [] };
   const title = document.getElementById('view-actions-title');
@@ -968,3 +981,34 @@ window[window.AGENT_CORE_WINDOW_EVENT || "onAgentCoreEvent"] = function(event) {
     if (el) el.remove();
   }, 4000);
 };
+
+
+// Row actions carry their id as data. Interpolating it into an inline handler
+// puts a value into JavaScript source, where HTML escaping does not protect it:
+// entities are decoded before the handler is parsed.
+document.addEventListener('click', function(ev) {
+  const install = ev.target.closest('[data-adapter-install]');
+  if (install) { ev.preventDefault(); installAdapter(install, install.dataset.adapterInstall); return; }
+  const update = ev.target.closest('[data-adapter-update]');
+  if (update) { ev.preventDefault(); updateAdapter(update, update.dataset.adapterUpdate); return; }
+  const uninstall = ev.target.closest('[data-adapter-uninstall]');
+  if (uninstall) { ev.preventDefault(); uninstallAdapter(uninstall, uninstall.dataset.adapterUninstall); return; }
+  const oauth = ev.target.closest('[data-binding-oauth]');
+  if (oauth) { ev.preventDefault(); authorizeBindingOAuth(oauth.dataset.bindingOauth); return; }
+  const edit = ev.target.closest('[data-binding-edit]');
+  if (edit) { ev.preventDefault(); editBinding(edit.dataset.bindingEdit); return; }
+  const history = ev.target.closest('[data-binding-history]');
+  if (history) { ev.preventDefault(); viewExecutions(history.dataset.bindingHistory); return; }
+  const test = ev.target.closest('[data-binding-test]');
+  if (test) { ev.preventDefault(); testBinding(test.dataset.bindingTest); return; }
+  const del = ev.target.closest('[data-binding-delete]');
+  if (del) { ev.preventDefault(); deleteBinding(del.dataset.bindingDelete); return; }
+  const newBinding = ev.target.closest('[data-newbinding-type-id]');
+  if (newBinding) {
+    ev.preventDefault();
+    openNewBinding(newBinding.dataset.newbindingTypeId, newBinding.dataset.newbindingName || '');
+    return;
+  }
+  const typeDelete = ev.target.closest('[data-connector-type-delete]');
+  if (typeDelete) { ev.preventDefault(); deleteConnectorType(typeDelete.dataset.connectorTypeDelete); }
+});

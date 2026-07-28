@@ -44,6 +44,21 @@ def delete_scope_data(conn: sqlite3.Connection, scope: str) -> dict:
     memory_deleted = conn.execute(
         "DELETE FROM memory_records WHERE scope = ?", (scope,)
     ).rowcount
+
+    # connector_bindings.credential_id references credentials(id), and foreign
+    # keys are enforced. Deleting a scope's credentials while a binding still
+    # points at one raises IntegrityError and aborts the whole purge — so the
+    # bindings that depend on them go first. A binding whose credential is gone
+    # could not authenticate anyway; leaving it behind would only produce a
+    # connector that fails at the moment someone relies on it.
+    bindings_deleted = conn.execute(
+        """
+        DELETE FROM connector_bindings
+        WHERE scope = ?
+           OR credential_id IN (SELECT id FROM credentials WHERE scope = ?)
+        """,
+        (scope, scope),
+    ).rowcount
     credentials_deleted = conn.execute(
         "DELETE FROM credentials WHERE scope = ?", (scope,)
     ).rowcount
@@ -56,6 +71,7 @@ def delete_scope_data(conn: sqlite3.Connection, scope: str) -> dict:
     return {
         "memory_records_deleted": memory_deleted,
         "credentials_deleted": credentials_deleted,
+        "connector_bindings_deleted": bindings_deleted,
         "activities_unlinked": activities_unlinked,
         "agents_updated": agents_updated,
     }

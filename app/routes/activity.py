@@ -3,8 +3,6 @@ from pydantic import BaseModel
 from typing import Optional
 
 from app.services import activity_service, audit_service, briefing_service
-from app.services.event_stream_service import event_hub
-from app.services import webhook_service
 from app.security.dependencies import get_request_context
 from app.security.context import RequestContext
 from app.security.scope_enforcer import ScopeEnforcer
@@ -42,43 +40,6 @@ def _can_modify_activity(ctx: RequestContext, activity: dict) -> bool:
         return activity.get("assigned_agent_id") == ctx.agent_id
     return activity.get("agent_id") == ctx.agent_id and ctx.actor_type == "user"
 
-
-def _activity_audit_details(activity: dict, **extra) -> dict:
-    details = {
-        "activity_id": activity.get("id"),
-        "task_description": activity.get("task_description"),
-        "memory_scope": activity.get("memory_scope"),
-        "agent_id": activity.get("agent_id"),
-    }
-    if activity.get("task_result") is not None:
-        details["task_result"] = activity.get("task_result")
-    if activity.get("task_note") is not None:
-        details["task_note"] = activity.get("task_note")
-    assigned_agent_id = activity.get("assigned_agent_id")
-    if assigned_agent_id:
-        details["assigned_agent_id"] = assigned_agent_id
-    details.update({k: v for k, v in extra.items() if v is not None})
-    return details
-
-
-def _activity_event_data(activity: dict, **extra) -> dict:
-    event_data = {
-        "activity_id": activity.get("id"),
-        "task_description": activity.get("task_description"),
-        "task_note": activity.get("task_note"),
-        "task_result": activity.get("task_result"),
-        "agent_id": activity.get("agent_id"),
-        "assigned_agent_id": activity.get("assigned_agent_id"),
-        "user_id": activity.get("user_id"),
-        "memory_scope": activity.get("memory_scope"),
-        "status": activity.get("status"),
-        "started_at": activity.get("started_at"),
-        "updated_at": activity.get("updated_at"),
-        "heartbeat_at": activity.get("heartbeat_at"),
-        "ended_at": activity.get("ended_at"),
-    }
-    event_data.update({k: v for k, v in extra.items() if v is not None})
-    return event_data
 
 
 @router.post("")
@@ -123,15 +84,13 @@ async def create_activity(
         resource_type="activity",
         resource_id=activity["id"],
         result="success",
-        details=_activity_audit_details(
+        details=activity_service.audit_details(
             activity,
             new_status=activity["status"],
             action="create",
         ),
     )
-    _event_data = _activity_event_data(activity)
-    event_hub.publish("activity_created", _event_data)
-    webhook_service.dispatch_event("activity_created", _event_data)
+    activity_service.notify("activity_created", activity)
 
     return success_response({"activity": activity}, status_code=201)
 
@@ -162,7 +121,7 @@ async def pickup_activity(
             resource_type="activity",
             resource_id=activity["id"],
             result="success",
-            details=_activity_audit_details(activity, action="pickup"),
+            details=activity_service.audit_details(activity, action="pickup"),
         )
 
     return success_response(
@@ -171,6 +130,60 @@ async def pickup_activity(
             "message": None if activity else "No assigned work found for this agent in authorized scopes",
         }
     )
+
+
+# Declared before /{activity_id} so "search" is not captured as an activity id.
+@router.get("/search")
+async def search_activities(
+    query: str,
+    agent_id: Optional[str] = None,
+    memory_scope: Optional[str] = None,
+    status: Optional[str] = None,
+    since: Optional[str] = None,
+    limit: int = 20,
+    offset: int = 0,
+    ctx: RequestContext = Depends(get_request_context),
+):
+    """Full-text search the activity trail.
+
+    Visibility is scope-based rather than caller-locked (unlike GET /api/activity,
+    which narrows an agent caller to its own rows): the point of searching the
+    trail is that one agent can find what another already did in a workspace they
+    both read. Rows outside the caller's readable scopes are dropped.
+    """
+    enforcer = ScopeEnforcer(
+        ctx.read_scopes,
+        ctx.write_scopes,
+        ctx.agent_id,
+        is_admin=ctx.is_admin,
+        active_workspace_ids=ctx.active_workspace_ids,
+    )
+
+    capped_limit = min(max(limit, 0), 100)
+    safe_offset = max(offset, 0)
+    fetch_limit = min(max((capped_limit + safe_offset) * 3, 50), 300)
+
+    raw_activities = activity_service.search_activities(
+        query,
+        user_id=ctx.user_id if ctx.actor_type == "user" and not ctx.is_admin else None,
+        agent_id=agent_id,
+        status=status,
+        memory_scope=memory_scope,
+        since=since,
+        limit=fetch_limit,
+        offset=0,
+    )
+
+    activities = []
+    for activity in raw_activities:
+        scope = activity.get("memory_scope") or f"agent:{activity['agent_id']}"
+        if not ctx.is_admin and not enforcer.can_read(scope):
+            continue
+        activities.append(activity)
+
+    activities = activities[safe_offset : safe_offset + capped_limit]
+
+    return success_response({"activities": activities, "total": len(activities)})
 
 
 @router.get("/{activity_id}")
@@ -229,16 +242,16 @@ async def update_activity(
         resource_type="activity",
         resource_id=activity_id,
         result="success",
-        details=_activity_audit_details(
+        details=activity_service.audit_details(
             updated,
             previous_status=activity["status"],
             new_status=body.status or activity["status"],
             action="update",
         ),
     )
-    _event_data = _activity_event_data(updated, previous_status=activity["status"])
-    event_hub.publish("activity_updated", _event_data)
-    webhook_service.dispatch_event("activity_updated", _event_data)
+    activity_service.notify(
+        "activity_updated", updated, previous_status=activity["status"]
+    )
 
     return success_response({"activity": updated})
 
@@ -271,15 +284,13 @@ async def heartbeat_activity(
         resource_type="activity",
         resource_id=activity_id,
         result="success",
-        details=_activity_audit_details(
+        details=activity_service.audit_details(
             activity,
             action="heartbeat",
             current_status=activity["status"],
         ),
     )
-    _event_data = _activity_event_data(activity)
-    event_hub.publish("activity_heartbeat", _event_data)
-    webhook_service.dispatch_event("activity_heartbeat", _event_data)
+    activity_service.notify("activity_heartbeat", activity)
 
     return success_response({"activity": activity_service.get_activity(activity_id)})
 
@@ -356,16 +367,16 @@ async def cancel_activity(
         resource_type="activity",
         resource_id=activity_id,
         result="success",
-        details=_activity_audit_details(
+        details=activity_service.audit_details(
             activity,
             action="cancel",
             previous_status=activity["status"],
         ),
     )
     updated = activity_service.get_activity(activity_id) or activity
-    _event_data = _activity_event_data(updated, previous_status=activity.get("status"))
-    event_hub.publish("activity_cancelled", _event_data)
-    webhook_service.dispatch_event("activity_cancelled", _event_data)
+    activity_service.notify(
+        "activity_cancelled", updated, previous_status=activity.get("status")
+    )
 
     return success_response({"message": "Activity cancelled"})
 
@@ -477,8 +488,8 @@ async def recover_activity(
         details={"action": body.action, "result": result_data},
     )
     recovered = activity_service.get_activity(activity_id) or activity
-    _event_data = _activity_event_data(recovered, recovery_action=body.action, result=result_data)
-    event_hub.publish("activity_recovered", _event_data)
-    webhook_service.dispatch_event("activity_recovered", _event_data)
+    activity_service.notify(
+        "activity_recovered", recovered, recovery_action=body.action, result=result_data
+    )
 
     return success_response(result_data)

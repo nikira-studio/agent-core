@@ -10,7 +10,6 @@ def _write(scope, content="movable content", topic="move-topic", cls="fact"):
         content=content,
         memory_class=cls,
         scope=scope,
-        domain="d",
         topic=topic,
         confidence=0.8,
         importance=0.6,
