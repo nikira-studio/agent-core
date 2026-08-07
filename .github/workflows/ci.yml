@@ -7,11 +7,19 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 3.11 is what the Docker image ships (see Dockerfile), so it is the
+        # version that must pass. 3.12 runs alongside it as forward-compatibility
+        # signal; drop it if the extra CI time stops being worth it.
+        python-version: ["3.11", "3.12"]
+    name: test (python ${{ matrix.python-version }})
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: ${{ matrix.python-version }}
           cache: pip
       - run: pip install -r requirements.txt
       - run: pytest -q

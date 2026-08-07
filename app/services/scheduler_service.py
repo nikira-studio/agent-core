@@ -24,9 +24,10 @@ async def _run_once() -> None:
     transient DB lock) must not kill the loop for the rest of the process
     lifetime; it just retries on the next interval.
 
-    Production runs multiple uvicorn worker processes (see Dockerfile), each
-    with its own independent copy of this scheduler. try_acquire_maintenance_lock
-    ensures only one worker actually runs the sweep per tick; the rest skip
+    The supported deployment is a single worker (see Dockerfile), but an
+    operator can raise AGENT_CORE_WORKERS, and every process would then start
+    its own copy of this scheduler. try_acquire_maintenance_lock takes a lease
+    in the database so only one of them runs the sweep per tick; the rest skip
     silently rather than doing redundant (if harmless) work.
     """
     from app.services import backup_service

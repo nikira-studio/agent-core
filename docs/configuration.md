@@ -199,6 +199,22 @@ volumes:
   agent-core-data:
 ```
 
+### Workers
+
+Agent Core runs as **a single process**, and that is the supported configuration. `AGENT_CORE_WORKERS` defaults to `1`.
+
+Some state is held per process rather than in the database, on purpose — it is the kind of state that would cost more to coordinate than it saves:
+
+| State | What a second worker does to it |
+| --- | --- |
+| Rate-limit buckets | Each process keeps its own, so the effective limit is multiplied by the worker count — including the login throttle |
+| Concurrent-search guard | Same: the cap applies per process, not per installation |
+| Dashboard event stream | A browser is connected to one process and never sees events published by another, so the live view goes quiet at random |
+
+The maintenance sweep is the exception: it takes a lease in the database, so only one process runs it per tick regardless of how many exist.
+
+You can raise `AGENT_CORE_WORKERS`, and nothing will crash — the effects above are quiet, not loud, which is exactly why the default is 1. A single process handles a local-first workload comfortably; horizontal scaling would need shared coordination that does not exist yet.
+
 ---
 
 ## Runtime Version

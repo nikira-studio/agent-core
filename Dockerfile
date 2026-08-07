@@ -23,4 +23,10 @@ EXPOSE 3500
 
 USER 1001:1001
 
-CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${AGENT_CORE_PORT:-3500} --workers ${AGENT_CORE_WORKERS:-4}"]
+# One worker by default, and that is the supported deployment. Several pieces of
+# state are per-process — rate-limit buckets, the concurrent-search guard, and
+# the dashboard's event stream — so a second worker silently multiplies the
+# configured limits and leaves a browser connected to one process unable to see
+# events published by another. Raising AGENT_CORE_WORKERS is possible and is the
+# operator's call, but it is not a supported configuration today.
+CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${AGENT_CORE_PORT:-3500} --workers ${AGENT_CORE_WORKERS:-1}"]
