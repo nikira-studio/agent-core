@@ -57,5 +57,3 @@ def get_connector(connector_type_id: str) -> Optional[BaseConnector]:
     if cls is None:
         return None
     return cls()
-
-

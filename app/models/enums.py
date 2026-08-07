@@ -48,4 +48,3 @@ ACTIVITY_STATUSES = (
 USER_ROLES = ("admin", "user")
 
 SCOPE_PREFIXES = ("user", "agent", "workspace", "shared", "system")
-

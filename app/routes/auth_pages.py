@@ -4,6 +4,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse
 
 from app.services.auth_service import count_users
+from app.branding import APP_NAME
 from app.routes.dashboard_shared import render_page
 
 router = APIRouter()
@@ -45,7 +46,7 @@ async def login_page(request: Request):
       else { showToast(j.error.message || 'Error', 'danger'); }
     }
     </script>
-    """,
+    """.replace("{APP_NAME}", APP_NAME),
             "",
             show_sidebar=False,
         )
