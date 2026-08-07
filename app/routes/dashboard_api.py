@@ -1,3 +1,4 @@
+import asyncio
 from fastapi import APIRouter, Depends
 
 from app.services import (
@@ -152,7 +153,7 @@ async def dashboard_activity_summary(session: dict = Depends(get_current_session
 
 @router.post("/broker/rotate")
 async def rotate_broker(session: dict = Depends(require_admin)):
-    new_credential = rotate_broker_credential()
+    new_credential = await asyncio.to_thread(rotate_broker_credential)
     return success_response(
         {
             "credential": new_credential,

@@ -1,5 +1,6 @@
 """Settings pages (general, password, OTP) and settings/prune/vector APIs."""
 
+import asyncio
 import httpx
 from urllib.parse import urlparse
 
@@ -428,7 +429,7 @@ async def test_review_model(session: dict = Depends(require_admin)):
     """
     from app.services import model_service
 
-    return success_response(model_service.validate())
+    return success_response(await asyncio.to_thread(model_service.validate))
 
 
 @router.post("/api/dashboard/vector-settings/test")
@@ -439,7 +440,7 @@ async def test_dashboard_vector_settings(
     from app.services import audit_service
     from app.routes.auth import get_client_ip
 
-    result = test_vector_connection()
+    result = await asyncio.to_thread(test_vector_connection)
     audit_service.write_event(
         actor_type="user",
         actor_id=session["user_id"],

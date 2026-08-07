@@ -1,3 +1,4 @@
+import asyncio
 import json
 
 from fastapi import APIRouter, Depends, Request
@@ -206,7 +207,7 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
     # Scan the adapter library once and reuse it for both the connector-type
     # filter and the per-type binding guidance (avoids a second full scan).
     available_adapters = {
-        entry["id"]: entry for entry in adapter_loader.list_available_adapters()
+        entry["id"]: entry for entry in await asyncio.to_thread(adapter_loader.list_available_adapters)
     }
     connector_types = connector_service.list_connector_types(
         available_adapters=available_adapters
@@ -880,7 +881,7 @@ async def connectors_adapters_page(
     session: dict = Depends(require_auth),
 ):
     ctx = build_user_context(session)
-    adapter_entries = adapter_loader.list_available_adapters()
+    adapter_entries = await asyncio.to_thread(adapter_loader.list_available_adapters)
     adapter_cards = _render_adapter_cards(adapter_entries, ctx)
 
     body = f"""

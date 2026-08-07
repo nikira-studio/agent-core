@@ -5,7 +5,6 @@ from app.services import credential_service
 from app.services import broker_service
 from app.services import audit_service
 from app.security.response_helpers import success_response, error_response
-from app.time_utils import parse_utc_datetime, utc_now
 
 
 router = APIRouter(prefix="/internal", tags=["internal"])
@@ -45,14 +44,12 @@ async def resolve_variable(
     if not entry:
         return error_response("NOT_FOUND", "Reference not found", 404)
 
-    if entry.get("expires_at"):
-        try:
-            if utc_now() > parse_utc_datetime(entry["expires_at"]):
-                return error_response(
-                    "CREDENTIAL_EXPIRED", "Credential has expired", 410
-                )
-        except ValueError:
-            pass
+    # Shared with resolve_reference so both paths agree, including on what an
+    # unreadable expiry means. This previously swallowed the parse error and
+    # carried on to hand out the secret — failing open on the one question the
+    # check exists to answer.
+    if credential_service.is_expired(entry):
+        return error_response("CREDENTIAL_EXPIRED", "Credential has expired", 410)
 
     enforcer = ScopeEnforcer(
         ctx.read_scopes,

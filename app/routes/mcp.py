@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 import re
@@ -891,7 +892,7 @@ async def _handle_custom_mcp_tool(body: dict, ctx: RequestContext):
                 ctx.default_recall_scopes or ctx.read_scopes
             )
         if not allowed:
-            embedding_status = embedding_service.safe_backend_status()
+            embedding_status = await asyncio.to_thread(embedding_service.safe_backend_status)
             return JSONResponse(
                 content={
                     "ok": True,
@@ -906,7 +907,8 @@ async def _handle_custom_mcp_tool(body: dict, ctx: RequestContext):
                 }
             )
         try:
-            records, mode = memory_service.search_memory(
+            records, mode = await asyncio.to_thread(
+                memory_service.search_memory,
                 query=query_text,
                 authorized_scopes=allowed,
                 topic=params.get("topic"),
@@ -927,7 +929,7 @@ async def _handle_custom_mcp_tool(body: dict, ctx: RequestContext):
         # is there for a caller that genuinely needs the lifecycle fields.
         if params.get("view") != "full":
             records = [memory_service.lean_record(r) for r in records]
-        embedding_status = embedding_service.safe_backend_status()
+        embedding_status = await asyncio.to_thread(embedding_service.safe_backend_status)
         audit_service.write_event(
             actor_type="agent",
             actor_id=ctx.agent_id,
@@ -1059,11 +1061,12 @@ async def _handle_custom_mcp_tool(body: dict, ctx: RequestContext):
                     403,
                 )
         try:
-            record, pii_flag = memory_service.write_memory(
+            record, pii_flag = await asyncio.to_thread(
+                memory_service.write_memory,
                 content=params["content"],
                 memory_class=params["memory_class"],
                 scope=scope,
-                    topic=params.get("topic"),
+                topic=params.get("topic"),
                 confidence=confidence,
                 importance=importance,
                 source_kind=source_kind,
@@ -1100,13 +1103,14 @@ async def _handle_custom_mcp_tool(body: dict, ctx: RequestContext):
         # Advisory only, and computed after the write so a slow embedding check
         # can never cost the caller its record.
         payload = {"record": record}
-        warnings = memory_service.assess_memory_write(
+        warnings = await asyncio.to_thread(
+            memory_service.assess_memory_write,
             content=params["content"],
             scope=scope,
             memory_class=params["memory_class"],
-                topic=params.get("topic"),
+            topic=params.get("topic"),
             exclude_id=record["id"],
-                subject_anchor=params.get("subject_anchor"),
+            subject_anchor=params.get("subject_anchor"),
         )
         if warnings:
             payload["warnings"] = warnings
@@ -1259,8 +1263,10 @@ async def _handle_custom_mcp_tool(body: dict, ctx: RequestContext):
             if not writable:
                 return _mcp_error("SCOPE_DENIED", "No writable scope to verify", 403)
 
-        result = verification_service.verify_scope(
-            scope=verify_scope, limit=min(int(params.get("limit", 50) or 50), 200)
+        result = await asyncio.to_thread(
+            verification_service.verify_scope,
+            scope=verify_scope,
+            limit=min(int(params.get("limit", 50) or 50), 200),
         )
         # Drop per-record detail for anything that passed: the interesting output
         # is what could not be confirmed.
@@ -1785,7 +1791,9 @@ async def _handle_custom_mcp_tool(body: dict, ctx: RequestContext):
             return _mcp_error("NOT_FOUND", "Binding not found", 404)
         if not enforcer.can_read(binding["scope"]):
             return _mcp_error("SCOPE_DENIED", "Access denied to this binding", 403)
-        result = connector_service.test_binding(params["binding_id"])
+        result = await asyncio.to_thread(
+            connector_service.test_binding, params["binding_id"]
+        )
         audit_service.write_event(
             actor_type=ctx.actor_type,
             actor_id=ctx.actor_id,
@@ -1803,7 +1811,8 @@ async def _handle_custom_mcp_tool(body: dict, ctx: RequestContext):
         ct = connector_service.get_connector_type(params["connector_type_id"])
         if not ct:
             return _mcp_error("NOT_FOUND", "Connector type not found", 404)
-        tool_result = connector_service.generate_connector_type_tools(
+        tool_result = await asyncio.to_thread(
+            connector_service.generate_connector_type_tools,
             ct,
             disabled_actions=ct.get("disabled_actions") or [],
             include_disabled=bool(params.get("include_disabled", False)),
@@ -1861,8 +1870,11 @@ async def _handle_custom_mcp_tool(body: dict, ctx: RequestContext):
                 "This action changes state, which needs write access to the binding's scope",
                 200,
             )
-        result = connector_service.execute_binding_action_with_logging(
-            params["binding_id"], action, params.get("params") or {}
+        result = await asyncio.to_thread(
+            connector_service.execute_binding_action_with_logging,
+            params["binding_id"],
+            action,
+            params.get("params") or {},
         )
         if not result.get("success") and result.get("error_code") == "DISABLED":
             return _mcp_error("DISABLED", "Binding is disabled", 200)

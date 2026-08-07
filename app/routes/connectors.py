@@ -1,3 +1,4 @@
+import asyncio
 import json
 import time
 import threading
@@ -199,7 +200,8 @@ async def start_binding_oauth(
         return error_response("SCOPE_DENIED", "Access denied to this binding", 403)
     redirect_uri = f"{_public_base_url(request)}/api/connector-bindings/oauth/callback"
     try:
-        authorization_url = connector_oauth_service.build_authorization_url(
+        authorization_url = await asyncio.to_thread(
+            connector_oauth_service.build_authorization_url,
             binding_id, ctx.user_id, redirect_uri
         )
     except connector_oauth_service.ConnectorOAuthError as exc:
@@ -221,7 +223,10 @@ async def connector_oauth_callback(
     if not code:
         return RedirectResponse("/connectors?oauth_error=Missing%20authorization%20code")
     try:
-        connector_oauth_service.exchange_callback(state, code, ctx.user_id)
+        await asyncio.to_thread(
+            connector_oauth_service.exchange_callback,
+            state, code, ctx.user_id
+        )
     except connector_oauth_service.ConnectorOAuthError as exc:
         return RedirectResponse(
             f"/connectors?oauth_error={urllib.parse.quote(str(exc))}"
@@ -339,7 +344,7 @@ async def test_binding(
     )
     if not enforcer.can_read(binding["scope"]):
         return error_response("SCOPE_DENIED", "Access denied to this binding", 403)
-    result = connector_service.test_binding(binding_id)
+    result = await asyncio.to_thread(connector_service.test_binding, binding_id)
     audit_service.write_event(
         actor_type=ctx.actor_type,
         actor_id=ctx.actor_id,
@@ -382,8 +387,11 @@ async def run_binding(
             "This action changes state, which needs write access to the binding's scope",
             403,
         )
-    result = connector_service.execute_binding_action_with_logging(
-        binding_id, action, params
+    result = await asyncio.to_thread(
+        connector_service.execute_binding_action_with_logging,
+        binding_id,
+        action,
+        params,
     )
     audit_service.write_event(
         actor_type=ctx.actor_type,
@@ -468,7 +476,8 @@ async def get_binding_tools(
     connector_type = connector_service.get_connector_type(binding["connector_type_id"])
     if not connector_type:
         return success_response({"tools": [], "total": 0})
-    result = connector_service.generate_connector_type_tools(
+    result = await asyncio.to_thread(
+        connector_service.generate_connector_type_tools,
         connector_type,
         disabled_actions=connector_type.get("disabled_actions") or [],
         include_disabled=include_disabled,
@@ -540,7 +549,7 @@ async def connector_health_check(
     visible = [binding for binding in bindings if enforcer.can_read(binding["scope"])]
     results = []
     for binding in visible:
-        result = connector_service.test_binding(binding["id"])
+        result = await asyncio.to_thread(connector_service.test_binding, binding["id"])
         audit_service.write_event(
             actor_type=ctx.actor_type,
             actor_id=ctx.actor_id,
@@ -587,7 +596,8 @@ async def get_connector_type_tools(
     ct = connector_service.get_connector_type(connector_type_id)
     if not ct:
         return error_response("NOT_FOUND", "Connector type not found", 404)
-    result = connector_service.generate_connector_type_tools(
+    result = await asyncio.to_thread(
+        connector_service.generate_connector_type_tools,
         ct,
         disabled_actions=ct.get("disabled_actions") or [],
         include_disabled=include_disabled,
@@ -753,7 +763,7 @@ async def get_directory(
     limit: int = 50,
     ctx: RequestContext = Depends(get_request_context),
 ):
-    entries = _fetch_directory()
+    entries = await asyncio.to_thread(_fetch_directory)
     installed_ids = {t["id"] for t in connector_service.list_connector_types()}
 
     for e in entries:
@@ -780,7 +790,7 @@ async def get_directory(
     page_entries = entries[start : start + limit]
 
     all_categories = sorted(
-        {e["category"] for e in _fetch_directory() if e.get("category")}
+        {e["category"] for e in await asyncio.to_thread(_fetch_directory) if e.get("category")}
     )
 
     return success_response(
@@ -809,11 +819,13 @@ async def import_spec(
 
     try:
         if body.url:
-            result = openapi_service.import_spec(
+            result = await asyncio.to_thread(
+                openapi_service.import_spec,
                 body.url, display_name=body.display_name, is_url=True
             )
         else:
-            result = openapi_service.import_spec(
+            result = await asyncio.to_thread(
+                openapi_service.import_spec,
                 body.spec_json, display_name=body.display_name, is_url=False
             )
     except ValueError as e:
@@ -869,7 +881,7 @@ async def import_spec(
 async def list_adapter_library(
     ctx: RequestContext = Depends(get_request_context),
 ):
-    entries = adapter_loader.list_available_adapters()
+    entries = await asyncio.to_thread(adapter_loader.list_available_adapters)
     return success_response({"adapters": entries, "total": len(entries)})
 
 
@@ -883,7 +895,8 @@ async def install_adapter(
         return error_response("FORBIDDEN", "Admin access required to install adapters", 403)
 
     try:
-        result = adapter_loader.install_adapter(
+        result = await asyncio.to_thread(
+            adapter_loader.install_adapter,
             adapter_id,
             source_kind=body.source_kind if body else None,
         )
@@ -916,7 +929,10 @@ async def update_adapter(
         return error_response("FORBIDDEN", "Admin access required to update adapters", 403)
 
     try:
-        result = adapter_loader.update_adapter(adapter_id)
+        result = await asyncio.to_thread(
+            adapter_loader.update_adapter,
+            adapter_id
+        )
     except adapter_loader.AdapterInstallError as e:
         return error_response("UPDATE_FAILED", str(e), 400)
     except Exception as e:
@@ -948,7 +964,10 @@ async def uninstall_adapter(
         return error_response("FORBIDDEN", "Admin access required to uninstall adapters", 403)
 
     try:
-        ok = adapter_loader.uninstall_adapter(adapter_id)
+        ok = await asyncio.to_thread(
+            adapter_loader.uninstall_adapter,
+            adapter_id
+        )
     except Exception as e:
         return error_response("UNINSTALL_FAILED", f"Unexpected error: {e}", 500)
     if not ok:
@@ -980,11 +999,13 @@ async def preview_spec(
 
     try:
         if body.url:
-            result = openapi_service.import_spec(
+            result = await asyncio.to_thread(
+                openapi_service.import_spec,
                 body.url, display_name=body.display_name, is_url=True
             )
         else:
-            result = openapi_service.import_spec(
+            result = await asyncio.to_thread(
+                openapi_service.import_spec,
                 body.spec_json, display_name=body.display_name, is_url=False
             )
     except ValueError as e:
@@ -1105,7 +1126,8 @@ async def import_mcp_server(
             return error_response("INVALID_REQUEST", "headers_json must be valid JSON", 400)
 
     try:
-        discovery = mcp_provider_service.discover_mcp_server(
+        discovery = await asyncio.to_thread(
+            mcp_provider_service.discover_mcp_server,
             body.url,
             timeout_ms=body.timeout_ms,
             headers=headers or None,
@@ -1220,7 +1242,8 @@ async def refresh_mcp_connector_type(
             return error_response("INVALID_REQUEST", "headers_json must be valid JSON", 400)
 
     try:
-        discovery = mcp_provider_service.discover_mcp_server(
+        discovery = await asyncio.to_thread(
+            mcp_provider_service.discover_mcp_server,
             endpoint_url,
             timeout_ms=timeout_ms,
             headers=headers,
@@ -1302,7 +1325,10 @@ async def delete_connector_type(
     # catalog delete, so the Browse Adapters page and service catalog stay in
     # sync. Generic connector types keep the direct delete path.
     if adapter_loader.get_adapter_library_entry(connector_type_id):
-        ok = adapter_loader.uninstall_adapter(connector_type_id)
+        ok = await asyncio.to_thread(
+            adapter_loader.uninstall_adapter,
+            connector_type_id
+        )
         if not ok:
             return error_response("NOT_FOUND", "Installed adapter not found", 404)
         audit_service.write_event(

@@ -5,6 +5,7 @@ decisions about what to retract, and that judgement stays with the operator.
 Agents write memory; they do not get to prune each other's.
 """
 
+import asyncio
 from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel
 from typing import Optional
@@ -77,7 +78,9 @@ async def review_usefulness(
     """
     from app.services import usefulness_service
 
-    result = usefulness_service.review_scope(scope=body.scope, limit=body.limit)
+    result = await asyncio.to_thread(
+        usefulness_service.review_scope, scope=body.scope, limit=body.limit
+    )
     if not result["ready"]:
         return error_response("REVIEWER_NOT_CONFIGURED", result["reason"], 400)
 
@@ -113,7 +116,8 @@ async def generate_proposals(
             400,
         )
 
-    result = memory_proposal_service.generate_proposals(
+    result = await asyncio.to_thread(
+        memory_proposal_service.generate_proposals,
         scope=body.scope, rules=body.rules
     )
 

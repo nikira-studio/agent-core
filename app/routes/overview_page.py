@@ -1,5 +1,6 @@
 """Overview dashboard page and global search."""
 
+import asyncio
 from fastapi import APIRouter, Request, Depends
 from pydantic import BaseModel
 
@@ -59,7 +60,8 @@ async def dashboard_search(
 
     memory_hits: list[dict] = []
     if readable_scopes:
-        memory_records, _ = memory_service.search_memory(
+        memory_records, _ = await asyncio.to_thread(
+            memory_service.search_memory,
             query=query,
             authorized_scopes=readable_scopes,
             limit=limit,

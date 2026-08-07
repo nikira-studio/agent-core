@@ -1,3 +1,4 @@
+import asyncio
 from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel
 from typing import Optional
@@ -183,7 +184,9 @@ async def test_webhook(
     if body.event_type and body.event_type not in webhook_service.WEBHOOK_EVENT_TYPES:
         return error_response("INVALID_EVENT_TYPE", f"Unknown event type: {body.event_type}", 400)
 
-    result = webhook_service.test_delivery(webhook_id, event_type=body.event_type)
+    result = await asyncio.to_thread(
+        webhook_service.test_delivery, webhook_id, event_type=body.event_type
+    )
     audit_service.write_event(
         actor_type=ctx.actor_type,
         actor_id=ctx.actor_id,
@@ -238,7 +241,7 @@ async def rotate_inbound_key(
     ctx: RequestContext = Depends(_require_admin_ctx),
 ):
     try:
-        plaintext = inbound_webhook_service.rotate_key()
+        plaintext = await asyncio.to_thread(inbound_webhook_service.rotate_key)
     except ValueError as exc:
         return error_response("NO_KEY", str(exc), 404)
 

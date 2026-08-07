@@ -1,3 +1,4 @@
+import asyncio
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import StreamingResponse, JSONResponse
 from app.branding import APP_SLUG, APP_VERSION, BACKUP_KEY_HEADER, MANIFEST_VERSION_KEY
@@ -27,7 +28,8 @@ async def backup_export(
         ip_address=get_client_ip(request),
     )
 
-    zip_buf, backup_key = backup_service.build_encrypted_backup_package(
+    zip_buf, backup_key = await asyncio.to_thread(
+        backup_service.build_encrypted_backup_package,
         str(settings.db_path),
         str(settings.credential_key_path),
         session["user_id"],
@@ -85,13 +87,15 @@ async def backup_restore(
         return error_response("INVALID_BACKUP_KEY", "Invalid backup key", 400)
 
     if mode == "merge":
-        ok, msg, manifest = backup_service.merge_restore_from_zip(
+        ok, msg, manifest = await asyncio.to_thread(
+            backup_service.merge_restore_from_zip,
             BytesIO(contents),
             str(settings.db_path),
             str(settings.credential_key_path),
         )
     else:
-        ok, msg, manifest = backup_service.restore_from_zip(
+        ok, msg, manifest = await asyncio.to_thread(
+            backup_service.restore_from_zip,
             BytesIO(contents),
             str(settings.db_path),
             str(settings.credential_key_path),
@@ -148,14 +152,20 @@ async def export_memory(
         user_id = None
 
     if fmt == "csv":
-        buf = backup_service.export_memory_csv(user_id=user_id)
+        buf = await asyncio.to_thread(
+            backup_service.export_memory_csv,
+            user_id=user_id
+        )
         return StreamingResponse(
             buf,
             media_type="text/csv",
             headers={"Content-Disposition": "attachment; filename=memory-export.csv"},
         )
     else:
-        buf = backup_service.export_memory_jsonl(user_id=user_id)
+        buf = await asyncio.to_thread(
+            backup_service.export_memory_jsonl,
+            user_id=user_id
+        )
         return StreamingResponse(
             buf,
             media_type="application/jsonl",
@@ -171,7 +181,10 @@ async def export_credentials_metadata(
     if session.get("role") == "admin":
         user_id = None
 
-    buf = backup_service.export_credentials_metadata(user_id=user_id)
+    buf = await asyncio.to_thread(
+        backup_service.export_credentials_metadata,
+        user_id=user_id
+    )
     return StreamingResponse(
         buf,
         media_type="application/json",
@@ -190,7 +203,8 @@ async def export_audit(
     session: dict = Depends(require_admin),
 ):
     if fmt == "csv":
-        buf = backup_service.export_audit_csv(
+        buf = await asyncio.to_thread(
+            backup_service.export_audit_csv,
             actor_type=actor_type,
             actor_id=actor_id,
             action=action,
@@ -208,7 +222,7 @@ async def export_audit(
 
 @router.get("/startup-checks")
 async def startup_checks(session: dict = Depends(require_admin)):
-    issues = backup_service.run_startup_checks()
+    issues = await asyncio.to_thread(backup_service.run_startup_checks)
     all_ok = all(i["status"] == "OK" for i in issues)
     return JSONResponse(
         {
@@ -220,7 +234,7 @@ async def startup_checks(session: dict = Depends(require_admin)):
 
 @router.post("/maintenance")
 async def run_maintenance(session: dict = Depends(require_admin)):
-    result = backup_service.run_scheduled_maintenance()
+    result = await asyncio.to_thread(backup_service.run_scheduled_maintenance)
     return success_response(result)
 
 

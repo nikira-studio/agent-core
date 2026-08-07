@@ -1,3 +1,4 @@
+import asyncio
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from typing import Optional
@@ -444,7 +445,8 @@ async def recover_activity(
             or (activity_for_briefing["agent_id"] if activity_for_briefing else None)
             or ""
         )
-        briefing = briefing_service.generate_handoff_briefing(
+        briefing = await asyncio.to_thread(
+            briefing_service.generate_handoff_briefing,
             activity_id=activity_id,
             requesting_agent_id=requesting_agent,
             requesting_user_id=ctx.user_id or "",
@@ -466,7 +468,8 @@ async def recover_activity(
         if not updated:
             return error_response("REASSIGN_FAILED", "Could not reassign activity", 500)
 
-        briefing = briefing_service.generate_handoff_briefing(
+        briefing = await asyncio.to_thread(
+            briefing_service.generate_handoff_briefing,
             activity_id=activity_id,
             requesting_agent_id=body.new_agent_id,
             requesting_user_id=ctx.user_id or "",

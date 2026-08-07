@@ -1,3 +1,4 @@
+import asyncio
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
@@ -70,7 +71,8 @@ async def create_handoff_briefing(
         if ctx.agent_id
         else activity["assigned_agent_id"] or activity["agent_id"]
     )
-    briefing = briefing_service.generate_handoff_briefing(
+    briefing = await asyncio.to_thread(
+        briefing_service.generate_handoff_briefing,
         activity_id=body.activity_id,
         requesting_agent_id=requesting_agent,
         requesting_user_id=ctx.user_id or "",
@@ -135,7 +137,8 @@ async def create_prd_handoff_briefing(
             "SCOPE_DENIED", "Access denied to requested user scope", 403
         )
 
-    briefing = briefing_service.generate_prd_handoff_briefing(
+    briefing = await asyncio.to_thread(
+        briefing_service.generate_prd_handoff_briefing,
         from_agent_id=body.from_agent_id,
         to_agent_id=body.to_agent_id,
         user_id=body.user_id,

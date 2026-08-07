@@ -1,3 +1,4 @@
+import asyncio
 import re
 
 from fastapi import APIRouter, Depends, Request
@@ -161,16 +162,17 @@ async def write_memory(
             return error_response("SCOPE_DENIED", "Access denied to scope of record being superseded", 403)
 
     try:
-        record, pii_flag = memory_service.write_memory(
+        record, pii_flag = await asyncio.to_thread(
+            memory_service.write_memory,
             content=body.content,
-                memory_class=body.memory_class,
+            memory_class=body.memory_class,
             scope=body.scope,
-                topic=body.topic,
+            topic=body.topic,
             confidence=body.confidence,
             importance=body.importance,
             source_kind=body.source_kind,
             supersedes_id=body.supersedes_id,
-                subject_anchor=body.subject_anchor,
+            subject_anchor=body.subject_anchor,
             provenance_json=_memory_provenance(ctx, body.source_kind, body.scope),
             slot_key=body.slot_key,
             valid_from=body.valid_from,
@@ -200,7 +202,8 @@ async def write_memory(
     # Advisory only, and computed after the write so a slow embedding check can
     # never cost the caller its record.
     payload = {"record": record}
-    warnings = memory_service.assess_memory_write(
+    warnings = await asyncio.to_thread(
+        memory_service.assess_memory_write,
         content=body.content,
         scope=body.scope,
         memory_class=body.memory_class,
@@ -281,16 +284,17 @@ async def import_memory(
             record_ids = []
             chunks = parsed["chunks"]
             for index, chunk in enumerate(chunks, start=1):
-                record, pii_flag = memory_service.write_memory(
+                record, pii_flag = await asyncio.to_thread(
+                    memory_service.write_memory,
                     content=chunk["content"],
                     memory_class=body.memory_class,
                     scope=body.scope,
-                            topic=body.topic or parsed["filename"],
+                    topic=body.topic or parsed["filename"],
                     confidence=body.confidence,
                     importance=body.importance,
                     source_kind="external_import",
                     provenance_json=_memory_import_provenance(
-                        ctx, body.scope, parsed["filename"], index, len(chunks)
+                    ctx, body.scope, parsed["filename"], index, len(chunks)
                     ),
                 )
                 if pii_flag == "PII_DETECTED":
@@ -386,7 +390,7 @@ async def search_memory(
                 ctx.default_recall_scopes or ctx.read_scopes
             )
         if not allowed_scopes:
-            embedding_status = embedding_service.safe_backend_status()
+            embedding_status = await asyncio.to_thread(embedding_service.safe_backend_status)
             return success_response_with_headers({
                 "records": [],
                 "retrieval_mode": "fts_only",
@@ -395,7 +399,8 @@ async def search_memory(
             }, rate_headers)
 
         try:
-            records, retrieval_mode = memory_service.search_memory(
+            records, retrieval_mode = await asyncio.to_thread(
+                memory_service.search_memory,
                 query=body.query,
                 authorized_scopes=allowed_scopes,
                 topic=body.topic,
@@ -416,7 +421,7 @@ async def search_memory(
         if body.view != "full":
             records = [memory_service.lean_record(r) for r in records]
 
-        embedding_status = embedding_service.safe_backend_status()
+        embedding_status = await asyncio.to_thread(embedding_service.safe_backend_status)
 
         audit_service.write_event(
             actor_type=ctx.actor_type,
