@@ -255,7 +255,9 @@ class TestActivityPage:
         assert "mem-search-topic" in r.text
         assert "mem-min-confidence" in r.text
         assert "Use these only when you want to narrow the result set" in r.text
-        assert "<th>Confidence</th>" in r.text
+        # The list shows operational state now; confidence is caller-assigned
+        # and ignored by ranking, so it stays a search filter, not a column.
+        assert "<th>State</th>" in r.text
 
     def test_memory_page_only_offers_workflow_backed_classes(self, admin_client):
         r = admin_client.get("/memory")

@@ -14,6 +14,60 @@ from app.routes.dashboard_shared import (
 router = APIRouter()
 
 
+def _state_cell(r) -> str:
+    """The operational state of a record, in the space Confidence used to take.
+
+    Confidence is caller-assigned and ranking ignores it, so a column of
+    self-reported decimals was the least informative thing on the page. What an
+    operator actually needs to see at a glance is whether a record is standing
+    context, whether anything can verify it, and how long since anyone checked.
+    """
+    # The same threshold ranking penalises at, so the page and the ordering
+    # cannot tell an operator two different stories about the same record.
+    from app.services.memory_service import (
+        CONFIRMATION_HALF_LIFE_DAYS,
+        days_since_confirmed,
+    )
+
+    marks = []
+    if r.get("pinned"):
+        marks.append(
+            "<span class='badge badge-info' title='Standing context: loaded into "
+            "every session in this scope'>pinned</span>"
+        )
+    anchor = r.get("subject_anchor")
+    if anchor:
+        # An anchor names what *could* settle the record. Saying "checked
+        # against" would claim a verification that may never have happened.
+        marks.append(
+            f"<span class='badge badge-active' title='Can be checked against "
+            f"{escape_html(anchor)}'>anchored</span>"
+        )
+
+    if r.get("memory_class") == "fact":
+        # days_since_confirmed falls back to created_at, which is the same
+        # measure ranking uses: a fact nobody has ever checked is not fresh
+        # just because it is unconfirmed, it is as old as the day it was
+        # written. Treating those two cases differently is what let a
+        # never-confirmed fact sit quietly forever.
+        days = days_since_confirmed(r)
+        stale = days is not None and days > CONFIRMATION_HALF_LIFE_DAYS
+        if not r.get("last_confirmed_at"):
+            label = "never confirmed"
+            if days is not None and days > CONFIRMATION_HALF_LIFE_DAYS:
+                label = f"never confirmed, {days}d old"
+            marks.append(
+                f"<span class='{'badge badge-warning' if stale else 'text-muted'}' "
+                f"title='Nobody has checked this against the world'>{label}</span>"
+            )
+        elif days is not None:
+            label = "confirmed today" if days == 0 else f"confirmed {days}d ago"
+            marks.append(
+                f"<span class='{'badge badge-warning' if stale else 'text-muted'}'>{label}</span>"
+            )
+    return " ".join(marks) or "<span class='text-muted'>—</span>"
+
+
 @router.get("/memory")
 async def memory_page(request: Request, session: dict = Depends(require_auth)):
     from app.services import memory_service
@@ -64,7 +118,8 @@ async def memory_page(request: Request, session: dict = Depends(require_auth)):
                 rows = conn.execute(
                     """
                     SELECT id, content, memory_class, scope, topic, confidence, importance,
-                           source_kind, created_at, record_status, superseded_by_id, supersedes_id
+                           source_kind, created_at, record_status, superseded_by_id,
+                           supersedes_id, subject_anchor, pinned, last_confirmed_at
                     FROM memory_records
                     WHERE record_status = ?
                     ORDER BY created_at DESC
@@ -99,7 +154,7 @@ async def memory_page(request: Request, session: dict = Depends(require_auth)):
             f"<tr><td><span class='badge badge-{r.get('memory_class', '')}'>{r.get('memory_class', '')}</span></td>"
             f"<td>{escape_html(r.get('content', '')[:80])}</td>"
             f"<td><code>{(r.get('scope') or '').replace('workspace:', '')}</code></td>"
-            f"<td>{r.get('confidence', 0.5):.1f}</td>"
+            f"<td>{_state_cell(r)}</td>"
             f"<td><div class='actions-cell'>"
             f"<button type='button' class='btn btn-sm btn-secondary' data-memory-detail='{escape_html(r['id'])}'>Detail</button>"
             f"{modify_buttons}"
@@ -117,7 +172,7 @@ async def memory_page(request: Request, session: dict = Depends(require_auth)):
             f"<tr style='opacity:0.65'><td><span class='badge badge-inactive'>{r.get('memory_class', '')}</span></td>"
             f"<td>{escape_html(r.get('content', '')[:80])}</td>"
             f"<td><code>{(r.get('scope') or '').replace('workspace:', '')}</code></td>"
-            f"<td>{r.get('confidence', 0.5):.1f}</td>"
+            f"<td>{_state_cell(r)}</td>"
             f"<td><div class='actions-cell'>"
             f"{modify_buttons}"
             f"</div></td></tr>"
@@ -304,6 +359,13 @@ async def memory_page(request: Request, session: dict = Depends(require_auth)):
       document.getElementById('mem-detail-valid-from').innerHTML = r.valid_from ? localDt(r.valid_from) : '';
       document.getElementById('mem-detail-valid-to').textContent = r.valid_to ? r.valid_to.substring(0, 19) : '';
       document.getElementById('mem-detail-last-confirmed').textContent = r.last_confirmed_at ? r.last_confirmed_at.substring(0, 19) : '';
+      // What would settle this record, and whether it is loaded into every
+      // session — the two things that decide how much weight it carries.
+      document.getElementById('mem-detail-anchor').textContent =
+        r.subject_anchor || (r.memory_class === 'fact' ? 'none — nothing can verify this' : 'not applicable');
+      document.getElementById('mem-detail-pinned').innerHTML = r.pinned
+        ? '<span class="badge badge-info">pinned</span>'
+        : '<span class="text-muted">no</span>';
       const provenanceEl = document.getElementById('mem-detail-provenance');
       if (r.provenance_json) {
         try {
@@ -341,11 +403,13 @@ async def memory_page(request: Request, session: dict = Depends(require_auth)):
       el.innerHTML = chain.map((r, i) => {
         const edge = i > 0 ? '<div class="text-muted" style="font-size:0.8rem;margin-bottom:2px">&larr; earlier version</div>' : '';
         const tag = i === chain.length - 1 ? 'Current' : 'Earlier';
+        // Topic and status are record data and must be escaped; localDt returns
+        // an element the browser localises, so escaping it prints the markup.
         const metadataParts = [];
-        if (r.topic) metadataParts.push(r.topic);
-        if (r.record_status) metadataParts.push(r.record_status);
+        if (r.topic) metadataParts.push(escapeHtml(r.topic));
+        if (r.record_status) metadataParts.push(escapeHtml(r.record_status));
         if (r.created_at) metadataParts.push(localDt(r.created_at));
-        const metadata = metadataParts.length ? metadataParts.map(escapeHtml).join(' · ') : '';
+        const metadata = metadataParts.join(' · ');
         return '<div style="margin:8px 0;padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:var(--bg);white-space:normal;overflow-wrap:anywhere">' +
           edge +
           '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:4px">' +
@@ -583,7 +647,7 @@ async def memory_page(request: Request, session: dict = Depends(require_auth)):
     <div class="card">
       <h3>Active Records <span id="mem-count" class="text-muted" style="font-weight:normal;font-size:0.8rem">({len(active_records)})</span></h3>
       <p class="text-muted" style="font-size:0.85rem;margin-bottom:8px">These are the active records you can read right now. Use Search for a narrower view.</p>
-      <table><thead><tr><th>Class</th><th>Content</th><th>Scope</th><th>Confidence</th><th class="actions-cell">Actions</th></tr></thead>
+      <table><thead><tr><th>Class</th><th>Content</th><th>Scope</th><th>State</th><th class="actions-cell">Actions</th></tr></thead>
       <tbody id="mem-results-body">
         {records_rows}
       </tbody>
@@ -599,7 +663,7 @@ async def memory_page(request: Request, session: dict = Depends(require_auth)):
     <div class="card" style="border-left:4px solid var(--text-muted)">
       <h3 style="color:var(--text-muted)">Retracted Records <span class="text-muted" style="font-weight:normal;font-size:0.8rem">({len(retracted_records)})</span></h3>
       <p class="text-muted" style="font-size:0.85rem;margin-bottom:8px">These records are hidden from search. Restore to make them active again, or permanently delete.</p>
-      <table><thead><tr><th>Class</th><th>Content</th><th>Scope</th><th>Confidence</th><th class="actions-cell">Actions</th></tr></thead>
+      <table><thead><tr><th>Class</th><th>Content</th><th>Scope</th><th>State</th><th class="actions-cell">Actions</th></tr></thead>
       <tbody>{retracted_rows or "<tr><td colspan=5 class=empty>No retracted records.</td></tr>"}</tbody></table>
     </div>
     """
@@ -785,6 +849,10 @@ async def memory_page(request: Request, session: dict = Depends(require_auth)):
         </div>
         <div class="form-row">
         <div class="form-group"><label>Topic</label><span id="mem-detail-topic"></span></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>Anchor</label><span id="mem-detail-anchor" class="text-muted"></span></div>
+        <div class="form-group"><label>Standing context</label><span id="mem-detail-pinned"></span></div>
       </div>
       <div class="form-row">
         <div class="form-group"><label>Confidence</label><span id="mem-detail-confidence"></span></div>
