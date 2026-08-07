@@ -43,6 +43,7 @@ from app.routes import (
     events_router,
     webhooks_router,
 )
+from app.database import DatabaseUnavailable
 from app.security.exceptions import APIError
 from app.services.broker_service import ensure_broker_credential
 from app.database import init_db
@@ -182,6 +183,26 @@ def create_app() -> FastAPI:
         return JSONResponse(
             content={"ok": False, "error": {"code": exc.code, "message": exc.message}},
             status_code=exc.status_code,
+        )
+
+    @app.exception_handler(DatabaseUnavailable)
+    async def database_unavailable_handler(
+        request: Request, exc: DatabaseUnavailable
+    ) -> JSONResponse:
+        """A restore is holding the database still.
+
+        This is a real, brief, and self-resolving condition, so it is reported
+        as one: 503 with a Retry-After, not the 500 an unhandled exception would
+        produce. Clients that retry will succeed; clients that log will log
+        something true.
+        """
+        return JSONResponse(
+            content={
+                "ok": False,
+                "error": {"code": "DATABASE_UNAVAILABLE", "message": str(exc)},
+            },
+            status_code=503,
+            headers={"Retry-After": "5"},
         )
 
     app.mount("/static", StaticFiles(directory="app/dashboard/static"), name="static")

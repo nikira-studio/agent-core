@@ -45,6 +45,8 @@ curl -X POST http://localhost:3500/api/backup/restore \
 **Mode options:**
 
 - **`replace_all`** — replaces your current database and encryption key entirely with the backup contents. Everything you have now is gone. Use this to recover from a corrupted or lost database.
+
+  A full restore holds the database still while it swaps: requests already in flight are allowed to finish, and requests arriving during the swap get a `503` with a `Retry-After` rather than a connection to a file that is about to be replaced. If in-flight work does not finish within the drain window, the restore refuses and changes nothing. **This gate is per process**, so a restore is only safe on the supported single-worker deployment — see [Configuration](configuration.md#workers).
 - **`merge`** — adds records from the backup that don't conflict with existing records. If a record with the same primary key already exists, the current version wins. Useful for combining two independent Agent Core installs or bringing back specific records without overwriting what you have.
 
 Before replacing anything, Agent Core always:

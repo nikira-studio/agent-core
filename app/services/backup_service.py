@@ -3,9 +3,11 @@ import io
 import json
 import logging
 import os
+import pathlib
 import secrets
 import shutil
 import sqlite3
+import tempfile
 import zipfile
 from datetime import timedelta
 from typing import Optional
@@ -14,7 +16,10 @@ from cryptography.fernet import Fernet
 
 from app.branding import APP_VERSION, DB_FILENAME, MANIFEST_VERSION_KEY
 from app.config import settings
-from app.database import get_db
+from app.database import DatabaseUnavailable, exclusive_access, get_db
+# Shared with credential key rotation and restoration; see the definition for
+# why these four operations cannot interleave.
+from app.security.encryption import KEY_OPERATION_LOCK
 from app.time_utils import parse_utc_datetime, utc_now, utc_now_iso
 
 
@@ -55,23 +60,56 @@ def _keyring_path() -> str:
     return str(settings.data_dir / "credential.keyring")
 
 
+def _snapshot_database(db_path: str, destination: str) -> None:
+    """Copy the database through SQLite rather than off the filesystem.
+
+    The database runs in WAL mode, so committed data lives in `-wal` until a
+    checkpoint folds it back. Archiving the `.db` file alone captures whatever
+    happened to have been checkpointed — a backup taken right after a write can
+    be missing the write, and in the worst case missing a whole table. The
+    backup API reads through a connection, so what lands is a consistent
+    snapshot including everything committed.
+    """
+    source = sqlite3.connect(db_path)
+    try:
+        target = sqlite3.connect(destination)
+        try:
+            with target:
+                source.backup(target)
+        finally:
+            target.close()
+    finally:
+        source.close()
+
+
 def build_backup_manifest(
     db_path: str,
     credential_key_path: str,
     exported_by: str,
     app_version: str,
+    key_bytes: Optional[bytes] = None,
+    keyring_bytes: Optional[bytes] = None,
 ) -> dict:
     checksums = {}
     if os.path.exists(db_path):
         checksums[DB_FILENAME] = compute_sha256(db_path)
 
-    env_key = _configured_env_key_bytes()
-    if env_key is not None:
-        checksums["credential.key"] = hashlib.sha256(env_key).hexdigest()
-    elif os.path.exists(credential_key_path):
-        checksums["credential.key"] = compute_sha256(credential_key_path)
-    if os.path.exists(_keyring_path()):
-        checksums["credential.keyring"] = compute_sha256(_keyring_path())
+    # Callers that already hold the key bytes pass them in, so the manifest
+    # describes exactly what is archived rather than whatever is on disk by the
+    # time the archive is written.
+    if key_bytes is None and keyring_bytes is None:
+        env_key = _configured_env_key_bytes()
+        if env_key is not None:
+            key_bytes = env_key
+        elif os.path.exists(credential_key_path):
+            key_bytes = pathlib.Path(credential_key_path).read_bytes()
+        if os.path.exists(_keyring_path()):
+            keyring_bytes = pathlib.Path(_keyring_path()).read_bytes()
+
+    if key_bytes is not None:
+        checksums["credential.key"] = hashlib.sha256(key_bytes).hexdigest()
+    if keyring_bytes is not None:
+        checksums["credential.keyring"] = hashlib.sha256(keyring_bytes).hexdigest()
 
     return {
         MANIFEST_VERSION_KEY: app_version,
@@ -87,25 +125,56 @@ def build_backup_zip(
     exported_by: str,
     app_version: str = APP_VERSION,
 ) -> io.BytesIO:
-    manifest = build_backup_manifest(
-        db_path, credential_key_path, exported_by, app_version
-    )
+    # Snapshot first, then describe and archive the snapshot: the manifest
+    # checksum has to be of the bytes that actually go into the archive, not of
+    # a live file that may move between hashing and reading.
+    snapshot_dir = tempfile.mkdtemp(prefix="agent-core-backup-")
+    snapshot_path = os.path.join(snapshot_dir, DB_FILENAME)
+    try:
+        # The key files are read once, under the lock, and both hashed and
+        # archived from those same bytes. Hashing the path and then reading it
+        # again leaves room for a rotation in between, which yields an archive
+        # whose manifest describes a key the payload does not contain.
+        with KEY_OPERATION_LOCK:
+            if os.path.exists(db_path):
+                _snapshot_database(db_path, snapshot_path)
 
-    buf = io.BytesIO()
-    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-        if os.path.exists(db_path):
-            zf.write(db_path, arcname=DB_FILENAME)
-        env_key = _configured_env_key_bytes()
-        if env_key is not None:
-            zf.writestr("credential.key", env_key)
-        elif os.path.exists(credential_key_path):
-            zf.write(credential_key_path, arcname="credential.key")
-        if os.path.exists(_keyring_path()):
-            zf.write(_keyring_path(), arcname="credential.keyring")
-        zf.writestr("manifest.json", json.dumps(manifest, indent=2))
+            env_key = _configured_env_key_bytes()
+            if env_key is not None:
+                key_bytes = env_key
+            elif os.path.exists(credential_key_path):
+                key_bytes = pathlib.Path(credential_key_path).read_bytes()
+            else:
+                key_bytes = None
+            keyring_bytes = (
+                pathlib.Path(_keyring_path()).read_bytes()
+                if os.path.exists(_keyring_path())
+                else None
+            )
 
-    buf.seek(0)
-    return buf
+        manifest = build_backup_manifest(
+            snapshot_path,
+            credential_key_path,
+            exported_by,
+            app_version,
+            key_bytes=key_bytes,
+            keyring_bytes=keyring_bytes,
+        )
+
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+            if os.path.exists(snapshot_path):
+                zf.write(snapshot_path, arcname=DB_FILENAME)
+            if key_bytes is not None:
+                zf.writestr("credential.key", key_bytes)
+            if keyring_bytes is not None:
+                zf.writestr("credential.keyring", keyring_bytes)
+            zf.writestr("manifest.json", json.dumps(manifest, indent=2))
+
+        buf.seek(0)
+        return buf
+    finally:
+        shutil.rmtree(snapshot_dir, ignore_errors=True)
 
 
 def build_encrypted_backup_package(
@@ -734,10 +803,40 @@ def restore_from_zip(
     zip_bytes: io.BytesIO,
     db_path: str,
     credential_key_path: str,
+    drain_timeout: float = 30.0,
 ) -> tuple[bool, str, dict]:
+    """Replace this installation with the contents of a backup.
+
+    Everything after validation happens with the database held still. A
+    connection opened before the swap keeps its handle on the replaced file and
+    would go on accepting writes that no later reader can see — a commit that
+    reports success and is gone. So new work waits, in-flight work drains, and
+    if it will not drain the restore refuses rather than running over it.
+    """
     ok, msg, manifest_data, extracted = _read_validated_backup(zip_bytes)
     if not ok:
         return False, msg, {}
+
+    try:
+        # Lock order is fixed everywhere: key lock first, then the database
+        # gate. Rotation takes the key lock and then opens connections, so a
+        # restore that took the gate first would hold what rotation needs while
+        # waiting for what rotation holds — a deadlock that resolves only when
+        # one side times out, having already done half its work.
+        with KEY_OPERATION_LOCK, exclusive_access(drain_timeout):
+            return _restore_extracted(
+                extracted, manifest_data, db_path, credential_key_path
+            )
+    except DatabaseUnavailable as exc:
+        return False, str(exc), {}
+
+
+def _restore_extracted(
+    extracted: dict,
+    manifest_data: dict,
+    db_path: str,
+    credential_key_path: str,
+) -> tuple[bool, str, dict]:
 
     backup_dir = settings.data_dir / "backups"
     os.makedirs(backup_dir, exist_ok=True)
@@ -764,6 +863,13 @@ def restore_from_zip(
         os.replace(tmp_path, dst_path)
 
     atomic_replace(extracted[DB_FILENAME], db_path, "db")
+    # The old `-wal` and `-shm` describe the database we just replaced. Left in
+    # place, SQLite either replays them over the restored file or refuses it
+    # outright; either way the result is not the backup that was restored.
+    for sidecar in (f"{db_path}-wal", f"{db_path}-shm"):
+        if os.path.exists(sidecar):
+            _backup_existing_file(sidecar, str(backup_dir), timestamp, "db-sidecar")
+            os.remove(sidecar)
     if settings.ENCRYPTION_KEY and settings.ENCRYPTION_KEY.lower() != "auto":
         _backup_existing_file(credential_key_path, str(backup_dir), timestamp, "key")
     else:
@@ -776,6 +882,15 @@ def restore_from_zip(
                 _keyring_path(),
                 "keyring",
             )
+
+    # The key files on disk have changed; the ones this process is holding have
+    # not. Without dropping them the process keeps decrypting with the previous
+    # installation's key against the restored database, and reports success
+    # while doing it. The mismatch only surfaces at the next resolve — or at the
+    # next restart, whichever comes first.
+    from app.security.encryption import reset_key_cache
+
+    reset_key_cache()
 
     return True, "", manifest_data
 

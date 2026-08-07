@@ -13,6 +13,19 @@ _rotation_lock = threading.Lock()
 
 
 def rotate_key(admin_user_id: str) -> tuple[bool, str, dict]:
+    """Re-encrypt every credential under a new key.
+
+    Serialised against backup, restore and key restoration: a rotation running
+    alongside an export produces an archive whose manifest describes one key
+    and whose payload contains another.
+    """
+    from app.security.encryption import KEY_OPERATION_LOCK
+
+    with KEY_OPERATION_LOCK:
+        return _rotate_key(admin_user_id)
+
+
+def _rotate_key(admin_user_id: str) -> tuple[bool, str, dict]:
     if not _rotation_lock.acquire(blocking=False):
         return False, "Rotation already in progress", {}
 
@@ -103,6 +116,14 @@ def get_key_status() -> dict:
 
 
 def restore_key(admin_user_id: str, key_bytes: bytes) -> tuple[bool, str]:
+    """Put a previous key back. Serialised with rotation, backup and restore."""
+    from app.security.encryption import KEY_OPERATION_LOCK
+
+    with KEY_OPERATION_LOCK:
+        return _restore_key(admin_user_id, key_bytes)
+
+
+def _restore_key(admin_user_id: str, key_bytes: bytes) -> tuple[bool, str]:
     try:
         fernet = Fernet(key_bytes)
     except Exception:

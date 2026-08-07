@@ -213,7 +213,9 @@ Some state is held per process rather than in the database, on purpose — it is
 
 The maintenance sweep is the exception: it takes a lease in the database, so only one process runs it per tick regardless of how many exist.
 
-You can raise `AGENT_CORE_WORKERS`, and nothing will crash — the effects above are quiet, not loud, which is exactly why the default is 1. A single process handles a local-first workload comfortably; horizontal scaling would need shared coordination that does not exist yet.
+One effect is not quiet. A **full restore** holds the database still while it swaps the file, and that gate is per process: a second worker knows nothing about it, keeps serving requests against the database being replaced, and its writes go to a file that is about to be unlinked — commits that succeed and then vanish. Raising the worker count makes `replace_all` restore unsafe, not merely imprecise.
+
+The rest of the effects above are quiet rather than loud, which is exactly why the default is 1. A single process handles a local-first workload comfortably; horizontal scaling would need shared coordination that does not exist yet.
 
 ---
 

@@ -79,9 +79,14 @@ async def backup_restore(
         )
 
     try:
-        contents = backup_service.decrypt_backup_package(
-            contents,
-            backup_key.encode(),
+        # Fernet over the whole archive: proportional to the database, and
+        # squarely on the loop until it finishes.
+        contents = (
+            await asyncio.to_thread(
+                backup_service.decrypt_backup_package,
+                contents,
+                backup_key.encode(),
+            )
         ).getvalue()
     except Exception:
         return error_response("INVALID_BACKUP_KEY", "Invalid backup key", 400)

@@ -1,3 +1,4 @@
+import threading
 import os
 import json
 from typing import Optional
@@ -7,6 +8,13 @@ from cryptography.fernet import Fernet, MultiFernet
 from app.branding import ENV_PREFIX
 from app.config import settings
 
+
+# Backup, restore, key rotation and key restoration all read or replace the key
+# files. Interleaved, they produce an archive whose manifest describes one key
+# and whose payload holds another, or a database re-encrypted half under each.
+# It lives here because it is a property of the key material, not of any one
+# caller, and because both sides of the problem already import this module.
+KEY_OPERATION_LOCK = threading.RLock()
 
 _fernet: Optional[MultiFernet] = None
 _keyring: Optional[list[bytes]] = None
@@ -77,6 +85,20 @@ def _save_keyring(keys: list[bytes]) -> None:
 
 def _build_fernet(keys: list[bytes]) -> MultiFernet:
     return MultiFernet([Fernet(k) for k in keys])
+
+
+def reset_key_cache() -> None:
+    """Forget the keys held in this process.
+
+    The keyring is read once and cached for the life of the process, which is
+    right for every path except one: a restore replaces the key files on disk
+    underneath us. Without this, the process keeps decrypting with the old key
+    while the files on disk belong to the restored installation — the database
+    and the keys disagree, and nothing says so until the next resolve fails.
+    """
+    global _fernet, _keyring
+    _fernet = None
+    _keyring = None
 
 
 def get_fernet() -> MultiFernet:

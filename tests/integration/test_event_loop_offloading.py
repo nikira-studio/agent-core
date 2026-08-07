@@ -49,6 +49,7 @@ BLOCKING = frozenset(
         # corpus. No network involved, and just as capable of stalling the
         # single supported worker.
         "build_encrypted_backup_package",
+        "decrypt_backup_package",
         "build_backup_zip",
         "restore_from_zip",
         "merge_restore_from_zip",
