@@ -1,3 +1,4 @@
+import logging
 import re
 import secrets
 import sqlite3
@@ -9,6 +10,8 @@ from app.database import get_db
 from app.security.encryption import encrypt_value, decrypt_value
 from app.models.enums import normalize_id
 from app.time_utils import parse_utc_datetime, utc_now
+
+logger = logging.getLogger(__name__)
 
 
 def _generate_unique_suffix() -> str:
@@ -135,10 +138,14 @@ def update_credential(entry_id: str, **fields) -> bool:
         "metadata_json",
         "expires_at",
     )
+    # `None` normally means "caller did not supply this", which is why it is
+    # skipped. `expires_at` is the exception: an operator clearing the expiry
+    # field is asking for it to be removed, and there is no other way to say so.
+    nullable = ("expires_at",)
     updates = []
     params = []
     for key, val in fields.items():
-        if key in allowed and val is not None:
+        if key in allowed and (val is not None or key in nullable):
             if key == "name" and not str(val).strip():
                 return False
             updates.append(f"{key} = ?")
@@ -167,13 +174,34 @@ def delete_credential(entry_id: str) -> bool:
         return cursor.rowcount > 0
 
 
+def is_expired(entry: dict) -> bool:
+    """Whether a stored credential should still be handed out.
+
+    An unreadable expiry fails closed. Writes are validated now, but a row
+    written before that validation existed must not be able to turn a resolve
+    into a 500 — and of the two ways to be wrong, refusing a secret is the
+    recoverable one.
+    """
+    expires_at = entry.get("expires_at")
+    if not expires_at:
+        return False
+    try:
+        return utc_now() > parse_utc_datetime(expires_at)
+    except (ValueError, TypeError):
+        logger.warning(
+            "Credential %s has an unreadable expires_at (%r); treating it as expired",
+            entry.get("id"),
+            expires_at,
+        )
+        return True
+
+
 def resolve_reference(reference_name: str) -> Optional[str]:
     entry = get_credential_by_reference(reference_name)
     if not entry:
         return None
-    if entry.get("expires_at"):
-        if utc_now() > parse_utc_datetime(entry["expires_at"]):
-            return None
+    if is_expired(entry):
+        return None
     return decrypt_value(entry["value_encrypted"])
 
 
@@ -181,7 +209,7 @@ def resolve_credential(reference_name: str) -> Optional[Credential]:
     entry = get_credential_by_reference(reference_name)
     if not entry:
         return None
-    if entry.get("expires_at") and utc_now() > parse_utc_datetime(entry["expires_at"]):
+    if is_expired(entry):
         return None
     return Credential.from_resolved(decrypt_value(entry["value_encrypted"]), entry)
 

@@ -6,9 +6,45 @@ from app.security.context import build_user_context
 from app.security.scope_enforcer import ScopeEnforcer
 from app.services import credential_service, workspace_service
 from app.services.agent_service import list_agents
-from app.routes.dashboard_shared import render_page, require_auth, escape_html, get_icon
+from app.routes.dashboard_shared import (
+    render_page,
+    require_auth,
+    escape_html,
+    get_icon,
+    local_dt,
+)
+from app.time_utils import parse_utc_datetime, utc_now
 
 router = APIRouter()
+
+# How close to expiry counts as worth warning about.
+EXPIRY_WARNING_DAYS = 14
+
+
+def _expiry_cell(expires_at) -> str:
+    """What an operator needs to know about a credential's lifetime at a glance.
+
+    An expired credential does not announce itself: the connector that depends
+    on it simply starts failing, and the reason is two pages away. The backend
+    has tracked `expires_at` all along; this is the first place it is shown.
+    """
+    if not expires_at:
+        return "<span class='text-muted'>—</span>"
+    try:
+        expiry = parse_utc_datetime(expires_at)
+    except (ValueError, TypeError):
+        return f"<span class='text-muted'>{escape_html(str(expires_at))}</span>"
+
+    days = (expiry - utc_now()).days
+    # local_dt already returns an element the browser localises; escaping it
+    # again renders the markup as text.
+    shown = local_dt(expires_at, style="date")
+    if days < 0:
+        return f"<span class='badge badge-danger'>expired</span> <span class='text-muted'>{shown}</span>"
+    if days <= EXPIRY_WARNING_DAYS:
+        label = "expires today" if days == 0 else f"{days}d left"
+        return f"<span class='badge badge-warning'>{label}</span> <span class='text-muted'>{shown}</span>"
+    return f"<span class='text-muted'>{shown}</span>"
 
 
 @router.get("/credentials")
@@ -53,11 +89,23 @@ async def credentials_page(request: Request, session: dict = Depends(require_aut
 
     credential_rows = ""
     for e in credential_entries:
+        origin = " · ".join(
+            part
+            for part in (
+                f"added {local_dt(e.get('created_at'), style='date')}"
+                if e.get("created_at")
+                else "",
+                f"by {escape_html(e['created_by'])}" if e.get("created_by") else "",
+            )
+            if part
+        )
         credential_rows += f"""
         <tr data-credential-id="{e["id"]}">
-          <td>{escape_html(e.get("name", ""))}</td>
+          <td>{escape_html(e.get("name", ""))}
+            <div class='text-muted' style='font-size:0.8rem'>{origin}</div></td>
           <td><code>{escape_html(e.get("scope", ""))}</code></td>
           <td><code>{escape_html(e.get("reference_name", ""))}</code></td>
+          <td>{_expiry_cell(e.get("expires_at"))}</td>
           <td class='actions-cell'>
             <button type='button' class='btn btn-sm btn-secondary' data-credential-edit="{escape_html(e["id"])}">Edit</button>
             <button type='button' class='btn btn-sm btn-danger icon-delete-btn' data-credential-delete="{escape_html(e["id"])}" title='Delete credential' aria-label='Delete credential'>{get_icon("delete")}</button>
@@ -66,7 +114,7 @@ async def credentials_page(request: Request, session: dict = Depends(require_aut
 
     if credential_entries:
         credentials_html = f"""
-        <table><thead><tr><th>Name</th><th>Scope</th><th>Reference</th><th class='actions-cell'>Actions</th></tr></thead>
+        <table><thead><tr><th>Name</th><th>Scope</th><th>Reference</th><th>Expires</th><th class='actions-cell'>Actions</th></tr></thead>
         <tbody>{credential_rows}</tbody></table>"""
     else:
         credentials_html = "<div class='empty'>No credentials yet.</div>"
@@ -112,6 +160,11 @@ async def credentials_page(request: Request, session: dict = Depends(require_aut
             <label>Secret Value *</label>
             <input type="password" id="credential-value" autocomplete="new-password" required>
           </div>
+          <div class="form-group">
+            <label>Expires</label>
+            <input type="date" id="credential-expires">
+            <p class="form-hint">Optional. Set it when the secret itself has an end date, so the dashboard can warn you before a connector starts failing.</p>
+          </div>
           <button type="submit" class="btn btn-primary">Create Credential</button>
           <button type="button" class="btn btn-secondary" onclick="closeModal('create-credential-modal')">Cancel</button>
         </form>
@@ -139,6 +192,11 @@ async def credentials_page(request: Request, session: dict = Depends(require_aut
           <div class="form-group">
             <label>Replace Secret Value</label>
             <input type="password" id="edit-credential-value" autocomplete="new-password" placeholder="Leave blank to keep current value">
+          </div>
+          <div class="form-group">
+            <label>Expires</label>
+            <input type="date" id="edit-credential-expires">
+            <p class="form-hint">Clear the field to remove the expiry.</p>
           </div>
           <button type="submit" class="btn btn-primary">Save Credential</button>
           <button type="button" class="btn btn-secondary" onclick="closeModal('edit-credential-modal')">Cancel</button>

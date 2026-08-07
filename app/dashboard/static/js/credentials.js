@@ -1,3 +1,14 @@
+// A date input yields YYYY-MM-DD with no timezone. The operator means "the end
+// of that day where they are", so the instant is built in the browser's own
+// timezone and converted to UTC — not stamped 23:59:59Z, which lands on the
+// wrong calendar day for anyone east of London.
+function endOfDayUtc(dateValue) {
+  if (!dateValue) return null;
+  const [y, m, d] = dateValue.split('-').map(Number);
+  if (!y || !m || !d) return null;
+  return new Date(y, m - 1, d, 23, 59, 59, 999).toISOString();
+}
+
 async function createCredential(e) {
   e.preventDefault();
   const body = {
@@ -6,6 +17,8 @@ async function createCredential(e) {
     scope: document.getElementById('credential-scope').value,
     value: document.getElementById('credential-value').value,
   };
+  const expires = endOfDayUtc(document.getElementById('credential-expires').value);
+  if (expires) body.expires_at = expires;
   const j = await apiFetch('/api/credentials/entries', { method: 'POST', body: JSON.stringify(body) });
   if (j.ok) {
     showToast('Credential created', 'success');
@@ -33,6 +46,10 @@ async function editCredential(id) {
   document.getElementById('edit-credential-label').value = c.label || '';
   document.getElementById('edit-credential-scope').value = c.scope || '';
   document.getElementById('edit-credential-value').value = '';
+  // Back to a date in the viewer's timezone, so what they saved is what they see.
+  document.getElementById('edit-credential-expires').value = c.expires_at
+    ? new Date(c.expires_at).toLocaleDateString('en-CA')
+    : '';
   openModal('edit-credential-modal');
 }
 
@@ -45,6 +62,8 @@ async function submitEditCredential(e) {
     label: document.getElementById('edit-credential-label').value || null,
   };
   if (replacementValue) body.value = replacementValue;
+  // Sent even when empty: clearing the field is how an expiry is removed.
+  body.expires_at = endOfDayUtc(document.getElementById('edit-credential-expires').value);
   const j = await apiFetch('/api/credentials/entries/' + id, { method: 'PUT', body: JSON.stringify(body) });
   if (j.ok) {
     showToast('Credential updated', 'success');

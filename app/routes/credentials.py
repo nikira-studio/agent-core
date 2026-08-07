@@ -1,7 +1,8 @@
+import asyncio
 import sqlite3
 
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from typing import Optional
 
 from app.services import credential_service
@@ -22,6 +23,26 @@ from app.security.response_helpers import (
 router = APIRouter(prefix="/api/credentials", tags=["credentials"])
 
 
+def _normalise_expiry(value: Optional[str]) -> Optional[str]:
+    """Accept only a real instant, and store it in one canonical form.
+
+    An unparseable expiry used to be stored happily and then blow up whenever
+    the credential was resolved. Rejecting it here means the only bad rows are
+    historical ones, which `credential_service.is_expired` fails closed on.
+    """
+    if value is None or value == "":
+        return None
+    from app.time_utils import parse_utc_datetime
+
+    try:
+        return parse_utc_datetime(value).isoformat()
+    except (ValueError, TypeError):
+        raise ValueError(
+            "expires_at must be an ISO 8601 timestamp, for example "
+            "2026-12-31T23:59:59+00:00"
+        )
+
+
 class CreateCredentialRequest(BaseModel):
     scope: str
     name: str
@@ -30,6 +51,11 @@ class CreateCredentialRequest(BaseModel):
     metadata_json: Optional[str] = None
     expires_at: Optional[str] = None
 
+    @field_validator("expires_at")
+    @classmethod
+    def _check_expiry(cls, value):
+        return _normalise_expiry(value)
+
 
 class UpdateCredentialRequest(BaseModel):
     name: Optional[str] = None
@@ -37,6 +63,11 @@ class UpdateCredentialRequest(BaseModel):
     value: Optional[str] = None
     metadata_json: Optional[str] = None
     expires_at: Optional[str] = None
+
+    @field_validator("expires_at")
+    @classmethod
+    def _check_expiry(cls, value):
+        return _normalise_expiry(value)
 
 
 @router.get("/entries")
@@ -216,7 +247,10 @@ async def update_entry(
         updates["value_encrypted"] = encrypt_value(body.value)
     if body.metadata_json is not None:
         updates["metadata_json"] = body.metadata_json
-    if body.expires_at is not None:
+    # Sent-as-null and omitted mean different things here: an operator clearing
+    # the expiry field is asking for the expiry to be removed, and treating that
+    # the same as "field not supplied" makes it impossible to undo.
+    if "expires_at" in body.model_fields_set:
         updates["expires_at"] = body.expires_at
 
     credential_service.update_credential(entry_id, **updates)
@@ -320,6 +354,12 @@ async def reveal_entry(
             "SCOPE_DENIED", "Access denied to this credential entry", 403
         )
 
+    # An expired credential is a normal answer, not a server fault. Reporting it
+    # as a 500 both misstates what happened and buries the one thing the
+    # operator needs to know, which is that the secret has lapsed.
+    if credential_service.is_expired(entry):
+        return error_response("CREDENTIAL_EXPIRED", "This credential has expired", 410)
+
     plaintext = credential_service.resolve_reference(entry["reference_name"])
     if plaintext is None:
         return error_response("RESOLVE_FAILED", "Could not resolve credential", 500)
@@ -361,7 +401,10 @@ async def rotate_key(
 
     from app.services import credential_rotation_service
 
-    ok, msg, details = credential_rotation_service.rotate_key(ctx.user_id)
+    ok, msg, details = await asyncio.to_thread(
+        credential_rotation_service.rotate_key,
+        ctx.user_id
+    )
     if not ok:
         return error_response("ROTATION_FAILED", msg, 500)
 
@@ -402,7 +445,10 @@ async def restore_key(
     from app.services import credential_rotation_service
 
     key_bytes = body.key_base64.encode()
-    ok, msg = credential_rotation_service.restore_key(ctx.user_id, key_bytes)
+    ok, msg = await asyncio.to_thread(
+        credential_rotation_service.restore_key,
+        ctx.user_id, key_bytes
+    )
     if not ok:
         return error_response("RESTORE_FAILED", msg, 400)
 
