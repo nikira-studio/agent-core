@@ -159,6 +159,9 @@ def render_page(
 
     layout_class = "layout" if show_sidebar else "layout no-sidebar"
     user_tz_js = json.dumps((session or {}).get("timezone") or "")
+    events_js = (
+        '<script src="/static/js/events.js?v=20260518a"></script>' if session else ""
+    )
 
     return HTMLResponse(
         f"""<!DOCTYPE html>
@@ -193,9 +196,10 @@ def render_page(
   </div>
 </div>
 <script>window.AC_USER_TZ = {user_tz_js};</script>
+<script>window.AC_AUTHENTICATED = {json.dumps(bool(session))};</script>
 <script>window.AGENT_CORE_WINDOW_EVENT = {json.dumps(JS_WINDOW_EVENT)};</script>
-<script src="/static/js/dashboard.js?v=20260523d"></script>
-<script src="/static/js/events.js?v=20260518a"></script>
+<script src="/static/js/dashboard.js?v=20260808a"></script>
+{events_js}
 {extra_js}
 </body>
 </html>""",

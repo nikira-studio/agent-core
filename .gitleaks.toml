@@ -1,0 +1,6 @@
+[allowlist]
+description = "Known documentation placeholders"
+regexTarget = "match"
+regexes = [
+  '''Bearer YOUR_AGENT_API_KEY''',
+]

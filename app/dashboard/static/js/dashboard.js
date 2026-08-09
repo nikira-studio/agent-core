@@ -523,7 +523,7 @@ document.addEventListener('DOMContentLoaded', function() {
     } catch (e) { detected = 'UTC'; }
     window.AC_USER_TZ = detected;
     // Persist the detected zone as the user's default; display works regardless.
-    if (typeof apiFetch === 'function') {
+    if (window.AC_AUTHENTICATED && typeof apiFetch === 'function') {
       apiFetch('/api/dashboard/user-settings', {
         method: 'POST',
         body: JSON.stringify({ timezone: detected }),

@@ -40,7 +40,7 @@ def test_shared_scope_agent_list_parsed():
     assert s.shared_scope_agent_list == ["agent1", "agent2", "agent3"]
 
 
-def test_checked_in_compose_uses_auto_encryption_key():
-    compose = (Path(__file__).parents[2] / "docker-compose.yml").read_text()
+def test_checked_in_compose_example_uses_auto_encryption_key():
+    compose = (Path(__file__).parents[2] / "docker-compose.example.yml").read_text()
     assert f"{ENV_PREFIX}ENCRYPTION_KEY=auto" in compose
     assert f"{ENV_PREFIX}ENCRYPTION_KEY=autookay" not in compose

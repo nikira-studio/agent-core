@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pytest
 
 
@@ -29,10 +31,23 @@ def test_dashboard_pages_load_with_static_assets(authenticated_client):
         html = r.text
         assert 'href="/static/css/dashboard.css' in html, f"{page} missing CSS link"
         assert 'src="/static/js/dashboard.js' in html, f"{page} missing JS link"
+        assert 'src="/static/js/events.js' in html, f"{page} missing event stream JS"
+        assert "window.AC_AUTHENTICATED = true" in html
         assert 'href="/static/img/favicon/favicon.ico"' in html, (
             f"{page} missing favicon link"
         )
         assert 'src="/static/img/logo.png"' in html, f"{page} missing logo"
+
+
+def test_public_auth_pages_do_not_start_the_authenticated_event_stream(test_client):
+    for page in ("/login", "/otp"):
+        r = test_client.get(page)
+        assert r.status_code == 200
+        assert 'src="/static/js/events.js' not in r.text
+        assert "window.AC_AUTHENTICATED = false" in r.text
+
+    dashboard_js = Path("app/dashboard/static/js/dashboard.js").read_text()
+    assert "window.AC_AUTHENTICATED && typeof apiFetch" in dashboard_js
 
 
 def test_dashboard_audit_page_requires_admin(authenticated_client):
