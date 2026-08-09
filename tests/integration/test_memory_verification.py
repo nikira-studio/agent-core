@@ -487,14 +487,13 @@ def test_every_attempt_is_recorded_whatever_the_answer(clean_db, tmp_path):
 def test_absolute_repo_anchors_are_rejected(clean_db):
     """The same directory has a different absolute path in every container.
 
-    /srv/docker-data/projects/Docs/HomeNetwork on the host is
-    /host/projects/Docs/HomeNetwork inside another agent — an absolute anchor
-    is resolvable only by whoever wrote it, which is the opposite of memory
-    that outlives the agent.
+    /opt/projects/notes on the host is /host/projects/notes inside another
+    agent — an absolute anchor is resolvable only by whoever wrote it, which is
+    the opposite of memory that outlives the agent.
     """
     for absolute in (
-        "repo:/host/projects/Docs/HomeNetwork/notes.md",
-        "repo:/srv/docker-data/projects/Apps/agent-core/app/main.py",
+        "repo:/host/projects/notes/index.md",
+        "repo:/opt/projects/example-app/app/main.py",
     ):
         try:
             memory_service.normalize_subject_anchor(absolute)

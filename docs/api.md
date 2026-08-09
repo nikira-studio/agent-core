@@ -24,6 +24,8 @@ Errors follow the same shape:
 
 The one exception: `GET /mcp` returns the MCP manifest directly.
 
+**`503 DATABASE_UNAVAILABLE`** can come back from any endpoint that touches the database. It means a full restore is holding the database still while it swaps files; the response carries a `Retry-After` and the condition clears in seconds. It is deliberately a refusal rather than a wait, because waiting would stall every other request in the process. See [Backup & Restore](backup-restore.md#restore).
+
 ---
 
 ## Authentication
@@ -347,6 +349,8 @@ Create:
   "metadata_json": "{}"
 }
 ```
+
+`expires_at` must be an ISO 8601 instant; anything else is rejected with `422` rather than stored. Sending `null` **clears** the expiry, while omitting the field leaves it alone — the two mean different things. Past its expiry a credential stops resolving: `reveal` answers `410 CREDENTIAL_EXPIRED`, and the broker refuses it. An expiry that cannot be parsed at all (a row written before this was validated) is treated as expired rather than raising. The dashboard shows expired and expiring-soon badges on the credentials list.
 
 Update metadata while keeping the current encrypted value:
 ```json

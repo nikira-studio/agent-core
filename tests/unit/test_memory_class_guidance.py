@@ -17,7 +17,7 @@ CHOICES = [
 ]
 
 OBSERVATIONS = [
-    "the build server is the home server at 192.0.2.10, and /srv/docker-data is the host-side "
+    "the build server is at 192.0.2.10, and /opt/appdata is the host-side "
     "mount root for container data.",
     "Schema upgrades temporarily disable SQLite foreign key enforcement while "
     "rebuilding connector tables. This is required because the rebuild recreates "

@@ -2,7 +2,7 @@
 
 Reproduces the production case where an adapter install record stored an
 absolute path captured before the data volume was remounted at a different
-location (host /srv/docker-data/core vs container /data). The manifest still
+location (host /opt/appdata/core vs container /data). The manifest still
 exists at the canonical user-adapter location, so restore should relink to it
 rather than warn and drop the connector.
 """
