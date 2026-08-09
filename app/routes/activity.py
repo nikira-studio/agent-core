@@ -5,7 +5,7 @@ from typing import Optional
 
 from app.services import activity_service, audit_service, briefing_service
 from app.security.dependencies import get_request_context
-from app.security.context import RequestContext
+from app.security.effective_authority import EffectiveAuthority
 from app.security.scope_enforcer import ScopeEnforcer
 from app.security.response_helpers import success_response, error_response
 from app.models.enums import ACTIVITY_STATUSES
@@ -34,7 +34,9 @@ class RecoveryRequest(BaseModel):
     task_result: Optional[str] = None
 
 
-def _can_modify_activity(ctx: RequestContext, activity: dict) -> bool:
+def _can_activity(ctx: EffectiveAuthority, activity: dict, operation: str) -> bool:
+    if ctx.is_delegated:
+        return ctx.can_resource("activity", operation, activity["id"])
     if ctx.is_admin:
         return True
     if ctx.actor_type == "agent":
@@ -46,8 +48,10 @@ def _can_modify_activity(ctx: RequestContext, activity: dict) -> bool:
 @router.post("")
 async def create_activity(
     body: CreateActivityRequest,
-    ctx: RequestContext = Depends(get_request_context),
+    ctx: EffectiveAuthority = Depends(get_request_context),
 ):
+    if ctx.is_delegated:
+        return error_response("FORBIDDEN", "Delegated activity creation is unsupported", 403)
     if ctx.agent_id:
         effective_agent_id = ctx.agent_id
     elif ctx.is_admin and body.assigned_agent_id:
@@ -98,8 +102,10 @@ async def create_activity(
 
 @router.post("/pickup")
 async def pickup_activity(
-    ctx: RequestContext = Depends(get_request_context),
+    ctx: EffectiveAuthority = Depends(get_request_context),
 ):
+    if ctx.is_delegated:
+        return error_response("FORBIDDEN", "Delegated activity pickup is unsupported", 403)
     if not ctx.agent_id:
         return error_response("AGENT_REQUIRED", "Pickup requires an agent context", 400)
 
@@ -143,7 +149,7 @@ async def search_activities(
     since: Optional[str] = None,
     limit: int = 20,
     offset: int = 0,
-    ctx: RequestContext = Depends(get_request_context),
+    ctx: EffectiveAuthority = Depends(get_request_context),
 ):
     """Full-text search the activity trail.
 
@@ -178,7 +184,10 @@ async def search_activities(
     activities = []
     for activity in raw_activities:
         scope = activity.get("memory_scope") or f"agent:{activity['agent_id']}"
-        if not ctx.is_admin and not enforcer.can_read(scope):
+        if ctx.is_delegated:
+            if not ctx.can_resource("activity", "read", activity["id"]):
+                continue
+        elif not ctx.is_admin and not enforcer.can_read(scope):
             continue
         activities.append(activity)
 
@@ -190,13 +199,13 @@ async def search_activities(
 @router.get("/{activity_id}")
 async def get_activity(
     activity_id: str,
-    ctx: RequestContext = Depends(get_request_context),
+    ctx: EffectiveAuthority = Depends(get_request_context),
 ):
     activity = activity_service.get_activity(activity_id)
     if not activity:
         return error_response("NOT_FOUND", "Activity not found", 404)
 
-    if not _can_modify_activity(ctx, activity):
+    if not _can_activity(ctx, activity, "read"):
         return error_response("FORBIDDEN", "Access denied", 403)
 
     return success_response({"activity": activity})
@@ -206,13 +215,13 @@ async def get_activity(
 async def update_activity(
     activity_id: str,
     body: UpdateActivityRequest,
-    ctx: RequestContext = Depends(get_request_context),
+    ctx: EffectiveAuthority = Depends(get_request_context),
 ):
     activity = activity_service.get_activity(activity_id)
     if not activity:
         return error_response("NOT_FOUND", "Activity not found", 404)
 
-    if not _can_modify_activity(ctx, activity):
+    if not _can_activity(ctx, activity, "update"):
         return error_response("FORBIDDEN", "Access denied", 403)
 
     if body.status and body.status not in ACTIVITY_STATUSES:
@@ -260,13 +269,13 @@ async def update_activity(
 @router.post("/{activity_id}/heartbeat")
 async def heartbeat_activity(
     activity_id: str,
-    ctx: RequestContext = Depends(get_request_context),
+    ctx: EffectiveAuthority = Depends(get_request_context),
 ):
     activity = activity_service.get_activity(activity_id)
     if not activity:
         return error_response("NOT_FOUND", "Activity not found", 404)
 
-    if not _can_modify_activity(ctx, activity):
+    if not _can_activity(ctx, activity, "update"):
         return error_response("FORBIDDEN", "Access denied", 403)
 
     if activity["status"] not in ("active", "stale"):
@@ -302,7 +311,7 @@ async def list_activities(
     agent_id: Optional[str] = None,
     limit: int = 50,
     offset: int = 0,
-    ctx: RequestContext = Depends(get_request_context),
+    ctx: EffectiveAuthority = Depends(get_request_context),
 ):
     activity_service.mark_stale_activities()
 
@@ -314,7 +323,9 @@ async def list_activities(
         active_workspace_ids=ctx.active_workspace_ids,
     )
 
-    if ctx.actor_type == "agent":
+    if ctx.is_delegated:
+        filter_agent_id = None
+    elif ctx.actor_type == "agent":
         filter_agent_id = ctx.agent_id
     else:
         filter_agent_id = agent_id
@@ -331,6 +342,11 @@ async def list_activities(
         limit=min(limit, 100),
         offset=offset,
     )
+    if ctx.is_delegated:
+        activities = [
+            activity for activity in activities
+            if ctx.can_resource("activity", "read", activity["id"])
+        ]
 
     return success_response(
         {
@@ -343,13 +359,13 @@ async def list_activities(
 @router.delete("/{activity_id}")
 async def cancel_activity(
     activity_id: str,
-    ctx: RequestContext = Depends(get_request_context),
+    ctx: EffectiveAuthority = Depends(get_request_context),
 ):
     activity = activity_service.get_activity(activity_id)
     if not activity:
         return error_response("NOT_FOUND", "Activity not found", 404)
 
-    if not _can_modify_activity(ctx, activity):
+    if not _can_activity(ctx, activity, "cancel"):
         return error_response("FORBIDDEN", "Access denied", 403)
 
     if activity["status"] not in ("active", "stale"):
@@ -386,7 +402,7 @@ async def cancel_activity(
 async def recover_activity(
     activity_id: str,
     body: RecoveryRequest,
-    ctx: RequestContext = Depends(get_request_context),
+    ctx: EffectiveAuthority = Depends(get_request_context),
 ):
     if not ctx.is_admin:
         return error_response("FORBIDDEN", "Admin access required for recovery", 403)

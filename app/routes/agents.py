@@ -23,6 +23,7 @@ class CreateAgentRequest(BaseModel):
     # Subset of read_scopes the agent recalls from on an unscoped search. None =
     # default (fan all read_scopes).
     default_recall_scopes: Optional[list[str]] = None
+    can_delegate: bool = False
 
 
 class UpdateAgentRequest(BaseModel):
@@ -34,6 +35,7 @@ class UpdateAgentRequest(BaseModel):
     # back to the default (fan all read_scopes).
     default_recall_scopes: Optional[list[str]] = None
     reset_default_recall_scopes: bool = False
+    can_delegate: Optional[bool] = None
 
 
 def _is_admin(session: dict) -> bool:
@@ -115,6 +117,7 @@ async def list_agents(session: dict = Depends(get_current_session)):
             "read_scopes_json": agent["read_scopes_json"],
             "write_scopes_json": agent["write_scopes_json"],
             "default_recall_scopes_json": agent.get("default_recall_scopes_json"),
+            "can_delegate": bool(agent.get("can_delegate")),
             "is_active": agent["is_active"],
             "is_shared": agent_service.is_agent_shared(agent),
             "created_at": agent["created_at"],
@@ -138,6 +141,8 @@ async def create_agent(
 
     if not _is_admin(session) and body.default_user_id not in (None, session["user_id"]):
         return error_response("FORBIDDEN", "Cannot assign another user's context", 403)
+    if body.can_delegate and not _is_admin(session):
+        return error_response("FORBIDDEN", "Only admins may enable delegation", 403)
 
     owner_user_id = session["user_id"]
     scope_error = _validate_agent_scopes(body.read_scopes, session, agent_id=normalized_id, owner_user_id=owner_user_id)
@@ -159,6 +164,7 @@ async def create_agent(
         read_scopes=body.read_scopes,
         write_scopes=body.write_scopes,
         default_recall_scopes=body.default_recall_scopes,
+        can_delegate=body.can_delegate,
     )
 
     audit_service.write_event(
@@ -180,6 +186,7 @@ async def create_agent(
             "read_scopes_json": agent["read_scopes_json"],
             "write_scopes_json": agent["write_scopes_json"],
             "default_recall_scopes_json": agent.get("default_recall_scopes_json"),
+            "can_delegate": bool(agent.get("can_delegate")),
             "is_active": agent["is_active"],
         },
         "next_step": "Generate a one-time connection key and config from Integrations.",
@@ -205,6 +212,7 @@ async def get_agent(agent_id: str, session: dict = Depends(get_current_session))
             "read_scopes_json": agent["read_scopes_json"],
             "write_scopes_json": agent["write_scopes_json"],
             "default_recall_scopes_json": agent.get("default_recall_scopes_json"),
+            "can_delegate": bool(agent.get("can_delegate")),
             "is_active": agent["is_active"],
             "created_at": agent["created_at"],
             "is_shared": agent_service.is_agent_shared(agent),
@@ -224,6 +232,8 @@ async def update_agent(
 
     if not _can_manage_agent(agent, session):
         return error_response("FORBIDDEN", "Access denied", 403)
+    if body.can_delegate is not None and not _is_admin(session):
+        return error_response("FORBIDDEN", "Only admins may change delegation capability", 403)
 
     owner_user_id = agent.get("owner_user_id") or session["user_id"]
     scope_error = _validate_agent_scopes(body.read_scopes, session, agent_id=agent_id, owner_user_id=owner_user_id)
@@ -241,6 +251,7 @@ async def update_agent(
         description=body.description,
         read_scopes=body.read_scopes,
         write_scopes=body.write_scopes,
+        can_delegate=body.can_delegate,
     )
     # reset flag clears back to default (fan all read_scopes); otherwise a
     # provided list narrows, and absence leaves it unchanged.

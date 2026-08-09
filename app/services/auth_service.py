@@ -232,6 +232,12 @@ def _delete_user(user_id: str) -> tuple[bool, str]:
             agent_scope = f"agent:{agent['id']}"
             cleanup_service.delete_scope_data(conn, agent_scope)
             conn.execute(
+                """DELETE FROM delegated_grants
+                   WHERE recipient_agent_id = ? OR coordinator_agent_id = ?
+                      OR (issuer_actor_type = 'agent' AND issuer_actor_id = ?)""",
+                (agent["id"], agent["id"], agent["id"]),
+            )
+            conn.execute(
                 """
                 DELETE FROM agent_activity
                 WHERE agent_id = ? OR assigned_agent_id = ? OR reassigned_from_agent_id = ?
@@ -241,6 +247,11 @@ def _delete_user(user_id: str) -> tuple[bool, str]:
             conn.execute("DELETE FROM agents WHERE id = ?", (agent["id"],))
 
         cleanup_service.delete_scope_data(conn, f"user:{user_id}")
+        conn.execute(
+            """DELETE FROM delegated_grants
+               WHERE principal_user_id = ? OR (issuer_actor_type = 'user' AND issuer_actor_id = ?)""",
+            (user_id, user_id),
+        )
         # Grants this user held on workspaces they do not own, and grants they
         # issued on workspaces that outlive them. Both columns reference
         # users(id) without a cascade, so either one left behind aborts the

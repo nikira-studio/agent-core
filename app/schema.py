@@ -45,6 +45,7 @@ CREATE TABLE IF NOT EXISTS agents (
     read_scopes_json TEXT NOT NULL DEFAULT '[]',
     write_scopes_json TEXT NOT NULL DEFAULT '[]',
     default_recall_scopes_json TEXT,
+    can_delegate INTEGER NOT NULL DEFAULT 0 CHECK (can_delegate IN (0, 1)),
     api_key_hash TEXT NOT NULL,
     is_active INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0, 1)),
     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
@@ -55,6 +56,45 @@ CREATE TABLE IF NOT EXISTS agents (
 
 CREATE INDEX IF NOT EXISTS idx_agents_owner ON agents(owner_user_id);
 CREATE INDEX IF NOT EXISTS idx_agents_active ON agents(is_active);
+
+-- Delegated authority is deliberately normalized: a scope alone is never a
+-- grant to every resource that happens to live in that scope.
+CREATE TABLE IF NOT EXISTS delegated_grants (
+    id TEXT PRIMARY KEY, secret_hash TEXT,
+    issuer_actor_type TEXT NOT NULL CHECK (issuer_actor_type IN ('user', 'agent')),
+    issuer_actor_id TEXT NOT NULL, principal_user_id TEXT NOT NULL,
+    recipient_agent_id TEXT NOT NULL, coordinator_agent_id TEXT,
+    purpose TEXT NOT NULL, activity_id TEXT, correlation_id TEXT,
+    status TEXT NOT NULL CHECK (status IN ('approved_unclaimed','active','revoked','expired','exhausted')),
+    issued_at TEXT NOT NULL, not_before TEXT, expires_at TEXT NOT NULL,
+    claim_expires_at TEXT NOT NULL, claimed_at TEXT, max_uses INTEGER,
+    use_count INTEGER NOT NULL DEFAULT 0, revoked_at TEXT, revoked_by_actor_id TEXT,
+    revocation_reason TEXT,
+    FOREIGN KEY (principal_user_id) REFERENCES users(id),
+    FOREIGN KEY (recipient_agent_id) REFERENCES agents(id)
+);
+CREATE INDEX IF NOT EXISTS idx_delegated_grants_recipient ON delegated_grants(recipient_agent_id, status, expires_at);
+CREATE INDEX IF NOT EXISTS idx_delegated_grants_principal ON delegated_grants(principal_user_id, status);
+CREATE INDEX IF NOT EXISTS idx_delegated_grants_issuer ON delegated_grants(issuer_actor_type, issuer_actor_id, status);
+CREATE INDEX IF NOT EXISTS idx_delegated_grants_status_expiry ON delegated_grants(status, expires_at);
+CREATE TABLE IF NOT EXISTS delegated_grant_scope_permissions (
+    grant_id TEXT NOT NULL, resource_type TEXT NOT NULL CHECK (resource_type IN ('memory','briefing')),
+    operation TEXT NOT NULL, scope TEXT NOT NULL,
+    PRIMARY KEY (grant_id, resource_type, operation, scope),
+    FOREIGN KEY (grant_id) REFERENCES delegated_grants(id) ON DELETE CASCADE
+);
+CREATE TABLE IF NOT EXISTS delegated_grant_resource_permissions (
+    grant_id TEXT NOT NULL, resource_type TEXT NOT NULL CHECK (resource_type IN ('activity')),
+    operation TEXT NOT NULL, resource_id TEXT NOT NULL,
+    PRIMARY KEY (grant_id, resource_type, operation, resource_id),
+    FOREIGN KEY (grant_id) REFERENCES delegated_grants(id) ON DELETE CASCADE
+);
+CREATE TABLE IF NOT EXISTS delegated_grant_actions (
+    grant_id TEXT NOT NULL, binding_id TEXT NOT NULL, action TEXT NOT NULL,
+    PRIMARY KEY (grant_id, binding_id, action),
+    FOREIGN KEY (grant_id) REFERENCES delegated_grants(id) ON DELETE CASCADE,
+    FOREIGN KEY (binding_id) REFERENCES connector_bindings(id)
+);
 
 -- Workspaces table
 CREATE TABLE IF NOT EXISTS workspaces (
@@ -303,6 +343,15 @@ CREATE TABLE IF NOT EXISTS connector_executions (
     result_body_json TEXT,
     error_message TEXT,
     duration_ms INTEGER,
+    actor_type TEXT,
+    actor_id TEXT,
+    principal_user_id TEXT,
+    executor_agent_id TEXT,
+    issuer_actor_id TEXT,
+    coordinator_agent_id TEXT,
+    grant_id TEXT,
+    correlation_id TEXT,
+    authorization_mode TEXT,
     executed_at TEXT DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (binding_id) REFERENCES connector_bindings(id)
 );
@@ -410,6 +459,8 @@ def create_schema(conn) -> None:
     _ensure_memory_proposals_table(conn)
     _widen_proposal_actions(conn)
     _ensure_agents_default_recall_column(conn)
+    _ensure_agents_delegation_column(conn)
+    _ensure_connector_execution_authority_columns(conn)
     _ensure_memory_metadata_columns(conn)
     _drop_retired_memory_columns(conn)
     _ensure_connector_type_provider_columns(conn)
@@ -474,6 +525,26 @@ def _ensure_agents_default_recall_column(conn) -> None:
     if "default_recall_scopes_json" not in columns:
         conn.execute("ALTER TABLE agents ADD COLUMN default_recall_scopes_json TEXT")
         conn.commit()
+
+
+def _ensure_agents_delegation_column(conn) -> None:
+    columns = {row["name"] for row in conn.execute("PRAGMA table_info(agents)").fetchall()}
+    if "can_delegate" not in columns:
+        conn.execute("ALTER TABLE agents ADD COLUMN can_delegate INTEGER NOT NULL DEFAULT 0")
+        conn.commit()
+
+
+def _ensure_connector_execution_authority_columns(conn) -> None:
+    columns = {row["name"] for row in conn.execute("PRAGMA table_info(connector_executions)").fetchall()}
+    wanted = (
+        "actor_type", "actor_id", "principal_user_id", "executor_agent_id",
+        "issuer_actor_id", "coordinator_agent_id", "grant_id", "correlation_id",
+        "authorization_mode",
+    )
+    for column in wanted:
+        if column not in columns:
+            conn.execute(f"ALTER TABLE connector_executions ADD COLUMN {column} TEXT")
+    conn.commit()
 
 
 def _ensure_activity_columns(conn) -> None:

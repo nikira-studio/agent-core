@@ -3,6 +3,7 @@ import logging
 import random
 import re
 import secrets
+from contextvars import ContextVar
 import time
 from typing import Optional
 from app.database import get_db
@@ -10,6 +11,9 @@ from app.models.enums import normalize_id
 from app.services import mcp_provider_service
 
 logger = logging.getLogger(__name__)
+_execution_authority: ContextVar[object | None] = ContextVar(
+    "connector_execution_authority", default=None
+)
 
 
 def normalize_action_names(actions: Optional[list]) -> list[str]:
@@ -296,6 +300,10 @@ def update_binding(binding_id: str, **fields) -> bool:
 
 def delete_binding(binding_id: str) -> bool:
     with get_db() as conn:
+        conn.execute(
+            "DELETE FROM delegated_grants WHERE id IN (SELECT grant_id FROM delegated_grant_actions WHERE binding_id = ?)",
+            (binding_id,),
+        )
         conn.execute(
             "DELETE FROM connector_executions WHERE binding_id = ?", (binding_id,)
         )
@@ -1217,9 +1225,38 @@ def execute_binding_action(
     return result
 
 
+def execute_authorized_binding_action_with_logging(
+    binding_id: str, action: str, params: Optional[dict], authority
+) -> dict:
+    """Protected connector entry point; authority is never optional."""
+    if authority is None:
+        raise TypeError("An explicit effective or system authority is required")
+    from app.security.effective_authority import SystemAuthority
+
+    if isinstance(authority, SystemAuthority):
+        token = _execution_authority.set(authority)
+        try:
+            return execute_binding_action_with_logging(binding_id, action, params)
+        finally:
+            _execution_authority.reset(token)
+    binding_for_auth = get_binding(binding_id)
+    if not binding_for_auth or not authority.can_binding_action(
+        binding_id, action, scope=binding_for_auth["scope"]
+    ):
+        from app.security.exceptions import APIError
+
+        raise APIError("SCOPE_DENIED", "Access denied to this binding action", 403)
+    token = _execution_authority.set(authority)
+    try:
+        return execute_binding_action_with_logging(binding_id, action, params)
+    finally:
+        _execution_authority.reset(token)
+
+
 def execute_binding_action_with_logging(
     binding_id: str, action: str, params: Optional[dict] = None
 ) -> dict:
+    """Execution/logging primitive. Request paths must use the authorized wrapper."""
     from app.services.event_stream_service import event_hub
     from app.services import webhook_service
 
@@ -1298,12 +1335,27 @@ def log_execution(
 ) -> str:
     execution_id = secrets.token_urlsafe(16)
     result_body_json = _truncate_execution_body(result_body_json)
+    authority = _execution_authority.get()
+    context = getattr(authority, "context", None)
+    attribution = (
+        getattr(authority, "actor_type", None),
+        getattr(authority, "actor_id", None),
+        getattr(authority, "principal_user_id", None),
+        getattr(context, "agent_id", None),
+        getattr(authority, "issuer_actor_id", None),
+        getattr(authority, "coordinator_agent_id", None),
+        getattr(authority, "grant_id", None),
+        getattr(authority, "correlation_id", None),
+        "delegated" if getattr(authority, "grant_id", None) else "system" if authority and not context else "permanent" if authority else None,
+    )
     with get_db() as conn:
         conn.execute(
             """
             INSERT INTO connector_executions
-            (id, binding_id, action, params_json, result_status, result_body_json, error_message, duration_ms)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            (id, binding_id, action, params_json, result_status, result_body_json, error_message, duration_ms,
+             actor_type, actor_id, principal_user_id, executor_agent_id, issuer_actor_id,
+             coordinator_agent_id, grant_id, correlation_id, authorization_mode)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 execution_id,
@@ -1314,6 +1366,7 @@ def log_execution(
                 result_body_json,
                 error_message,
                 duration_ms,
+                *attribution,
             ),
         )
         conn.commit()
@@ -1516,6 +1569,10 @@ def delete_connector_type(connector_type_id: str) -> bool:
                 "DELETE FROM connector_executions WHERE binding_id = ?",
                 (row[0],),
             )
+        conn.execute(
+            "DELETE FROM delegated_grants WHERE id IN (SELECT dga.grant_id FROM delegated_grant_actions dga JOIN connector_bindings cb ON cb.id = dga.binding_id WHERE cb.connector_type_id = ?)",
+            (connector_type_id,),
+        )
         conn.execute(
             "DELETE FROM connector_bindings WHERE connector_type_id = ?",
             (connector_type_id,),

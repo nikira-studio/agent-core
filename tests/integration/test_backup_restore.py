@@ -2,9 +2,51 @@
 import io
 import json
 import zipfile
+import sqlite3
+import tempfile
+from pathlib import Path
 from io import BytesIO
 
 from app.branding import APP_SLUG
+
+
+def test_backup_snapshot_makes_delegated_grants_inert(clean_db):
+    from app.config import settings
+    from app.database import get_db
+    from app.services import backup_service
+
+    with get_db() as conn:
+        conn.execute(
+            "INSERT INTO users (id, email, password_hash, display_name) VALUES ('u', 'u@test', 'x', 'U')"
+        )
+        conn.execute(
+            """INSERT INTO agents
+               (id, display_name, owner_user_id, default_user_id, api_key_hash)
+               VALUES ('a', 'A', 'u', 'u', 'x')"""
+        )
+        conn.execute(
+            """INSERT INTO delegated_grants
+               (id, secret_hash, issuer_actor_type, issuer_actor_id, principal_user_id,
+                recipient_agent_id, purpose, status, issued_at, expires_at, claim_expires_at)
+               VALUES ('g', 'plaintext-would-be-hash', 'user', 'u', 'u', 'a', 'test',
+                       'active', '2026-01-01T00:00:00+00:00', '2099-01-01T00:00:00+00:00',
+                       '2099-01-01T00:00:00+00:00')"""
+        )
+        conn.commit()
+
+    archive = backup_service.build_backup_zip(
+        str(clean_db), str(settings.credential_key_path), "admin"
+    )
+    with zipfile.ZipFile(archive) as source:
+        db_bytes = source.read("agent-core.db")
+    extracted = Path(tempfile.mkdtemp()) / "snapshot.db"
+    extracted.write_bytes(db_bytes)
+    con = sqlite3.connect(extracted)
+    row = con.execute(
+        "SELECT secret_hash, status, revocation_reason FROM delegated_grants WHERE id = 'g'"
+    ).fetchone()
+    con.close()
+    assert row == (None, "revoked", "backup safety invalidation")
 
 
 def test_backup_restore_requires_admin(test_client, agent_token):

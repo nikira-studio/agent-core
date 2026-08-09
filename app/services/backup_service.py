@@ -82,6 +82,26 @@ def _snapshot_database(db_path: str, destination: str) -> None:
         source.close()
 
 
+def _make_delegations_inert(db_path: str) -> None:
+    """Ensure archived/restored databases cannot carry usable grant credentials."""
+    con = sqlite3.connect(db_path)
+    try:
+        exists = con.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'delegated_grants'"
+        ).fetchone()
+        if exists:
+            con.execute(
+                """UPDATE delegated_grants
+                   SET secret_hash = NULL, status = 'revoked', revoked_at = COALESCE(revoked_at, ?),
+                       revocation_reason = COALESCE(revocation_reason, 'backup safety invalidation')
+                   WHERE status IN ('approved_unclaimed', 'active')""",
+                (utc_now_iso(),),
+            )
+            con.commit()
+    finally:
+        con.close()
+
+
 def build_backup_manifest(
     db_path: str,
     credential_key_path: str,
@@ -138,6 +158,7 @@ def build_backup_zip(
         with KEY_OPERATION_LOCK:
             if os.path.exists(db_path):
                 _snapshot_database(db_path, snapshot_path)
+                _make_delegations_inert(snapshot_path)
 
             env_key = _configured_env_key_bytes()
             if env_key is not None:
@@ -850,6 +871,18 @@ def _restore_extracted(
         effective_key,
         timestamp,
     )
+    inert_path = str(
+        settings.data_dir / f"restore-inert-{timestamp}-{secrets.token_hex(4)}.db"
+    )
+    try:
+        with open(inert_path, "wb") as f:
+            f.write(extracted[DB_FILENAME])
+        _make_delegations_inert(inert_path)
+        with open(inert_path, "rb") as f:
+            extracted[DB_FILENAME] = f.read()
+    finally:
+        if os.path.exists(inert_path):
+            os.remove(inert_path)
 
     def atomic_replace(src_bytes: bytes, dst_path: str, backup_suffix: str):
         tmp_path = dst_path + f".{timestamp}.tmp"

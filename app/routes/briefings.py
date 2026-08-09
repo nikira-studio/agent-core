@@ -5,7 +5,7 @@ from pydantic import BaseModel
 from app.services import briefing_service, audit_service, agent_service
 from app.services.auth_service import get_user_by_id
 from app.security.dependencies import get_request_context
-from app.security.context import RequestContext
+from app.security.effective_authority import EffectiveAuthority
 from app.security.scope_enforcer import ScopeEnforcer
 from app.security.response_helpers import success_response, error_response
 
@@ -23,7 +23,9 @@ class PrdHandoffRequest(BaseModel):
     user_id: str
 
 
-def _briefing_authorized(ctx: RequestContext, activity: dict) -> bool:
+def _briefing_authorized(ctx: EffectiveAuthority, activity: dict) -> bool:
+    if ctx.is_delegated:
+        return ctx.can_resource("activity", "read", activity["id"])
     if ctx.is_admin:
         return True
     if ctx.actor_type == "agent":
@@ -36,7 +38,7 @@ def _briefing_authorized(ctx: RequestContext, activity: dict) -> bool:
 @router.post("/handoff")
 async def create_handoff_briefing(
     body: HandoffBriefingRequest,
-    ctx: RequestContext = Depends(get_request_context),
+    ctx: EffectiveAuthority = Depends(get_request_context),
 ):
     if not ctx.agent_id and not ctx.user_id:
         return error_response(
@@ -54,14 +56,7 @@ async def create_handoff_briefing(
 
     memory_scope = activity.get("memory_scope")
     if memory_scope:
-        enforcer = ScopeEnforcer(
-            ctx.read_scopes,
-            ctx.write_scopes,
-            ctx.agent_id,
-            is_admin=ctx.is_admin,
-            active_workspace_ids=ctx.active_workspace_ids,
-        )
-        if not enforcer.can_read(memory_scope):
+        if not ctx.can("briefing", "create", scope=memory_scope):
             return error_response(
                 "SCOPE_DENIED", "Access denied to activity memory scope", 403
             )
@@ -76,7 +71,10 @@ async def create_handoff_briefing(
         activity_id=body.activity_id,
         requesting_agent_id=requesting_agent,
         requesting_user_id=ctx.user_id or "",
-        authorized_scopes=ctx.read_scopes,
+        authorized_scopes=(
+            [scope for resource, operation, scope in ctx.scope_permissions if resource == "briefing" and operation == "create"]
+            if ctx.is_delegated else ctx.read_scopes
+        ),
     )
     if not briefing:
         return error_response("BRIEFING_FAILED", "Could not generate briefing", 500)
@@ -97,8 +95,10 @@ async def create_handoff_briefing(
 @router.post("/handoff/prd")
 async def create_prd_handoff_briefing(
     body: PrdHandoffRequest,
-    ctx: RequestContext = Depends(get_request_context),
+    ctx: EffectiveAuthority = Depends(get_request_context),
 ):
+    if ctx.is_delegated:
+        return error_response("FORBIDDEN", "Delegated PRD handoff creation is unsupported", 403)
     if not ctx.agent_id and not ctx.user_id:
         return error_response(
             "CTX_REQUIRED", "Briefing requires agent or user context", 400
@@ -166,7 +166,7 @@ async def create_prd_handoff_briefing(
 @router.get("/{briefing_id}")
 async def get_briefing(
     briefing_id: str,
-    ctx: RequestContext = Depends(get_request_context),
+    ctx: EffectiveAuthority = Depends(get_request_context),
 ):
     from app.services import activity_service
 
@@ -180,5 +180,9 @@ async def get_briefing(
     briefing = briefing_service.get_briefing(briefing_id)
     if not briefing:
         return error_response("NOT_FOUND", "Briefing not found", 404)
+
+    scope = activity.get("memory_scope")
+    if scope and not ctx.can("briefing", "read", scope=scope):
+        return error_response("SCOPE_DENIED", "Access denied to briefing scope", 403)
 
     return success_response({"briefing": briefing})

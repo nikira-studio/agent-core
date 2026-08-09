@@ -13,6 +13,7 @@ from app.routes import (
     health_router,
     spec_router,
     auth_router,
+    delegations_router,
     agents_router,
     workspaces_router,
     credentials_router,
@@ -210,6 +211,7 @@ def create_app() -> FastAPI:
     app.include_router(health_router, tags=["health"])
     app.include_router(spec_router, tags=["spec"])
     app.include_router(auth_router, tags=["auth"])
+    app.include_router(delegations_router, tags=["delegations"])
     app.include_router(agents_router, tags=["agents"])
     app.include_router(workspaces_router, tags=["workspaces"])
     app.include_router(credentials_router, tags=["credentials"])

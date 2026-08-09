@@ -200,6 +200,7 @@ def _verify_via_binding(spec: dict, anchor_type: str, value: str) -> tuple[str, 
     only when the binding says so plainly.
     """
     from app.services import connector_service
+    from app.security.effective_authority import system_authority
 
     binding_id = spec.get("binding_id")
     action = spec.get("action")
@@ -209,8 +210,9 @@ def _verify_via_binding(spec: dict, anchor_type: str, value: str) -> tuple[str, 
     params = dict(spec.get("params") or {})
     params[spec.get("value_param", "target")] = value
     try:
-        result = connector_service.execute_binding_action_with_logging(
-            binding_id, action, params
+        result = connector_service.execute_authorized_binding_action_with_logging(
+            binding_id, action, params,
+            system_authority("configured anchored-fact verification"),
         )
     except Exception as exc:
         return UNVERIFIABLE, f"the '{anchor_type}:' verifier could not run: {exc}"

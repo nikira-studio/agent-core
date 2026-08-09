@@ -51,6 +51,18 @@ def delete_scope_data(conn: sqlite3.Connection, scope: str) -> dict:
     # bindings that depend on them go first. A binding whose credential is gone
     # could not authenticate anyway; leaving it behind would only produce a
     # connector that fails at the moment someone relies on it.
+    affected_grants = conn.execute(
+        """SELECT DISTINCT grant_id FROM delegated_grant_scope_permissions WHERE scope = ?
+           UNION SELECT DISTINCT dga.grant_id FROM delegated_grant_actions dga
+           JOIN connector_bindings cb ON cb.id = dga.binding_id
+           WHERE cb.scope = ? OR cb.credential_id IN (SELECT id FROM credentials WHERE scope = ?)""",
+        (scope, scope, scope),
+    ).fetchall()
+    grant_ids = [row["grant_id"] for row in affected_grants]
+    if grant_ids:
+        placeholders = ",".join("?" for _ in grant_ids)
+        conn.execute(f"DELETE FROM delegated_grants WHERE id IN ({placeholders})", grant_ids)
+
     bindings_deleted = conn.execute(
         """
         DELETE FROM connector_bindings

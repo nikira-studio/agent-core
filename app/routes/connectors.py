@@ -372,14 +372,17 @@ async def run_binding(
         is_admin=ctx.is_admin,
         active_workspace_ids=ctx.active_workspace_ids,
     )
-    if not enforcer.can_read(binding["scope"]):
-        return error_response("SCOPE_DENIED", "Access denied to this binding", 403)
     action = body.get("action")
     params = body.get("params") or {}
     if not action:
         return error_response("INVALID_REQUEST", "Missing action", 400)
+    if ctx.is_delegated:
+        if not ctx.can_binding_action(binding_id, action, scope=binding["scope"]):
+            return error_response("SCOPE_DENIED", "Access denied to this binding action", 403)
+    elif not enforcer.can_read(binding["scope"]):
+        return error_response("SCOPE_DENIED", "Access denied to this binding", 403)
     connector_type = connector_service.get_connector_type(binding["connector_type_id"])
-    if connector_service.action_requires_write(
+    if not ctx.is_delegated and connector_service.action_requires_write(
         connector_type or {}, action
     ) and not enforcer.can_write(binding["scope"]):
         return error_response(
@@ -388,10 +391,11 @@ async def run_binding(
             403,
         )
     result = await asyncio.to_thread(
-        connector_service.execute_binding_action_with_logging,
+        connector_service.execute_authorized_binding_action_with_logging,
         binding_id,
         action,
         params,
+        ctx,
     )
     audit_service.write_event(
         actor_type=ctx.actor_type,

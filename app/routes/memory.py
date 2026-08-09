@@ -13,8 +13,7 @@ try:
 except Exception:
     _EMBED_AVAILABLE = False
 from app.security.dependencies import get_request_context
-from app.security.context import RequestContext
-from app.security.scope_enforcer import ScopeEnforcer
+from app.security.effective_authority import EffectiveAuthority
 from app.security.rate_limiter import RL, CSG
 from app.security.response_helpers import (
     success_response, success_response_with_headers, error_response, rate_limited_response, rate_limit_headers,
@@ -29,7 +28,7 @@ router = APIRouter(prefix="/api/memory", tags=["memory"])
 
 
 
-def _memory_provenance(ctx: RequestContext, source_kind: str, scope: str) -> str:
+def _memory_provenance(ctx: EffectiveAuthority, source_kind: str, scope: str) -> str:
     return memory_service.provenance_for_write(
         actor_type=ctx.actor_type,
         actor_id=ctx.actor_id,
@@ -39,11 +38,12 @@ def _memory_provenance(ctx: RequestContext, source_kind: str, scope: str) -> str
         scope=scope,
         user_id=ctx.user_id,
         agent_id=ctx.agent_id,
+        extras=ctx.safe_attribution(),
     )
 
 
 def _memory_import_provenance(
-    ctx: RequestContext,
+    ctx: EffectiveAuthority,
     scope: str,
     filename: str,
     chunk_index: int,
@@ -59,6 +59,7 @@ def _memory_import_provenance(
         agent_id=ctx.agent_id,
         extras={
             "route": "/api/memory/import",
+            **ctx.safe_attribution(),
             "import_source": filename,
             "import_chunk": chunk_index,
             "import_chunks": chunk_count,
@@ -123,21 +124,14 @@ class GetMemoryRequest(BaseModel):
 @router.post("/write")
 async def write_memory(
     body: WriteMemoryRequest,
-    ctx: RequestContext = Depends(get_request_context),
+    ctx: EffectiveAuthority = Depends(get_request_context),
 ):
     allowed, info = RL.check("agent", ctx.agent_id, "memory_write")
     if not allowed:
         return rate_limited_response("RATE_LIMITED", "memory_write rate limit exceeded", **info)
 
     rate_headers = rate_limit_headers(**info)
-    enforcer = ScopeEnforcer(
-        ctx.read_scopes,
-        ctx.write_scopes,
-        ctx.agent_id,
-        is_admin=ctx.is_admin,
-        active_workspace_ids=ctx.active_workspace_ids,
-    )
-    if not enforcer.can_write(body.scope):
+    if not ctx.can("memory", "write", scope=body.scope):
         return error_response("SCOPE_DENIED", "Access denied to this scope", 403)
 
     if body.memory_class not in MEMORY_CLASSES:
@@ -158,7 +152,7 @@ async def write_memory(
             return error_response("NOT_FOUND", "Record to supersede not found", 404)
         if old_record["record_status"] != "active":
             return error_response("INVALID_SUPERSESSION", "Cannot supersede non-active record", 400)
-        if not enforcer.can_write(old_record["scope"]):
+        if not ctx.can("memory", "write", scope=old_record["scope"]):
             return error_response("SCOPE_DENIED", "Access denied to scope of record being superseded", 403)
 
     try:
@@ -220,21 +214,14 @@ async def write_memory(
 @router.post("/import")
 async def import_memory(
     body: ImportMemoryRequest,
-    ctx: RequestContext = Depends(get_request_context),
+    ctx: EffectiveAuthority = Depends(get_request_context),
 ):
     allowed, info = RL.check("agent", ctx.agent_id, "memory_write")
     if not allowed:
         return rate_limited_response("RATE_LIMITED", "memory_write rate limit exceeded", **info)
 
     rate_headers = rate_limit_headers(**info)
-    enforcer = ScopeEnforcer(
-        ctx.read_scopes,
-        ctx.write_scopes,
-        ctx.agent_id,
-        is_admin=ctx.is_admin,
-        active_workspace_ids=ctx.active_workspace_ids,
-    )
-    if not enforcer.can_write(body.scope):
+    if not ctx.can("memory", "write", scope=body.scope):
         return error_response("SCOPE_DENIED", "Access denied to this scope", 403)
 
     if body.memory_class not in MEMORY_CLASSES:
@@ -339,7 +326,7 @@ async def import_memory(
 @router.post("/search")
 async def search_memory(
     body: SearchMemoryRequest,
-    ctx: RequestContext = Depends(get_request_context),
+    ctx: EffectiveAuthority = Depends(get_request_context),
 ):
     allowed, info = RL.check("agent", ctx.agent_id, "memory_search")
     if not allowed:
@@ -351,14 +338,6 @@ async def search_memory(
         return error_response("CONCURRENT_LIMIT", "Too many concurrent searches", 429)
 
     try:
-        enforcer = ScopeEnforcer(
-            ctx.read_scopes,
-            ctx.write_scopes,
-            ctx.agent_id,
-            is_admin=ctx.is_admin,
-            active_workspace_ids=ctx.active_workspace_ids,
-        )
-
         query_text = body.query.strip()
         if len(query_text) <= 2:
             return error_response("QUERY_TOO_SHORT", "Query must be at least 2 characters", 400)
@@ -382,13 +361,14 @@ async def search_memory(
             return error_response("QUERY_NOISE", "Query contains credential-like pattern", 400)
 
         if body.scope:
-            if not enforcer.can_read(body.scope):
+            if not ctx.can("memory", "read", scope=body.scope):
                 return error_response("SCOPE_DENIED", "Access denied to this scope", 403)
             allowed_scopes = [body.scope]
         else:
-            allowed_scopes = enforcer.filter_readable_scopes(
-                ctx.default_recall_scopes or ctx.read_scopes
-            )
+            candidates = ctx.default_recall_scopes or ctx.read_scopes
+            if ctx.is_delegated:
+                candidates = [scope for resource, operation, scope in ctx.scope_permissions if resource == "memory" and operation == "read"]
+            allowed_scopes = ctx.filter_scopes("memory", "read", candidates)
         if not allowed_scopes:
             embedding_status = await asyncio.to_thread(embedding_service.safe_backend_status)
             return success_response_with_headers({
@@ -466,18 +446,10 @@ async def search_memory(
 @router.post("/get")
 async def get_memory(
     body: GetMemoryRequest,
-    ctx: RequestContext = Depends(get_request_context),
+    ctx: EffectiveAuthority = Depends(get_request_context),
 ):
-    enforcer = ScopeEnforcer(
-        ctx.read_scopes,
-        ctx.write_scopes,
-        ctx.agent_id,
-        is_admin=ctx.is_admin,
-        active_workspace_ids=ctx.active_workspace_ids,
-    )
-
     if body.scope:
-        if not enforcer.can_read(body.scope):
+        if not ctx.can("memory", "read", scope=body.scope):
             return error_response("SCOPE_DENIED", "Access denied to this scope", 403)
         records = memory_service.get_memory_by_scope(
             scope=body.scope,
@@ -486,9 +458,10 @@ async def get_memory(
             record_status=body.record_status,
         )
     else:
-        allowed_scopes = enforcer.filter_readable_scopes(
-            ctx.default_recall_scopes or ctx.read_scopes
-        )
+        candidates = ctx.default_recall_scopes or ctx.read_scopes
+        if ctx.is_delegated:
+            candidates = [scope for resource, operation, scope in ctx.scope_permissions if resource == "memory" and operation == "read"]
+        allowed_scopes = ctx.filter_scopes("memory", "read", candidates)
         records = memory_service.get_memory_by_scopes(
             scopes=allowed_scopes,
                 limit=min(body.limit, 100),
@@ -501,7 +474,7 @@ async def get_memory(
 @router.post("/restore")
 async def restore_memory(
     request: Request,
-    ctx: RequestContext = Depends(get_request_context),
+    ctx: EffectiveAuthority = Depends(get_request_context),
 ):
     record_id = request.query_params.get("record_id")
     if not record_id:
@@ -518,14 +491,7 @@ async def restore_memory(
     if not record:
         return error_response("NOT_FOUND", "Memory record not found", 404)
 
-    enforcer = ScopeEnforcer(
-        ctx.read_scopes,
-        ctx.write_scopes,
-        ctx.agent_id,
-        is_admin=ctx.is_admin,
-        active_workspace_ids=ctx.active_workspace_ids,
-    )
-    if not enforcer.can_write(record["scope"]):
+    if not ctx.can("memory", "write", scope=record["scope"]):
         return error_response("SCOPE_DENIED", "Access denied to this scope", 403)
 
     success = memory_service.restore_memory(record_id)
@@ -547,7 +513,7 @@ async def restore_memory(
 @router.post("/retract")
 async def retract_memory(
     request: Request,
-    ctx: RequestContext = Depends(get_request_context),
+    ctx: EffectiveAuthority = Depends(get_request_context),
 ):
     record_id = request.query_params.get("record_id")
     if not record_id:
@@ -564,14 +530,7 @@ async def retract_memory(
     if not record:
         return error_response("NOT_FOUND", "Memory record not found", 404)
 
-    enforcer = ScopeEnforcer(
-        ctx.read_scopes,
-        ctx.write_scopes,
-        ctx.agent_id,
-        is_admin=ctx.is_admin,
-        active_workspace_ids=ctx.active_workspace_ids,
-    )
-    if not enforcer.can_write(record["scope"]):
+    if not ctx.can("memory", "write", scope=record["scope"]):
         return error_response("SCOPE_DENIED", "Access denied to this scope", 403)
 
     success = memory_service.retract_memory(record_id)
@@ -593,7 +552,7 @@ async def retract_memory(
 @router.post("/move")
 async def move_memory(
     request: Request,
-    ctx: RequestContext = Depends(get_request_context),
+    ctx: EffectiveAuthority = Depends(get_request_context),
 ):
     try:
         body = await request.json()
@@ -617,16 +576,9 @@ async def move_memory(
     if not record:
         return error_response("NOT_FOUND", "Memory record not found", 404)
 
-    enforcer = ScopeEnforcer(
-        ctx.read_scopes,
-        ctx.write_scopes,
-        ctx.agent_id,
-        is_admin=ctx.is_admin,
-        active_workspace_ids=ctx.active_workspace_ids,
-    )
-    if not enforcer.can_write(record["scope"]):
+    if not ctx.can("memory", "write", scope=record["scope"]):
         return error_response("SCOPE_DENIED", "Access denied to source scope", 403)
-    if not enforcer.can_write(new_scope):
+    if not ctx.can("memory", "write", scope=new_scope):
         return error_response("SCOPE_DENIED", "Access denied to destination scope", 403)
 
     new_record, err = memory_service.move_memory(
@@ -675,20 +627,13 @@ async def move_memory(
 @router.delete("/{record_id}")
 async def delete_memory_record(
     record_id: str,
-    ctx: RequestContext = Depends(get_request_context),
+    ctx: EffectiveAuthority = Depends(get_request_context),
 ):
     record = memory_service.get_memory_record(record_id)
     if not record:
         return error_response("NOT_FOUND", "Memory record not found", 404)
 
-    enforcer = ScopeEnforcer(
-        ctx.read_scopes,
-        ctx.write_scopes,
-        ctx.agent_id,
-        is_admin=ctx.is_admin,
-        active_workspace_ids=ctx.active_workspace_ids,
-    )
-    if not enforcer.can_write(record["scope"]):
+    if not ctx.can("memory", "write", scope=record["scope"]):
         return error_response("SCOPE_DENIED", "Access denied to this scope", 403)
 
     try:
@@ -714,20 +659,13 @@ async def delete_memory_record(
 @router.get("/{record_id}")
 async def get_memory_record(
     record_id: str,
-    ctx: RequestContext = Depends(get_request_context),
+    ctx: EffectiveAuthority = Depends(get_request_context),
 ):
     record = memory_service.get_memory_record(record_id)
     if not record:
         return error_response("NOT_FOUND", "Memory record not found", 404)
 
-    enforcer = ScopeEnforcer(
-        ctx.read_scopes,
-        ctx.write_scopes,
-        ctx.agent_id,
-        is_admin=ctx.is_admin,
-        active_workspace_ids=ctx.active_workspace_ids,
-    )
-    if not enforcer.can_read(record["scope"]):
+    if not ctx.can("memory", "read", scope=record["scope"]):
         return error_response("SCOPE_DENIED", "Access denied to this scope", 403)
 
     return success_response({"record": record})
@@ -736,20 +674,13 @@ async def get_memory_record(
 @router.get("/{record_id}/chain")
 async def get_memory_chain(
     record_id: str,
-    ctx: RequestContext = Depends(get_request_context),
+    ctx: EffectiveAuthority = Depends(get_request_context),
 ):
     record = memory_service.get_memory_record(record_id)
     if not record:
         return error_response("NOT_FOUND", "Memory record not found", 404)
 
-    enforcer = ScopeEnforcer(
-        ctx.read_scopes,
-        ctx.write_scopes,
-        ctx.agent_id,
-        is_admin=ctx.is_admin,
-        active_workspace_ids=ctx.active_workspace_ids,
-    )
-    if not enforcer.can_read(record["scope"]):
+    if not ctx.can("memory", "read", scope=record["scope"]):
         return error_response("SCOPE_DENIED", "Access denied to this scope", 403)
 
     chain = memory_service.get_supersession_chain(record_id)

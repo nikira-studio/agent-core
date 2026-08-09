@@ -73,6 +73,7 @@ def create_agent(
     read_scopes: Optional[list[str]] = None,
     write_scopes: Optional[list[str]] = None,
     default_recall_scopes: Optional[list[str]] = None,
+    can_delegate: bool = False,
 ) -> tuple[dict, str]:
     normalized_id = normalize_id(agent_id)
     api_key_plaintext, api_key_hash = generate_api_key()
@@ -108,11 +109,12 @@ def create_agent(
             """
             INSERT INTO agents (id, display_name, description, owner_user_id, default_user_id,
                                read_scopes_json, write_scopes_json, default_recall_scopes_json,
-                               api_key_hash)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                               can_delegate, api_key_hash)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (normalized_id, display_name, description, owner_user_id, default_user_id,
-             read_scopes_json, write_scopes_json, default_recall_scopes_json, api_key_hash),
+             read_scopes_json, write_scopes_json, default_recall_scopes_json,
+             int(can_delegate), api_key_hash),
         )
         conn.commit()
 
@@ -125,6 +127,7 @@ def create_agent(
             "read_scopes_json": read_scopes_json,
             "write_scopes_json": write_scopes_json,
             "default_recall_scopes_json": default_recall_scopes_json,
+            "can_delegate": can_delegate,
             "is_active": True,
         }
 
@@ -136,7 +139,7 @@ def get_agent_by_id(agent_id: str) -> Optional[dict]:
         cursor = conn.execute(
             """
             SELECT id, display_name, description, owner_user_id, default_user_id,
-                   read_scopes_json, write_scopes_json, default_recall_scopes_json, api_key_hash, is_active, created_at
+                   read_scopes_json, write_scopes_json, default_recall_scopes_json, can_delegate, api_key_hash, is_active, created_at
             FROM agents WHERE id = ?
             """,
             (agent_id,),
@@ -151,7 +154,7 @@ def get_agent_by_api_key(plaintext_key: str) -> Optional[dict]:
         cursor = conn.execute(
             """
             SELECT id, display_name, description, owner_user_id, default_user_id,
-                   read_scopes_json, write_scopes_json, default_recall_scopes_json, api_key_hash, is_active, created_at
+                   read_scopes_json, write_scopes_json, default_recall_scopes_json, can_delegate, api_key_hash, is_active, created_at
             FROM agents WHERE api_key_hash = ?
             """,
             (key_hash,),
@@ -168,7 +171,7 @@ def is_agent_shared(agent: dict) -> bool:
 
 def list_agents(owner_user_id: Optional[str] = None, is_active: Optional[bool] = None) -> list[dict]:
     with get_db() as conn:
-        query = "SELECT id, display_name, description, owner_user_id, default_user_id, read_scopes_json, write_scopes_json, default_recall_scopes_json, is_active, created_at FROM agents WHERE 1=1"
+        query = "SELECT id, display_name, description, owner_user_id, default_user_id, read_scopes_json, write_scopes_json, default_recall_scopes_json, can_delegate, is_active, created_at FROM agents WHERE 1=1"
         params = []
 
         if owner_user_id:
@@ -202,6 +205,7 @@ def update_agent(
     read_scopes: Optional[list[str]] = None,
     write_scopes: Optional[list[str]] = None,
     default_recall_scopes=_UNSET,
+    can_delegate: Optional[bool] = None,
 ) -> bool:
     current = get_agent_by_id(agent_id)
     if current is None:
@@ -216,6 +220,9 @@ def update_agent(
     if description is not None:
         updates.append("description = ?")
         params.append(description)
+    if can_delegate is not None:
+        updates.append("can_delegate = ?")
+        params.append(int(can_delegate))
 
     new_read = _with_own_scope(agent_id, read_scopes) if read_scopes is not None else None
     if new_read is not None:
@@ -300,6 +307,12 @@ def delete_agent_hard(agent_id: str) -> bool:
     scope = f"agent:{normalized_id}"
     with get_db() as conn:
         cleanup_service.delete_scope_data(conn, scope)
+        conn.execute(
+            """DELETE FROM delegated_grants
+               WHERE recipient_agent_id = ? OR coordinator_agent_id = ?
+                  OR (issuer_actor_type = 'agent' AND issuer_actor_id = ?)""",
+            (normalized_id, normalized_id, normalized_id),
+        )
         conn.execute(
             """
             DELETE FROM agent_activity

@@ -100,7 +100,8 @@ async def get_request_context(
 ) -> EffectiveAuthority:
     if not credentials:
         session = await get_current_session(request, credentials)
-        return permanent_authority(build_user_context(session))
+        authority = permanent_authority(build_user_context(session))
+        return _with_delegation(request, authority)
 
     token = credentials.credentials
     if token.startswith("ac_sk_"):
@@ -111,10 +112,12 @@ async def get_request_context(
             raise APIError("INVALID_KEY", "Invalid or inactive agent API key", 401)
         from app.security.scope_enforcer import build_agent_context
 
-        return permanent_authority(build_agent_context(agent))
+        authority = permanent_authority(build_agent_context(agent))
+        return _with_delegation(request, authority)
     else:
         session = await get_current_session(request, credentials)
-        return permanent_authority(build_user_context(session))
+        authority = permanent_authority(build_user_context(session))
+        return _with_delegation(request, authority)
 
 
 async def get_mcp_request_context(
@@ -123,7 +126,8 @@ async def get_mcp_request_context(
 ) -> EffectiveAuthority:
     if not credentials:
         session = await get_current_session(request, credentials)
-        return permanent_authority(build_user_context_for_connectors(session))
+        authority = permanent_authority(build_user_context_for_connectors(session))
+        return _with_delegation(request, authority)
 
     token = credentials.credentials
     if token.startswith("ac_sk_"):
@@ -134,7 +138,18 @@ async def get_mcp_request_context(
             raise APIError("INVALID_KEY", "Invalid or inactive agent API key", 401)
         from app.security.scope_enforcer import build_agent_context
 
-        return permanent_authority(build_agent_context(agent))
+        authority = permanent_authority(build_agent_context(agent))
+        return _with_delegation(request, authority)
     else:
         session = await get_current_session(request, credentials)
-        return permanent_authority(build_user_context_for_connectors(session))
+        authority = permanent_authority(build_user_context_for_connectors(session))
+        return _with_delegation(request, authority)
+
+
+def _with_delegation(request: Request, authority: EffectiveAuthority) -> EffectiveAuthority:
+    from app.services.delegation_service import GRANT_HEADER, build_delegated_authority
+
+    value = request.headers.get(GRANT_HEADER)
+    if not value:
+        return authority
+    return build_delegated_authority(authority.context, value)

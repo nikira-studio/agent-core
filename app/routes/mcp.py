@@ -653,6 +653,7 @@ def _memory_provenance(ctx: RequestContext, source_kind: str, scope: str) -> str
         scope=scope,
         user_id=ctx.user_id,
         agent_id=ctx.agent_id,
+        extras=ctx.safe_attribution() if hasattr(ctx, "safe_attribution") else None,
     )
 
 
@@ -885,13 +886,14 @@ async def _handle_custom_mcp_tool(body: dict, ctx: RequestContext):
             # On-demand: target one specific scope (e.g. another project), gated
             # by full read access — this is how a narrowed agent reaches past its
             # default recall set when the request is explicitly about that scope.
-            if not enforcer.can_read(search_scope):
+            if not ctx.can("memory", "read", scope=search_scope):
                 return _mcp_error("SCOPE_DENIED", "Access denied to this scope", 403)
             allowed = [search_scope]
         else:
-            allowed = enforcer.filter_readable_scopes(
-                ctx.default_recall_scopes or ctx.read_scopes
-            )
+            candidates = ctx.default_recall_scopes or ctx.read_scopes
+            if ctx.is_delegated:
+                candidates = [scope for resource, operation, scope in ctx.scope_permissions if resource == "memory" and operation == "read"]
+            allowed = ctx.filter_scopes("memory", "read", candidates)
         if not allowed:
             embedding_status = await asyncio.to_thread(embedding_service.safe_backend_status)
             return JSONResponse(
@@ -987,7 +989,7 @@ async def _handle_custom_mcp_tool(body: dict, ctx: RequestContext):
                 "INVALID_PARAMS", "view must be 'full' or 'compact'", 400
             )
         if params.get("scope"):
-            if not enforcer.can_read(params["scope"]):
+            if not ctx.can("memory", "read", scope=params["scope"]):
                 return _mcp_error("SCOPE_DENIED", "Access denied to this scope", 403)
             records = memory_service.get_memory_by_scope(
                 scope=params["scope"],
@@ -996,9 +998,10 @@ async def _handle_custom_mcp_tool(body: dict, ctx: RequestContext):
                 record_status=params.get("record_status"),
             )
         else:
-            allowed = enforcer.filter_readable_scopes(
-                ctx.default_recall_scopes or ctx.read_scopes
-            )
+            candidates = ctx.default_recall_scopes or ctx.read_scopes
+            if ctx.is_delegated:
+                candidates = [scope for resource, operation, scope in ctx.scope_permissions if resource == "memory" and operation == "read"]
+            allowed = ctx.filter_scopes("memory", "read", candidates)
             records = memory_service.get_memory_by_scopes(
                 scopes=allowed,
                 limit=min(params.get("limit", 50), 200),
@@ -1025,7 +1028,7 @@ async def _handle_custom_mcp_tool(body: dict, ctx: RequestContext):
 
     elif tool == "memory_write":
         scope = params["scope"]
-        if not enforcer.can_write(scope):
+        if not ctx.can("memory", "write", scope=scope):
             return _mcp_error("SCOPE_DENIED", "Access denied to this scope", 403)
         if params["memory_class"] not in MEMORY_CLASSES:
             return _mcp_error(
@@ -1055,7 +1058,7 @@ async def _handle_custom_mcp_tool(body: dict, ctx: RequestContext):
                 return _mcp_error(
                     "INVALID_SUPERSESSION", "Cannot supersede non-active record", 400
                 )
-            if not enforcer.can_write(old["scope"]):
+            if not ctx.can("memory", "write", scope=old["scope"]):
                 return _mcp_error(
                     "SCOPE_DENIED",
                     "Access denied to scope of record being superseded",
@@ -1120,9 +1123,10 @@ async def _handle_custom_mcp_tool(body: dict, ctx: RequestContext):
         )
 
     elif tool == "memory_pinned":
-        scopes = enforcer.filter_readable_scopes(
-            ctx.default_recall_scopes or ctx.read_scopes
-        )
+        candidates = ctx.default_recall_scopes or ctx.read_scopes
+        if ctx.is_delegated:
+            candidates = [scope for resource, operation, scope in ctx.scope_permissions if resource == "memory" and operation == "read"]
+        scopes = ctx.filter_scopes("memory", "read", candidates)
         records = memory_service.pinned_records(scopes)
         return JSONResponse(
             content={
@@ -1138,7 +1142,7 @@ async def _handle_custom_mcp_tool(body: dict, ctx: RequestContext):
         record = memory_service.get_memory_record(params["record_id"])
         if not record:
             return _mcp_error("NOT_FOUND", "Record not found", 404)
-        if not enforcer.can_write(record["scope"]):
+        if not ctx.can("memory", "write", scope=record["scope"]):
             return _mcp_error("SCOPE_DENIED", "Access denied to this scope", 403)
         if record["record_status"] != "active":
             return _mcp_error("NOT_ACTIVE", "Only an active record can be pinned", 400)
@@ -1192,7 +1196,7 @@ async def _handle_custom_mcp_tool(body: dict, ctx: RequestContext):
         record = memory_service.get_memory_record(params["record_id"])
         if not record:
             return _mcp_error("NOT_FOUND", "Record not found", 404)
-        if not enforcer.can_write(record["scope"]):
+        if not ctx.can("memory", "write", scope=record["scope"]):
             return _mcp_error("SCOPE_DENIED", "Access denied to this scope", 403)
         try:
             confirmed = memory_service.confirm_memory(
@@ -1223,7 +1227,7 @@ async def _handle_custom_mcp_tool(body: dict, ctx: RequestContext):
         record = memory_service.get_memory_record(params["record_id"])
         if not record:
             return _mcp_error("NOT_FOUND", "Record not found", 404)
-        if not enforcer.can_write(record["scope"]):
+        if not ctx.can("memory", "write", scope=record["scope"]):
             return _mcp_error("SCOPE_DENIED", "Access denied to this scope", 403)
         try:
             updated = memory_service.set_subject_anchor(
@@ -1255,12 +1259,15 @@ async def _handle_custom_mcp_tool(body: dict, ctx: RequestContext):
         from app.services import verification_service
 
         verify_scope = params.get("scope")
-        if verify_scope and not enforcer.can_write(verify_scope):
+        if verify_scope and not ctx.can("memory", "write", scope=verify_scope):
             # Verification writes confirmation onto records, so it needs the
             # same authority as any other statement about a scope.
             return _mcp_error("SCOPE_DENIED", "Access denied to this scope", 403)
         if not verify_scope:
-            writable = enforcer.filter_readable_scopes(list(ctx.write_scopes))
+            candidates = list(ctx.write_scopes)
+            if ctx.is_delegated:
+                candidates = [scope for resource, operation, scope in ctx.scope_permissions if resource == "memory" and operation == "write"]
+            writable = ctx.filter_scopes("memory", "write", candidates)
             if not writable:
                 return _mcp_error("SCOPE_DENIED", "No writable scope to verify", 403)
 
@@ -1296,7 +1303,7 @@ async def _handle_custom_mcp_tool(body: dict, ctx: RequestContext):
         # Read access is the bar: judging whether a record helped you is not a
         # mutation of its content, and a reader who cannot rate what it was
         # given is a reader whose experience never reaches the ranking.
-        if not enforcer.can_read(record["scope"]):
+        if not ctx.can("memory", "read", scope=record["scope"]):
             return _mcp_error("SCOPE_DENIED", "Access denied to this scope", 403)
         helpful = bool(params.get("helpful"))
         updated = memory_service.record_feedback(params["record_id"], helpful)
@@ -1326,7 +1333,7 @@ async def _handle_custom_mcp_tool(body: dict, ctx: RequestContext):
         record = memory_service.get_memory_record(params["record_id"])
         if not record:
             return _mcp_error("NOT_FOUND", "Memory record not found", 404)
-        if not enforcer.can_write(record["scope"]):
+        if not ctx.can("memory", "write", scope=record["scope"]):
             return _mcp_error("SCOPE_DENIED", "Access denied to this scope", 403)
         memory_service.retract_memory(params["record_id"])
         audit_service.write_event(
@@ -1348,9 +1355,9 @@ async def _handle_custom_mcp_tool(body: dict, ctx: RequestContext):
         new_scope = params["new_scope"]
         # A move both removes from the source and creates in the destination, so
         # the caller must be able to write BOTH scopes.
-        if not enforcer.can_write(record["scope"]):
+        if not ctx.can("memory", "write", scope=record["scope"]):
             return _mcp_error("SCOPE_DENIED", "Access denied to source scope", 403)
-        if not enforcer.can_write(new_scope):
+        if not ctx.can("memory", "write", scope=new_scope):
             return _mcp_error(
                 "SCOPE_DENIED", "Access denied to destination scope", 403
             )
@@ -1437,7 +1444,11 @@ async def _handle_custom_mcp_tool(body: dict, ctx: RequestContext):
             ctx.agent_id, ctx.user_id
         )
         if existing:
+            if ctx.is_delegated and not ctx.can_resource("activity", "update", existing["id"]):
+                return _mcp_error("FORBIDDEN", "Access denied", 403)
             memory_scope = params.get("memory_scope")
+            if ctx.is_delegated and memory_scope and memory_scope != existing.get("memory_scope"):
+                return _mcp_error("FORBIDDEN", "Delegated activity scope changes are unsupported", 403)
             if memory_scope and not enforcer.can_write(memory_scope):
                 return _mcp_error("SCOPE_DENIED", "Access denied to memory_scope", 403)
             if params.get("status"):
@@ -1509,6 +1520,8 @@ async def _handle_custom_mcp_tool(body: dict, ctx: RequestContext):
                 content={"ok": True, "data": {"activity": _updated}},
             )
         else:
+            if ctx.is_delegated:
+                return _mcp_error("FORBIDDEN", "Delegated activity creation is unsupported", 403)
             if not params.get("task_description"):
                 return _mcp_error(
                     "TASK_REQUIRED", "task_description required to create activity", 400
@@ -1544,7 +1557,10 @@ async def _handle_custom_mcp_tool(body: dict, ctx: RequestContext):
         activity = activity_service.get_activity(params["activity_id"])
         if not activity:
             return _mcp_error("NOT_FOUND", "Activity not found", 404)
-        if (
+        if ctx.is_delegated:
+            if not ctx.can_resource("activity", "read", activity["id"]):
+                return _mcp_error("FORBIDDEN", "Access denied", 403)
+        elif (
             activity.get("agent_id") != ctx.agent_id
             and activity.get("assigned_agent_id") != ctx.agent_id
             and not ctx.is_admin
@@ -1554,9 +1570,11 @@ async def _handle_custom_mcp_tool(body: dict, ctx: RequestContext):
         # description says what was attempted, these say what came of it.
         produced = memory_service.records_for_activity(
             params["activity_id"],
-            authorized_scopes=None
-            if ctx.is_admin
-            else enforcer.filter_readable_scopes(ctx.read_scopes),
+            authorized_scopes=(
+                None if ctx.is_admin else
+                [scope for resource, operation, scope in ctx.scope_permissions if resource == "memory" and operation == "read"]
+                if ctx.is_delegated else enforcer.filter_readable_scopes(ctx.read_scopes)
+            ),
         )
         return JSONResponse(
             content={
@@ -1592,7 +1610,10 @@ async def _handle_custom_mcp_tool(body: dict, ctx: RequestContext):
         activities = []
         for activity in raw_activities:
             memory_scope = activity.get("memory_scope") or f"agent:{activity['agent_id']}"
-            if not ctx.is_admin and not enforcer.can_read(memory_scope):
+            if ctx.is_delegated:
+                if not ctx.can_resource("activity", "read", activity["id"]):
+                    continue
+            elif not ctx.is_admin and not enforcer.can_read(memory_scope):
                 continue
             if agent_filter and activity.get("agent_id") != agent_filter and activity.get("assigned_agent_id") != agent_filter:
                 continue
@@ -1628,7 +1649,10 @@ async def _handle_custom_mcp_tool(body: dict, ctx: RequestContext):
             memory_scope = (
                 activity.get("memory_scope") or f"agent:{activity['agent_id']}"
             )
-            if not ctx.is_admin and not enforcer.can_read(memory_scope):
+            if ctx.is_delegated:
+                if not ctx.can_resource("activity", "read", activity["id"]):
+                    continue
+            elif not ctx.is_admin and not enforcer.can_read(memory_scope):
                 continue
             activities.append(activity)
         activities = activities[offset : offset + limit]
@@ -1640,6 +1664,8 @@ async def _handle_custom_mcp_tool(body: dict, ctx: RequestContext):
         )
 
     elif tool == "activity_pickup":
+        if ctx.is_delegated:
+            return _mcp_error("FORBIDDEN", "Delegated activity pickup is unsupported", 403)
         authorized_scopes = enforcer.filter_readable_scopes(ctx.read_scopes)
         activity = activity_service.claim_next_activity(ctx.agent_id, authorized_scopes)
         if activity:
@@ -1667,7 +1693,11 @@ async def _handle_custom_mcp_tool(body: dict, ctx: RequestContext):
         if not briefing:
             return _mcp_error("NOT_FOUND", "Briefing not found", 404)
         act = activity_service.get_activity(params["briefing_id"])
-        if (
+        if ctx.is_delegated:
+            scope = (act or {}).get("memory_scope")
+            if not act or not ctx.can_resource("activity", "read", act["id"]) or not scope or not ctx.can("briefing", "read", scope=scope):
+                return _mcp_error("FORBIDDEN", "Access denied", 403)
+        elif (
             act
             and act.get("agent_id") != ctx.agent_id
             and act.get("assigned_agent_id") != ctx.agent_id
@@ -1696,7 +1726,11 @@ async def _handle_custom_mcp_tool(body: dict, ctx: RequestContext):
         briefings = []
         for briefing in raw_briefings:
             memory_scope = briefing.get("memory_scope") or f"agent:{briefing.get('agent_id')}"
-            if not ctx.is_admin and not enforcer.can_read(memory_scope):
+            if ctx.is_delegated:
+                activity_id = briefing.get("id")
+                if not ctx.can("briefing", "read", scope=memory_scope) or not ctx.can_resource("activity", "read", activity_id):
+                    continue
+            elif not ctx.is_admin and not enforcer.can_read(memory_scope):
                 continue
             if agent_filter and briefing.get("agent_id") != agent_filter and briefing.get("assigned_agent_id") != agent_filter:
                 continue
@@ -1852,7 +1886,11 @@ async def _handle_custom_mcp_tool(body: dict, ctx: RequestContext):
         binding = connector_service.get_binding(params["binding_id"])
         if not binding:
             return _mcp_error("NOT_FOUND", "Binding not found", 200)
-        if not enforcer.can_read(binding["scope"]):
+        action = params["action"]
+        if ctx.is_delegated:
+            if not ctx.can_binding_action(params["binding_id"], action, scope=binding["scope"]):
+                return _mcp_error("SCOPE_DENIED", "Access denied to this binding action", 200)
+        elif not enforcer.can_read(binding["scope"]):
             return _mcp_error("SCOPE_DENIED", "Access denied to this binding", 200)
         if not binding.get("enabled"):
             return _mcp_error("DISABLED", "Binding is disabled", 200)
@@ -1862,8 +1900,7 @@ async def _handle_custom_mcp_tool(body: dict, ctx: RequestContext):
         )
         if not connector_type:
             return _mcp_error("NOT_FOUND", "Connector type not found", 200)
-        action = params["action"]
-        if connector_service.action_requires_write(
+        if not ctx.is_delegated and connector_service.action_requires_write(
             connector_type, action
         ) and not enforcer.can_write(binding["scope"]):
             return _mcp_error(
@@ -1872,10 +1909,11 @@ async def _handle_custom_mcp_tool(body: dict, ctx: RequestContext):
                 200,
             )
         result = await asyncio.to_thread(
-            connector_service.execute_binding_action_with_logging,
+            connector_service.execute_authorized_binding_action_with_logging,
             params["binding_id"],
             action,
             params.get("params") or {},
+            ctx,
         )
         if result.get("success") and "body" in result:
             new_body, exported_count = artifact_export_service.export_connector_body(

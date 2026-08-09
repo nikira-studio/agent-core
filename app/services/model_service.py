@@ -114,13 +114,15 @@ def _complete_ollama(config: dict, prompt: str) -> Optional[str]:
 
 def _complete_binding(config: dict, prompt: str) -> Optional[str]:
     from app.services import connector_service
+    from app.security.effective_authority import system_authority
 
     params = {"messages": [{"role": "user", "content": prompt}], "temperature": 0}
     if config["model"]:
         params["model"] = config["model"]
     try:
-        result = connector_service.execute_binding_action_with_logging(
-            config["binding_id"], config["action"], params
+        result = connector_service.execute_authorized_binding_action_with_logging(
+            config["binding_id"], config["action"], params,
+            system_authority("configured local review model invocation"),
         )
     except Exception:
         logger.warning("Review model binding call failed", exc_info=True)
