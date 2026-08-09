@@ -426,6 +426,7 @@ async def run_binding(
         return error_response("INVALID_REQUEST", "Missing action", 400)
     if ctx.is_delegated:
         if not ctx.can_binding_action(binding_id, action, scope=binding["scope"]):
+            connector_service.audit_delegated_execution_denial(ctx, binding_id, action)
             return error_response("SCOPE_DENIED", "Access denied to this binding action", 403)
     elif not enforcer.can_read(binding["scope"]):
         return error_response("SCOPE_DENIED", "Access denied to this binding", 403)

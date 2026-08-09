@@ -1987,6 +1987,7 @@ async def _handle_custom_mcp_tool(body: dict, ctx: RequestContext):
         action = params["action"]
         if ctx.is_delegated:
             if not ctx.can_binding_action(params["binding_id"], action, scope=binding["scope"]):
+                connector_service.audit_delegated_execution_denial(ctx, params["binding_id"], action)
                 return _mcp_error("SCOPE_DENIED", "Access denied to this binding action", 200)
         elif not enforcer.can_read(binding["scope"]):
             return _mcp_error("SCOPE_DENIED", "Access denied to this binding", 200)

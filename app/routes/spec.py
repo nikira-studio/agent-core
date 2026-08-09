@@ -262,6 +262,36 @@ async def spec(
             "inputSchema": {"limit": "integer?", "offset": "integer?"},
         },
         {
+            "name": "connectors_resolve",
+            "description": "Resolve one authorized connector binding deterministically",
+            "inputSchema": {"connector_type_id": "string", "logical_alias": "string?", "scope": "string?", "action": "string?"},
+        },
+        {
+            "name": "delegation_request",
+            "description": "Request narrowly scoped authority for a recipient agent",
+            "inputSchema": {"recipient_agent_id": "string", "purpose": "string", "ttl_seconds": "integer", "scope_permissions": "array?", "resource_permissions": "array?", "binding_actions": "array?"},
+        },
+        {
+            "name": "delegation_requests_list",
+            "description": "List visible delegation requests",
+            "inputSchema": {},
+        },
+        {
+            "name": "delegation_request_approve",
+            "description": "Approve and optionally narrow a pending delegation request",
+            "inputSchema": {"request_id": "string", "scope_permissions": "array?", "resource_permissions": "array?", "binding_actions": "array?"},
+        },
+        {
+            "name": "delegation_request_deny",
+            "description": "Deny a pending delegation request",
+            "inputSchema": {"request_id": "string", "reason": "string?"},
+        },
+        {
+            "name": "delegation_revoke",
+            "description": "Immediately revoke an issued or received grant",
+            "inputSchema": {"grant_id": "string", "reason": "string?"},
+        },
+        {
             "name": "connectors_summary",
             "description": "Summarize visible connector types, bindings, credentials, actions, and health state for the current caller",
             "inputSchema": {"scope": "string?", "connector_type_id": "string?", "enabled_only": "boolean?"},

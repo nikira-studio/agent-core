@@ -431,7 +431,7 @@ def resolve_authorized_binding(
             )
         else:
             allowed = (
-                authority.can_binding_action(binding["id"], action, scope=binding["scope"])
+                can_run_binding_action(authority, binding, connector_type or {}, action)
                 if action else authority.can("connector", "read", scope=binding["scope"])
             )
         if allowed:
@@ -1409,8 +1409,9 @@ def execute_authorized_binding_action_with_logging(
         finally:
             _execution_authority.reset(token)
     binding_for_auth = get_binding(binding_id)
-    if not binding_for_auth or not authority.can_binding_action(
-        binding_id, action, scope=binding_for_auth["scope"]
+    connector_type = get_connector_type(binding_for_auth["connector_type_id"]) if binding_for_auth else None
+    if not binding_for_auth or not connector_type or not can_run_binding_action(
+        authority, binding_for_auth, connector_type, action
     ):
         from app.security.exceptions import APIError
 
@@ -1420,6 +1421,27 @@ def execute_authorized_binding_action_with_logging(
         return execute_binding_action_with_logging(binding_id, action, params)
     finally:
         _execution_authority.reset(token)
+
+
+def audit_delegated_execution_denial(authority, binding_id: str, action: str) -> None:
+    if not getattr(authority, "is_delegated", False):
+        return
+    from app.services import audit_service
+
+    details = authority.safe_attribution()
+    details["action"] = action
+    audit_service.write_event(
+        actor_type=authority.actor_type, actor_id=authority.actor_id,
+        action="connector_action_executed", resource_type="connector_binding",
+        resource_id=binding_id, result="blocked", details=details,
+    )
+
+
+def can_run_binding_action(authority, binding: dict, connector_type: dict, action: str) -> bool:
+    if authority.is_delegated:
+        return authority.can_binding_action(binding["id"], action, scope=binding["scope"])
+    operation = "execute" if action_requires_write(connector_type, action) else "read"
+    return authority.can("connector", operation, scope=binding["scope"])
 
 
 def execute_binding_action_with_logging(

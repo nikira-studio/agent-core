@@ -125,7 +125,8 @@ def create_grant(
             actions = _action_names(connector_type)
             if not binding or not binding.get("enabled") or not connector_type or not connector_type.get("is_active") or not action or action not in actions:
                 raise APIError("INVALID_PERMISSION", "Binding action is unavailable", 400)
-            if not authority.can("connector", "execute", scope=binding["scope"]):
+            required_operation = "execute" if connector_service.action_requires_write(connector_type, action) else "read"
+            if not authority.can("connector", required_operation, scope=binding["scope"]):
                 raise APIError("DELEGATION_EXCEEDS_AUTHORITY", "Binding action exceeds issuer authority", 403)
             normalized_actions.add((binding_id, action))
 
@@ -303,7 +304,8 @@ def build_delegated_authority(context, header_value: str) -> EffectiveAuthority:
             binding = connector_service.get_binding(permission["binding_id"])
             connector_type = connector_service.get_connector_type(binding["connector_type_id"]) if binding else None
             available = _action_names(connector_type)
-            if not binding or not binding.get("enabled") or not connector_type or not connector_type.get("is_active") or permission["action"] not in available or not issuer_authority.can("connector", "execute", scope=binding["scope"]):
+            required_operation = "execute" if connector_service.action_requires_write(connector_type or {}, permission["action"]) else "read"
+            if not binding or not binding.get("enabled") or not connector_type or not connector_type.get("is_active") or permission["action"] not in available or not issuer_authority.can("connector", required_operation, scope=binding["scope"]):
                 raise APIError("GRANT_INVALIDATED", "Binding authority has changed", 403)
     # Legacy scope-only checks must fail closed. Only resource-named
     # EffectiveAuthority checks can authorize a delegated operation.

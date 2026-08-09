@@ -151,3 +151,132 @@ def test_unknown_permissions_and_agent_issuers_fail_closed(test_client, admin_to
     )
     assert agent_issue.status_code == 403
     assert agent_issue.json()["error"]["code"] == "DELEGATION_FORBIDDEN"
+
+
+def test_grant_credentials_in_body_or_mcp_arguments_are_rejected(
+    test_client, admin_token, agent_token
+):
+    body = test_client.post(
+        "/api/memory/get",
+        headers={"Authorization": f"Bearer {agent_token}"},
+        json={"scope": "user:admin", "grant_secret": "must-not-be-read"},
+    )
+    assert body.status_code == 400
+    assert body.json()["error"]["code"] == "GRANT_HEADER_REQUIRED"
+    mcp = test_client.post(
+        "/mcp",
+        headers={"Authorization": f"Bearer {agent_token}"},
+        json={"tool": "memory_get", "params": {"scope": "user:admin", "grant_credential": "must-not-be-read"}},
+    )
+    assert mcp.status_code == 400
+    assert mcp.json()["error"]["code"] == "GRANT_HEADER_REQUIRED"
+
+
+def test_connector_execution_records_delegated_attribution(
+    test_client, admin_token, agent_token, monkeypatch
+):
+    from app.services import connector_service
+
+    connector_service.create_connector_type(
+        connector_type_id="attributed", display_name="Attributed", auth_type="none",
+        provider_type="openapi", backend_type="generic_http",
+        supported_actions=[{"name": "read", "side_effect": "none"}],
+    )
+    binding = connector_service.create_binding("attributed", "Attributed", "user:admin")
+    grant = test_client.post(
+        "/api/delegations",
+        headers={"Authorization": f"Bearer {admin_token}"},
+        json={
+            "recipient_agent_id": "testagent", "purpose": "attribution", "ttl_seconds": 60,
+            "binding_actions": [{"binding_id": binding["id"], "action": "read"}],
+            "correlation_id": "corr-attribution",
+        },
+    ).json()["data"]["grant"]
+    secret = test_client.post(
+        f"/api/delegations/{grant['id']}/claim",
+        headers={"Authorization": f"Bearer {agent_token}"},
+    ).json()["data"]["grant_secret"]
+    monkeypatch.setattr(
+        connector_service, "execute_binding_action",
+        lambda *args, **kwargs: {"success": True, "body": {"ok": True}},
+    )
+    executed = test_client.post(
+        f"/api/connector-bindings/{binding['id']}/run",
+        headers={"Authorization": f"Bearer {agent_token}", "X-Agent-Core-Grant": secret},
+        json={"action": "read", "params": {}},
+    )
+    assert executed.status_code == 200, executed.json()
+    with get_db() as conn:
+        row = conn.execute(
+            """SELECT actor_type, actor_id, principal_user_id, executor_agent_id,
+                      grant_id, correlation_id, authorization_mode
+               FROM connector_executions WHERE binding_id = ?""",
+            (binding["id"],),
+        ).fetchone()
+    assert tuple(row) == (
+        "agent", "testagent", "admin", "testagent", grant["id"],
+        "corr-attribution", "delegated",
+    )
+
+
+def test_connector_service_boundary_requires_authority(clean_db):
+    from app.services import connector_service
+
+    try:
+        connector_service.execute_authorized_binding_action_with_logging(
+            "missing", "read", {}, None
+        )
+    except TypeError as exc:
+        assert "explicit" in str(exc)
+    else:
+        raise AssertionError("connector service accepted an absent authority")
+
+
+def test_principal_disable_and_issuer_scope_downgrade_invalidate_immediately(
+    test_client, admin_token, agent_token
+):
+    from app.services import agent_service, auth_service
+
+    grant = _issue(test_client, admin_token)
+    secret = test_client.post(
+        f"/api/delegations/{grant['id']}/claim",
+        headers={"Authorization": f"Bearer {agent_token}"},
+    ).json()["data"]["grant_secret"]
+    ok, message = auth_service.update_user("admin", is_active=False)
+    assert ok, message
+    invalid = test_client.get(
+        "/api/auth/effective-authority",
+        headers={"Authorization": f"Bearer {agent_token}", "X-Agent-Core-Grant": secret},
+    )
+    assert invalid.status_code == 403
+    assert invalid.json()["error"]["code"] == "GRANT_INVALIDATED"
+
+    auth_service.update_user("admin", is_active=True)
+    with get_db() as conn:
+        conn.execute("UPDATE agents SET can_delegate = 1 WHERE id = 'testagent'")
+        conn.commit()
+    agent_grant = test_client.post(
+        "/api/delegations",
+        headers={"Authorization": f"Bearer {agent_token}"},
+        json={
+            "recipient_agent_id": "testagent", "purpose": "attenuation", "ttl_seconds": 60,
+            "scope_permissions": [
+                {"resource_type": "memory", "operation": "read", "scope": "user:admin"}
+            ],
+        },
+    )
+    assert agent_grant.status_code == 201, agent_grant.json()
+    grant_id = agent_grant.json()["data"]["grant"]["id"]
+    agent_secret = test_client.post(
+        f"/api/delegations/{grant_id}/claim",
+        headers={"Authorization": f"Bearer {agent_token}"},
+    ).json()["data"]["grant_secret"]
+    agent_service.update_agent(
+        "testagent", read_scopes=["agent:testagent"], write_scopes=["agent:testagent"]
+    )
+    downgraded = test_client.get(
+        "/api/auth/effective-authority",
+        headers={"Authorization": f"Bearer {agent_token}", "X-Agent-Core-Grant": agent_secret},
+    )
+    assert downgraded.status_code == 403
+    assert downgraded.json()["error"]["code"] == "GRANT_INVALIDATED"

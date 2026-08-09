@@ -121,6 +121,34 @@ def create_app() -> FastAPI:
         return await call_next(request)
 
     @app.middleware("http")
+    async def reject_body_grant_credentials(request: Request, call_next):
+        """Grant credentials are transport metadata, never model/body data."""
+        content_type = request.headers.get("content-type", "").lower()
+        if "application/json" in content_type:
+            try:
+                payload = await request.json()
+            except Exception:
+                payload = None
+            forbidden = {
+                "grant_secret", "grant_credential", "delegation_secret",
+                "x-agent-core-grant",
+            }
+
+            def contains_forbidden(value) -> bool:
+                if isinstance(value, dict):
+                    return any(str(key).lower() in forbidden or contains_forbidden(item) for key, item in value.items())
+                if isinstance(value, list):
+                    return any(contains_forbidden(item) for item in value)
+                return False
+
+            if contains_forbidden(payload):
+                return JSONResponse(
+                    status_code=400,
+                    content={"ok": False, "error": {"code": "GRANT_HEADER_REQUIRED", "message": "Delegated credentials are accepted only in the dedicated header"}},
+                )
+        return await call_next(request)
+
+    @app.middleware("http")
     async def security_headers(request: Request, call_next):
         response = await call_next(request)
         response.headers.setdefault("X-Content-Type-Options", "nosniff")

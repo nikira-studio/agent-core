@@ -99,7 +99,7 @@ class EffectiveAuthority:
     def can_binding_action(self, binding_id: str, action: str, *, scope: str) -> bool:
         if self.is_delegated:
             return (binding_id, action) in self.binding_actions
-        return self.can("connector", "execute", scope=scope)
+        return self.can("connector", "read", scope=scope)
 
     def safe_summary(self) -> dict:
         """Return only information safe for an authenticated caller to inspect."""
