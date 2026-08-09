@@ -17,6 +17,7 @@ from app.services import (
     briefing_service,
     audit_service,
     tool_spill_service,
+    artifact_export_service,
     embedding_service,
 )
 from app.config import settings
@@ -1876,6 +1877,26 @@ async def _handle_custom_mcp_tool(body: dict, ctx: RequestContext):
             action,
             params.get("params") or {},
         )
+        if result.get("success") and "body" in result:
+            new_body, exported_count = artifact_export_service.export_connector_body(
+                result["body"]
+            )
+            if exported_count > 0:
+                result["body"] = new_body
+                result["artifacts_exported"] = exported_count
+                audit_service.write_event(
+                    actor_type=ctx.actor_type,
+                    actor_id=ctx.actor_id,
+                    action="connector_artifact_exported",
+                    resource_type="connector_binding",
+                    resource_id=params["binding_id"],
+                    result="success",
+                    details={
+                        "connector_type_id": binding["connector_type_id"],
+                        "action": params["action"],
+                        "count": exported_count,
+                    },
+                )
         if not result.get("success") and result.get("error_code") == "DISABLED":
             return _mcp_error("DISABLED", "Binding is disabled", 200)
         if not result.get("success") and result.get("error_code") == "DISABLED_ACTION":
