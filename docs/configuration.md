@@ -127,6 +127,8 @@ The **Test** button on that card (or `POST /api/dashboard/review-model/test`) ch
 
 Stored in `system_settings` under `verification_bindings`. The anchor's value is passed as `value_param` (default `target`), along with any fixed `params`.
 
+**This is JSON configuration by design, and there is no dashboard editor planned.** Custom anchor types are an advanced capability for installations that already run their own connectors; an operator reaching for one is comfortable writing the mapping. A settings form would have to guess at a shape nobody has needed yet, and the built-in `repo:`, `host:` and `service:` types cover what the dashboard is for.
+
 A binding that answers verifies the anchor. One that reports 404/not-found is evidence the subject is gone, and becomes a review proposal. **Anything else — a timeout, an error, an unconfigured type — leaves the record unverifiable rather than condemning it.** An outage is not a false memory, and a system that forgets that will delete true records the first time the network hiccups.
 
 Writing a record with an anchor type nothing can check is allowed and warned about, not refused: the anchor still records what *would* settle it, which is useful to a human even when no automation can follow it.
