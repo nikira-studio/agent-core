@@ -477,6 +477,18 @@ MANIFEST = {
             },
         },
         {
+            "name": "connectors_resolve",
+            "description": "Resolve one authorized connector binding deterministically; ambiguous candidates fail closed",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "connector_type_id": {"type": "string"}, "logical_alias": {"type": "string"},
+                    "scope": {"type": "string"}, "action": {"type": "string"},
+                },
+                "required": ["connector_type_id"],
+            },
+        },
+        {
             "name": "connectors_bindings_list",
             "description": "List connector bindings in authorized scopes",
             "inputSchema": {
@@ -921,6 +933,15 @@ async def _handle_custom_mcp_tool(body: dict, ctx: RequestContext):
         grant = delegation_service.revoke_grant(params["grant_id"], ctx, params.get("reason"))
         audit_service.write_event(ctx.actor_type, ctx.actor_id, "delegation_grant_revoked", "delegated_grant", params["grant_id"])
         return JSONResponse(content={"ok": True, "data": {"grant": grant}})
+    if tool == "connectors_resolve":
+        from app.services import connector_service
+
+        binding = connector_service.resolve_authorized_binding(
+            ctx, connector_type_id=params["connector_type_id"],
+            logical_alias=params.get("logical_alias"), scope=params.get("scope"),
+            action=params.get("action"),
+        )
+        return JSONResponse(content={"ok": True, "data": {"binding": binding}})
 
     if tool == "result_fetch":
         handle = (params.get("handle") or "").strip()

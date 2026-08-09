@@ -8,9 +8,15 @@ import time
 from typing import Optional
 from app.database import get_db
 from app.models.enums import normalize_id
+from app.security.exceptions import APIError
 from app.services import mcp_provider_service
 
 logger = logging.getLogger(__name__)
+CAPABILITY_POLICY_FIELDS = (
+    "domain", "category", "risk_level", "idempotent", "approval_required",
+    "expected_latency", "background_execution", "data_sensitivity",
+    "event_producing", "purpose", "tags",
+)
 _execution_authority: ContextVar[object | None] = ContextVar(
     "connector_execution_authority", default=None
 )
@@ -30,6 +36,11 @@ def normalize_action_names(actions: Optional[list]) -> list[str]:
             names.append(name)
             seen.add(name)
     return names
+
+
+def capability_policy(action: dict) -> dict:
+    """Return advisory generic metadata; it never weakens authorization."""
+    return {key: action[key] for key in CAPABILITY_POLICY_FIELDS if key in action}
 
 
 def list_connector_types(
@@ -131,6 +142,12 @@ def _row_to_binding(row: dict) -> dict:
         "credential_id": row.get("credential_id"),
         "config_json": row.get("config_json"),
         "rate_limit_config_json": row.get("rate_limit_config_json"),
+        "logical_alias": row.get("logical_alias"),
+        "is_preferred": bool(row.get("is_preferred")),
+        "priority": int(row.get("priority") or 0),
+        "description": row.get("description"),
+        "metadata_json": row.get("metadata_json"),
+        "endpoint_url_override": row.get("endpoint_url_override"),
         "enabled": bool(row["enabled"]),
         "last_tested_at": row.get("last_tested_at"),
         "last_error": row.get("last_error"),
@@ -150,6 +167,56 @@ def _parse_json_object(value: Optional[str]) -> Optional[dict]:
     except json.JSONDecodeError:
         return None
     return parsed if isinstance(parsed, dict) else None
+
+
+def effective_mcp_endpoint(binding: dict, connector_type: dict) -> str:
+    """One endpoint-selection rule shared by test, discovery, and execution."""
+    return binding.get("endpoint_url_override") or connector_type.get("endpoint_url") or ""
+
+
+def _tool_contract(tools) -> str:
+    normalized = []
+    for tool in tools or []:
+        if not isinstance(tool, dict) or not tool.get("name"):
+            continue
+        normalized.append({
+            "name": tool["name"],
+            "inputSchema": tool.get("inputSchema") or tool.get("input_schema") or {},
+            "annotations": tool.get("annotations") or {},
+        })
+    return json.dumps(sorted(normalized, key=lambda item: item["name"]), sort_keys=True, separators=(",", ":"))
+
+
+def _validate_endpoint_override(connector_type, endpoint_url, credential_id, config_json):
+    if endpoint_url is None or not str(endpoint_url).strip():
+        return None
+    if not connector_type or connector_type.get("provider_type") != "mcp":
+        raise ValueError("endpoint_url_override is only valid for MCP connector types")
+    endpoint_url = mcp_provider_service.validate_mcp_server_url(str(endpoint_url).strip())
+    credential = None
+    if credential_id:
+        from app.services import credential_service
+
+        entry = credential_service.get_credential(credential_id)
+        if entry:
+            credential = credential_service.resolve_reference(entry["reference_name"])
+    request_binding = {"endpoint_url": endpoint_url, "config_json": config_json}
+    effective_url, headers, timeout_ms = mcp_provider_service.build_mcp_request_config(
+        request_binding, credential=credential
+    )
+    discovered = mcp_provider_service.discover_all_tools(
+        effective_url, timeout_ms=min(timeout_ms, 10000), headers=headers
+    )
+    try:
+        snapshot = json.loads(connector_type.get("tool_snapshot_json") or "{}")
+    except json.JSONDecodeError:
+        snapshot = {}
+    expected = snapshot.get("tools") if isinstance(snapshot, dict) else snapshot
+    if _tool_contract(discovered) != _tool_contract(expected):
+        raise ValueError(
+            "Endpoint tool contract does not match this connector type; register a separate connector type"
+        )
+    return endpoint_url
 
 
 def list_bindings(
@@ -212,19 +279,34 @@ def create_binding(
     config_json: Optional[str] = None,
     enabled: bool = True,
     created_by: Optional[str] = None,
+    logical_alias: Optional[str] = None,
+    is_preferred: bool = False,
+    priority: int = 0,
+    description: Optional[str] = None,
+    metadata_json: Optional[str] = None,
+    endpoint_url_override: Optional[str] = None,
 ) -> dict:
     normalized_scope = _normalize_scope(scope)
     config_data = _parse_json_object(config_json)
     if config_json is not None and config_data is None:
         raise ValueError("config_json must be a JSON object")
     config_json = json.dumps(config_data) if config_data is not None else None
+    metadata_data = _parse_json_object(metadata_json)
+    if metadata_json is not None and metadata_data is None:
+        raise ValueError("metadata_json must be a JSON object")
+    metadata_json = json.dumps(metadata_data) if metadata_data is not None else None
+    connector_type = get_connector_type(connector_type_id)
+    endpoint_url_override = _validate_endpoint_override(
+        connector_type, endpoint_url_override, credential_id, config_json
+    )
     binding_id = secrets.token_urlsafe(16)
     with get_db() as conn:
         conn.execute(
             """
             INSERT INTO connector_bindings
-            (id, connector_type_id, name, scope, credential_id, config_json, enabled, created_by)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            (id, connector_type_id, name, scope, credential_id, config_json, enabled, created_by,
+             logical_alias, is_preferred, priority, description, metadata_json, endpoint_url_override)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 binding_id,
@@ -235,6 +317,9 @@ def create_binding(
                 config_json,
                 1 if enabled else 0,
                 created_by,
+                logical_alias.strip() if logical_alias and logical_alias.strip() else None,
+                int(is_preferred), int(priority), description, metadata_json,
+                endpoint_url_override,
             ),
         )
         conn.commit()
@@ -251,17 +336,23 @@ def update_binding(binding_id: str, **fields) -> bool:
         "enabled",
         "last_tested_at",
         "last_error",
+        "logical_alias",
+        "is_preferred",
+        "priority",
+        "description",
+        "metadata_json",
+        "endpoint_url_override",
     )
     # Status fields are nullable and must be clearable: a successful test has to
     # reset last_error to NULL, otherwise a binding that failed once would keep
     # reporting an error forever. Other fields keep the "skip None" semantics.
-    nullable = ("last_tested_at", "last_error")
+    nullable = ("last_tested_at", "last_error", "endpoint_url_override")
     updates = []
     params = []
     for key, val in fields.items():
         if key in allowed and (val is not None or key in nullable):
-            if key == "enabled":
-                updates.append("enabled = ?")
+            if key in ("enabled", "is_preferred"):
+                updates.append(f"{key} = ?")
                 params.append(1 if val else 0)
             elif key == "scope":
                 updates.append("scope = ?")
@@ -282,6 +373,22 @@ def update_binding(binding_id: str, **fields) -> bool:
                 params.append(
                     json.dumps(rate_limit_data) if rate_limit_data is not None else None
                 )
+            elif key == "metadata_json":
+                metadata_data = _parse_json_object(val)
+                if val is not None and metadata_data is None:
+                    raise ValueError("metadata_json must be a JSON object")
+                updates.append("metadata_json = ?")
+                params.append(json.dumps(metadata_data) if metadata_data is not None else None)
+            elif key == "endpoint_url_override":
+                current = get_binding(binding_id)
+                connector_type = get_connector_type(current["connector_type_id"]) if current else None
+                credential_id = fields.get("credential_id") if fields.get("credential_id") is not None else current.get("credential_id") if current else None
+                config_value = fields.get("config_json") if fields.get("config_json") is not None else current.get("config_json") if current else None
+                updates.append("endpoint_url_override = ?")
+                params.append(_validate_endpoint_override(connector_type, val, credential_id, config_value))
+            elif key == "logical_alias":
+                updates.append("logical_alias = ?")
+                params.append(val.strip() if isinstance(val, str) and val.strip() else None)
             else:
                 updates.append(f"{key} = ?")
                 params.append(val)
@@ -296,6 +403,57 @@ def update_binding(binding_id: str, **fields) -> bool:
         )
         conn.commit()
         return cursor.rowcount > 0
+
+
+def resolve_authorized_binding(
+    authority,
+    *,
+    connector_type_id: str,
+    logical_alias: str | None = None,
+    scope: str | None = None,
+    action: str | None = None,
+) -> dict:
+    """Resolve one authorized binding deterministically; ambiguity never guesses."""
+    normalized_scope = _normalize_scope(scope) if scope else None
+    candidates = list_bindings(
+        scope=normalized_scope, connector_type_id=connector_type_id, enabled=True
+    )
+    connector_type = get_connector_type(connector_type_id)
+    available_actions = set(normalize_action_names((connector_type or {}).get("supported_actions"))) - set((connector_type or {}).get("disabled_actions") or [])
+    visible = []
+    for binding in candidates:
+        if action and action not in available_actions:
+            continue
+        if authority.is_delegated:
+            allowed = (
+                authority.can_binding_action(binding["id"], action, scope=binding["scope"])
+                if action else any(item[0] == binding["id"] for item in authority.binding_actions)
+            )
+        else:
+            allowed = (
+                authority.can_binding_action(binding["id"], action, scope=binding["scope"])
+                if action else authority.can("connector", "read", scope=binding["scope"])
+            )
+        if allowed:
+            visible.append(binding)
+    if logical_alias is not None:
+        matches = [item for item in visible if item.get("logical_alias") == logical_alias]
+        if len(matches) == 1:
+            return matches[0]
+        if not matches:
+            raise APIError("BINDING_NOT_FOUND", "No authorized binding matches the requested alias", 404)
+        visible = matches
+    if len(visible) == 1:
+        return visible[0]
+    preferred = [item for item in visible if item.get("is_preferred")]
+    if len(preferred) == 1:
+        return preferred[0]
+    if visible:
+        highest = max(item.get("priority", 0) for item in visible)
+        ranked = [item for item in visible if item.get("priority", 0) == highest]
+        if len(ranked) == 1:
+            return ranked[0]
+    raise APIError("AMBIGUOUS_BINDING", "Authorized binding selection is ambiguous", 409)
 
 
 def delete_binding(binding_id: str) -> bool:
@@ -595,6 +753,7 @@ def generate_connector_type_tools(
                         "side_effect": action_meta.get(
                             "side_effect", spec.get("side_effect", "none")
                         ),
+                        "capability_policy": capability_policy(action_meta),
                     }
                 )
             total = len(tools)
@@ -611,6 +770,10 @@ def generate_connector_type_tools(
     supported_action_names = normalize_action_names(
         connector_type.get("supported_actions")
     )
+    manifest_actions = {
+        item.get("name"): item for item in connector_type.get("supported_actions") or []
+        if isinstance(item, dict) and item.get("name")
+    }
     tools = [
         {
             "name": action,
@@ -619,6 +782,7 @@ def generate_connector_type_tools(
             "path": "",
             "description": "",
             "enabled": action not in disabled_set,
+            "capability_policy": capability_policy(manifest_actions.get(action, {})),
         }
         for action in supported_action_names
     ]
@@ -658,8 +822,8 @@ def test_binding(binding_id: str) -> dict:
         if connector_type.get("provider_type") == "mcp":
             try:
                 test_binding_context = dict(binding)
-                test_binding_context["endpoint_url"] = connector_type.get(
-                    "endpoint_url"
+                test_binding_context["endpoint_url"] = effective_mcp_endpoint(
+                    binding, connector_type
                 )
                 endpoint_url, headers, timeout_ms = (
                     mcp_provider_service.build_mcp_request_config(
@@ -1126,7 +1290,7 @@ def execute_binding_action(
             if provider_type == "mcp":
                 from app.services import mcp_provider_service as _mcp
 
-                endpoint_url = connector_type.get("endpoint_url")
+                endpoint_url = effective_mcp_endpoint(binding, connector_type)
                 if not endpoint_url:
                     return {
                         "success": False,

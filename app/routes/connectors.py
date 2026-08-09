@@ -21,6 +21,7 @@ from app.branding import APP_USER_AGENT
 from app.security.dependencies import get_request_context
 from app.security.context import RequestContext
 from app.security.scope_enforcer import ScopeEnforcer
+from app.security.effective_authority import EffectiveAuthority
 from app.security.response_helpers import success_response, error_response
 
 
@@ -80,6 +81,12 @@ class CreateBindingRequest(BaseModel):
     credential_id: Optional[str] = None
     config_json: Optional[str] = None
     enabled: bool = True
+    logical_alias: Optional[str] = None
+    is_preferred: bool = False
+    priority: int = 0
+    description: Optional[str] = None
+    metadata_json: Optional[str] = None
+    endpoint_url_override: Optional[str] = None
 
 
 class UpdateBindingRequest(BaseModel):
@@ -88,6 +95,13 @@ class UpdateBindingRequest(BaseModel):
     credential_id: Optional[str] = None
     config_json: Optional[str] = None
     enabled: Optional[bool] = None
+    logical_alias: Optional[str] = None
+    is_preferred: Optional[bool] = None
+    priority: Optional[int] = None
+    description: Optional[str] = None
+    metadata_json: Optional[str] = None
+    endpoint_url_override: Optional[str] = None
+    reset_endpoint_url_override: bool = False
 
 
 class ActionSettingsRequest(BaseModel):
@@ -97,6 +111,13 @@ class ActionSettingsRequest(BaseModel):
 class ConnectorHealthCheckRequest(BaseModel):
     connector_type_id: Optional[str] = None
     scope: Optional[str] = None
+
+
+class ResolveBindingRequest(BaseModel):
+    connector_type_id: str
+    logical_alias: Optional[str] = None
+    scope: Optional[str] = None
+    action: Optional[str] = None
 
 
 class AdapterInstallRequest(BaseModel):
@@ -130,6 +151,18 @@ async def list_bindings(
     )
     allowed = [b for b in bindings if enforcer.can_read(b["scope"])]
     return success_response({"bindings": allowed, "total": len(allowed)})
+
+
+@router.post("/resolve")
+async def resolve_binding(
+    body: ResolveBindingRequest,
+    ctx: EffectiveAuthority = Depends(get_request_context),
+):
+    binding = connector_service.resolve_authorized_binding(
+        ctx, connector_type_id=body.connector_type_id,
+        logical_alias=body.logical_alias, scope=body.scope, action=body.action,
+    )
+    return success_response({"binding": binding})
 
 
 @router.post("")
@@ -166,6 +199,12 @@ async def create_binding(
             config_json=body.config_json,
             enabled=body.enabled,
             created_by=ctx.user_id,
+            logical_alias=body.logical_alias,
+            is_preferred=body.is_preferred,
+            priority=body.priority,
+            description=body.description,
+            metadata_json=body.metadata_json,
+            endpoint_url_override=body.endpoint_url_override,
         )
     except ValueError as e:
         return error_response("INVALID_CONFIG", str(e), 400)
@@ -283,14 +322,23 @@ async def update_binding(
                 "SCOPE_DENIED", "Access denied to linked credential", 403
             )
     try:
-        ok = connector_service.update_binding(
-            binding_id,
+        update_fields = dict(
             name=body.name,
             scope=body.scope,
             credential_id=body.credential_id,
             config_json=body.config_json,
             enabled=body.enabled,
+            logical_alias=body.logical_alias,
+            is_preferred=body.is_preferred,
+            priority=body.priority,
+            description=body.description,
+            metadata_json=body.metadata_json,
         )
+        if body.reset_endpoint_url_override:
+            update_fields["endpoint_url_override"] = None
+        elif body.endpoint_url_override is not None:
+            update_fields["endpoint_url_override"] = body.endpoint_url_override
+        ok = connector_service.update_binding(binding_id, **update_fields)
     except ValueError as e:
         return error_response("INVALID_CONFIG", str(e), 400)
     if not ok:

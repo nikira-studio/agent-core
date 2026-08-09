@@ -349,6 +349,12 @@ CREATE TABLE IF NOT EXISTS connector_bindings (
     credential_id TEXT,
     config_json TEXT,
     rate_limit_config_json TEXT,
+    logical_alias TEXT,
+    is_preferred INTEGER NOT NULL DEFAULT 0 CHECK (is_preferred IN (0, 1)),
+    priority INTEGER NOT NULL DEFAULT 0,
+    description TEXT,
+    metadata_json TEXT,
+    endpoint_url_override TEXT,
     enabled INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0, 1)),
     last_tested_at TEXT,
     last_error TEXT,
@@ -362,6 +368,8 @@ CREATE TABLE IF NOT EXISTS connector_bindings (
 CREATE INDEX IF NOT EXISTS idx_bindings_scope ON connector_bindings(scope, enabled);
 CREATE INDEX IF NOT EXISTS idx_bindings_connector ON connector_bindings(connector_type_id);
 CREATE INDEX IF NOT EXISTS idx_bindings_credential ON connector_bindings(credential_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_bindings_alias_unique ON connector_bindings(scope, connector_type_id, logical_alias) WHERE logical_alias IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_bindings_preferred_unique ON connector_bindings(scope, connector_type_id) WHERE is_preferred = 1;
 
 -- Short-lived OAuth authorization state shared across app workers
 CREATE TABLE IF NOT EXISTS connector_oauth_states (
@@ -504,6 +512,7 @@ def create_schema(conn) -> None:
     _ensure_agents_default_recall_column(conn)
     _ensure_agents_delegation_column(conn)
     _ensure_connector_execution_authority_columns(conn)
+    _ensure_binding_resolution_columns(conn)
     _ensure_memory_metadata_columns(conn)
     _drop_retired_memory_columns(conn)
     _ensure_connector_type_provider_columns(conn)
@@ -587,6 +596,21 @@ def _ensure_connector_execution_authority_columns(conn) -> None:
     for column in wanted:
         if column not in columns:
             conn.execute(f"ALTER TABLE connector_executions ADD COLUMN {column} TEXT")
+    conn.commit()
+
+
+def _ensure_binding_resolution_columns(conn) -> None:
+    columns = {row["name"] for row in conn.execute("PRAGMA table_info(connector_bindings)").fetchall()}
+    definitions = {
+        "logical_alias": "TEXT", "is_preferred": "INTEGER NOT NULL DEFAULT 0",
+        "priority": "INTEGER NOT NULL DEFAULT 0", "description": "TEXT",
+        "metadata_json": "TEXT", "endpoint_url_override": "TEXT",
+    }
+    for column, definition in definitions.items():
+        if column not in columns:
+            conn.execute(f"ALTER TABLE connector_bindings ADD COLUMN {column} {definition}")
+    conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_bindings_alias_unique ON connector_bindings(scope, connector_type_id, logical_alias) WHERE logical_alias IS NOT NULL")
+    conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_bindings_preferred_unique ON connector_bindings(scope, connector_type_id) WHERE is_preferred = 1")
     conn.commit()
 
 
