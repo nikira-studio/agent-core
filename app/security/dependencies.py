@@ -3,10 +3,10 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
 from app.services.auth_service import validate_session
 from app.security.context import (
-    RequestContext,
     build_user_context,
     build_user_context_for_connectors,
 )
+from app.security.effective_authority import EffectiveAuthority, permanent_authority
 from app.security.exceptions import APIError
 from app.config import settings
 
@@ -97,10 +97,10 @@ async def get_current_agent(
 async def get_request_context(
     request: Request,
     credentials: HTTPAuthorizationCredentials = Depends(security),
-) -> RequestContext:
+) -> EffectiveAuthority:
     if not credentials:
         session = await get_current_session(request, credentials)
-        return build_user_context(session)
+        return permanent_authority(build_user_context(session))
 
     token = credentials.credentials
     if token.startswith("ac_sk_"):
@@ -111,19 +111,19 @@ async def get_request_context(
             raise APIError("INVALID_KEY", "Invalid or inactive agent API key", 401)
         from app.security.scope_enforcer import build_agent_context
 
-        return build_agent_context(agent)
+        return permanent_authority(build_agent_context(agent))
     else:
         session = await get_current_session(request, credentials)
-        return build_user_context(session)
+        return permanent_authority(build_user_context(session))
 
 
 async def get_mcp_request_context(
     request: Request,
     credentials: HTTPAuthorizationCredentials = Depends(security),
-) -> RequestContext:
+) -> EffectiveAuthority:
     if not credentials:
         session = await get_current_session(request, credentials)
-        return build_user_context_for_connectors(session)
+        return permanent_authority(build_user_context_for_connectors(session))
 
     token = credentials.credentials
     if token.startswith("ac_sk_"):
@@ -134,7 +134,7 @@ async def get_mcp_request_context(
             raise APIError("INVALID_KEY", "Invalid or inactive agent API key", 401)
         from app.security.scope_enforcer import build_agent_context
 
-        return build_agent_context(agent)
+        return permanent_authority(build_agent_context(agent))
     else:
         session = await get_current_session(request, credentials)
-        return build_user_context_for_connectors(session)
+        return permanent_authority(build_user_context_for_connectors(session))

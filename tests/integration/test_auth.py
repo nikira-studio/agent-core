@@ -116,6 +116,19 @@ def test_disabling_a_user_revokes_sessions_and_blocks_login(test_client, admin_t
         create_session("disabled")
 
 
+def test_effective_authority_reports_current_permanent_identity(test_client, agent_token):
+    response = test_client.get(
+        "/api/auth/effective-authority",
+        headers={"Authorization": f"Bearer {agent_token}"},
+    )
+    assert response.status_code == 200, response.json()
+    authority = response.json()["data"]["authority"]
+    assert authority["authenticated_actor"] == {"type": "agent", "id": "testagent"}
+    assert authority["executor_agent_id"] == "testagent"
+    assert authority["authorization_mode"] == "permanent"
+    assert authority["grant_id"] is None
+
+
 def test_login_failed_attempts_are_rate_limited(test_client, clean_db):
     RL._buckets.pop("login_failed:user:user", None)
     test_client.post("/api/auth/register", json={

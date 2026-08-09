@@ -28,6 +28,8 @@ from app.security.rate_limiter import RL
 from app.models.enums import normalize_id
 from app.config import settings
 from app.time_utils import parse_utc_datetime, utc_now
+from app.security.dependencies import get_request_context
+from app.security.effective_authority import EffectiveAuthority
 
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
@@ -138,6 +140,14 @@ class AdminUpdateUserRequest(BaseModel):
     role: str | None = None
     password: str | None = None
     is_active: bool | None = None
+
+
+@router.get("/effective-authority")
+async def effective_authority(
+    authority: EffectiveAuthority = Depends(get_request_context),
+):
+    """Inspect the caller's current, non-secret effective authority."""
+    return success_response({"authority": authority.safe_summary()})
 
 
 @router.post("/register")
