@@ -272,6 +272,16 @@ async def spec(
             "inputSchema": {"recipient_agent_id": "string", "purpose": "string", "ttl_seconds": "integer", "scope_permissions": "array?", "resource_permissions": "array?", "binding_actions": "array?"},
         },
         {
+            "name": "effective_authority",
+            "description": "Inspect non-secret effective authority",
+            "inputSchema": {},
+        },
+        {
+            "name": "delegations_list",
+            "description": "List visible non-secret delegated grants",
+            "inputSchema": {},
+        },
+        {
             "name": "delegation_requests_list",
             "description": "List visible delegation requests",
             "inputSchema": {},

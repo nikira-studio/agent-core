@@ -432,6 +432,16 @@ MANIFEST = {
             },
         },
         {
+            "name": "effective_authority",
+            "description": "Inspect the authenticated request's non-secret effective authority",
+            "inputSchema": {"type": "object", "properties": {}},
+        },
+        {
+            "name": "delegations_list",
+            "description": "List non-secret issued, received, and active grants visible to the authenticated actor",
+            "inputSchema": {"type": "object", "properties": {}},
+        },
+        {
             "name": "delegation_requests_list",
             "description": "List delegation requests visible to the authenticated actor",
             "inputSchema": {"type": "object", "properties": {}},
@@ -914,6 +924,10 @@ async def _handle_custom_mcp_tool(body: dict, ctx: RequestContext):
         )
         audit_service.write_event(ctx.actor_type, ctx.actor_id, "delegation_request_created", "delegation_request", request["id"])
         return JSONResponse(content={"ok": True, "data": {"request": request}}, status_code=201)
+    if tool == "effective_authority":
+        return JSONResponse(content={"ok": True, "data": {"authority": ctx.safe_summary()}})
+    if tool == "delegations_list":
+        return JSONResponse(content={"ok": True, "data": {"grants": delegation_service.list_grants(ctx)}})
     if tool == "delegation_requests_list":
         return JSONResponse(content={"ok": True, "data": {"requests": delegation_service.list_requests(ctx)}})
     if tool == "delegation_request_approve":
