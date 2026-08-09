@@ -232,6 +232,18 @@ def _delete_user(user_id: str) -> tuple[bool, str]:
             agent_scope = f"agent:{agent['id']}"
             cleanup_service.delete_scope_data(conn, agent_scope)
             conn.execute(
+                """DELETE FROM delegation_requests
+                   WHERE recipient_agent_id = ? OR coordinator_agent_id = ?
+                      OR (requester_actor_type = 'agent' AND requester_actor_id = ?)""",
+                (agent["id"], agent["id"], agent["id"]),
+            )
+            conn.execute(
+                """UPDATE delegation_requests SET grant_id = NULL WHERE grant_id IN
+                   (SELECT id FROM delegated_grants WHERE recipient_agent_id = ? OR coordinator_agent_id = ?
+                    OR (issuer_actor_type = 'agent' AND issuer_actor_id = ?))""",
+                (agent["id"], agent["id"], agent["id"]),
+            )
+            conn.execute(
                 """DELETE FROM delegated_grants
                    WHERE recipient_agent_id = ? OR coordinator_agent_id = ?
                       OR (issuer_actor_type = 'agent' AND issuer_actor_id = ?)""",
@@ -247,6 +259,15 @@ def _delete_user(user_id: str) -> tuple[bool, str]:
             conn.execute("DELETE FROM agents WHERE id = ?", (agent["id"],))
 
         cleanup_service.delete_scope_data(conn, f"user:{user_id}")
+        conn.execute(
+            "DELETE FROM delegation_requests WHERE target_user_id = ? OR (requester_actor_type = 'user' AND requester_actor_id = ?)",
+            (user_id, user_id),
+        )
+        conn.execute(
+            """UPDATE delegation_requests SET grant_id = NULL WHERE grant_id IN
+               (SELECT id FROM delegated_grants WHERE principal_user_id = ? OR (issuer_actor_type = 'user' AND issuer_actor_id = ?))""",
+            (user_id, user_id),
+        )
         conn.execute(
             """DELETE FROM delegated_grants
                WHERE principal_user_id = ? OR (issuer_actor_type = 'user' AND issuer_actor_id = ?)""",

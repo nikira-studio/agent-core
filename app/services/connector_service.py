@@ -301,6 +301,11 @@ def update_binding(binding_id: str, **fields) -> bool:
 def delete_binding(binding_id: str) -> bool:
     with get_db() as conn:
         conn.execute(
+            """UPDATE delegation_requests SET grant_id = NULL WHERE grant_id IN
+               (SELECT grant_id FROM delegated_grant_actions WHERE binding_id = ?)""",
+            (binding_id,),
+        )
+        conn.execute(
             "DELETE FROM delegated_grants WHERE id IN (SELECT grant_id FROM delegated_grant_actions WHERE binding_id = ?)",
             (binding_id,),
         )
@@ -1569,6 +1574,12 @@ def delete_connector_type(connector_type_id: str) -> bool:
                 "DELETE FROM connector_executions WHERE binding_id = ?",
                 (row[0],),
             )
+        conn.execute(
+            """UPDATE delegation_requests SET grant_id = NULL WHERE grant_id IN
+               (SELECT dga.grant_id FROM delegated_grant_actions dga
+                JOIN connector_bindings cb ON cb.id = dga.binding_id WHERE cb.connector_type_id = ?)""",
+            (connector_type_id,),
+        )
         conn.execute(
             "DELETE FROM delegated_grants WHERE id IN (SELECT dga.grant_id FROM delegated_grant_actions dga JOIN connector_bindings cb ON cb.id = dga.binding_id WHERE cb.connector_type_id = ?)",
             (connector_type_id,),

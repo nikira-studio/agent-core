@@ -327,3 +327,191 @@ def _action_names(connector_type: dict | None) -> set[str]:
         if isinstance(name, str) and name:
             names.add(name)
     return names - set((connector_type or {}).get("disabled_actions") or [])
+
+
+def create_request(
+    authority: EffectiveAuthority,
+    *,
+    recipient_agent_id: str,
+    purpose: str,
+    ttl_seconds: int,
+    scope_permissions: list[dict],
+    resource_permissions: list[dict],
+    binding_actions: list[dict],
+    activity_id: str | None = None,
+    correlation_id: str | None = None,
+) -> dict:
+    """Record requested authority without treating it as granted authority."""
+    if authority.is_delegated or authority.actor_type not in ("user", "agent"):
+        raise APIError("FORBIDDEN", "Delegated requests require permanent authentication", 403)
+    if not purpose.strip() or ttl_seconds < 1 or ttl_seconds > 3600:
+        raise APIError("INVALID_REQUEST", "Purpose and a TTL of at most one hour are required", 400)
+    scopes, resources, actions = _normalize_requested_permissions(
+        scope_permissions, resource_permissions, binding_actions
+    )
+    if not (scopes or resources or actions):
+        raise APIError("INVALID_REQUEST", "At least one explicit permission is required", 400)
+    with get_db() as conn:
+        recipient = conn.execute(
+            "SELECT is_active, default_user_id, owner_user_id FROM agents WHERE id = ?",
+            (recipient_agent_id,),
+        ).fetchone()
+        if not recipient or not recipient["is_active"]:
+            raise APIError("INVALID_RECIPIENT", "Recipient agent is unavailable", 400)
+        target_user_id = recipient["default_user_id"] or recipient["owner_user_id"]
+        target = conn.execute("SELECT is_active FROM users WHERE id = ?", (target_user_id,)).fetchone()
+        if not target or not target["is_active"]:
+            raise APIError("INVALID_RECIPIENT", "Recipient principal is unavailable", 400)
+        request_id = secrets.token_urlsafe(18)
+        coordinator_id = authority.agent_id if authority.actor_type == "agent" else None
+        conn.execute(
+            """INSERT INTO delegation_requests
+               (id, requester_actor_type, requester_actor_id, target_user_id, recipient_agent_id,
+                coordinator_agent_id, purpose, ttl_seconds, activity_id, correlation_id, status, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)""",
+            (request_id, authority.actor_type, authority.actor_id, target_user_id,
+             recipient_agent_id, coordinator_id, purpose.strip(), ttl_seconds,
+             activity_id, correlation_id, utc_now_iso()),
+        )
+        conn.executemany(
+            "INSERT INTO delegation_request_scope_permissions VALUES (?, ?, ?, ?)",
+            [(request_id, *item) for item in scopes],
+        )
+        conn.executemany(
+            "INSERT INTO delegation_request_resource_permissions VALUES (?, ?, ?, ?)",
+            [(request_id, *item) for item in resources],
+        )
+        conn.executemany(
+            "INSERT INTO delegation_request_actions VALUES (?, ?, ?)",
+            [(request_id, *item) for item in actions],
+        )
+        conn.commit()
+    return get_request(request_id, authority)
+
+
+def _normalize_requested_permissions(scope_permissions, resource_permissions, binding_actions):
+    scopes: set[tuple[str, str, str]] = set()
+    for item in scope_permissions:
+        resource, operation, raw_scope = item.get("resource_type", ""), item.get("operation", ""), item.get("scope", "")
+        if resource not in SCOPE_RESOURCES or operation not in RESOURCE_OPERATIONS[resource] or not validate_scope_string(raw_scope):
+            raise APIError("INVALID_PERMISSION", "Unknown scope permission", 400)
+        scopes.add((resource, operation, normalize_scope_string(raw_scope)))
+    resources: set[tuple[str, str, str]] = set()
+    for item in resource_permissions:
+        resource, operation = item.get("resource_type", ""), item.get("operation", "")
+        resource_id = str(item.get("resource_id", "")).strip()
+        if resource not in EXACT_RESOURCES or operation not in EXACT_ACTIVITY_OPERATIONS or not resource_id:
+            raise APIError("INVALID_PERMISSION", "Unknown exact-resource permission", 400)
+        resources.add((resource, operation, resource_id))
+    actions: set[tuple[str, str]] = set()
+    for item in binding_actions:
+        binding_id, action = str(item.get("binding_id", "")).strip(), str(item.get("action", "")).strip()
+        if not binding_id or not action:
+            raise APIError("INVALID_PERMISSION", "Invalid binding action", 400)
+        actions.add((binding_id, action))
+    return scopes, resources, actions
+
+
+def _request_permissions(conn, request_id: str) -> tuple[list[dict], list[dict], list[dict]]:
+    scopes = [dict(row) for row in conn.execute(
+        "SELECT resource_type, operation, scope FROM delegation_request_scope_permissions WHERE request_id = ?", (request_id,)
+    ).fetchall()]
+    resources = [dict(row) for row in conn.execute(
+        "SELECT resource_type, operation, resource_id FROM delegation_request_resource_permissions WHERE request_id = ?", (request_id,)
+    ).fetchall()]
+    actions = [dict(row) for row in conn.execute(
+        "SELECT binding_id, action FROM delegation_request_actions WHERE request_id = ?", (request_id,)
+    ).fetchall()]
+    return scopes, resources, actions
+
+
+def _request_visible(row, authority: EffectiveAuthority) -> bool:
+    return bool(
+        not authority.is_delegated and (
+            authority.is_admin
+            or row["target_user_id"] == authority.principal_user_id
+            or (row["requester_actor_type"] == authority.actor_type and row["requester_actor_id"] == authority.actor_id)
+            or row["recipient_agent_id"] == authority.agent_id
+        )
+    )
+
+
+def get_request(request_id: str, authority: EffectiveAuthority) -> dict:
+    with get_db() as conn:
+        row = conn.execute("SELECT * FROM delegation_requests WHERE id = ?", (request_id,)).fetchone()
+        if not row or not _request_visible(row, authority):
+            raise APIError("REQUEST_NOT_FOUND", "Delegation request not found", 404)
+        scopes, resources, actions = _request_permissions(conn, request_id)
+    result = dict(row)
+    result.update(scope_permissions=scopes, resource_permissions=resources, binding_actions=actions)
+    return result
+
+
+def list_requests(authority: EffectiveAuthority) -> list[dict]:
+    if authority.is_delegated:
+        raise APIError("FORBIDDEN", "Request administration requires permanent authority", 403)
+    with get_db() as conn:
+        rows = conn.execute("SELECT * FROM delegation_requests ORDER BY created_at DESC").fetchall()
+    return [get_request(row["id"], authority) for row in rows if _request_visible(row, authority)]
+
+
+def approve_request(
+    request_id: str,
+    authority: EffectiveAuthority,
+    *,
+    scope_permissions: list[dict] | None = None,
+    resource_permissions: list[dict] | None = None,
+    binding_actions: list[dict] | None = None,
+) -> dict:
+    request = get_request(request_id, authority)
+    if request["status"] != "pending":
+        raise APIError("REQUEST_DECIDED", "Delegation request has already been decided", 409)
+    requested_sets = _normalize_requested_permissions(
+        request["scope_permissions"], request["resource_permissions"], request["binding_actions"]
+    )
+    approved = (
+        scope_permissions if scope_permissions is not None else request["scope_permissions"],
+        resource_permissions if resource_permissions is not None else request["resource_permissions"],
+        binding_actions if binding_actions is not None else request["binding_actions"],
+    )
+    approved_sets = _normalize_requested_permissions(*approved)
+    if any(not approved_sets[i].issubset(requested_sets[i]) for i in range(3)):
+        raise APIError("APPROVAL_EXPANDS_REQUEST", "Approval may only narrow requested authority", 400)
+    grant = create_grant(
+        authority, recipient_agent_id=request["recipient_agent_id"], purpose=request["purpose"],
+        scope_permissions=approved[0], resource_permissions=approved[1], binding_actions=approved[2],
+        ttl_seconds=request["ttl_seconds"], coordinator_agent_id=request["coordinator_agent_id"],
+        activity_id=request["activity_id"], correlation_id=request["correlation_id"],
+    )
+    with get_db() as conn:
+        changed = conn.execute(
+            """UPDATE delegation_requests SET status = 'approved', decided_at = ?,
+               decided_by_actor_type = ?, decided_by_actor_id = ?, grant_id = ?
+               WHERE id = ? AND status = 'pending'""",
+            (utc_now_iso(), authority.actor_type, authority.actor_id, grant["id"], request_id),
+        )
+        if changed.rowcount != 1:
+            conn.execute("DELETE FROM delegated_grants WHERE id = ?", (grant["id"],))
+            conn.commit()
+            raise APIError("REQUEST_DECIDED", "Delegation request has already been decided", 409)
+        conn.commit()
+    return {"request": get_request(request_id, authority), "grant": grant}
+
+
+def deny_request(request_id: str, authority: EffectiveAuthority, reason: str | None) -> dict:
+    request = get_request(request_id, authority)
+    if request["status"] != "pending":
+        raise APIError("REQUEST_DECIDED", "Delegation request has already been decided", 409)
+    if not _issuer_can_delegate(authority):
+        raise APIError("DELEGATION_FORBIDDEN", "Actor may not decide delegation requests", 403)
+    with get_db() as conn:
+        changed = conn.execute(
+            """UPDATE delegation_requests SET status = 'denied', decided_at = ?,
+               decided_by_actor_type = ?, decided_by_actor_id = ?, decision_reason = ?
+               WHERE id = ? AND status = 'pending'""",
+            (utc_now_iso(), authority.actor_type, authority.actor_id, reason, request_id),
+        )
+        conn.commit()
+    if changed.rowcount != 1:
+        raise APIError("REQUEST_DECIDED", "Delegation request has already been decided", 409)
+    return get_request(request_id, authority)

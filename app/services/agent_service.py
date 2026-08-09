@@ -308,6 +308,18 @@ def delete_agent_hard(agent_id: str) -> bool:
     with get_db() as conn:
         cleanup_service.delete_scope_data(conn, scope)
         conn.execute(
+            """DELETE FROM delegation_requests
+               WHERE recipient_agent_id = ? OR coordinator_agent_id = ?
+                  OR (requester_actor_type = 'agent' AND requester_actor_id = ?)""",
+            (normalized_id, normalized_id, normalized_id),
+        )
+        conn.execute(
+            """UPDATE delegation_requests SET grant_id = NULL WHERE grant_id IN
+               (SELECT id FROM delegated_grants WHERE recipient_agent_id = ? OR coordinator_agent_id = ?
+                OR (issuer_actor_type = 'agent' AND issuer_actor_id = ?))""",
+            (normalized_id, normalized_id, normalized_id),
+        )
+        conn.execute(
             """DELETE FROM delegated_grants
                WHERE recipient_agent_id = ? OR coordinator_agent_id = ?
                   OR (issuer_actor_type = 'agent' AND issuer_actor_id = ?)""",

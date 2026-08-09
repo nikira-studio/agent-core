@@ -2,6 +2,7 @@ from app.routes.health import router as health_router
 from app.routes.spec import router as spec_router
 from app.routes.auth import router as auth_router
 from app.routes.delegations import router as delegations_router
+from app.routes.delegation_requests import router as delegation_requests_router
 from app.routes.agents import router as agents_router
 from app.routes.workspaces import router as workspaces_router
 from app.routes.credentials import router as credentials_router
@@ -37,6 +38,7 @@ __all__ = [
     "spec_router",
     "auth_router",
     "delegations_router",
+    "delegation_requests_router",
     "agents_router",
     "workspaces_router",
     "credentials_router",

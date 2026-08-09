@@ -61,6 +61,7 @@ def delete_scope_data(conn: sqlite3.Connection, scope: str) -> dict:
     grant_ids = [row["grant_id"] for row in affected_grants]
     if grant_ids:
         placeholders = ",".join("?" for _ in grant_ids)
+        conn.execute(f"UPDATE delegation_requests SET grant_id = NULL WHERE grant_id IN ({placeholders})", grant_ids)
         conn.execute(f"DELETE FROM delegated_grants WHERE id IN ({placeholders})", grant_ids)
 
     bindings_deleted = conn.execute(

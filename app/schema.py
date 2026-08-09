@@ -96,6 +96,49 @@ CREATE TABLE IF NOT EXISTS delegated_grant_actions (
     FOREIGN KEY (binding_id) REFERENCES connector_bindings(id)
 );
 
+CREATE TABLE IF NOT EXISTS delegation_requests (
+    id TEXT PRIMARY KEY,
+    requester_actor_type TEXT NOT NULL CHECK (requester_actor_type IN ('user', 'agent')),
+    requester_actor_id TEXT NOT NULL,
+    target_user_id TEXT NOT NULL,
+    recipient_agent_id TEXT NOT NULL,
+    coordinator_agent_id TEXT,
+    purpose TEXT NOT NULL,
+    ttl_seconds INTEGER NOT NULL CHECK (ttl_seconds > 0 AND ttl_seconds <= 3600),
+    activity_id TEXT,
+    correlation_id TEXT,
+    status TEXT NOT NULL CHECK (status IN ('pending', 'approved', 'denied')),
+    created_at TEXT NOT NULL,
+    decided_at TEXT,
+    decided_by_actor_type TEXT,
+    decided_by_actor_id TEXT,
+    decision_reason TEXT,
+    grant_id TEXT,
+    FOREIGN KEY (target_user_id) REFERENCES users(id),
+    FOREIGN KEY (recipient_agent_id) REFERENCES agents(id),
+    FOREIGN KEY (coordinator_agent_id) REFERENCES agents(id),
+    FOREIGN KEY (grant_id) REFERENCES delegated_grants(id) ON DELETE SET NULL
+);
+CREATE INDEX IF NOT EXISTS idx_delegation_requests_target ON delegation_requests(target_user_id, status, created_at);
+CREATE INDEX IF NOT EXISTS idx_delegation_requests_requester ON delegation_requests(requester_actor_type, requester_actor_id, created_at);
+CREATE TABLE IF NOT EXISTS delegation_request_scope_permissions (
+    request_id TEXT NOT NULL, resource_type TEXT NOT NULL CHECK (resource_type IN ('memory','briefing')),
+    operation TEXT NOT NULL, scope TEXT NOT NULL,
+    PRIMARY KEY (request_id, resource_type, operation, scope),
+    FOREIGN KEY (request_id) REFERENCES delegation_requests(id) ON DELETE CASCADE
+);
+CREATE TABLE IF NOT EXISTS delegation_request_resource_permissions (
+    request_id TEXT NOT NULL, resource_type TEXT NOT NULL CHECK (resource_type IN ('activity')),
+    operation TEXT NOT NULL, resource_id TEXT NOT NULL,
+    PRIMARY KEY (request_id, resource_type, operation, resource_id),
+    FOREIGN KEY (request_id) REFERENCES delegation_requests(id) ON DELETE CASCADE
+);
+CREATE TABLE IF NOT EXISTS delegation_request_actions (
+    request_id TEXT NOT NULL, binding_id TEXT NOT NULL, action TEXT NOT NULL,
+    PRIMARY KEY (request_id, binding_id, action),
+    FOREIGN KEY (request_id) REFERENCES delegation_requests(id) ON DELETE CASCADE
+);
+
 -- Workspaces table
 CREATE TABLE IF NOT EXISTS workspaces (
     id TEXT PRIMARY KEY,

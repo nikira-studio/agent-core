@@ -19,6 +19,7 @@ from app.services import (
     tool_spill_service,
     artifact_export_service,
     embedding_service,
+    delegation_service,
 )
 from app.config import settings
 from app.models.enums import MEMORY_CLASSES, SOURCE_KINDS
@@ -413,6 +414,51 @@ MANIFEST = {
                     "offset": {"type": "integer", "default": 0},
                 },
             },
+        },
+        {
+            "name": "delegation_request",
+            "description": "Request narrowly scoped authority for an active recipient agent; this does not grant authority",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "recipient_agent_id": {"type": "string"}, "purpose": {"type": "string"},
+                    "ttl_seconds": {"type": "integer", "maximum": 3600},
+                    "scope_permissions": {"type": "array", "items": {"type": "object"}},
+                    "resource_permissions": {"type": "array", "items": {"type": "object"}},
+                    "binding_actions": {"type": "array", "items": {"type": "object"}},
+                    "activity_id": {"type": "string"}, "correlation_id": {"type": "string"},
+                },
+                "required": ["recipient_agent_id", "purpose", "ttl_seconds"],
+            },
+        },
+        {
+            "name": "delegation_requests_list",
+            "description": "List delegation requests visible to the authenticated actor",
+            "inputSchema": {"type": "object", "properties": {}},
+        },
+        {
+            "name": "delegation_request_approve",
+            "description": "Approve a visible pending request, optionally narrowing each permission list",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "request_id": {"type": "string"},
+                    "scope_permissions": {"type": "array", "items": {"type": "object"}},
+                    "resource_permissions": {"type": "array", "items": {"type": "object"}},
+                    "binding_actions": {"type": "array", "items": {"type": "object"}},
+                },
+                "required": ["request_id"],
+            },
+        },
+        {
+            "name": "delegation_request_deny",
+            "description": "Deny a visible pending delegation request",
+            "inputSchema": {"type": "object", "properties": {"request_id": {"type": "string"}, "reason": {"type": "string"}}, "required": ["request_id"]},
+        },
+        {
+            "name": "delegation_revoke",
+            "description": "Immediately revoke a grant the actor issued or received",
+            "inputSchema": {"type": "object", "properties": {"grant_id": {"type": "string"}, "reason": {"type": "string"}}, "required": ["grant_id"]},
         },
         {
             "name": "connectors_list",
@@ -844,6 +890,37 @@ async def _handle_custom_mcp_tool(body: dict, ctx: RequestContext):
         # already declares what each tool requires, so check against that rather
         # than adding a guard per handler and forgetting one.
         return _mcp_error("INVALID_PARAMS", _missing_params_message(tool, missing), 400)
+
+    if tool == "delegation_request":
+        request = delegation_service.create_request(
+            ctx, recipient_agent_id=params["recipient_agent_id"], purpose=params["purpose"],
+            ttl_seconds=int(params["ttl_seconds"]),
+            scope_permissions=params.get("scope_permissions") or [],
+            resource_permissions=params.get("resource_permissions") or [],
+            binding_actions=params.get("binding_actions") or [],
+            activity_id=params.get("activity_id"), correlation_id=params.get("correlation_id"),
+        )
+        audit_service.write_event(ctx.actor_type, ctx.actor_id, "delegation_request_created", "delegation_request", request["id"])
+        return JSONResponse(content={"ok": True, "data": {"request": request}}, status_code=201)
+    if tool == "delegation_requests_list":
+        return JSONResponse(content={"ok": True, "data": {"requests": delegation_service.list_requests(ctx)}})
+    if tool == "delegation_request_approve":
+        result = delegation_service.approve_request(
+            params["request_id"], ctx,
+            scope_permissions=params.get("scope_permissions") if "scope_permissions" in params else None,
+            resource_permissions=params.get("resource_permissions") if "resource_permissions" in params else None,
+            binding_actions=params.get("binding_actions") if "binding_actions" in params else None,
+        )
+        audit_service.write_event(ctx.actor_type, ctx.actor_id, "delegation_request_approved", "delegation_request", params["request_id"], details={"grant_id": result["grant"]["id"]})
+        return JSONResponse(content={"ok": True, "data": result})
+    if tool == "delegation_request_deny":
+        request = delegation_service.deny_request(params["request_id"], ctx, params.get("reason"))
+        audit_service.write_event(ctx.actor_type, ctx.actor_id, "delegation_request_denied", "delegation_request", params["request_id"])
+        return JSONResponse(content={"ok": True, "data": {"request": request}})
+    if tool == "delegation_revoke":
+        grant = delegation_service.revoke_grant(params["grant_id"], ctx, params.get("reason"))
+        audit_service.write_event(ctx.actor_type, ctx.actor_id, "delegation_grant_revoked", "delegated_grant", params["grant_id"])
+        return JSONResponse(content={"ok": True, "data": {"grant": grant}})
 
     if tool == "result_fetch":
         handle = (params.get("handle") or "").strip()
