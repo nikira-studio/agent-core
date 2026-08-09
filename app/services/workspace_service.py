@@ -110,41 +110,13 @@ def list_workspace_collaborators(workspace_id: str) -> list[dict]:
 
 
 def can_user_read_workspace(user_id: str, workspace_id: str) -> bool:
-    workspace = get_workspace_by_id(workspace_id)
-    if not workspace or not workspace.get("is_active", False):
-        return False
-    if workspace.get("owner_user_id") == user_id:
-        return True
-    with get_db() as conn:
-        row = conn.execute(
-            """
-            SELECT 1
-            FROM workspace_collaborators
-            WHERE workspace_id = ? AND user_id = ? AND can_read = 1
-            LIMIT 1
-            """,
-            (normalize_id(workspace_id), user_id),
-        ).fetchone()
-    return bool(row)
+    readable, _ = get_workspace_authority(user_id, [workspace_id])
+    return normalize_id(workspace_id) in readable
 
 
 def can_user_write_workspace(user_id: str, workspace_id: str) -> bool:
-    workspace = get_workspace_by_id(workspace_id)
-    if not workspace or not workspace.get("is_active", False):
-        return False
-    if workspace.get("owner_user_id") == user_id:
-        return True
-    with get_db() as conn:
-        row = conn.execute(
-            """
-            SELECT 1
-            FROM workspace_collaborators
-            WHERE workspace_id = ? AND user_id = ? AND can_write = 1
-            LIMIT 1
-            """,
-            (normalize_id(workspace_id), user_id),
-        ).fetchone()
-    return bool(row)
+    _, writable = get_workspace_authority(user_id, [workspace_id])
+    return normalize_id(workspace_id) in writable
 
 
 def upsert_workspace_collaborator(
@@ -192,25 +164,43 @@ def remove_workspace_collaborator(workspace_id: str, user_id: str) -> bool:
 
 
 def get_accessible_workspace_ids(user_id: str, workspace_ids: Iterable[str]) -> frozenset[str]:
+    """Compatibility wrapper for callers that need readable workspace IDs."""
+    return get_workspace_authority(user_id, workspace_ids)[0]
+
+
+def get_workspace_authority(
+    user_id: str, workspace_ids: Iterable[str]
+) -> tuple[frozenset[str], frozenset[str]]:
+    """Return the active workspace IDs a user may read and write.
+
+    This is intentionally one query so runtime agent attenuation uses the same
+    owner/collaborator predicates as scope assignment. A collaborator row by
+    itself conveys no authority: its individual can_read/can_write bits do.
+    """
     normalized_ids = [normalize_id(workspace_id) for workspace_id in workspace_ids if workspace_id]
-    if not normalized_ids:
-        return frozenset()
+    if not user_id or not normalized_ids:
+        return frozenset(), frozenset()
 
     placeholders = ",".join("?" for _ in normalized_ids)
     with get_db() as conn:
         rows = conn.execute(
             f"""
-            SELECT w.id
+            SELECT w.id,
+                   CASE WHEN w.owner_user_id = ? OR COALESCE(wc.can_read, 0) = 1
+                        THEN 1 ELSE 0 END AS can_read,
+                   CASE WHEN w.owner_user_id = ? OR COALESCE(wc.can_write, 0) = 1
+                        THEN 1 ELSE 0 END AS can_write
             FROM workspaces w
             LEFT JOIN workspace_collaborators wc
               ON wc.workspace_id = w.id AND wc.user_id = ?
             WHERE w.id IN ({placeholders})
               AND w.is_active = 1
-              AND (w.owner_user_id = ? OR wc.user_id IS NOT NULL)
             """,
-            [user_id, *normalized_ids, user_id],
+            [user_id, user_id, user_id, *normalized_ids],
         ).fetchall()
-        return frozenset(row["id"] for row in rows)
+        readable = frozenset(row["id"] for row in rows if row["can_read"])
+        writable = frozenset(row["id"] for row in rows if row["can_write"])
+        return readable, writable
 
 
 def get_active_workspace_ids(workspace_ids: Iterable[str]) -> frozenset[str]:

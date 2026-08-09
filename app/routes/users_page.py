@@ -51,6 +51,8 @@ async def users_page(request: Request, session: dict = Depends(require_auth)):
                     "email": u.get("email", ""),
                     "display_name": u.get("display_name", ""),
                     "role": u.get("role", "user"),
+                    "is_active": bool(u.get("is_active", True)),
+                    "is_self": is_self,
                 }
             )
         )
@@ -69,6 +71,7 @@ async def users_page(request: Request, session: dict = Depends(require_auth)):
             f"<td><code>{escape_html(u['id'])}</code></td>"
             f"<td>{escape_html(u.get('email', ''))}</td>"
             f"<td><span class='badge badge-{'active' if u.get('role') == 'admin' else 'inactive'}'>{escape_html(u.get('role', 'user'))}</span></td>"
+            f"<td><span class='badge badge-{'active' if u.get('is_active', True) else 'inactive'}'>{'active' if u.get('is_active', True) else 'disabled'}</span></td>"
             f"<td>{otp}</td>"
             f"<td>{local_dt(u.get('created_at'), style='date')}</td>"
             f"<td>{actions}</td>"
@@ -77,7 +80,7 @@ async def users_page(request: Request, session: dict = Depends(require_auth)):
 
     rows = (
         "".join(user_row(u) for u in users)
-        or "<tr><td colspan=7 class=empty>No users.</td></tr>"
+        or "<tr><td colspan=8 class=empty>No users.</td></tr>"
     )
 
     js = """
@@ -98,6 +101,8 @@ async def users_page(request: Request, session: dict = Depends(require_auth)):
       document.getElementById('eu-display-name').value = u.display_name || '';
       document.getElementById('eu-email').value = u.email || '';
       document.getElementById('eu-role').value = u.role || 'user';
+      document.getElementById('eu-active').checked = u.is_active;
+      document.getElementById('eu-active').disabled = u.is_self;
       document.getElementById('eu-password').value = '';
       openModal('edit-user-modal');
     }
@@ -108,6 +113,7 @@ async def users_page(request: Request, session: dict = Depends(require_auth)):
         display_name: document.getElementById('eu-display-name').value,
         email: document.getElementById('eu-email').value,
         role: document.getElementById('eu-role').value,
+        is_active: document.getElementById('eu-active').checked,
       };
       const password = document.getElementById('eu-password').value;
       if (password) body.password = password;
@@ -137,7 +143,7 @@ async def users_page(request: Request, session: dict = Depends(require_auth)):
     <div class="card">
       <h3>All Users</h3>
       <p class="text-muted" style="margin-bottom:12px">Admin-only view. First-run registration creates the initial admin; after that, admins create users here and assign roles.</p>
-      <table><thead><tr><th>Name</th><th>ID</th><th>Email</th><th>Role</th><th>OTP</th><th>Created</th><th class="actions-cell">Actions</th></tr></thead>
+      <table><thead><tr><th>Name</th><th>ID</th><th>Email</th><th>Role</th><th>Status</th><th>OTP</th><th>Created</th><th class="actions-cell">Actions</th></tr></thead>
       <tbody>{rows}</tbody></table>
     </div>
     <div class="modal-overlay" id="create-user-modal" style="display:none">
@@ -150,6 +156,7 @@ async def users_page(request: Request, session: dict = Depends(require_auth)):
             <div class="form-group"><label>Role</label><select name="role"><option value="user">User</option><option value="admin">Admin</option></select></div>
             <div class="form-group"><label>Initial Password</label><input type="password" name="password" minlength="8" autocomplete="new-password" required></div>
           </div>
+          <div class="form-group"><label><input type="checkbox" id="eu-active" checked> Account active</label><p class="form-hint">Disabling an account revokes its existing sessions immediately.</p></div>
           <p class="form-hint">Users can change their password after signing in. Admin role grants full dashboard access.</p>
           <div class="modal-footer">
             <button type="button" class="btn btn-secondary" onclick="closeModal('create-user-modal')">Cancel</button>

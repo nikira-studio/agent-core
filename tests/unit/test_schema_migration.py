@@ -10,7 +10,7 @@ via the normal clean_db fixture (which can't represent the pre-upgrade state).
 
 import sqlite3
 
-from app.schema import SCHEMA_SQL, _ensure_memory_metadata_columns
+from app.schema import SCHEMA_SQL, _ensure_memory_metadata_columns, _ensure_user_active_column
 
 
 def _bare_connection() -> sqlite3.Connection:
@@ -90,3 +90,20 @@ def test_migration_is_idempotent_and_does_not_reset_real_timestamps():
     ).fetchone()["status_changed_at"]
     assert second_stamp == "2099-01-01T00:00:00+00:00"
     assert second_stamp != first_stamp
+
+
+def test_user_active_migration_defaults_existing_accounts_to_active():
+    conn = _bare_connection()
+    conn.execute("ALTER TABLE users DROP COLUMN is_active")
+    conn.execute(
+        "INSERT INTO users (id, email, password_hash, display_name, role) VALUES ('legacy', 'legacy@test.local', 'hash', 'Legacy', 'user')"
+    )
+    conn.commit()
+
+    _ensure_user_active_column(conn)
+    row = conn.execute("SELECT is_active FROM users WHERE id = 'legacy'").fetchone()
+    assert row["is_active"] == 1
+
+    _ensure_user_active_column(conn)
+    columns = {row["name"] for row in conn.execute("PRAGMA table_info(users)").fetchall()}
+    assert "is_active" in columns

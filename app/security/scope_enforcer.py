@@ -72,14 +72,48 @@ class ScopeEnforcer:
 
 def build_agent_context(agent: dict) -> "RequestContext":
     from app.security.context import RequestContext
+    from app.services import auth_service
 
-    read_scopes = agent_service.parse_scopes(agent["read_scopes_json"])
-    write_scopes = agent_service.parse_scopes(agent["write_scopes_json"])
+    stored_read_scopes = agent_service.parse_scopes(agent["read_scopes_json"])
+    stored_write_scopes = agent_service.parse_scopes(agent["write_scopes_json"])
+
+    # default_user_id is the principal whose workspace authority the agent may
+    # exercise. owner_user_id manages the agent record; it is only a fallback
+    # for older rows without a selected default user.
+    user_id = agent.get("default_user_id") or agent.get("owner_user_id")
+    principal = auth_service.get_user_by_id(user_id) if user_id else None
+    principal_is_active = bool(principal and principal.get("is_active", True))
 
     # Default recall set: NULL column = Option A (fan all read_scopes). When set,
     # constrain to read_scopes and always include the agent's own scope, so an
     # unscoped recall can never be stranded from its own memory or drift past
     # read access regardless of how the row was edited.
+    workspace_ids = {
+        scope.split(":", 1)[1]
+        for scope in stored_read_scopes + stored_write_scopes
+        if scope.startswith("workspace:") and ":" in scope
+    }
+    readable_workspace_ids, writable_workspace_ids = (
+        workspace_service.get_workspace_authority(user_id, workspace_ids)
+        if principal_is_active
+        else (frozenset(), frozenset())
+    )
+
+    def attenuate(scopes: list[str], allowed_workspace_ids: frozenset[str]) -> list[str]:
+        result = []
+        for scope in scopes:
+            if scope.startswith("workspace:"):
+                workspace_id = scope.split(":", 1)[1]
+                if workspace_id not in allowed_workspace_ids:
+                    continue
+            # A disabled default user cannot lend access to their private data.
+            if scope == f"user:{user_id}" and not principal_is_active:
+                continue
+            result.append(scope)
+        return result
+
+    read_scopes = attenuate(stored_read_scopes, readable_workspace_ids)
+    write_scopes = attenuate(stored_write_scopes, writable_workspace_ids)
     read_set = set(read_scopes)
     own_scope = f"agent:{agent['id']}"
     recall_json = agent.get("default_recall_scopes_json")
@@ -92,16 +126,7 @@ def build_agent_context(agent: dict) -> "RequestContext":
     if own_scope in read_set and own_scope not in default_recall_scopes:
         default_recall_scopes.insert(0, own_scope)
 
-    user_id = agent.get("default_user_id") or agent.get("owner_user_id")
-    workspace_ids = {
-        scope.split(":", 1)[1]
-        for scope in read_scopes + write_scopes
-        if scope.startswith("workspace:") and ":" in scope
-    }
-    active_workspace_ids = workspace_service.get_accessible_workspace_ids(
-        user_id,
-        workspace_ids,
-    )
+    active_workspace_ids = readable_workspace_ids | writable_workspace_ids
 
     return RequestContext(
         actor_type="agent",

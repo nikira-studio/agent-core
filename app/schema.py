@@ -6,6 +6,7 @@ CREATE TABLE IF NOT EXISTS users (
     password_hash TEXT NOT NULL,
     display_name TEXT NOT NULL,
     role TEXT NOT NULL DEFAULT 'user' CHECK (role IN ('admin', 'user')),
+    is_active INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0, 1)),
     timezone TEXT,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT DEFAULT CURRENT_TIMESTAMP
@@ -456,6 +457,7 @@ def create_schema(conn) -> None:
     )
     conn.commit()
     _ensure_user_timezone_column(conn)
+    _ensure_user_active_column(conn)
     _ensure_connector_type_action_state_column(conn)
     _ensure_connector_type_spec_columns(conn)
     _ensure_connector_type_backend_columns(conn)
@@ -729,6 +731,19 @@ def _ensure_user_timezone_column(conn) -> None:
     }
     if "timezone" not in columns:
         conn.execute("ALTER TABLE users ADD COLUMN timezone TEXT")
+        conn.commit()
+
+
+def _ensure_user_active_column(conn) -> None:
+    """Add the account-disable flag for databases created before Phase 0."""
+    columns = {
+        row["name"] for row in conn.execute("PRAGMA table_info(users)").fetchall()
+    }
+    if "is_active" not in columns:
+        # SQLite cannot add the CHECK constraint after the fact. The service
+        # writes this as a boolean and old accounts deliberately become active
+        # on upgrade, preserving their existing login behavior.
+        conn.execute("ALTER TABLE users ADD COLUMN is_active INTEGER NOT NULL DEFAULT 1")
         conn.commit()
 
 

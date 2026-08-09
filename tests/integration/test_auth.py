@@ -1,5 +1,7 @@
 import json
 
+import pytest
+
 from app.database import get_db
 from app.security.rate_limiter import RL
 
@@ -86,6 +88,32 @@ def test_login_valid_credentials(test_client, clean_db):
     assert details["user_id"] == "user"
     assert details["role"] == "admin"
     assert details["otp_required"] is False
+
+
+def test_disabling_a_user_revokes_sessions_and_blocks_login(test_client, admin_token):
+    from app.services.auth_service import create_session, create_user
+
+    create_user("disabled", "disabled@test.local", "testpassword123", "Disabled User")
+    old_session = create_session("disabled")["session_id"]
+    disabled = test_client.put(
+        "/api/auth/users/disabled",
+        headers={"Authorization": f"Bearer {admin_token}"},
+        json={"is_active": False},
+    )
+    assert disabled.status_code == 200, disabled.json()
+
+    existing = test_client.get(
+        "/api/agents", headers={"Authorization": f"Bearer {old_session}"}
+    )
+    assert existing.status_code == 401, existing.json()
+    login = test_client.post(
+        "/api/auth/login",
+        json={"email": "disabled@test.local", "password": "testpassword123"},
+    )
+    assert login.status_code == 401
+    assert login.json()["error"]["code"] == "INVALID_CREDENTIALS"
+    with pytest.raises(ValueError, match="inactive"):
+        create_session("disabled")
 
 
 def test_login_failed_attempts_are_rate_limited(test_client, clean_db):

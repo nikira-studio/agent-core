@@ -72,8 +72,8 @@ def create_user(
     with get_db() as conn:
         conn.execute(
             """
-            INSERT INTO users (id, email, password_hash, display_name, role)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT INTO users (id, email, password_hash, display_name, role, is_active)
+            VALUES (?, ?, ?, ?, ?, 1)
             """,
             (user_id, email, password_hash, display_name, role),
         )
@@ -83,13 +83,14 @@ def create_user(
             "email": email,
             "display_name": display_name,
             "role": role,
+            "is_active": True,
         }
 
 
 def get_user_by_email(email: str) -> Optional[dict]:
     with get_db() as conn:
         row = conn.execute(
-            "SELECT id, email, password_hash, display_name, role FROM users WHERE email = ?",
+            "SELECT id, email, password_hash, display_name, role, is_active FROM users WHERE email = ?",
             (email,),
         ).fetchone()
         return dict(row) if row else None
@@ -98,7 +99,7 @@ def get_user_by_email(email: str) -> Optional[dict]:
 def get_user_by_id(user_id: str) -> Optional[dict]:
     with get_db() as conn:
         row = conn.execute(
-            "SELECT id, email, display_name, role, timezone FROM users WHERE id = ?",
+            "SELECT id, email, display_name, role, timezone, is_active FROM users WHERE id = ?",
             (user_id,),
         ).fetchone()
         return dict(row) if row else None
@@ -131,7 +132,7 @@ def list_users() -> list[dict]:
     with get_db() as conn:
         rows = conn.execute(
             """
-            SELECT u.id, u.email, u.display_name, u.role, u.created_at,
+            SELECT u.id, u.email, u.display_name, u.role, u.is_active, u.created_at,
                    CASE WHEN o.user_id IS NOT NULL THEN 1 ELSE 0 END as otp_enrolled
             FROM users u
             LEFT JOIN otp_secrets o ON o.user_id = u.id AND o.is_active = 1
@@ -148,6 +149,7 @@ def update_user(
     display_name: Optional[str] = None,
     role: Optional[str] = None,
     password: Optional[str] = None,
+    is_active: Optional[bool] = None,
 ) -> tuple[bool, str]:
     updates = []
     values = []
@@ -166,6 +168,9 @@ def update_user(
     if password:
         updates.append("password_hash = ?")
         values.append(hash_password(password))
+    if is_active is not None:
+        updates.append("is_active = ?")
+        values.append(1 if is_active else 0)
 
     if not updates:
         return True, ""
@@ -180,6 +185,8 @@ def update_user(
                 f"UPDATE users SET {', '.join(updates)} WHERE id = ?",
                 tuple(values),
             )
+            if is_active is False:
+                conn.execute("DELETE FROM sessions WHERE user_id = ?", (user_id,))
             conn.commit()
         except Exception:
             return False, "User could not be updated"
@@ -269,6 +276,11 @@ def create_session(
     expires_at = (utc_now() + timedelta(hours=expiry_hours)).isoformat()
 
     with get_db() as conn:
+        user = conn.execute(
+            "SELECT is_active FROM users WHERE id = ?", (user_id,)
+        ).fetchone()
+        if not user or not user["is_active"]:
+            raise ValueError("Cannot create a session for an inactive user")
         conn.execute(
             """
             INSERT INTO sessions (id, user_id, expires_at, channel)
@@ -291,10 +303,10 @@ def get_session(session_id: str) -> Optional[dict]:
         cursor = conn.execute(
             """
             SELECT s.id, s.user_id, s.expires_at, s.last_activity, s.channel,
-                   u.email, u.display_name, u.role, u.timezone
+                   u.email, u.display_name, u.role, u.timezone, u.is_active
             FROM sessions s
             JOIN users u ON u.id = s.user_id
-            WHERE s.id = ?
+            WHERE s.id = ? AND u.is_active = 1
             """,
             (session_id,),
         )

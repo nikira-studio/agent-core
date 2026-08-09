@@ -8,6 +8,7 @@ from app.services.workspace_service import (
     get_workspace_by_id,
     list_workspace_collaborators,
     remove_workspace_collaborator,
+    upsert_workspace_collaborator,
 )
 from app.services import agent_service
 
@@ -117,6 +118,79 @@ def test_workspace_collaborator_revocation_blocks_agent_runtime_access(test_clie
     assert not can_user_read_workspace("collab2", "revocationproject")
     assert not can_user_write_workspace("collab2", "revocationproject")
 
+
+def test_agent_workspace_authority_tracks_collaborator_permission_bits(test_client, admin_token):
+    """An unchanged collaborator row must not keep an agent's old authority."""
+    create_user("ownerbits", "ownerbits@test.local", "testpassword123", "Owner", "user")
+    create_user("memberbits", "memberbits@test.local", "testpassword123", "Member", "user")
+    owner_token = create_session("ownerbits")["session_id"]
+    test_client.post(
+        "/api/workspaces",
+        headers={"Authorization": f"Bearer {owner_token}"},
+        json={"id": "permissionbits", "name": "Permission Bits"},
+    )
+    upsert_workspace_collaborator("permissionbits", "memberbits", True, True, "ownerbits")
+    _, agent_key = agent_service.create_agent(
+        "memberbitsagent", "Member agent", "memberbits",
+        read_scopes=["workspace:permissionbits"],
+        write_scopes=["workspace:permissionbits"],
+    )
+    scope = "workspace:permissionbits"
+
+    context = build_agent_context(agent_service.get_agent_by_id("memberbitsagent"))
+    assert scope in context.read_scopes
+    assert scope in context.write_scopes
+
+    # Retaining read access must not retain write access. Both transports use
+    # the freshly-built runtime context rather than the agent's stored scopes.
+    upsert_workspace_collaborator("permissionbits", "memberbits", True, False, "ownerbits")
+    context = build_agent_context(agent_service.get_agent_by_id("memberbitsagent"))
+    assert scope in context.read_scopes
+    assert scope not in context.write_scopes
+    payload = {"content": "must not write", "memory_class": "fact", "scope": scope}
+    rest = test_client.post("/api/memory/write", headers={"Authorization": f"Bearer {agent_key}"}, json=payload)
+    assert rest.status_code == 403, rest.json()
+    mcp = test_client.post("/mcp", headers={"Authorization": f"Bearer {agent_key}"}, json={"tool": "memory_write", "params": payload})
+    assert mcp.status_code == 403, mcp.json()
+
+    # Read removal must likewise take effect without editing or disabling the
+    # agent record itself.
+    upsert_workspace_collaborator("permissionbits", "memberbits", False, False, "ownerbits")
+    context = build_agent_context(agent_service.get_agent_by_id("memberbitsagent"))
+    assert scope not in context.read_scopes
+    assert scope not in context.write_scopes
+    rest = test_client.post("/api/memory/search", headers={"Authorization": f"Bearer {agent_key}"}, json={"query": "anything", "scope": scope})
+    assert rest.status_code == 403, rest.json()
+    mcp = test_client.post("/mcp", headers={"Authorization": f"Bearer {agent_key}"}, json={"tool": "memory_search", "params": {"query": "anything", "scope": scope}})
+    assert mcp.status_code == 403, mcp.json()
+
+
+def test_disabled_default_user_cannot_lend_workspace_authority(test_client, admin_token):
+    create_user("ownerprincipal", "ownerprincipal@test.local", "testpassword123", "Owner", "user")
+    create_user("principal", "principal@test.local", "testpassword123", "Principal", "user")
+    owner_token = create_session("ownerprincipal")["session_id"]
+    test_client.post(
+        "/api/workspaces",
+        headers={"Authorization": f"Bearer {owner_token}"},
+        json={"id": "principalspace", "name": "Principal Space"},
+    )
+    upsert_workspace_collaborator("principalspace", "principal", True, True, "ownerprincipal")
+    agent, _ = agent_service.create_agent(
+        "principalagent", "Principal agent", "ownerprincipal", default_user_id="principal",
+        read_scopes=["user:principal", "workspace:principalspace"],
+        write_scopes=["workspace:principalspace"],
+    )
+    assert "workspace:principalspace" in build_agent_context(agent).read_scopes
+
+    test_client.put(
+        "/api/auth/users/principal",
+        headers={"Authorization": f"Bearer {admin_token}"},
+        json={"is_active": False},
+    )
+    context = build_agent_context(agent_service.get_agent_by_id("principalagent"))
+    assert "user:principal" not in context.read_scopes
+    assert "workspace:principalspace" not in context.read_scopes
+    assert "workspace:principalspace" not in context.write_scopes
 
 def test_non_owner_collaborator_cannot_manage_collaborators(test_client, admin_token):
     create_user("owner4", "owner4@test.local", "testpassword123", "Owner4", "user")

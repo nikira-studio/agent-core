@@ -86,9 +86,10 @@ Agents have separate `read_scopes` and `write_scopes`. An agent can read from `s
 A few other things worth knowing:
 
 - **Inactive agents can't authenticate.** Rotating or deactivating an agent immediately revokes access.
+- **Disabled users can't authenticate.** Disabling an account revokes its dashboard sessions immediately and rejects new login sessions. An agent's `default_user_id` is the principal whose workspace access is attenuated at request time; disabling that principal also removes the workspace and personal-user authority it could lend to the agent. The agent owner manages the record and is only the fallback principal for older agents.
 - **Inactive workspaces stop authorizing access.** Deactivating a workspace makes `workspace:<id>` invalid for reads and writes.
 - **Use workspace scopes for collaboration, not personal scopes.** The `agent:<id>` scope is private scratch space — don't use it as a handoff channel. For cross-agent work, use workspace scopes and keep activity and briefing records current. Activity is a mailroom-style handoff board, not an orchestrator: a human or agent can leave work there, but the receiving agent still has to explicitly check for and claim it. Other users do not automatically see a shared workspace row in their own dashboard; they see the shared capability through the agent scopes you grant.
-- **Share workspaces with users, not with agent identities.** Workspace membership is the source of truth for collaboration. Once a user is added as a collaborator, they can grant their own agents `workspace:<id>` access. Revoking collaboration should immediately stop new runtime access even if an old agent scope is still present.
+- **Share workspaces with users, not with agent identities.** Workspace membership is the source of truth for collaboration. Once a user is added as a collaborator, they can grant their own agents `workspace:<id>` access. At runtime, each stored agent scope is intersected with the principal's current `can_read` or `can_write` bit; merely retaining a collaborator row grants nothing. Revoking or downgrading collaboration therefore stops new runtime access even if an old agent scope is still present.
 
 ---
 

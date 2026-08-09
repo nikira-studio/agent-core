@@ -74,7 +74,7 @@ Agent API keys start with `ac_sk_`. Broker credentials start with `ac_broker_`. 
 | `POST` | `/api/auth/otp/verify` | Pending session | Verify OTP during login |
 | `POST` | `/api/auth/otp/disable` | Session + password + OTP | Disable OTP on the account |
 | `POST` | `/api/auth/users` | Admin session | Create a new user account |
-| `PUT` | `/api/auth/users/{user_id}` | Admin session | Update user metadata or role |
+| `PUT` | `/api/auth/users/{user_id}` | Admin session | Update user metadata, role, or `is_active` status |
 | `DELETE` | `/api/auth/users/{user_id}` | Admin session | Delete a user account |
 
 Register:
@@ -163,7 +163,7 @@ Create:
 
 Inactive workspaces no longer authorize reads or writes to `workspace:<id>`.
 
-Workspace sharing is user-level first: the workspace owner or an admin grants collaborator access to specific users, and then those users can scope their own agents to the shared workspace. Agents still have their own owner/default user, so sharing a workspace does not change agent ownership or attribution.
+Workspace sharing is user-level first: the workspace owner or an admin grants collaborator access to specific users, and then those users can scope their own agents to the shared workspace. At execution time, Agent Core intersects each stored workspace scope with the agent principal's current `can_read` or `can_write` collaborator bit. An agent's `default_user_id` is that principal; `owner_user_id` manages the agent record and is only its fallback. Sharing a workspace therefore does not change agent ownership or attribution, and a permission downgrade takes effect without editing the agent.
 
 ---
 

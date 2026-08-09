@@ -137,6 +137,7 @@ class AdminUpdateUserRequest(BaseModel):
     display_name: str | None = None
     role: str | None = None
     password: str | None = None
+    is_active: bool | None = None
 
 
 @router.post("/register")
@@ -204,6 +205,25 @@ async def login(body: LoginRequest, request: Request):
             result="failure",
             details={"reason": "user_not_found"},
             ip_address=client_ip,
+        )
+        return error_response("INVALID_CREDENTIALS", "Invalid credentials", 401)
+
+    if not user.get("is_active", True):
+        # Verify the submitted password before returning the same generic error
+        # as an unknown account, so account state is not observable by timing.
+        try:
+            verify_password(body.password, user["password_hash"])
+        except Exception:
+            pass
+        allowed_ip, info_ip = RL.check("user", client_ip, "login_failed")
+        allowed_user, info_user = RL.check("user", user["id"], "login_failed")
+        if not allowed_ip:
+            return rate_limited_response("RATE_LIMITED", "Too many failed login attempts", **info_ip)
+        if not allowed_user:
+            return rate_limited_response("RATE_LIMITED", "Too many failed login attempts", **info_user)
+        audit_service.write_event(
+            actor_type="user", actor_id=user["id"], action="session_login",
+            result="failure", details={"reason": "account_inactive"}, ip_address=client_ip,
         )
         return error_response("INVALID_CREDENTIALS", "Invalid credentials", 401)
 
@@ -527,6 +547,8 @@ async def update_user_endpoint(
         return error_response("INVALID_ROLE", "Role must be admin or user", 400)
     if user_id == session["user_id"] and body.role is not None and body.role != "admin":
         return error_response("FORBIDDEN", "You cannot remove admin from your current session", 400)
+    if user_id == session["user_id"] and body.is_active is False:
+        return error_response("FORBIDDEN", "You cannot disable your current session", 400)
 
     ok, reason = update_user(
         user_id,
@@ -534,6 +556,7 @@ async def update_user_endpoint(
         display_name=body.display_name,
         role=body.role,
         password=body.password or None,
+        is_active=body.is_active,
     )
     if not ok and reason:
         return error_response("UPDATE_FAILED", reason, 400)
