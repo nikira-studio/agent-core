@@ -368,8 +368,6 @@ CREATE TABLE IF NOT EXISTS connector_bindings (
 CREATE INDEX IF NOT EXISTS idx_bindings_scope ON connector_bindings(scope, enabled);
 CREATE INDEX IF NOT EXISTS idx_bindings_connector ON connector_bindings(connector_type_id);
 CREATE INDEX IF NOT EXISTS idx_bindings_credential ON connector_bindings(credential_id);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_bindings_alias_unique ON connector_bindings(scope, connector_type_id, logical_alias) WHERE logical_alias IS NOT NULL;
-CREATE UNIQUE INDEX IF NOT EXISTS idx_bindings_preferred_unique ON connector_bindings(scope, connector_type_id) WHERE is_preferred = 1;
 
 -- Short-lived OAuth authorization state shared across app workers
 CREATE TABLE IF NOT EXISTS connector_oauth_states (

@@ -10,7 +10,12 @@ via the normal clean_db fixture (which can't represent the pre-upgrade state).
 
 import sqlite3
 
-from app.schema import SCHEMA_SQL, _ensure_memory_metadata_columns, _ensure_user_active_column
+from app.schema import (
+    SCHEMA_SQL,
+    _ensure_memory_metadata_columns,
+    _ensure_user_active_column,
+    create_schema,
+)
 
 
 def _bare_connection() -> sqlite3.Connection:
@@ -107,3 +112,27 @@ def test_user_active_migration_defaults_existing_accounts_to_active():
     _ensure_user_active_column(conn)
     columns = {row["name"] for row in conn.execute("PRAGMA table_info(users)").fetchall()}
     assert "is_active" in columns
+
+
+def test_existing_binding_table_adds_resolution_columns_before_indexes():
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    conn.execute(
+        """CREATE TABLE connector_bindings (
+            id TEXT PRIMARY KEY, connector_type_id TEXT NOT NULL, name TEXT NOT NULL,
+            scope TEXT NOT NULL, credential_id TEXT, config_json TEXT,
+            rate_limit_config_json TEXT, enabled INTEGER NOT NULL DEFAULT 1,
+            last_tested_at TEXT, last_error TEXT, created_by TEXT,
+            created_at TEXT, updated_at TEXT
+        )"""
+    )
+    conn.commit()
+
+    create_schema(conn)
+
+    columns = {row["name"] for row in conn.execute("PRAGMA table_info(connector_bindings)")}
+    indexes = {row["name"] for row in conn.execute("PRAGMA index_list(connector_bindings)")}
+    assert "logical_alias" in columns
+    assert "is_preferred" in columns
+    assert "idx_bindings_alias_unique" in indexes
+    assert "idx_bindings_preferred_unique" in indexes
