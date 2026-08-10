@@ -83,6 +83,17 @@ def test_non_admin_cannot_grant_unowned_or_shared_write_scopes(
     )
     assert unowned_project.status_code == 403
 
+    other_user_scope = test_client.post(
+        "/api/agents",
+        headers={"Authorization": f"Bearer {owner_token}"},
+        json={
+            "id": "baduserscope",
+            "display_name": "Bad User Scope",
+            "read_scopes": ["user:other"],
+        },
+    )
+    assert other_user_scope.status_code == 403
+
 
 def test_shared_agent_is_visible_but_read_only_to_other_users(
     test_client, admin_token
@@ -118,9 +129,10 @@ def test_shared_agent_is_visible_but_read_only_to_other_users(
     assert update.status_code == 403
 
 
-def test_admin_cannot_grant_other_users_personal_scope_to_agent(
+def test_admin_can_explicitly_grant_other_users_personal_scope_to_agent(
     test_client, admin_token
 ):
+    from app.services import audit_service
     from app.services.auth_service import create_user
 
     create_user("other", "other@test.local", "testpassword123", "Other", "user")
@@ -134,8 +146,48 @@ def test_admin_cannot_grant_other_users_personal_scope_to_agent(
             "read_scopes": ["user:other"],
         },
     )
-    assert create.status_code == 403
-    assert "owner" in create.json()["error"]["message"]
+    assert create.status_code == 201, create.json()
+    scopes = json.loads(create.json()["data"]["agent"]["read_scopes_json"])
+    assert "user:other" in scopes
+    event = audit_service.query_events(
+        action="agent_created", resource_type="agent", limit=1
+    )[0]
+    assert "user:other" in json.loads(event["details_json"])["read_scopes"]
+
+
+def test_owner_can_remove_their_own_user_scope(test_client, admin_token):
+    from app.services.auth_service import create_session, create_user
+
+    create_user("owner", "owner@test.local", "testpassword123", "Owner", "user")
+    owner_token = create_session("owner")["session_id"]
+    created = test_client.post(
+        "/api/agents",
+        headers={"Authorization": f"Bearer {owner_token}"},
+        json={
+            "id": "privateowneragent",
+            "display_name": "Private Owner Agent",
+            "read_scopes": [],
+            "write_scopes": [],
+        },
+    )
+    assert created.status_code == 201, created.json()
+    agent = created.json()["data"]["agent"]
+    assert json.loads(agent["read_scopes_json"]) == ["agent:privateowneragent"]
+    assert json.loads(agent["write_scopes_json"]) == ["agent:privateowneragent"]
+
+    updated = test_client.put(
+        "/api/agents/privateowneragent",
+        headers={"Authorization": f"Bearer {owner_token}"},
+        json={"read_scopes": [], "write_scopes": []},
+    )
+    assert updated.status_code == 200, updated.json()
+    fetched = test_client.get(
+        "/api/agents/privateowneragent",
+        headers={"Authorization": f"Bearer {owner_token}"},
+    )
+    assert json.loads(fetched.json()["data"]["agent"]["read_scopes_json"]) == [
+        "agent:privateowneragent"
+    ]
 
 
 def test_rotate_agent_key(test_client, admin_token):

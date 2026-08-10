@@ -1,6 +1,5 @@
 """Agents dashboard page."""
 
-import json
 from urllib.parse import quote
 
 from fastapi import APIRouter, Request, Depends
@@ -18,7 +17,7 @@ router = APIRouter()
 
 @router.get("/agents")
 async def agents_page(request: Request, session: dict = Depends(require_auth)):
-    from app.services import agent_service, workspace_service
+    from app.services import agent_service, auth_service, workspace_service
 
     is_admin = session.get("role") == "admin"
     agents = (
@@ -31,22 +30,24 @@ async def agents_page(request: Request, session: dict = Depends(require_auth)):
         if is_admin
         else workspace_service.list_workspaces(owner_user_id=session["user_id"])
     )
+    selectable_users = auth_service.list_users() if is_admin else [
+        {"id": session["user_id"], "display_name": "Your personal context"}
+    ]
 
     def build_scope_list(prefix):
         h = f'<div class="scope-selectors" id="{prefix}-scopes">'
         h += '<label class="checkbox-label" data-scope-row="shared"><input type="checkbox" data-scope="shared"> <span>Other users can use this scope</span></label>'
-        if prefix.endswith("read"):
+        h += "<h4>Personal User Scopes</h4>"
+        for user in selectable_users:
+            user_id = user["id"]
+            checked = " checked" if prefix == "ca-read" and user_id == session["user_id"] else ""
+            owner_label = " (owner context)" if user_id == session["user_id"] else ""
+            user_label = "User" if user_id == session["user_id"] else user.get("display_name") or user_id
             h += (
-                f'<label class="checkbox-label" data-scope-row="user:{session["user_id"]}">'
-                f'<input type="checkbox" data-scope="user:{session["user_id"]}" checked disabled data-required-scope="true">'
-                f' <span>User <code>user:{session["user_id"]}</code> (owner context)</span></label>'
-            )
-        elif prefix.endswith("recall"):
-            # Recall set may include the owner scope, but it is selectable (not required).
-            h += (
-                f'<label class="checkbox-label" data-scope-row="user:{session["user_id"]}">'
-                f'<input type="checkbox" data-scope="user:{session["user_id"]}">'
-                f' <span>User <code>user:{session["user_id"]}</code> (owner context)</span></label>'
+                f'<label class="checkbox-label" data-scope-row="user:{escape_html(user_id)}">'
+                f'<input type="checkbox" data-scope="user:{escape_html(user_id)}"{checked}>'
+                f' <span>{escape_html(user_label)} '
+                f'<code>user:{escape_html(user_id)}</code>{owner_label}</span></label>'
             )
         if all_workspaces:
             h += "<h4>Workspaces</h4>"
@@ -65,6 +66,20 @@ async def agents_page(request: Request, session: dict = Depends(require_auth)):
     edit_read_html = build_scope_list("edit-read")
     edit_write_html = build_scope_list("edit-write")
     edit_recall_html = build_scope_list("edit-recall")
+    delegation_create_html = (
+        '<div class="form-group"><label class="checkbox-label">'
+        '<input type="checkbox" id="ca-can-delegate"> '
+        '<span>May issue or approve delegation grants</span></label>'
+        '<p class="form-hint">High-trust administrator setting. It is not required to submit a delegation request.</p></div>'
+        if is_admin else ""
+    )
+    delegation_edit_html = (
+        '<div class="form-group"><label class="checkbox-label">'
+        '<input type="checkbox" id="edit-can-delegate"> '
+        '<span>May issue or approve delegation grants</span></label>'
+        '<p class="form-hint">High-trust administrator setting. It is not required to submit a delegation request.</p></div>'
+        if is_admin else ""
+    )
 
     def agent_row(a):
         active = a.get("is_active")
@@ -122,7 +137,6 @@ async def agents_page(request: Request, session: dict = Depends(require_auth)):
     js = """
     <script>
     const IS_ADMIN = __IS_ADMIN__;
-    const CURRENT_USER_ID = __CURRENT_USER_ID__;
     let agentModalReadOnly = false;
     async function refreshAgents() { location.reload(); }
     document.addEventListener('click', function(ev) {
@@ -206,6 +220,11 @@ async def agents_page(request: Request, session: dict = Depends(require_auth)):
       document.getElementById('edit-description').value = a.description || '';
       document.getElementById('edit-owner').textContent = a.owner_user_id || '-';
       document.getElementById('edit-default-user').textContent = a.default_user_id || a.owner_user_id || '-';
+      const delegation = document.getElementById('edit-can-delegate');
+      if (delegation) {
+        delegation.checked = Boolean(a.can_delegate);
+        delegation.disabled = Boolean(readOnly);
+      }
       const readScopes = JSON.parse(a.read_scopes_json || '[]');
       const writeScopes = JSON.parse(a.write_scopes_json || '[]');
       setSelectedScopes('edit-read-scopes', readScopes);
@@ -274,7 +293,6 @@ async def agents_page(request: Request, session: dict = Depends(require_auth)):
       if (agentModalReadOnly) return;
       const id = document.getElementById('edit-agent-id').textContent;
         const ownScope = 'agent:' + id;
-        const userScope = 'user:' + CURRENT_USER_ID;
         const body = {
           display_name: document.getElementById('edit-display-name').value,
           description: document.getElementById('edit-description').value,
@@ -283,7 +301,8 @@ async def agents_page(request: Request, session: dict = Depends(require_auth)):
         };
         body.read_scopes.push(ownScope);
         body.write_scopes.push(ownScope);
-        if (!body.read_scopes.includes(userScope)) body.read_scopes.push(userScope);
+        const editCanDelegate = document.getElementById('edit-can-delegate');
+        if (editCanDelegate) body.can_delegate = editCanDelegate.checked;
         const editRecallAll = document.getElementById('edit-recall-all');
         if (editRecallAll && editRecallAll.checked) {
           body.reset_default_recall_scopes = true;
@@ -314,10 +333,10 @@ async def agents_page(request: Request, session: dict = Depends(require_auth)):
         };
         // Ensure private scope is added if not present (it's implicit in backend but good to show)
         const privateScope = 'agent:' + agentId;
-        const userScope = 'user:' + CURRENT_USER_ID;
         if (!body.read_scopes.includes(privateScope)) body.read_scopes.push(privateScope);
         if (!body.write_scopes.includes(privateScope)) body.write_scopes.push(privateScope);
-        if (!body.read_scopes.includes(userScope)) body.read_scopes.push(userScope);
+        const createCanDelegate = document.getElementById('ca-can-delegate');
+        if (createCanDelegate) body.can_delegate = createCanDelegate.checked;
         const caRecallAll = document.getElementById('ca-recall-all');
         if (caRecallAll && !caRecallAll.checked) {
           const recall = getSelectedScopes('ca-recall-scopes');
@@ -354,7 +373,6 @@ async def agents_page(request: Request, session: dict = Depends(require_auth)):
       }
     </script>"""
     js = js.replace("__IS_ADMIN__", str(is_admin).lower())
-    js = js.replace("__CURRENT_USER_ID__", json.dumps(session["user_id"]))
 
     return render_page(
         "Agents",
@@ -364,7 +382,7 @@ async def agents_page(request: Request, session: dict = Depends(require_auth)):
     </div></div>
     <div class="card">
       <h3>Agent Access</h3>
-      <p class="text-muted access-summary">Agents belong to one owner/default user. The shared/global option grants other users access to the scope itself. Use workspaces as shared collaboration spaces; personal user scopes stay tied to the agent owner.</p>
+      <p class="text-muted access-summary">An agent's private scope is always present. Owner/default identity does not itself grant personal-memory access: its owner user scope starts selected for convenience and may be removed. Administrators may explicitly grant another user's personal scope; use workspaces for ordinary shared collaboration.</p>
     </div>
 
     <div class="card">
@@ -394,7 +412,7 @@ async def agents_page(request: Request, session: dict = Depends(require_auth)):
           <div class="form-group">
             <label>Can Read From</label>
             {ca_read_html}
-            <p class="form-hint">User context is automatic for the owner/default user. Use this area for workspace, shared/global, or other agent-private context outside the agent's own scope.</p>
+            <p class="form-hint">Your personal context starts selected for convenience. Uncheck it for a private-scope-only agent. The agent's own private scope is always included.</p>
           </div>
           <div class="form-group">
             <label>Can Write To</label>
@@ -409,6 +427,7 @@ async def agents_page(request: Request, session: dict = Depends(require_auth)):
               <p class="form-hint"><strong>Checked</strong> = recall from everything the agent can read (the default — same as before this setting existed). <strong>Uncheck</strong> to recall only the scopes ticked below. The agent's own scope is always included, and any other readable scope stays reachable on demand via <code>memory_search(scope=…)</code>.</p>
             </div>
           </div>
+          {delegation_create_html}
           <div id="create-agent-error" class="alert alert-danger" style="display:none"></div>
           <div class="modal-footer">
             <button type="button" class="btn btn-secondary" onclick="closeModal('create-agent-modal')">Cancel</button>
@@ -459,6 +478,7 @@ async def agents_page(request: Request, session: dict = Depends(require_auth)):
               <p class="form-hint"><strong>Checked</strong> = recall from everything the agent can read (the default — same as before this setting existed). <strong>Uncheck</strong> to recall only the scopes ticked below. The agent's own scope is always included, and any other readable scope stays reachable on demand via <code>memory_search(scope=…)</code>.</p>
             </div>
           </div>
+          {delegation_edit_html}
           <div class="modal-footer">
             <button type="button" class="btn btn-secondary" onclick="closeModal('edit-agent-modal')">Cancel</button>
             <button id="edit-agent-save" type="submit" class="btn">Save Changes</button>
@@ -482,5 +502,3 @@ async def agents_page(request: Request, session: dict = Depends(require_auth)):
         js,
         session=session,
     )
-
-

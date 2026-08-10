@@ -72,10 +72,10 @@ def _validate_agent_scopes(
         scope = normalize_scope_string(raw_scope)
         if scope == own_scope:
             continue
-        if scope == f"user:{owner_user_id}":
-            continue
         if scope.startswith("user:"):
-            return error_response("FORBIDDEN", "Agents can only be granted their owner's personal user scope. Use workspace scopes for collaboration.", 403)
+            if _is_admin(session) or scope == f"user:{owner_user_id}":
+                continue
+            return error_response("FORBIDDEN", "Only an administrator may grant another user's personal scope.", 403)
         if _is_admin(session):
             continue
         if scope == "shared":
@@ -98,6 +98,20 @@ def _validate_agent_scopes(
         return error_response("FORBIDDEN", f"Cannot grant scope: {scope}", 403)
 
     return None
+
+
+def _authority_audit_details(agent: dict) -> dict:
+    """Safe, durable description of an agent's permanent authority."""
+    return {
+        "read_scopes": agent_service.parse_scopes(agent.get("read_scopes_json", "[]")),
+        "write_scopes": agent_service.parse_scopes(agent.get("write_scopes_json", "[]")),
+        "default_recall_scopes": (
+            agent_service.parse_scopes(agent["default_recall_scopes_json"])
+            if agent.get("default_recall_scopes_json")
+            else None
+        ),
+        "can_delegate": bool(agent.get("can_delegate")),
+    }
 
 
 @router.get("")
@@ -174,6 +188,7 @@ async def create_agent(
         resource_type="agent",
         resource_id=agent["id"],
         result="success",
+        details=_authority_audit_details(agent),
     )
 
     return success_response({
@@ -260,6 +275,7 @@ async def update_agent(
     elif body.default_recall_scopes is not None:
         update_kwargs["default_recall_scopes"] = body.default_recall_scopes
     agent_service.update_agent(agent_id, **update_kwargs)
+    updated_agent = agent_service.get_agent_by_id(agent_id)
 
     audit_service.write_event(
         actor_type="user",
@@ -268,6 +284,7 @@ async def update_agent(
         resource_type="agent",
         resource_id=agent_id,
         result="success",
+        details=_authority_audit_details(updated_agent or agent),
     )
 
     return success_response({"message": "Agent updated"})

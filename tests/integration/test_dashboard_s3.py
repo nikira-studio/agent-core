@@ -113,15 +113,26 @@ class TestAgentsPage:
         assert "body.read_scopes.push(ownScope)" in r.text
         assert "body.write_scopes.push(ownScope)" in r.text
 
-    def test_non_admin_agent_page_uses_projects_for_collaboration_not_user_scope_assignment(
+    def test_non_admin_agent_page_makes_owner_user_scope_optional(
         self, user_client
     ):
         r = user_client.get("/agents")
         assert r.status_code == 200
         assert 'data-scope="user:user1"' in r.text
-        assert 'data-required-scope="true"' in r.text
+        assert 'data-required-scope="true"' not in r.text
         assert "owner context" in r.text
-        assert "Use workspaces as shared collaboration spaces" in r.text
+        assert "Uncheck it for a private-scope-only agent" in r.text
+        assert "body.read_scopes.includes(userScope)" not in r.text
+
+    def test_admin_agent_page_exposes_delegation_control_and_user_scopes(
+        self, admin_client
+    ):
+        r = admin_client.get("/agents")
+        assert r.status_code == 200
+        assert 'id="ca-can-delegate"' in r.text
+        assert 'id="edit-can-delegate"' in r.text
+        assert "May issue or approve delegation grants" in r.text
+        assert "Personal User Scopes" in r.text
 
     def test_non_admin_can_see_shared_agents_read_only(self, user_client):
         from app.services.agent_service import create_agent
