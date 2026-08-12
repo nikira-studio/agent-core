@@ -43,3 +43,51 @@ def test_override_requires_matching_normalized_tool_contract(clean_db, monkeypat
         assert "separate connector type" in str(exc)
     else:
         raise AssertionError("mismatching endpoint contract was accepted")
+
+
+def test_contract_fingerprint_ignores_descriptions_and_tool_order():
+    expected = [
+        {
+            "name": "read",
+            "description": "Read a record",
+            "inputSchema": {
+                "type": "object",
+                "description": "Input",
+                "properties": {"id": {"type": "string", "description": "ID"}},
+                "required": ["id"],
+            },
+            "annotations": {"readOnlyHint": True},
+        },
+        {"name": "write", "inputSchema": {"type": "object"}},
+    ]
+    equivalent = [
+        {"name": "write", "description": "Changed copy", "input_schema": {"type": "object"}},
+        {
+            "name": "read",
+            "description": "Different words",
+            "input_schema": {
+                "type": "object",
+                "properties": {"id": {"description": "Different ID copy", "type": "string"}},
+                "required": ["id"],
+            },
+            "raw": {"annotations": {"readOnlyHint": True, "title": "display only"}},
+        },
+    ]
+    assert connector_service.mcp_tool_contract_fingerprint(expected) == (
+        connector_service.mcp_tool_contract_fingerprint(equivalent)
+    )
+
+
+def test_contract_fingerprint_rejects_schema_or_authority_annotation_change():
+    base = [{"name": "read", "inputSchema": {"type": "object"}}]
+    changed_schema = [{"name": "read", "inputSchema": {"type": "string"}}]
+    changed_annotation = [
+        {
+            "name": "read",
+            "inputSchema": {"type": "object"},
+            "annotations": {"destructiveHint": True},
+        }
+    ]
+    base_fingerprint = connector_service.mcp_tool_contract_fingerprint(base)
+    assert base_fingerprint != connector_service.mcp_tool_contract_fingerprint(changed_schema)
+    assert base_fingerprint != connector_service.mcp_tool_contract_fingerprint(changed_annotation)

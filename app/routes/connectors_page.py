@@ -279,6 +279,7 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
         (
             f'<option value="{ct["id"]}" '
             f'data-display-name="{escape_html(ct["display_name"])}" '
+            f'data-provider-type="{escape_html(ct.get("provider_type") or "openapi")}" '
             f'data-guidance="{escape_html(json.dumps(binding_guidance.get(ct["id"], {})))}">'
             f'{escape_html(ct["display_name"])}'
             f'</option>'
@@ -364,7 +365,7 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
                 f'data-binding-oauth="{escape_html(b["id"])}">{escape_html(oauth_label)}</button>'
             )
         bindings_rows += f"""
-        <tr data-binding-id="{b["id"]}" data-connector-type-id="{escape_html(b.get("connector_type_id", ""))}">
+        <tr data-binding-id="{b["id"]}" data-connector-type-id="{escape_html(b.get("connector_type_id", ""))}" data-provider-type="{escape_html(ct.get("provider_type", "") if ct else "")}">
           <td style="{text_style}">{escape_html(b.get("name", ""))}</td>
           <td style="{text_style}">{escape_html(ct.get("display_name", "") if ct else b.get("connector_type_id", ""))}</td>
           <td style="{text_style}"><code>{escape_html(b.get("scope", ""))}</code></td>
@@ -637,6 +638,11 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
               service root, not the final RPC endpoint.
             </div>
           </div>
+          <div class="form-group" id="binding-mcp-endpoint-group" style="display:none">
+            <label>Native MCP Endpoint Override</label>
+            <input type="url" id="binding-mcp-endpoint" placeholder="https://instance.example/mcp" autocomplete="off">
+            <div class="form-hint">Optional. Agent Core checks the deployment's strict tool contract before saving. Description-only changes are accepted; different tools or schemas require a separate connector type.</div>
+          </div>
           <div class="form-group">
             <label class="checkbox-label">
               <input type="checkbox" id="binding-enabled" checked> Enabled
@@ -681,6 +687,11 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
               For adapters with their own request paths, point <code>base_url</code> at the
               service root, not the final RPC endpoint.
             </div>
+          </div>
+          <div class="form-group" id="edit-binding-mcp-endpoint-group" style="display:none">
+            <label>Native MCP Endpoint Override</label>
+            <input type="url" id="edit-binding-mcp-endpoint" placeholder="https://instance.example/mcp" autocomplete="off">
+            <div class="form-hint">Leave blank to use the connector type endpoint. Saving an override checks the strict tool contract.</div>
           </div>
           <div class="form-group">
             <label class="checkbox-label">

@@ -310,6 +310,68 @@ class TestConnectorMCPTools:
         assert result["tools_discovered"] == 1
         assert result["transport"] == "streamable_http"
 
+    def test_binding_endpoint_override_is_used_for_health_and_execution(
+        self, test_client, admin_token, monkeypatch
+    ):
+        from app.services import connector_service, mcp_provider_service
+
+        tools = [{"name": "scrape", "inputSchema": {"type": "object"}}]
+        connector_service.create_connector_type(
+            connector_type_id="override-mcp",
+            display_name="Override MCP",
+            provider_type="mcp",
+            auth_type="none",
+            supported_actions=["scrape"],
+            endpoint_url="https://default.example/mcp",
+            transport_type="streamable_http",
+            tool_snapshot_json=json.dumps({"tools": tools}),
+        )
+        monkeypatch.setattr(
+            mcp_provider_service, "validate_mcp_server_url", lambda value: value
+        )
+        discovered_endpoints = []
+
+        def discover(endpoint_url, **_kwargs):
+            discovered_endpoints.append(endpoint_url)
+            return tools
+
+        monkeypatch.setattr(mcp_provider_service, "discover_all_tools", discover)
+        created = test_client.post(
+            "/api/connector-bindings",
+            headers={"Authorization": f"Bearer {admin_token}"},
+            json={
+                "connector_type_id": "override-mcp",
+                "name": "Override instance",
+                "scope": "workspace:test",
+                "endpoint_url_override": "https://instance.example/mcp",
+            },
+        )
+        assert created.status_code == 201, created.json()
+        binding_id = created.json()["data"]["binding"]["id"]
+        assert discovered_endpoints == ["https://instance.example/mcp"]
+
+        health = test_client.post(
+            f"/api/connector-bindings/{binding_id}/test",
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        assert health.status_code == 200, health.json()
+        assert discovered_endpoints[-1] == "https://instance.example/mcp"
+
+        called = {}
+
+        def execute(endpoint_url, **kwargs):
+            called["endpoint_url"] = endpoint_url
+            return mcp_provider_service.MCPExecutionResult(success=True, body={})
+
+        monkeypatch.setattr(mcp_provider_service, "execute_mcp_tool", execute)
+        executed = test_client.post(
+            f"/api/connector-bindings/{binding_id}/run",
+            headers={"Authorization": f"Bearer {admin_token}"},
+            json={"action": "scrape", "params": {}},
+        )
+        assert executed.status_code == 200, executed.json()
+        assert called["endpoint_url"] == "https://instance.example/mcp"
+
     def test_test_binding_without_credential_still_probes_connector(
         self, test_client, admin_token, monkeypatch
     ):

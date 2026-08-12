@@ -242,6 +242,9 @@ function defaultCredentialModeForGuidance(guidance) {
 
 function bindingConnectorTypeChanged() {
   const credentialMode = document.getElementById('binding-credential-mode');
+  const typeOption = document.getElementById('binding-connector-type').selectedOptions[0];
+  const endpointGroup = document.getElementById('binding-mcp-endpoint-group');
+  if (endpointGroup) endpointGroup.style.display = typeOption?.dataset.providerType === 'mcp' ? '' : 'none';
   const guidance = parseBindingGuidance();
   if (credentialMode) credentialMode.value = defaultCredentialModeForGuidance(guidance);
   updateBindingFormContext();
@@ -356,6 +359,11 @@ async function createBinding(e) {
     config_json: document.getElementById('binding-config').value || null,
     enabled: document.getElementById('binding-enabled').checked,
   };
+  const endpointOverride = document.getElementById('binding-mcp-endpoint');
+  const selectedType = document.getElementById('binding-connector-type').selectedOptions[0];
+  if (selectedType?.dataset.providerType === 'mcp' && endpointOverride && endpointOverride.value.trim()) {
+    body.endpoint_url_override = endpointOverride.value.trim();
+  }
   const j = await apiFetch('/api/connector-bindings', { method: 'POST', body: JSON.stringify(body) });
   if (j.ok) {
     showToast('Binding created', 'success');
@@ -385,6 +393,11 @@ async function editBinding(id) {
   document.getElementById('edit-binding-credential').value = b.credential_id || '';
   document.getElementById('edit-binding-config').value = b.config_json || '';
   document.getElementById('edit-binding-enabled').checked = !!b.enabled;
+  const endpointGroup = document.getElementById('edit-binding-mcp-endpoint-group');
+  const endpointInput = document.getElementById('edit-binding-mcp-endpoint');
+  const bindingRow = document.querySelector('[data-binding-id="' + CSS.escape(id) + '"]');
+  if (endpointGroup) endpointGroup.style.display = bindingRow?.dataset.providerType === 'mcp' ? '' : 'none';
+  if (endpointInput) endpointInput.value = b.endpoint_url_override || '';
   openModal('edit-binding-modal');
 }
 
@@ -398,6 +411,11 @@ async function submitEditBinding(e) {
     config_json: document.getElementById('edit-binding-config').value || null,
     enabled: document.getElementById('edit-binding-enabled').checked,
   };
+  const endpointInput = document.getElementById('edit-binding-mcp-endpoint');
+  if (endpointInput && document.getElementById('edit-binding-mcp-endpoint-group').style.display !== 'none') {
+    if (endpointInput.value.trim()) body.endpoint_url_override = endpointInput.value.trim();
+    else body.reset_endpoint_url_override = true;
+  }
   const j = await apiFetch('/api/connector-bindings/' + id, { method: 'PUT', body: JSON.stringify(body) });
   if (j.ok) { showToast('Updated', 'success'); closeModal('edit-binding-modal'); location.reload(); }
   else { showToast(j.error?.message || 'Failed', 'danger'); }

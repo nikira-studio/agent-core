@@ -1,10 +1,12 @@
 import json
+import hashlib
 import logging
 import random
 import re
 import secrets
 from contextvars import ContextVar
 import time
+from types import SimpleNamespace
 from typing import Optional
 from app.database import get_db
 from app.models.enums import normalize_id
@@ -174,17 +176,133 @@ def effective_mcp_endpoint(binding: dict, connector_type: dict) -> str:
     return binding.get("endpoint_url_override") or connector_type.get("endpoint_url") or ""
 
 
-def _tool_contract(tools) -> str:
+_NON_STRUCTURAL_SCHEMA_KEYS = {
+    "$comment",
+    "$id",
+    "$schema",
+    "description",
+    "examples",
+    "example",
+    "markdownDescription",
+    "title",
+}
+_ORDER_INSENSITIVE_SCHEMA_LIST_KEYS = {
+    "allOf",
+    "anyOf",
+    "enum",
+    "oneOf",
+    "required",
+    "type",
+}
+_SECURITY_RELEVANT_TOOL_ANNOTATIONS = {
+    "destructiveHint",
+    "idempotentHint",
+    "openWorldHint",
+    "readOnlyHint",
+}
+
+
+def _normalize_schema_with_context(value, parent_key: str | None = None):
+    if isinstance(value, dict):
+        return {
+            key: _normalize_schema_with_context(child, key)
+            for key, child in sorted(value.items())
+            if key not in _NON_STRUCTURAL_SCHEMA_KEYS
+        }
+    if isinstance(value, list):
+        normalized = [_normalize_schema_with_context(child) for child in value]
+        if parent_key in _ORDER_INSENSITIVE_SCHEMA_LIST_KEYS:
+            return sorted(
+                normalized,
+                key=lambda item: json.dumps(item, sort_keys=True, separators=(",", ":")),
+            )
+        return normalized
+    return value
+
+
+def mcp_tool_contract_fingerprint(tools) -> str:
+    """Fingerprint the strict v1 native-MCP capability contract.
+
+    Tool names, input schemas, and authority-relevant annotations are retained.
+    Descriptions, examples, and response ordering intentionally do not affect a
+    deployment's compatibility with the connector type.
+    """
     normalized = []
     for tool in tools or []:
         if not isinstance(tool, dict) or not tool.get("name"):
             continue
+        raw = tool.get("raw") if isinstance(tool.get("raw"), dict) else tool
+        annotations = raw.get("annotations") or tool.get("annotations") or {}
         normalized.append({
             "name": tool["name"],
-            "inputSchema": tool.get("inputSchema") or tool.get("input_schema") or {},
-            "annotations": tool.get("annotations") or {},
+            "inputSchema": _normalize_schema_with_context(
+                tool.get("inputSchema") or tool.get("input_schema") or raw.get("inputSchema") or {}
+            ),
+            "annotations": {
+                key: annotations[key]
+                for key in sorted(_SECURITY_RELEVANT_TOOL_ANNOTATIONS)
+                if key in annotations
+            },
         })
-    return json.dumps(sorted(normalized, key=lambda item: item["name"]), sort_keys=True, separators=(",", ":"))
+    serialized = json.dumps(
+        sorted(normalized, key=lambda item: item["name"]),
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+
+
+def _expected_mcp_tools(connector_type: dict) -> list[dict]:
+    try:
+        snapshot = json.loads(connector_type.get("tool_snapshot_json") or "")
+    except json.JSONDecodeError as exc:
+        raise ValueError(
+            "Connector type has no valid MCP capability contract; refresh or register a separate connector type"
+        ) from exc
+    if not isinstance(snapshot, dict) or not isinstance(snapshot.get("tools"), list):
+        raise ValueError(
+            "Connector type has no MCP capability contract; refresh or register a separate connector type"
+        )
+    return snapshot["tools"]
+
+
+def _mcp_binding_request_config(
+    binding: dict, connector_type: dict, credential=None
+) -> tuple[str, dict[str, str], int]:
+    endpoint_url = effective_mcp_endpoint(binding, connector_type)
+    if not endpoint_url:
+        raise ValueError("MCP connector has no endpoint_url")
+    request_binding = dict(binding)
+    request_binding["endpoint_url"] = endpoint_url
+    return mcp_provider_service.build_mcp_request_config(
+        request_binding, credential=credential.raw if credential else None
+    )
+
+
+def discover_mcp_binding_tools(
+    binding: dict, connector_type: dict, credential=None, *, timeout_cap_ms: int | None = None
+) -> list[dict]:
+    endpoint_url, headers, timeout_ms = _mcp_binding_request_config(
+        binding, connector_type, credential
+    )
+    if timeout_cap_ms is not None:
+        timeout_ms = min(timeout_ms, timeout_cap_ms)
+    return mcp_provider_service.discover_all_tools(
+        endpoint_url, timeout_ms=timeout_ms, headers=headers
+    )
+
+
+def validate_mcp_binding_contract(
+    binding: dict, connector_type: dict, credential=None, *, tools=None
+) -> None:
+    expected = _expected_mcp_tools(connector_type)
+    actual = tools if tools is not None else discover_mcp_binding_tools(
+        binding, connector_type, credential
+    )
+    if mcp_tool_contract_fingerprint(actual) != mcp_tool_contract_fingerprint(expected):
+        raise ValueError(
+            "Endpoint tool contract does not match this connector type; register a separate connector type"
+        )
 
 
 def _validate_endpoint_override(connector_type, endpoint_url, credential_id, config_json):
@@ -200,22 +318,14 @@ def _validate_endpoint_override(connector_type, endpoint_url, credential_id, con
         entry = credential_service.get_credential(credential_id)
         if entry:
             credential = credential_service.resolve_reference(entry["reference_name"])
-    request_binding = {"endpoint_url": endpoint_url, "config_json": config_json}
-    effective_url, headers, timeout_ms = mcp_provider_service.build_mcp_request_config(
-        request_binding, credential=credential
+    candidate = {"endpoint_url_override": endpoint_url, "config_json": config_json}
+    credential_object = SimpleNamespace(raw=credential) if credential else None
+    discovered = discover_mcp_binding_tools(
+        candidate, connector_type, credential_object, timeout_cap_ms=10000
     )
-    discovered = mcp_provider_service.discover_all_tools(
-        effective_url, timeout_ms=min(timeout_ms, 10000), headers=headers
+    validate_mcp_binding_contract(
+        candidate, connector_type, credential_object, tools=discovered
     )
-    try:
-        snapshot = json.loads(connector_type.get("tool_snapshot_json") or "{}")
-    except json.JSONDecodeError:
-        snapshot = {}
-    expected = snapshot.get("tools") if isinstance(snapshot, dict) else snapshot
-    if _tool_contract(discovered) != _tool_contract(expected):
-        raise ValueError(
-            "Endpoint tool contract does not match this connector type; register a separate connector type"
-        )
     return endpoint_url
 
 
@@ -821,19 +931,11 @@ def test_binding(binding_id: str) -> dict:
     if not executor:
         if connector_type.get("provider_type") == "mcp":
             try:
-                test_binding_context = dict(binding)
-                test_binding_context["endpoint_url"] = effective_mcp_endpoint(
-                    binding, connector_type
+                tools = discover_mcp_binding_tools(
+                    binding, connector_type, cred, timeout_cap_ms=10000
                 )
-                endpoint_url, headers, timeout_ms = (
-                    mcp_provider_service.build_mcp_request_config(
-                        test_binding_context, credential=cred.raw if cred else None
-                    )
-                )
-                tools = mcp_provider_service.discover_all_tools(
-                    endpoint_url,
-                    timeout_ms=min(timeout_ms, 10000),
-                    headers=headers,
+                validate_mcp_binding_contract(
+                    binding, connector_type, cred, tools=tools
                 )
                 update_binding(binding_id, last_tested_at=_utc_now(), last_error=None)
                 return {
@@ -1297,6 +1399,11 @@ def execute_binding_action(
                         "error": "MCP connector has no endpoint_url",
                         "error_code": "INVALID_CONFIGURATION",
                     }
+                # Validate immediately before passing the selected binding/type
+                # endpoint to the provider. The provider intentionally also
+                # serves lower-level direct callers, so this boundary is where
+                # binding override URL policy must be enforced.
+                endpoint_url = _mcp.validate_mcp_server_url(endpoint_url)
                 result = _mcp.execute_mcp_tool(
                     endpoint_url=endpoint_url,
                     action=action,
