@@ -312,6 +312,7 @@ CREATE TABLE IF NOT EXISTS connector_types (
     required_credential_fields_json TEXT NOT NULL DEFAULT '[]',
     default_binding_rules_json TEXT,
     disabled_actions_json TEXT NOT NULL DEFAULT '[]',
+    capability_policy_overrides_json TEXT NOT NULL DEFAULT '{}',
     endpoint_url TEXT,
     transport_type TEXT,
     capabilities_json TEXT,
@@ -560,6 +561,7 @@ def create_schema(conn) -> None:
     _ensure_user_timezone_column(conn)
     _ensure_user_active_column(conn)
     _ensure_connector_type_action_state_column(conn)
+    _ensure_connector_type_capability_policy_column(conn)
     _ensure_connector_type_spec_columns(conn)
     _ensure_connector_type_backend_columns(conn)
     _ensure_webhook_tables(conn)
@@ -894,6 +896,17 @@ def _ensure_connector_type_action_state_column(conn) -> None:
             ALTER TABLE connector_types
             ADD COLUMN disabled_actions_json TEXT NOT NULL DEFAULT '[]'
             """
+        )
+        conn.commit()
+
+
+def _ensure_connector_type_capability_policy_column(conn) -> None:
+    columns = {
+        row["name"] for row in conn.execute("PRAGMA table_info(connector_types)").fetchall()
+    }
+    if "capability_policy_overrides_json" not in columns:
+        conn.execute(
+            "ALTER TABLE connector_types ADD COLUMN capability_policy_overrides_json TEXT NOT NULL DEFAULT '{}'"
         )
         conn.commit()
 

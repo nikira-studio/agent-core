@@ -106,6 +106,7 @@ class UpdateBindingRequest(BaseModel):
 
 class ActionSettingsRequest(BaseModel):
     disabled_actions: list[str] = Field(default_factory=list)
+    capability_policy_overrides: dict[str, dict] = Field(default_factory=dict)
 
 
 class ConnectorHealthCheckRequest(BaseModel):
@@ -686,7 +687,25 @@ async def update_connector_type_actions(
             )
         disabled_actions.append(action)
 
+    allowed_policy_fields = set(connector_service.CAPABILITY_POLICY_FIELDS) | {
+        "authorization_class"
+    }
+    overrides = {}
+    for action, policy in body.capability_policy_overrides.items():
+        if action not in valid_actions:
+            return error_response("INVALID_ACTION", f"Unknown action for this connector type: {action}", 400)
+        if not isinstance(policy, dict) or not set(policy).issubset(allowed_policy_fields):
+            return error_response("INVALID_POLICY", "Capability policy contains unsupported fields", 400)
+        auth_class = policy.get("authorization_class")
+        if auth_class is not None and auth_class not in connector_service.CAPABILITY_AUTHORIZATION_CLASSES:
+            return error_response("INVALID_POLICY", "authorization_class must be read or write", 400)
+        overrides[action] = policy
+
     connector_service.update_connector_type_actions(connector_type_id, disabled_actions)
+    connector_service.update_connector_type(
+        connector_type_id,
+        capability_policy_overrides_json=json.dumps(overrides, sort_keys=True),
+    )
     updated = connector_service.get_connector_type(connector_type_id)
     audit_service.write_event(
         actor_type=ctx.actor_type,
@@ -695,7 +714,7 @@ async def update_connector_type_actions(
         resource_type="connector_type",
         resource_id=connector_type_id,
         result="success",
-        details={"disabled_actions": disabled_actions},
+        details={"disabled_actions": disabled_actions, "capability_policy_overrides": overrides},
     )
     return success_response({"connector_type": updated})
 

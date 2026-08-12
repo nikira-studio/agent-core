@@ -80,6 +80,12 @@ Resolution first removes unauthorized candidates. It then selects an exact alias
 
 Bindings may define `endpoint_url_override` for native MCP deployments. Agent Core validates the URL and requires strict normalized equality of tool names, input schemas, and annotations with the connector type's stored capability contract. Incompatible endpoints require a separate connector type.
 
+## Capability policy metadata
+
+REST connector tool lists and MCP `connectors_actions_list` return `capability_policy` (advisory metadata such as risk, idempotency, approval requirement, expected latency, sensitivity, purpose, and tags) plus `authorization` with the effective required scope operation and its source.
+
+Imported specifications, manifests, and MCP annotations may supply advisory metadata, but cannot make an unknown or non-HTTP-read action read-only. Unknown actions require write scope. Administrators may save a per-action operator policy through `PUT /api/connector-types/{id}/actions`, including `authorization_class: "read" | "write"`; this is the only supported path that can classify a non-obvious action as read-only. Changes are audited.
+
 ## Expected integration errors
 
 - `DELEGATION_EXCEEDS_AUTHORITY`: approval or direct issuance exceeds current issuer authority.

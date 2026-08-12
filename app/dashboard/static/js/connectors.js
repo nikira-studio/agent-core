@@ -923,6 +923,14 @@ function renderActions() {
     '<table style="width:100%">' +
       '<thead><tr><th style="width:72px">Enable</th><th>Action</th><th>Details</th></tr></thead>' +
       '<tbody>' + filtered.map(function(t) {
+        const policy = t.capability_policy || {};
+        const authorization = t.authorization || {};
+        const policyBits = [];
+        if (authorization.required_scope_operation) policyBits.push('Requires ' + authorization.required_scope_operation + ' scope' + (authorization.source ? ' (' + authorization.source.replace(/_/g, ' ') + ')' : ''));
+        if (policy.risk_level) policyBits.push('Risk: ' + policy.risk_level);
+        if (policy.approval_required === true) policyBits.push('Approval required');
+        if (policy.idempotent === true) policyBits.push('Idempotent');
+        if (Array.isArray(policy.tags) && policy.tags.length) policyBits.push('Tags: ' + policy.tags.join(', '));
         return '<tr>' +
           '<td><label class="checkbox-label" style="margin:0"><input type="checkbox" ' +
           'data-action="' + encodeURIComponent(t.action) + '" ' +
@@ -934,6 +942,7 @@ function renderActions() {
             (t.path ? '<code style="font-size:0.8em">' + escapeHtml(t.path) + '</code>' : '') +
             (t.auth_summary ? '<div style="font-size:0.8em;color:var(--muted);margin-top:4px">Auth: ' + escapeHtml(t.auth_summary) + '</div>' : '') +
             (t.description ? '<div style="font-size:0.85em;color:var(--muted);margin-top:4px">' + escapeHtml(t.description) + '</div>' : '') +
+            (policyBits.length ? '<div style="font-size:0.8em;color:var(--muted);margin-top:4px">' + escapeHtml(policyBits.join(' · ')) + '</div>' : '') +
             (!t.enabled ? '<div class="text-muted" style="font-size:0.8em;margin-top:4px">Disabled</div>' : '') +
           '</td>' +
         '</tr>';

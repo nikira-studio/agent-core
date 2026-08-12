@@ -28,7 +28,7 @@ TYPE = {
         ("GET /items", False),
         ("POST /items", True),
         ("DELETE /items/{id}", True),
-        ("search", False),
+        ("search", True),
         ("purge_everything", True),
         ("unlisted action", True),
     ],
@@ -62,6 +62,17 @@ def test_an_unidentifiable_action_needs_write():
     """
     assert connector_service.action_requires_write({}, "do_something") is True
     assert connector_service.action_requires_write({}, "GET /safe") is False
+
+
+def test_remote_read_metadata_cannot_weaken_authorization_but_operator_override_can():
+    connector_type = {
+        "supported_actions": [{"name": "search", "side_effect": "read"}],
+        "capability_policy_overrides_json": '{"search":{"authorization_class":"read"}}',
+    }
+    assert connector_service.action_requires_write(
+        {"supported_actions": [{"name": "search", "side_effect": "read"}]}, "search"
+    ) is True
+    assert connector_service.action_requires_write(connector_type, "search") is False
 
 
 def test_the_method_is_read_from_the_action_name_when_metadata_is_thin():

@@ -218,6 +218,50 @@ class TestConnectorActionsSchema:
         data = r.json()["data"]["connector_type"]
         assert data["disabled_actions"] == ["delete_item"]
 
+    def test_operator_capability_policy_is_returned_identically_by_rest_and_mcp(
+        self, clean_db, test_client, admin_token
+    ):
+        from app.services import connector_service
+
+        connector_service.create_connector_type(
+            connector_type_id="policy_actions_test",
+            display_name="Policy Actions Test",
+            supported_actions=[{"name": "search", "side_effect": "read"}],
+            provider_type="mcp",
+            tool_snapshot_json='{"tools":[{"name":"search"}]}',
+        )
+        updated = test_client.put(
+            "/api/connector-types/policy_actions_test/actions",
+            headers={"Authorization": f"Bearer {admin_token}"},
+            json={
+                "capability_policy_overrides": {
+                    "search": {
+                        "authorization_class": "read",
+                        "risk_level": "low",
+                        "idempotent": True,
+                        "tags": ["lookup"],
+                    }
+                }
+            },
+        )
+        assert updated.status_code == 200, updated.text
+        rest = test_client.get(
+            "/api/connector-types/policy_actions_test/tools",
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        mcp = test_client.post(
+            "/mcp",
+            headers={"Authorization": f"Bearer {admin_token}"},
+            json={"tool": "connectors_actions_list", "params": {"connector_type_id": "policy_actions_test"}},
+        )
+        assert rest.status_code == 200 and mcp.status_code == 200
+        rest_tool = rest.json()["data"]["tools"][0]
+        mcp_tool = mcp.json()["data"]["tools"][0]
+        assert rest_tool["capability_policy"] == mcp_tool["capability_policy"]
+        assert rest_tool["authorization"] == mcp_tool["authorization"] == {
+            "required_scope_operation": "read", "source": "operator"
+        }
+
 
 class TestTransmissionActionsSchema:
     def test_transmission_adapter_actions_have_schemas(self, clean_db):

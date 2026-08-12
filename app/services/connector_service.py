@@ -19,6 +19,7 @@ CAPABILITY_POLICY_FIELDS = (
     "expected_latency", "background_execution", "data_sensitivity",
     "event_producing", "purpose", "tags",
 )
+CAPABILITY_AUTHORIZATION_CLASSES = frozenset({"read", "write"})
 _execution_authority: ContextVar[object | None] = ContextVar(
     "connector_execution_authority", default=None
 )
@@ -40,9 +41,60 @@ def normalize_action_names(actions: Optional[list]) -> list[str]:
     return names
 
 
-def capability_policy(action: dict) -> dict:
+def capability_policy(action: dict, override: dict | None = None) -> dict:
     """Return advisory generic metadata; it never weakens authorization."""
-    return {key: action[key] for key in CAPABILITY_POLICY_FIELDS if key in action}
+    result = {key: action[key] for key in CAPABILITY_POLICY_FIELDS if key in action}
+    if override:
+        result.update({key: override[key] for key in CAPABILITY_POLICY_FIELDS if key in override})
+    return result
+
+
+def _capability_policy_overrides(connector_type: dict) -> dict:
+    try:
+        overrides = json.loads(connector_type.get("capability_policy_overrides_json") or "{}")
+    except json.JSONDecodeError:
+        return {}
+    return overrides if isinstance(overrides, dict) else {}
+
+
+def capability_policy_override(connector_type: dict, action: str) -> dict:
+    value = _capability_policy_overrides(connector_type).get(action)
+    return value if isinstance(value, dict) else {}
+
+
+def action_authorization_metadata(connector_type: dict, action: str) -> dict:
+    """Authorization classification with a source the caller can inspect.
+
+    Imported action metadata is advisory. Only an operator-saved override can
+    classify a non-obvious action as read-only; all unknown actions fail closed
+    to write authority.
+    """
+    override = capability_policy_override(connector_type, action)
+    auth_class = override.get("authorization_class")
+    if auth_class in CAPABILITY_AUTHORIZATION_CLASSES:
+        return {"required_scope_operation": auth_class, "source": "operator"}
+    meta = _action_meta(connector_type, action)
+    side_effect = str(meta.get("side_effect") or "").strip().lower()
+    if side_effect in ("write", "writes", "destructive", "delete", "mutating"):
+        return {"required_scope_operation": "write", "source": "remote_or_manifest"}
+    method = str(meta.get("method") or "").strip().upper()
+    if not method:
+        head = str(action or "").strip().split(" ", 1)[0].upper()
+        method = head if head.isalpha() else ""
+    if method in READ_ONLY_METHODS:
+        return {"required_scope_operation": "read", "source": "http_method"}
+    return {"required_scope_operation": "write", "source": "fail_closed"}
+
+
+def _with_capability_policy(connector_type: dict, tool: dict) -> dict:
+    action = tool.get("action") or tool.get("name") or ""
+    result = dict(tool)
+    result["capability_policy"] = capability_policy(
+        _action_meta(connector_type, action),
+        capability_policy_override(connector_type, action),
+    )
+    result["authorization"] = action_authorization_metadata(connector_type, action)
+    return result
 
 
 def list_connector_types(
@@ -65,7 +117,7 @@ def list_connector_types(
         query = """
             SELECT id, display_name, description, provider_type, auth_type,
                    supported_actions_json, required_credential_fields_json,
-                   default_binding_rules_json, disabled_actions_json, endpoint_url,
+                   default_binding_rules_json, disabled_actions_json, capability_policy_overrides_json, endpoint_url,
                    transport_type, capabilities_json, tool_snapshot_json, spec_url,
                    operations_json, backend_type, backend_json,
                    is_active, created_at, updated_at
@@ -91,7 +143,7 @@ def get_connector_type(connector_type_id: str) -> Optional[dict]:
             """
             SELECT id, display_name, description, provider_type, auth_type,
                    supported_actions_json, required_credential_fields_json,
-                   default_binding_rules_json, disabled_actions_json, endpoint_url,
+                   default_binding_rules_json, disabled_actions_json, capability_policy_overrides_json, endpoint_url,
                    transport_type, capabilities_json, tool_snapshot_json, spec_url,
                    operations_json, backend_type, backend_json,
                    is_active, created_at, updated_at
@@ -120,6 +172,7 @@ def _row_to_connector_type(row: dict) -> dict:
         "disabled_actions": json.loads(row["disabled_actions_json"])
         if row.get("disabled_actions_json")
         else [],
+        "capability_policy_overrides_json": row.get("capability_policy_overrides_json") or "{}",
         "is_active": bool(row["is_active"]),
         "endpoint_url": row.get("endpoint_url"),
         "transport_type": row.get("transport_type"),
@@ -804,8 +857,16 @@ def generate_connector_type_tools(
     limit: int = 20,
     offset: int = 0,
 ) -> dict:
+    def enrich(result: dict) -> dict:
+        result = dict(result)
+        result["tools"] = [
+            _with_capability_policy(connector_type, tool)
+            for tool in result.get("tools", [])
+        ]
+        return result
+
     if connector_type.get("provider_type") == "mcp":
-        return _mcp_tools_from_snapshot(
+        return enrich(_mcp_tools_from_snapshot(
             connector_type_id=connector_type["id"],
             snapshot_json=connector_type.get("tool_snapshot_json"),
             disabled_actions=disabled_actions,
@@ -813,12 +874,12 @@ def generate_connector_type_tools(
             query=query,
             limit=limit,
             offset=offset,
-        )
+        ))
 
     if connector_type.get("operations_json"):
         from app.services import openapi_service
 
-        return openapi_service.generate_tools(
+        return enrich(openapi_service.generate_tools(
             connector_type_id=connector_type["id"],
             operations_json=connector_type["operations_json"],
             disabled_actions=disabled_actions,
@@ -826,7 +887,7 @@ def generate_connector_type_tools(
             query=query,
             limit=limit,
             offset=offset,
-        )
+        ))
 
     backend_json = connector_type.get("backend_json")
     if backend_json:
@@ -868,11 +929,11 @@ def generate_connector_type_tools(
                 )
             total = len(tools)
             page = tools[offset : offset + limit] if offset or limit != 20 else tools
-            return {
+            return enrich({
                 "tools": page,
                 "total": total,
                 "connector_type_id": connector_type["id"],
-            }
+            })
 
     disabled_set = {
         action for action in (disabled_actions or []) if isinstance(action, str)
@@ -903,7 +964,7 @@ def generate_connector_type_tools(
         tools = [t for t in tools if t["enabled"]]
     total = len(tools)
     page = tools[offset : offset + limit]
-    return {"tools": page, "total": total, "connector_type_id": connector_type["id"]}
+    return enrich({"tools": page, "total": total, "connector_type_id": connector_type["id"]})
 
 
 def test_binding(binding_id: str) -> dict:
@@ -1220,6 +1281,19 @@ def _action_meta(connector_type: dict, action: str) -> dict:
     for a in connector_type.get("supported_actions") or []:
         if isinstance(a, dict) and a.get("name") == action:
             return a
+    try:
+        operations = json.loads(connector_type.get("operations_json") or "{}").get(
+            "operations", []
+        )
+    except json.JSONDecodeError:
+        operations = []
+    for operation in operations:
+        if isinstance(operation, dict) and operation.get("operation_id") == action:
+            return {
+                "name": action,
+                "method": operation.get("method"),
+                "description": operation.get("description") or operation.get("summary"),
+            }
     return {}
 
 
@@ -1240,21 +1314,9 @@ def action_requires_write(connector_type: dict, action: str) -> bool:
     memory; here, guessing wrong runs someone else's DELETE. When in doubt,
     verification does nothing and this asks for the stronger grant.
     """
-    meta = _action_meta(connector_type, action)
-    side_effect = str(meta.get("side_effect") or "").strip().lower()
-    # Explicit metadata wins over the method, in both directions. Inferring from
-    # the method alone let a manifest that declared `destructive` on a GET read
-    # as safe — an author who took the trouble to say what an action does is a
-    # better source than the verb it happens to use.
-    if side_effect in ("write", "writes", "destructive", "delete", "mutating"):
-        return True
-    if side_effect in ("none", "read", "readonly", "read_only"):
-        return False
-    method = str(meta.get("method") or "").strip().upper()
-    if not method:
-        head = str(action or "").strip().split(" ", 1)[0].upper()
-        method = head if head.isalpha() else ""
-    return method not in READ_ONLY_METHODS
+    return action_authorization_metadata(connector_type, action)[
+        "required_scope_operation"
+    ] != "read"
 
 
 def _prepare_action_params(
@@ -1771,6 +1833,7 @@ def create_connector_type(
     supported_actions: Optional[list[str]] = None,
     required_credential_fields: Optional[list[str]] = None,
     disabled_actions: Optional[list[str]] = None,
+    capability_policy_overrides_json: Optional[str] = None,
     endpoint_url: Optional[str] = None,
     transport_type: Optional[str] = None,
     capabilities_json: Optional[str] = None,
@@ -1786,10 +1849,10 @@ def create_connector_type(
             INSERT INTO connector_types
             (id, display_name, description, provider_type, auth_type,
              supported_actions_json, required_credential_fields_json,
-             disabled_actions_json, endpoint_url, transport_type,
+             disabled_actions_json, capability_policy_overrides_json, endpoint_url, transport_type,
              capabilities_json, tool_snapshot_json, spec_url, operations_json,
              backend_type, backend_json)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 connector_type_id,
@@ -1800,6 +1863,7 @@ def create_connector_type(
                 json.dumps(supported_actions or []),
                 json.dumps(required_credential_fields or []),
                 json.dumps(disabled_actions or []),
+                capability_policy_overrides_json or "{}",
                 endpoint_url,
                 transport_type,
                 capabilities_json,
@@ -1823,6 +1887,7 @@ def update_connector_type(connector_type_id: str, **fields) -> bool:
         "supported_actions_json",
         "required_credential_fields_json",
         "disabled_actions_json",
+        "capability_policy_overrides_json",
         "endpoint_url",
         "transport_type",
         "capabilities_json",
