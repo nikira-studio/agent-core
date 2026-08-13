@@ -1,5 +1,7 @@
 # Delegated Authorization Integration Contract
 
+> Status: implemented and released on Agent Core `main`. This document is the stable integration contract; recursive delegation, ephemeral grant-only identities, and general budgets are not part of this version.
+
 This contract is for any external coordinator or agent runtime. Agent Core remains the authority for identity, durable context, credentials, connector execution, delegation, and audit. The consumer remains responsible for task coordination and runtime behavior.
 
 ## Authentication and grant transport
