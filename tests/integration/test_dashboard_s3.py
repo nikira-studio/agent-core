@@ -103,6 +103,10 @@ class TestAgentsPage:
             in r.text
         )
         assert "const privateScope = 'agent:' + agentId" in r.text
+        assert "Use least-privileged service-agent preset" in r.text
+        assert "function applyLeastPrivilegedPreset" in r.text
+        assert 'id="ca-authority-preview"' in r.text
+        assert "Permanent authority after creation" in r.text
 
     def test_agents_edit_hides_and_preserves_own_scope(self, admin_client):
         r = admin_client.get("/agents")

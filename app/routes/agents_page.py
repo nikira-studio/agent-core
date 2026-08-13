@@ -139,6 +139,33 @@ async def agents_page(request: Request, session: dict = Depends(require_auth)):
     const IS_ADMIN = __IS_ADMIN__;
     let agentModalReadOnly = false;
     async function refreshAgents() { location.reload(); }
+    function createAuthorityPreview() {
+      const agentId = normalizeAgentId(document.getElementById('ca-id')?.value);
+      const ownScope = 'agent:' + (agentId || '<new-agent-id>');
+      const read = [ownScope].concat(getSelectedScopes('ca-read-scopes'));
+      const write = [ownScope].concat(getSelectedScopes('ca-write-scopes'));
+      const recallAll = document.getElementById('ca-recall-all')?.checked;
+      const recall = recallAll ? read : [ownScope].concat(getSelectedScopes('ca-recall-scopes'));
+      const delegate = document.getElementById('ca-can-delegate')?.checked;
+      const preview = document.getElementById('ca-authority-preview');
+      if (!preview) return;
+      preview.innerHTML = '<strong>Permanent authority after creation</strong><br>' +
+        'Read: <code>' + escapeHtml(read.join(', ')) + '</code><br>' +
+        'Write: <code>' + escapeHtml(write.join(', ')) + '</code><br>' +
+        'Default recall: <code>' + escapeHtml(recall.join(', ')) + '</code><br>' +
+        'Can delegate: <code>' + (delegate ? 'yes' : 'no') + '</code>';
+    }
+    function applyLeastPrivilegedPreset() {
+      ['ca-read-scopes', 'ca-write-scopes', 'ca-recall-scopes'].forEach(function(containerId) {
+        document.querySelectorAll('#' + containerId + ' input').forEach(function(input) { input.checked = false; });
+      });
+      const recallAll = document.getElementById('ca-recall-all');
+      if (recallAll) recallAll.checked = false;
+      const canDelegate = document.getElementById('ca-can-delegate');
+      if (canDelegate) canDelegate.checked = false;
+      toggleRecallPicker('ca');
+      createAuthorityPreview();
+    }
     document.addEventListener('click', function(ev) {
       const edit = ev.target.closest('[data-agent-edit]');
       if (edit) { ev.preventDefault(); editAgent(edit.dataset.agentEdit); return; }
@@ -150,6 +177,15 @@ async def agents_page(request: Request, session: dict = Depends(require_auth)):
       if (reactivate) { ev.preventDefault(); reactivateAgent(reactivate.dataset.agentReactivate); return; }
       const purge = ev.target.closest('[data-agent-purge]');
       if (purge) { ev.preventDefault(); purgeAgent(purge.dataset.agentPurge); }
+    });
+    document.addEventListener('input', function(ev) {
+      if (ev.target.closest('#create-agent-form')) createAuthorityPreview();
+    });
+    document.addEventListener('change', function(ev) {
+      if (ev.target.closest('#create-agent-form')) {
+        toggleRecallPicker('ca');
+        createAuthorityPreview();
+      }
     });
 
     async function deactivateAgent(id) {
@@ -371,6 +407,7 @@ async def agents_page(request: Request, session: dict = Depends(require_auth)):
           showToast(message, 'danger');
         }
       }
+      document.addEventListener('DOMContentLoaded', createAuthorityPreview);
     </script>"""
     js = js.replace("__IS_ADMIN__", str(is_admin).lower())
 
@@ -410,6 +447,10 @@ async def agents_page(request: Request, session: dict = Depends(require_auth)):
             <input type="text" id="ca-description">
           </div>
           <div class="form-group">
+            <button type="button" class="btn btn-sm btn-secondary" onclick="applyLeastPrivilegedPreset()">Use least-privileged service-agent preset</button>
+            <p class="form-hint">Private agent scope only; no personal, workspace, or shared scopes; delegation disabled. You can add explicit authority afterward.</p>
+          </div>
+          <div class="form-group">
             <label>Can Read From</label>
             {ca_read_html}
             <p class="form-hint">Your personal context starts selected for convenience. Uncheck it for a private-scope-only agent. The agent's own private scope is always included.</p>
@@ -428,6 +469,7 @@ async def agents_page(request: Request, session: dict = Depends(require_auth)):
             </div>
           </div>
           {delegation_create_html}
+          <div id="ca-authority-preview" class="form-hint" style="white-space:normal"></div>
           <div id="create-agent-error" class="alert alert-danger" style="display:none"></div>
           <div class="modal-footer">
             <button type="button" class="btn btn-secondary" onclick="closeModal('create-agent-modal')">Cancel</button>
