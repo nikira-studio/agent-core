@@ -991,7 +991,7 @@ You are connected to {APP_NAME}.
 1. Call `activity_pickup` at startup or when idle to check for work a human has assigned to you in this workspace. If it returns an activity, that is your current task — read it, start working, and send heartbeats. If it returns null, there is no assigned work and you can proceed with whatever the user is asking.
 2. Search memory in `{default_scope}` for relevant context before starting work. If the search returns little or nothing, retry with exact topic values, exact keywords from prior records, or a known record id. When embeddings are unavailable, broad conceptual queries can miss; exact tokens and known ids are more reliable. If this is a handoff, resume, or review of prior work, also inspect the recent activity trail and any generated briefing before making changes. Use `activity_list` and `briefing_list` when you need that trail from MCP.
 3. Search memory in `{user_scope}` for relevant user preferences and owner-context details when you have user-scope read access.
-4. Create or update an activity record when starting a meaningful task. Use `task_note` for in-flight progress updates and `task_result` when closing the task.
+4. Create or update an activity record when starting a meaningful task. Include `{default_scope}` as `memory_scope` on every heartbeat, progress note, completion, or blocked update: Core updates only the activity in that scope and never moves one across scopes. Use `task_note` for in-flight progress updates and `task_result` when closing the task.
 5. Store durable decisions and handoff notes in `{default_scope}`.
 6. Use `credential_list` and `credential_get` to retrieve credential references — never ask for raw secrets.
 7. Use connector tools to discover and run available server-side connector bindings before asking the user to wire an external service manually.
@@ -1117,7 +1117,7 @@ Read `{user_scope}` for stable {user_display} preferences and other owner-contex
 Use credential references through {APP_NAME} MCP; never request or print raw secrets.
 Activity records are operational task tracking, not durable memory. At the start of every non-trivial user task, immediately call `activity_update` with a concise `task_description`, `memory_scope` set to `{default_scope}`, and `status` set to `active`. When you are starting fresh or have gone idle, call `activity_pickup` to claim work a human assigned to you in your scopes. It returns nothing when nothing is waiting; work is pulled, never pushed, so an agent that never asks never sees it.
 
-If the session reloads, a handoff begins, or no active activity exists yet, open a fresh activity first with `status: active` before attempting to close it. While actively working, use `task_note` for short progress updates and call `activity_update` again every 1-2 minutes as a heartbeat. Before your final response, call `activity_update` with `status: completed` and a short `task_result` summary when the task is complete, or `status: blocked` if you cannot proceed and need user input.
+If the session reloads, a handoff begins, or no active activity exists yet, open a fresh activity first with `status: active` before attempting to close it. While actively working, use `task_note` for short progress updates and call `activity_update` again every 1-2 minutes as a heartbeat. Include `{default_scope}` as `memory_scope` on every later update: Core updates only the activity in that scope and never moves one across scopes. Before your final response, call `activity_update` with `status: completed` and a short `task_result` summary when the task is complete, or `status: blocked` if you cannot proceed and need user input.
 If the session has to stop early or hits a token limit, leave the activity current and write durable decisions or handoff notes to memory so another agent can continue from the saved state.
 If work needs to move across users or workspaces, make that explicit in the activity scope and handoff notes rather than assuming a hidden policy layer.
 If the client has hooks or plugins, use them to automate memory/activity capture; if it does not, treat this prompt as the source of truth for those expectations.
@@ -1234,6 +1234,7 @@ When the task is a handoff, resume, or review of prior work, inspect the recent 
 Use `activity_list` and `briefing_list` when you need to inspect that trail from MCP instead of the dashboard.
 
 While actively working, call `activity_update` again every 1-2 minutes as a heartbeat. Use `task_note` for interim progress updates and update `task_description` if the task changes materially.
+Include `{default_scope}` as `memory_scope` on every heartbeat, progress note, completion, or blocked update. Core updates only the activity in that scope and never moves one across scopes.
 
 When you are starting fresh or have gone idle, call `activity_pickup` to claim work a human assigned to you in your scopes. It returns nothing when nothing is waiting; work is pulled, never pushed, so an agent that never asks never sees it.
 
@@ -1296,6 +1297,7 @@ When the task is a handoff, resume, or review of prior work, inspect the recent 
 Use `activity_list` and `briefing_list` when you need to inspect that trail from MCP instead of the dashboard.
 
 While actively working, call `activity_update` again every 1-2 minutes as a heartbeat. Use `task_note` for interim progress updates and update `task_description` if the task changes materially.
+Include `{default_scope}` as `memory_scope` on every heartbeat, progress note, completion, or blocked update. Core updates only the activity in that scope and never moves one across scopes.
 
 When you are starting fresh or have gone idle, call `activity_pickup` to claim work a human assigned to you in your scopes. It returns nothing when nothing is waiting; work is pulled, never pushed, so an agent that never asks never sees it.
 
@@ -1451,6 +1453,7 @@ At the start of every meaningful task, call `activity_update` immediately with:
 - `status`: `active`
 
 While actively working, call `activity_update` again every 1-2 minutes as a heartbeat. Use `task_note` for interim progress updates and update `task_description` if the task changes materially.
+Include `{durable_scope}` as `memory_scope` on every heartbeat, progress note, completion, or blocked update. Core updates only the activity in that scope and never moves one across scopes.
 
 When you are starting fresh or have gone idle, call `activity_pickup` to claim work a human assigned to you in your scopes. It returns nothing when nothing is waiting; work is pulled, never pushed, so an agent that never asks never sees it.
 
@@ -1659,10 +1662,8 @@ def _build_verification_prompt(user_scope, workspace_scope):
 8. Call `connectors_summary` to list visible connector capability and binding health. Then call `connectors_bindings_list` with no scope to see everything visible to this agent. If you can read `{user_scope}`, call `connectors_bindings_list` again with `scope` set to `{user_scope}`. If you can read `{workspace_scope}`, call `connectors_bindings_list` again with `scope` set to `{workspace_scope}`. Report user-scoped and workspace-scoped bindings separately if both exist.
 9. Call `connectors_actions_list` with a real connector type id from the `connectors_list` result and pass it as `connector_type_id` exactly. Report whether connector actions are visible.
 10. If at least one enabled binding is visible in any scope, call `connectors_bindings_test` on a non-destructive binding and report the result. If none are visible, say that clearly.
-11. Use `task_note` for intermediate verification updates and call `activity_update` with `status` set to `completed` and include a short `task_result` summary of the verification outcome. If the session reloads or no active activity exists yet, first open the fresh verification activity with `status: active` before closing it.
+11. Use `task_note` for intermediate verification updates and call `activity_update` with `memory_scope` still set to `{workspace_scope}`, `status` set to `completed`, and a short `task_result` summary of the verification outcome. If the session reloads or no active activity exists yet, first open the fresh verification activity with `status: active` before closing it.
 12. Report which scope you wrote to and summarize the memory, credential, and connector checks.
 
 Use the full prefixed scope name exactly as shown. Do not use a plain workspace ID as a memory scope.
 """
-
-

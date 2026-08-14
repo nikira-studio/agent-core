@@ -72,7 +72,7 @@ Once connected, these tools are available in any session:
 | `memory_move` | Atomically move an active record to a new scope (write access to both scopes required) |
 | `credential_get` | Get an `AC_SECRET_*` reference for a stored credential |
 | `credential_list` | List credential entries the agent can access (metadata and references only — no raw values) |
-| `activity_update` | Create or update an activity record, including progress notes and a completion result |
+| `activity_update` | Create or update an activity record in the supplied `memory_scope`, including progress notes and a completion result; it never moves an activity across scopes |
 | `activity_get` | Get one activity, together with the memory records written during it |
 | `activity_list` | List activities visible to the current agent or user |
 | `activity_pickup` | Claim the next active work item a human assigned to this agent in authorized scopes |
@@ -466,8 +466,8 @@ You are connected to Agent Core at http://localhost:3500.
 - Search memory at the start of each session: `memory_search` with a natural language query. If a broad query returns little or nothing, retry with exact topic values, exact words from prior records, or a known record id. When embeddings are unavailable, exact tokens and known ids are more reliable than conceptual searches.
 - Store decisions, preferences, and facts: `memory_write`
 - For credentials: use `credential_get` to retrieve an AC_SECRET_* reference — never ask the user for raw API keys
-- Send `activity_update` heartbeats every 1–2 minutes while working on a task
-- Use `task_note` for short in-flight progress updates
+- Send `activity_update` heartbeats every 1–2 minutes while working on a task, always including the activity's explicit `memory_scope`
+- Use `task_note` for short in-flight progress updates with that same `memory_scope`; Core updates only the activity in that scope and never moves one across scopes
 - If the session reloads, a handoff begins, or no active activity exists yet, open a fresh activity first with `status: active` before attempting to close it
 - When finishing a task, include `status: completed` and a short `task_result` summary of what changed
 ```
@@ -579,7 +579,7 @@ Expected Agent Core tools:
 Operating rules:
 - At startup or when idle, call `activity_pickup` to check for work a human has assigned to you in this workspace. If it returns an activity, that is your current task — read it and start working. Only call pickup once per session start; do not loop infinitely claiming new tasks on your own.
 - Start meaningful tasks with `activity_update` using `status: active`, a concise `task_description`, and the default shared scope.
-- Refresh activity while actively working.
+- Refresh activity while actively working, always including that same explicit `memory_scope`; Core updates only the activity in that scope and never moves one across scopes.
 - Before making changes, search memory with `memory_search`.
 - For handoffs or reviews, use `activity_list` and `briefing_list` first.
 - Write durable facts and decisions to Agent Core memory with `memory_write`.
@@ -762,7 +762,7 @@ Agent sessions do not wake up automatically. The pickup is an explicit pull:
 1. The human creates an activity in the dashboard, assigns it to an agent, and sets the workspace scope.
 2. The agent session calls `activity_pickup` at startup or when idle.
 3. If a matching activity exists (same `assigned_agent_id`, same readable workspace scope), it is returned and heartbeated.
-4. The agent reads the task, starts working, and sends heartbeats via `activity_update`, using `task_note` for interim progress updates.
+4. The agent reads the task, starts working, and sends heartbeats via `activity_update`, always including the activity's `memory_scope` and using `task_note` for interim progress updates.
 5. If no active activity exists yet after a reload or handoff, open one with `status: active` before closing it.
 6. When done, the agent marks the activity `completed` with a short `task_result` summary, or `blocked` if it cannot finish.
 

@@ -142,6 +142,41 @@ def test_all_generated_prompts_include_memory_discipline_guidance():
         )
 
 
+def test_all_generated_prompts_require_activity_scope_continuity():
+    """Every client must keep lifecycle updates in the activity's scope."""
+    from app.routes.integrations_page import (
+        _build_agents_md,
+        _build_assistants_md,
+        _build_claude_md,
+        _build_instructions,
+        _build_session_prompt,
+    )
+
+    outputs = {
+        "instructions": _build_instructions(
+            "claude_code", "http://x", "user:u", "workspace:w", "agent:a",
+            "Agent", "User", "ws",
+        ),
+        "session_prompt": _build_session_prompt(
+            "claude_code", "http://x", "user:u", "workspace:w", "agent:a",
+            "Agent", "User", "ws",
+        ),
+        "claude_md": _build_claude_md(
+            "http://x", "user:u", "workspace:w", "agent:a", "Agent", "ws"
+        ),
+        "agents_md": _build_agents_md(
+            "http://x", "user:u", "workspace:w", "agent:a", "ws"
+        ),
+        "assistants_md": _build_assistants_md(
+            "http://x", "user:u", "workspace:w", "agent:a"
+        ),
+    }
+    for name, output in outputs.items():
+        assert "never moves one across scopes" in output, (
+            f"{name} is missing activity scope-continuity guidance"
+        )
+
+
 def test_integrations_generates_env_vars(integrations_client):
     r = integrations_client.get(
         "/integrations?user_id=alex&workspace_id=agent-core&agent_id=claude-code&target=claude_code&output_type=env"

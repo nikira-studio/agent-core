@@ -660,7 +660,7 @@ Dispatch:
 | `memory_reanchor` | Repoint a record at what actually describes it, when the file moved or the anchor was wrong |
 | `credential_get` | Get an `AC_SECRET_*` reference for a credential entry |
 | `credential_list` | List credential metadata and references in authorized scopes |
-| `activity_update` | Create or update an activity record, including progress notes and completion result |
+| `activity_update` | Create or update an activity record in the supplied `memory_scope`, including progress notes and completion result; it never moves an activity across scopes |
 | `activity_get` | Get an activity record |
 | `activity_list` | List activities visible to the current caller |
 | `activity_pickup` | Claim the next active work item assigned to this agent in authorized scopes |
