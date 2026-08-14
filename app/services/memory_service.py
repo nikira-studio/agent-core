@@ -279,7 +279,9 @@ def provenance_for_write(
         try:
             from app.services import activity_service
 
-            active = activity_service.get_active_activity_for_agent(agent_id, user_id)
+            active = activity_service.get_active_activity_for_agent(
+                agent_id, user_id, memory_scope=scope
+            )
             if active:
                 payload["activity_id"] = active["id"]
         except Exception:

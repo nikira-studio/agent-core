@@ -376,12 +376,19 @@ def claim_next_activity(
         return result
 
 
-def get_active_activity_for_agent(agent_id: str, user_id: Optional[str] = None) -> Optional[dict]:
+def get_active_activity_for_agent(
+    agent_id: str,
+    user_id: Optional[str] = None,
+    memory_scope: Optional[str] = None,
+) -> Optional[dict]:
     conditions = ["assigned_agent_id = ? AND status IN ('active', 'stale')"]
     params = [agent_id]
     if user_id:
         conditions.append("user_id = ?")
         params.append(user_id)
+    if memory_scope is not None:
+        conditions.append("memory_scope = ?")
+        params.append(memory_scope)
 
     with get_db() as conn:
         row = conn.execute(

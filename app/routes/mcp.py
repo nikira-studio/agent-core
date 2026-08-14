@@ -321,7 +321,7 @@ MANIFEST = {
         },
         {
             "name": "activity_update",
-            "description": "Update the current agent's active activity or create one if none exists",
+            "description": "Update the current agent's active activity in the requested memory scope, or create one there if none exists",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -1552,17 +1552,18 @@ async def _handle_custom_mcp_tool(body: dict, ctx: RequestContext):
         )
 
     elif tool == "activity_update":
+        # An agent identity can work in more than one workspace at once. The
+        # requested scope identifies that activity stream; never select a
+        # different active activity and then move it into this scope.
+        memory_scope = params.get("memory_scope") or f"agent:{ctx.agent_id}"
+        if not enforcer.can_write(memory_scope):
+            return _mcp_error("SCOPE_DENIED", "Access denied to memory_scope", 403)
         existing = activity_service.get_active_activity_for_agent(
-            ctx.agent_id, ctx.user_id
+            ctx.agent_id, ctx.user_id, memory_scope=memory_scope
         )
         if existing:
             if ctx.is_delegated and not ctx.can_resource("activity", "update", existing["id"]):
                 return _mcp_error("FORBIDDEN", "Access denied", 403)
-            memory_scope = params.get("memory_scope")
-            if ctx.is_delegated and memory_scope and memory_scope != existing.get("memory_scope"):
-                return _mcp_error("FORBIDDEN", "Delegated activity scope changes are unsupported", 403)
-            if memory_scope and not enforcer.can_write(memory_scope):
-                return _mcp_error("SCOPE_DENIED", "Access denied to memory_scope", 403)
             if params.get("status"):
                 if params["status"] in (
                     "completed",
@@ -1577,16 +1578,14 @@ async def _handle_custom_mcp_tool(body: dict, ctx: RequestContext):
                     task_description=params.get("task_description"),
                     task_note=params.get("task_note"),
                     task_result=params.get("task_result"),
-                    memory_scope=memory_scope,
                     status=params["status"],
                 )
-            elif params.get("task_description") or params.get("task_note") or params.get("task_result") or memory_scope:
+            elif params.get("task_description") or params.get("task_note") or params.get("task_result"):
                 activity_service.update_activity(
                     existing["id"],
                     task_description=params.get("task_description"),
                     task_note=params.get("task_note"),
                     task_result=params.get("task_result"),
-                    memory_scope=memory_scope,
                 )
             else:
                 activity_service.heartbeat_activity(existing["id"])
@@ -1605,11 +1604,10 @@ async def _handle_custom_mcp_tool(body: dict, ctx: RequestContext):
                     and not params.get("task_description")
                     and not params.get("task_note")
                     and not params.get("task_result")
-                    and not memory_scope
                     else "update",
                     previous_status=existing["status"],
                     new_status=params.get("status") or existing["status"],
-                    memory_scope=memory_scope or existing.get("memory_scope"),
+                    memory_scope=existing.get("memory_scope"),
                 ),
             )
             _new_status = params.get("status")
@@ -1618,7 +1616,6 @@ async def _handle_custom_mcp_tool(body: dict, ctx: RequestContext):
                 and not params.get("task_description")
                 and not params.get("task_note")
                 and not params.get("task_result")
-                and not memory_scope
             ):
                 _event = "activity_heartbeat"
             elif _new_status == "cancelled":
@@ -1638,9 +1635,6 @@ async def _handle_custom_mcp_tool(body: dict, ctx: RequestContext):
                 return _mcp_error(
                     "TASK_REQUIRED", "task_description required to create activity", 400
                 )
-            memory_scope = params.get("memory_scope") or f"agent:{ctx.agent_id}"
-            if not enforcer.can_write(memory_scope):
-                return _mcp_error("SCOPE_DENIED", "Access denied to memory_scope", 403)
             act = activity_service.create_activity(
                 agent_id=ctx.agent_id,
                 user_id=ctx.user_id or "",

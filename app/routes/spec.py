@@ -183,7 +183,7 @@ async def spec(
         },
         {
             "name": "activity_update",
-            "description": "Update the current agent's active activity or create one if none exists",
+            "description": "Update the current agent's active activity in the requested memory scope, or create one there if none exists",
             "inputSchema": {
                 "task_description": "string?",
                 "task_note": "string?",

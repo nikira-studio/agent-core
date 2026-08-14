@@ -387,6 +387,84 @@ def test_mcp_activity_update_can_change_existing_task_and_scope(
     assert activity["memory_scope"] == "agent:testagent"
 
 
+def _multi_workspace_agent_token(admin_token):
+    from app.database import get_db
+    from app.services import agent_service, workspace_service
+
+    with get_db() as conn:
+        owner_id = conn.execute("SELECT id FROM users LIMIT 1").fetchone()["id"]
+    for workspace_id in ("alpha", "beta"):
+        workspace_service.create_workspace(
+            workspace_id=workspace_id,
+            name=workspace_id,
+            owner_user_id=owner_id,
+        )
+    _, api_key = agent_service.create_agent(
+        agent_id="multiworkspace",
+        display_name="Multi-workspace test agent",
+        owner_user_id=owner_id,
+        read_scopes=["workspace:alpha", "workspace:beta"],
+        write_scopes=["workspace:alpha", "workspace:beta"],
+    )
+    return api_key
+
+
+def test_mcp_activity_update_isolated_by_requested_memory_scope(test_client, admin_token):
+    """A shared agent identity must never move one workspace's activity into another."""
+    api_key = _multi_workspace_agent_token(admin_token)
+    headers = {"Authorization": f"Bearer {api_key}"}
+
+    beta = test_client.post(
+        "/mcp",
+        headers=headers,
+        json={
+            "tool": "activity_update",
+            "params": {
+                "task_description": "Beta workspace task",
+                "memory_scope": "workspace:beta",
+            },
+        },
+    )
+    assert beta.status_code == 201, beta.json()
+    beta_activity = beta.json()["data"]["activity"]
+
+    alpha = test_client.post(
+        "/mcp",
+        headers=headers,
+        json={
+            "tool": "activity_update",
+            "params": {
+                "task_description": "Alpha workspace task",
+                "memory_scope": "workspace:alpha",
+            },
+        },
+    )
+    assert alpha.status_code == 201, alpha.json()
+    alpha_activity = alpha.json()["data"]["activity"]
+    assert alpha_activity["id"] != beta_activity["id"]
+
+    alpha_update = test_client.post(
+        "/mcp",
+        headers=headers,
+        json={
+            "tool": "activity_update",
+            "params": {
+                "task_note": "Regression isolated",
+                "memory_scope": "workspace:alpha",
+            },
+        },
+    )
+    assert alpha_update.status_code == 200, alpha_update.json()
+    assert alpha_update.json()["data"]["activity"]["id"] == alpha_activity["id"]
+
+    from app.services import activity_service
+
+    unchanged_beta = activity_service.get_activity(beta_activity["id"])
+    assert unchanged_beta["memory_scope"] == "workspace:beta"
+    assert unchanged_beta["task_description"] == "Beta workspace task"
+    assert unchanged_beta["task_note"] is None
+
+
 def test_mcp_activity_update_can_store_task_result(test_client, agent_token):
     created = test_client.post(
         "/mcp",
