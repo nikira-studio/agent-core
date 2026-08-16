@@ -1,3 +1,7 @@
+import json
+import re
+
+
 def _request(test_client, agent_token):
     response = test_client.post(
         "/api/delegation-requests",
@@ -33,6 +37,10 @@ def test_delegation_requests_dashboard_supports_human_review(
     assert "Approval can only keep or narrow" in page.text
     assert "grant_secret" not in page.text
     assert "/api/delegation-requests/" in page.text
+    match = re.search(r"const delegationRequests = (.+);", page.text)
+    assert match is not None
+    embedded_requests = json.loads(match.group(1))
+    assert request["id"] in embedded_requests
 
 
 def test_requester_cannot_self_approve_but_admin_can_narrow(

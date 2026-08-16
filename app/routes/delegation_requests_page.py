@@ -92,6 +92,10 @@ async def delegation_requests_page(request: Request, session: dict = Depends(req
         rows = "<tr><td colspan='7' class='text-muted' style='text-align:center'>No delegation requests are visible to this account.</td></tr>"
 
     request_data = json.dumps({item["id"]: item for item in pending}).replace("<", "\\u003c")
+    # render_page reserves doubled braces for f-string compatibility. Protect
+    # the embedded JSON so its nested closing braces are not collapsed before
+    # the browser parses the script.
+    request_data = request_data.replace("{", "{{").replace("}", "}}")
     body = f"""
 <div class='page-header'>
   <div><h1>Delegation Requests</h1><p class='text-muted'>Review explicit, short-lived authority requests. Approval can only keep or narrow the requested permissions.</p></div>
