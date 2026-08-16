@@ -93,6 +93,21 @@ A few other things worth knowing:
 
 ---
 
+## Delegated Authority
+
+Scopes are standing access. A delegated grant is the temporary form: a narrowed, expiring slice of one actor's authority, lent to a recipient agent for a single task. The full lifecycle and error codes are in [Delegated Authorization](delegated-authorization-integration.md); these are the security properties it holds to:
+
+- **Subset only.** A grant is checked against the issuer's current authority when issued and again on every use. Approving a request can keep or remove requested permissions, never add one (`APPROVAL_EXPANDS_REQUEST`).
+- **Replacement, not union.** While the grant header is present, grant authority replaces the recipient's permanent scopes entirely. A delegated worker cannot combine the grant with whatever its own key could normally reach.
+- **The secret is shown once, and never to a model.** The recipient claims the grant over REST with its own API key; claiming is deliberately not an MCP tool, so the secret cannot land in a model context. The credential travels only in the `X-Agent-Core-Grant` header and is rejected if it appears in JSON bodies or MCP arguments.
+- **Two credentials, both required.** A grant secret is not a bearer token. Delegated requests need the recipient's own API key plus the grant header, so a leaked grant secret authenticates nothing by itself.
+- **Bounded and revocable.** Grant TTL is capped at one hour and claim windows at five minutes. Issuer, recipient, or an admin can revoke, and expiry, revocation, or demotion of the issuer takes effect on the recipient's next request.
+- **Credential references are not delegable.** A grant can permit specific connector binding actions; the binding's credential is resolved server-side, and neither its reference nor its value is ever exposed to the delegated agent.
+- **Fully attributed.** Every delegated action records principal, issuer, coordinator, executor, and grant in the audit log. Delegated memory writes carry the same server-derived provenance.
+- **Backups cannot resurrect authority.** Backup export clears grant hashes and forces claimable or active grants to revoked. Restore never reactivates a grant, and merge restore omits the grant and request tables.
+
+---
+
 ## The Credential Broker Flow
 
 Here's what happens from the time you store a secret to when a tool actually uses it:

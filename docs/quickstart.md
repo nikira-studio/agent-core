@@ -247,4 +247,5 @@ This keeps ownership and attribution separate from collaboration. The shared wor
 - [Configuration](configuration.md) — customize port, data path, session timeouts, and more
 - [Credential Broker](credential-broker.md) — inject real credential values at runtime without exposing them to models
 - [Security](security.md) — understand the scope model and deployment checklist
+- [Delegated Authorization](delegated-authorization-integration.md) — lend an agent a short-lived, narrowed slice of authority for one task
 - [API Reference](api.md) — full endpoint documentation

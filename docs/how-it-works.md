@@ -8,7 +8,7 @@ Everything here is current behaviour. For exact request and response shapes, see
 
 ## 1. The shape of the system
 
-Agent Core is a single local HTTP service backed by one SQLite database. It stores four kinds of thing and does nothing else:
+Agent Core is a single local HTTP service backed by one SQLite database. It stores five kinds of thing and does nothing else:
 
 | | What it holds | Who writes it |
 | --- | --- | --- |
@@ -16,6 +16,7 @@ Agent Core is a single local HTTP service backed by one SQLite database. It stor
 | **Activity** | What happened — one record per task, with a heartbeat | Agents |
 | **Credentials** | Encrypted secrets, exposed only as references | Operator |
 | **Connectors** | How to reach external services, and with which credential | Operator |
+| **Grants** | Lent authority — narrowed, expiring, revocable | Operator and delegating agents |
 
 Agents connect to it. It does not connect to agents, schedule them, or run their work. That boundary is deliberate: an agent's harness already decides what to do next, and a memory layer that also tried to would have to be replaced every time you changed agents. Agent Core is what stays constant while the agents around it change.
 
@@ -39,11 +40,11 @@ Agents connect to it. It does not connect to agents, schedule them, or run their
                                             external services
 ```
 
-Nothing leaves the machine unless you configure something that reaches out: a connector action, an embedding backend, or a review model. Those are the only outbound paths, and all three are off until an operator sets them up.
+Nothing leaves the machine unless you configure something that reaches out: a connector action, an embedding backend, a review model, or an outbound webhook notification. Those are the only outbound paths, and all four are off until an operator sets them up.
 
 ### Two transports, one implementation
 
-- **MCP** at `POST /mcp` — 27 tools, the path agents normally use. Speaks both JSON-RPC (`tools/list`, `tools/call`) and a plain `{"tool": ..., "params": ...}` shape.
+- **MCP** at `POST /mcp` — 35 tools, the path agents normally use. Speaks both JSON-RPC (`tools/list`, `tools/call`) and a plain `{"tool": ..., "params": ...}` shape.
 - **REST** under `/api/...` — the same operations for scripts, CI, and non-MCP clients.
 
 Both call the same service layer, so they enforce the same rules and fail the same way. If a request is malformed, both return a `400` with an error code rather than a stack trace.
@@ -73,6 +74,8 @@ A scope is a named box. Every memory record lives in exactly one, and every agen
 The common mistake is using `agent:<id>` as a handoff channel. It is private and it disappears with the agent; a shared workspace is both a cleaner grant and a durable one. If an agent has durable knowledge and no workspace to put it in, that is a setup gap to fix, not a reason to use the private scope.
 
 Scope enforcement happens in one place, before any read or write reaches the data. An agent asking for a scope it does not hold gets `SCOPE_DENIED` — it is never silently given a filtered result, because a silently narrowed answer looks identical to a complete one.
+
+Scopes are standing access — what an agent holds from now on. When an agent should have access for one task rather than from now on, that is a delegated grant, covered in [section 7](#7-delegation-authority-for-one-task).
 
 ---
 
@@ -270,7 +273,42 @@ Adapters declare their requirements, and a binding only exposes actions whose re
 
 ---
 
-## 7. Optional capabilities
+## 7. Delegation: authority for one task
+
+Scopes fit the agents you work with every day. Some access should not stand, though: a coordinator farming a task out to a worker agent, a scheduled job that needs one connector action a night, a new agent you are not ready to trust with anything permanent. Delegation covers that case — one actor lends an agent a narrowed slice of its authority, and the loan expires.
+
+The pattern is the local equivalent of temporary credentials from a cloud provider (AWS STS role assumption, OAuth token exchange): attenuated authority, never broader than the issuer's, bounded in time, revocable at will.
+
+### Grants
+
+A **grant** names a recipient agent, a purpose, a TTL (capped at one hour), and exactly what it permits: memory and briefing operations in named scopes, specific activity records, and specific connector binding/action pairs. Whoever issues it (a human in the dashboard, or an agent with `can_delegate`) can only give away a subset of what they currently hold.
+
+The recipient claims the grant once, over REST, with its own API key, and receives the grant secret exactly once. Claiming is deliberately not an MCP tool: a secret returned as a tool result would land in a model context, and from there in transcripts and logs. From then on, delegated requests carry both credentials together:
+
+```http
+Authorization: Bearer ac_sk_<the recipient's own key>
+X-Agent-Core-Grant: ac_dg_<grant-id>.<secret>
+```
+
+While the grant header is present, the grant **replaces** the recipient's permanent authority — it is never added to it. A worker holding a grant for one workspace cannot also reach whatever else its key normally could. Issuer, recipient, expiry, revocation, and the issuer's own current authority are revalidated on every request, so revoking a grant (or demoting its issuer) takes effect immediately, not at the next claim.
+
+### Requests: asking for authority you don't have
+
+A coordinator does not need authority to ask for it. `delegation_request` records what is wanted (recipient, purpose, TTL, exact permissions), and the request appears on the dashboard's **Delegation** page. A human approves, narrows, or denies it there. Approval can keep or remove requested permissions; it can never add one. The decision is one-time, audited, and produces an unclaimed grant that goes through the normal claim flow — approval never returns a secret either.
+
+This is the system's human-in-the-loop answer for agent authority: the agent states exactly what it wants, a person decides, and no secret ever passes through a model on the way.
+
+### What this makes possible
+
+Anything that coordinates worker agents (an orchestration framework, a scheduler, a script of your own) faces the same choice: give every worker standing broad credentials, or hand out narrow ones per task. Delegation makes the second choice available to anything that speaks REST, while Agent Core keeps identity, enforcement, and audit in one place. Every delegated action is attributed end to end — principal, issuer, coordinator, executor, grant — in the audit log, and delegated memory writes carry the same provenance.
+
+Backups deliberately revoke grants: restoring a database brings back records, never live authority.
+
+The exact permission shapes, lifecycle rules, and error codes are in the [Delegated Authorization contract](delegated-authorization-integration.md).
+
+---
+
+## 8. Optional capabilities
 
 Three things make Agent Core better and none of them are required. Each has a defined fallback, because a memory layer that stops working when an optional service is down is not a memory layer.
 
@@ -286,7 +324,7 @@ The review model deserves one explicit note: pointing it at a model on a machine
 
 ---
 
-## 8. What runs on a schedule
+## 9. What runs on a schedule
 
 One in-process sweep, hourly by default, does all of it (`AGENT_CORE_MAINTENANCE_INTERVAL_MINUTES`, `0` to disable — the manual **Run Maintenance** button still works):
 
@@ -301,7 +339,7 @@ The last run's time, trigger, and results are visible in **Settings → Backup &
 
 ---
 
-## 9. Your data
+## 10. Your data
 
 ```
 data/
@@ -316,7 +354,7 @@ data/
 
 ---
 
-## 10. The rules the system holds to
+## 11. The rules the system holds to
 
 Every design decision above comes from one of these. When something in Agent Core surprises you, one of these is usually the reason.
 
@@ -332,7 +370,9 @@ Every design decision above comes from one of these. When something in Agent Cor
 
 **Explicit beats automatic.** Agents write and read deliberately; work is pulled, not pushed; nothing transfers by magic. It makes the trail auditable and the context intentional.
 
-**Local by default.** Memory, credentials, and configuration stay on your disk. The outbound paths are the ones you configured, and there are only three.
+**Authority is lent, never taken.** A grant is a subset of what its issuer holds, replaces the recipient's own authority rather than adding to it, and expires on its own. Approval can narrow a request, never expand it, and no grant secret is ever visible to a model.
+
+**Local by default.** Memory, credentials, and configuration stay on your disk. The outbound paths are the ones you configured, and there are only four.
 
 ---
 
@@ -345,6 +385,7 @@ Every design decision above comes from one of these. When something in Agent Cor
 | [API Reference](api.md) | Every REST endpoint and MCP tool |
 | [Configuration](configuration.md) | Settings, optional capabilities, data layout |
 | [Security](security.md) | Scope model, secret handling, deployment checklist |
+| [Delegated Authorization](delegated-authorization-integration.md) | The delegation contract for coordinators and agent runtimes |
 | [Adapters](adapters.md) | Building and sharing connector integrations |
 | [Backup & Restore](backup-restore.md) | Export, restore, maintenance |
 | [Troubleshooting](troubleshooting.md) | Common issues and fixes |

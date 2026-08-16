@@ -73,6 +73,7 @@ Agent API keys start with `ac_sk_`. Broker credentials start with `ac_broker_`. 
 | `POST` | `/api/auth/otp/confirm` | Session | Confirm the first TOTP code and enable OTP |
 | `POST` | `/api/auth/otp/verify` | Pending session | Verify OTP during login |
 | `POST` | `/api/auth/otp/disable` | Session + password + OTP | Disable OTP on the account |
+| `GET` | `/api/auth/effective-authority` | Session or agent | The caller's current effective authority — permanent scopes, or the grant's permissions when a delegated request presents a grant header |
 | `POST` | `/api/auth/users` | Admin session | Create a new user account |
 | `PUT` | `/api/auth/users/{user_id}` | Admin session | Update user metadata, role, or `is_active` status |
 | `DELETE` | `/api/auth/users/{user_id}` | Admin session | Delete a user account |
@@ -625,6 +626,58 @@ Briefings include authorized decision, fact, and preference memory linked to the
 
 ---
 
+## Delegations
+
+Short-lived, narrowed authority that one actor lends to a recipient agent — see [Delegated Authorization](delegated-authorization-integration.md) for the permission model, lifecycle rules, and error codes. Delegated requests authenticate with the recipient's normal API key plus the one-time-claimed grant credential in a dedicated header:
+
+```http
+Authorization: Bearer ac_sk_<recipient-agent-key>
+X-Agent-Core-Grant: ac_dg_<grant-id>.<opaque-secret>
+```
+
+### Direct grants
+
+| Method | Path | Auth | Description |
+| --- | --- | --- | --- |
+| `POST` | `/api/delegations` | Session, or agent with `can_delegate` | Issue a grant. Permissions must be a subset of the issuer's current authority; `ttl_seconds` ≤ 3600 |
+| `GET` | `/api/delegations` | Session or agent | List grants visible to the caller |
+| `GET` | `/api/delegations/{grant_id}` | Session or agent | One grant |
+| `POST` | `/api/delegations/{grant_id}/claim` | Recipient agent key, no grant header | One-time claim. Returns `grant_secret` exactly once and activates the grant. REST-only by design — a secret returned as an MCP tool result would be model-visible |
+| `POST` | `/api/delegations/{grant_id}/revoke` | Issuer, recipient, or admin | Revoke the grant; optional `reason` |
+
+Create a grant:
+
+```json
+{
+  "recipient_agent_id": "worker-agent",
+  "purpose": "Summarize this week's workspace decisions",
+  "ttl_seconds": 900,
+  "scope_permissions": [
+    {"resource_type": "memory", "operation": "read", "scope": "workspace:my-project"}
+  ],
+  "resource_permissions": [],
+  "binding_actions": []
+}
+```
+
+`resource_permissions` name exact resources (`resource_type`, `operation`, `resource_id`; activities are exact-resource only). `binding_actions` name an exact connector `binding_id` and `action`. Optional fields: `coordinator_agent_id`, `activity_id`, `correlation_id`.
+
+### Delegation requests
+
+An actor without authority can ask for it. Approval produces an `approved_unclaimed` grant that goes through the normal claim flow; approval never returns a secret. Pending requests are also reviewable on the dashboard's **Delegation** page.
+
+| Method | Path | Auth | Description |
+| --- | --- | --- | --- |
+| `POST` | `/api/delegation-requests` | Session or agent | Record a pending request (same body shape as grant creation, minus `coordinator_agent_id` — coordinator attribution is server-derived) |
+| `GET` | `/api/delegation-requests` | Session or agent | List requests visible to the caller |
+| `GET` | `/api/delegation-requests/{request_id}` | Session or agent | One request |
+| `POST` | `/api/delegation-requests/{request_id}/approve` | Eligible human, or agent with `can_delegate` | Approve, optionally replacing any permission list with a strict subset |
+| `POST` | `/api/delegation-requests/{request_id}/deny` | Eligible human, or agent with `can_delegate` | Deny with an optional `reason` |
+
+Decisions are one-time. All lifecycle transitions are written to the audit log (`delegation_grant_created`, `delegation_grant_claimed`, `delegation_grant_revoked`, `delegation_request_created`, `delegation_request_approved`, `delegation_request_denied`).
+
+---
+
 ## MCP
 
 Agent authentication required.
@@ -658,6 +711,8 @@ Dispatch:
 | `memory_feedback` | Say whether a recalled record actually helped; feeds observed usefulness into ranking |
 | `memory_verify` | Check anchored facts against the repo path, host or connector binding they describe. Records evidence on passes; queues review for anchors that have vanished |
 | `memory_reanchor` | Repoint a record at what actually describes it, when the file moved or the anchor was wrong |
+| `memory_pinned` | The standing context for the caller's scopes — loaded at session start rather than searched for |
+| `memory_pin` | Request that a record become (or stop being) standing context; queues the request for operator review |
 | `credential_get` | Get an `AC_SECRET_*` reference for a credential entry |
 | `credential_list` | List credential metadata and references in authorized scopes |
 | `activity_update` | Create or update an activity record in the supplied `memory_scope`, including progress notes and completion result; it never moves an activity across scopes |
@@ -667,13 +722,23 @@ Dispatch:
 | `activity_search` | Full-text search the activity trail — what agents worked on, per task, with results. Use for "what did we do on X"; use `memory_search` for durable facts and decisions |
 | `get_briefing` | Fetch a briefing |
 | `briefing_list` | List briefings visible to the current caller |
+| `effective_authority` | Report the caller's current effective authority — permanent scopes, or the grant's permissions on a delegated call |
+| `delegations_list` | List delegated grants visible to the caller |
+| `delegation_request` | Record a pending request for narrowed, short-lived authority |
+| `delegation_requests_list` | List delegation requests visible to the caller |
+| `delegation_request_approve` | Approve a request, optionally narrowing it to a strict subset; never returns a secret |
+| `delegation_request_deny` | Deny a request with an optional reason |
+| `delegation_revoke` | Revoke a delegated grant |
 | `connectors_list` | List installed connector types as lean summaries (id, name, auth/backend type, action_count; no full specs). Supports `limit`/`offset`; use `connectors_actions_list` for a type's actions |
 | `connectors_bindings_list` | List connector bindings in authorized scopes |
 | `connectors_bindings_test` | Test a binding using its stored credential |
 | `connectors_actions_list` | List actions supported by a connector type |
 | `connectors_summary` | Summarize visible connector capability, binding, credential-presence, action, and health state |
 | `connectors_run` | Run one connector action server-side using a binding |
+| `connectors_resolve` | Deterministically resolve a connector type (plus optional alias, scope, and action) to a single authorized binding |
 | `result_fetch` | Retrieve a slice of a previously offloaded large tool result by handle |
+
+Claiming a delegated grant is intentionally REST-only (`POST /api/delegations/{grant_id}/claim`): the one-time secret must never appear in a tool result a model can read. On delegated MCP calls, send the recipient's API key and the `X-Agent-Core-Grant` header on every request — the stateless `/mcp` transport rebuilds authority each time.
 
 ### Large tool results (offloading)
 

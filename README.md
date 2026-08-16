@@ -24,6 +24,7 @@ It is good at:
 
 - keeping durable memory in one place
 - controlling access to credentials and external services
+- lending an agent short-lived, narrowed access for a single task, with human approval
 - exposing server-side connectors as agent tools — imported OpenAPI specs, native MCP servers, and **adapters** (shareable data-manifest integrations for OAuth, session handshakes, and CLI wrappers; see [docs/adapters.md](docs/adapters.md))
 - showing what agents are doing right now
 
@@ -135,6 +136,14 @@ Working with a team, or switching between Claude Code and Cursor on the same pro
 
 ![Agent Core agents](docs/images/agent-workspace.png)
 
+### Short-Lived Authority for Agent Teams
+
+Standing scopes fit the agents you use every day. Sometimes an agent should get access for one task only: a coordinator handing work to a worker agent, a nightly job that needs a single connector action, a new tool you aren't ready to trust with anything permanent.
+
+For that, Agent Core supports **delegation** — the same idea as the temporary credentials cloud providers issue (AWS STS, OAuth token exchange), running locally. A grant is always a subset of what its issuer holds, expires within an hour, and *replaces* the recipient's normal access while in use instead of adding to it. Agents that lack authority can request it; the request lands on your dashboard, where you approve it, narrow it, or deny it. No secret ever passes through a model, and every delegated action is attributed in the audit log from the agent that asked to the agent that acted.
+
+This is what lets agent orchestration frameworks — anything that coordinates worker agents — sit on top of Agent Core without every worker holding broad permanent credentials. Coordination stays in your framework; Agent Core stays the layer that holds identity, authority, and audit. See [How It Works](docs/how-it-works.md#7-delegation-authority-for-one-task) for the mechanism and the [Delegated Authorization contract](docs/delegated-authorization-integration.md) for integration details.
+
 ---
 
 ## Activity and Handoffs
@@ -232,6 +241,7 @@ For REST-based clients or custom integrations, every feature is also available t
 | [Credential Broker](docs/credential-broker.md) | How `AC_SECRET_*` references work and how to resolve them at runtime |
 | [Configuration](docs/configuration.md) | Environment variables, ports, and data directory layout |
 | [Security](docs/security.md) | Scope model, secret handling, and deployment checklist |
+| [Delegated Authorization](docs/delegated-authorization-integration.md) | Lending agents short-lived, narrowed authority — the contract for coordinators and agent runtimes |
 | [API Reference](docs/api.md) | Full REST and MCP endpoint reference |
 | [Backup & Restore](docs/backup-restore.md) | Export, restore, and routine maintenance |
 | [Troubleshooting](docs/troubleshooting.md) | Common issues and fixes |

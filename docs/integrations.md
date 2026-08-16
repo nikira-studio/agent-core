@@ -85,12 +85,20 @@ Once connected, these tools are available in any session:
 | `memory_reanchor` | Fix a record's pointer when the file moved or the anchor was wrong |
 | `get_briefing` | Pull a briefing when taking over from another agent |
 | `briefing_list` | List generated briefings visible to the current agent or user |
+| `effective_authority` | Report the caller's current effective authority — permanent scopes, or the grant's permissions on a delegated call |
+| `delegations_list` | List delegated grants visible to the caller |
+| `delegation_request` | Ask for short-lived, narrowed authority the caller does not hold; a human reviews it on the dashboard |
+| `delegation_requests_list` | List delegation requests visible to the caller |
+| `delegation_request_approve` | Approve a request, optionally narrowing it; never returns a secret |
+| `delegation_request_deny` | Deny a request with an optional reason |
+| `delegation_revoke` | Revoke a delegated grant |
 | `connectors_list` | List installed connector types as lean summaries (no full specs); supports `limit`/`offset`. Use `connectors_actions_list` for a type's actions |
 | `connectors_bindings_list` | List connector bindings in authorized scopes |
 | `connectors_bindings_test` | Test a binding using the stored credential |
 | `connectors_actions_list` | List actions supported by a connector type |
 | `connectors_summary` | Summarize visible connector types, bindings, credentials, actions, and health state |
 | `connectors_run` | Run one connector action server-side using a binding |
+| `connectors_resolve` | Deterministically resolve a connector type (plus optional alias, scope, and action) to a single authorized binding |
 | `result_fetch` | Read a large tool result that was offloaded to a handle, in chunks |
 
 Agents connect, discover authorized tools, and call what they need. Agent Core provides the capabilities and logs the results. It is not a workflow engine.
@@ -98,6 +106,8 @@ Agents connect, discover authorized tools, and call what they need. Agent Core p
 For memory writes, `slot_key` keeps one active value per slot for preference records, which makes "the current answer" deterministic instead of something retrieval has to guess at. `valid_from` and `valid_to` say when the content was **true in the world**, which is a separate timeline from when the system learned it — set them when a record describes a period other than "from now on", and pass `as_of` to a search to ask what the corpus held to be true at a past moment. See [How It Works](how-it-works.md#two-clocks).
 
 If one agent needs to hand work to another, write the durable state into the shared workspace scope and generate or link a briefing. If you are reviewing prior work, use `memory_search`, `activity_list`, and `briefing_list` together before changing anything. The private `agent:<id>` scope is only for scratch notes for that specific agent and should not be treated as the handoff channel.
+
+If you run a coordinator that farms work out to worker agents — an orchestration framework, a scheduler, or a script of your own — the delegation tools let it request short-lived, narrowed authority per task instead of every worker holding standing broad scopes. See the [Delegated Authorization contract](delegated-authorization-integration.md) for the claim flow and header transport; claiming a grant is REST-only so the secret never appears in a model-visible tool result.
 
 ### Scope Model
 
