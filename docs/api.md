@@ -826,8 +826,13 @@ data: {"type": "activity_created", "timestamp": "2026-05-18T12:34:56.789Z", "dat
 | `activity_cancelled` | An activity is cancelled |
 | `activity_recovered` | A stale activity is reassigned or recovered |
 | `connector_executed` | A connector binding action completes |
+| `delegation_request_created` | An actor asks for short-lived delegated authority |
+| `delegation_request_approved` | A delegation request is approved and produces an unclaimed grant |
+| `delegation_request_denied` | A delegation request is denied |
 
 The `connector_executed` payload includes `binding_id`, `binding_name`, `scope`, `connector_type_id`, `connector_type_name`, `action`, `success`, `duration_ms`, `status`, and `error_message`.
+
+The `delegation_request_*` payloads include `request_id`, `status`, requester and recipient identity, `purpose`, `ttl_seconds`, permission counts, and the decision fields (`decided_by_actor_id`, `decision_reason`, `grant_id`). They never include permission details or grant secrets.
 
 The stream sends an SSE comment (`: heartbeat`) every 15 seconds to keep the connection alive through proxies. The browser's built-in `EventSource` API reconnects automatically on disconnect; Agent Core's dashboard client uses exponential backoff (1 s → 2 s → … → 30 s max).
 
@@ -1097,7 +1102,7 @@ The secret is write-only. It is never returned in list or get responses.
 
 ### Supported event types
 
-`activity_created`, `activity_updated`, `activity_heartbeat`, `activity_cancelled`, `activity_recovered`, `connector_executed`
+`activity_created`, `activity_updated`, `activity_heartbeat`, `activity_cancelled`, `activity_recovered`, `connector_executed`, `delegation_request_created`, `delegation_request_approved`, `delegation_request_denied`
 
 ### Delivery payload
 
@@ -1152,6 +1157,31 @@ Every delivery is a signed HTTP POST. The envelope is the same for all event typ
 ```
 
 `error_message` is non-null on failure.
+
+**Delegation event `data` fields** (`delegation_request_created`, `delegation_request_approved`, `delegation_request_denied`):
+
+```json
+{
+  "request_id": "req123",
+  "status": "approved",
+  "requester_actor_type": "agent",
+  "requester_actor_id": "coordinator-agent",
+  "recipient_agent_id": "worker-agent",
+  "target_user_id": "admin",
+  "purpose": "Summarize this week's workspace decisions",
+  "ttl_seconds": 900,
+  "scope_permission_count": 1,
+  "resource_permission_count": 0,
+  "binding_action_count": 0,
+  "decided_by_actor_id": "admin",
+  "decision_reason": null,
+  "grant_id": "grant123",
+  "created_at": "2026-05-18T09:00:00+00:00",
+  "decided_at": "2026-05-18T09:05:00+00:00"
+}
+```
+
+Decision fields are null on `delegation_request_created`; `grant_id` is set only on approval; `decision_reason` only on denial when a reason was given. Payloads carry permission counts, never permission details, and never any grant secret.
 
 Signature header: `X-Agent-Core-Signature: sha256=<hex>` (HMAC-SHA256 of raw body with webhook secret).
 

@@ -147,6 +147,69 @@ def test_request_shape_is_closed_and_delegated_credentials_cannot_request(
     assert delegated.status_code == 403
 
 
+def test_request_lifecycle_notifies_stream_and_webhooks(
+    test_client, admin_token, agent_token, monkeypatch
+):
+    from app.services import webhook_service
+    from app.services.event_stream_service import event_hub
+
+    assert "delegation_request_created" in webhook_service.WEBHOOK_EVENT_TYPES
+    assert "delegation_request_approved" in webhook_service.WEBHOOK_EVENT_TYPES
+    assert "delegation_request_denied" in webhook_service.WEBHOOK_EVENT_TYPES
+
+    seen = []
+    monkeypatch.setattr(
+        event_hub, "publish", lambda event, data: seen.append(("stream", event, data))
+    )
+    monkeypatch.setattr(
+        webhook_service,
+        "dispatch_event",
+        lambda event, data: seen.append(("webhook", event, data)),
+    )
+
+    request = _request(test_client, agent_token)
+    created = [item for item in seen if item[1] == "delegation_request_created"]
+    assert {kind for kind, _, _ in created} == {"stream", "webhook"}
+    payload = created[0][2]
+    assert payload["request_id"] == request["id"]
+    assert payload["status"] == "pending"
+    assert payload["scope_permission_count"] == 2
+    assert "scope_permissions" not in payload
+
+    test_client.cookies.set("session_token", admin_token)
+    overview = test_client.get("/")
+    assert overview.status_code == 200
+    assert "Pending Delegations" in overview.text
+    assert "/delegation-requests" in overview.text
+
+    seen.clear()
+    denied = test_client.post(
+        f"/api/delegation-requests/{request['id']}/deny",
+        headers={"Authorization": f"Bearer {admin_token}"},
+        json={"reason": "not needed"},
+    )
+    assert denied.status_code == 200
+    assert {(kind, event) for kind, event, _ in seen} == {
+        ("stream", "delegation_request_denied"),
+        ("webhook", "delegation_request_denied"),
+    }
+    assert seen[0][2]["decision_reason"] == "not needed"
+
+    seen.clear()
+    second = _request(test_client, agent_token)
+    approved = test_client.post(
+        f"/api/delegation-requests/{second['id']}/approve",
+        headers={"Authorization": f"Bearer {admin_token}"},
+        json={},
+    )
+    assert approved.status_code == 200
+    events = {event for _, event, _ in seen}
+    assert "delegation_request_approved" in events
+    approved_payload = next(d for _, e, d in seen if e == "delegation_request_approved")
+    assert approved_payload["grant_id"]
+    assert "grant_secret" not in approved_payload
+
+
 def test_rest_and_mcp_share_request_and_approval_decisions(test_client, admin_token, agent_token):
     requested = test_client.post(
         "/mcp",

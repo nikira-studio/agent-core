@@ -23,6 +23,9 @@ WEBHOOK_EVENT_TYPES = (
     "activity_cancelled",
     "activity_recovered",
     "connector_executed",
+    "delegation_request_created",
+    "delegation_request_approved",
+    "delegation_request_denied",
 )
 
 DELIVERY_TIMEOUT_SECONDS = 5
@@ -293,6 +296,32 @@ def _sample_payload(event_type: str) -> dict:
             "duration_ms": 142,
             "status": "success",
             "error_message": None,
+        }
+    elif event_type in ("delegation_request_created", "delegation_request_approved",
+                         "delegation_request_denied"):
+        status_map = {
+            "delegation_request_created": "pending",
+            "delegation_request_approved": "approved",
+            "delegation_request_denied": "denied",
+        }
+        decided = event_type != "delegation_request_created"
+        data = {
+            "request_id": "sample-request-id",
+            "status": status_map[event_type],
+            "requester_actor_type": "agent",
+            "requester_actor_id": "coordinator-agent",
+            "recipient_agent_id": "worker-agent",
+            "target_user_id": "admin",
+            "purpose": "Summarize this week's workspace decisions",
+            "ttl_seconds": 900,
+            "scope_permission_count": 1,
+            "resource_permission_count": 0,
+            "binding_action_count": 0,
+            "decided_by_actor_id": "admin" if decided else None,
+            "decision_reason": "not needed" if event_type == "delegation_request_denied" else None,
+            "grant_id": "sample-grant-id" if event_type == "delegation_request_approved" else None,
+            "created_at": started,
+            "decided_at": now if decided else None,
         }
     else:
         data = {"message": f"{APP_NAME} webhook test delivery", "event_type": event_type}

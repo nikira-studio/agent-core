@@ -161,7 +161,7 @@ def render_page(
     layout_class = "layout" if show_sidebar else "layout no-sidebar"
     user_tz_js = json.dumps((session or {}).get("timezone") or "")
     events_js = (
-        '<script src="/static/js/events.js?v=20260518a"></script>' if session else ""
+        '<script src="/static/js/events.js?v=20260816a"></script>' if session else ""
     )
 
     return HTMLResponse(

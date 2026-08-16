@@ -331,6 +331,38 @@ def _action_names(connector_type: dict | None) -> set[str]:
     return names - set((connector_type or {}).get("disabled_actions") or [])
 
 
+def _notify_request(event: str, request: dict) -> None:
+    """Announce a request-lifecycle change to the live dashboard and webhooks.
+
+    Grants have a five-minute claim window and an hour-long TTL, so an approval
+    flow nobody notices always times out. Notification lives here, in the
+    service, because both REST and MCP create and decide requests.
+    """
+    from app.services import webhook_service
+    from app.services.event_stream_service import event_hub
+
+    payload = {
+        "request_id": request.get("id"),
+        "status": request.get("status"),
+        "requester_actor_type": request.get("requester_actor_type"),
+        "requester_actor_id": request.get("requester_actor_id"),
+        "recipient_agent_id": request.get("recipient_agent_id"),
+        "target_user_id": request.get("target_user_id"),
+        "purpose": request.get("purpose"),
+        "ttl_seconds": request.get("ttl_seconds"),
+        "scope_permission_count": len(request.get("scope_permissions") or []),
+        "resource_permission_count": len(request.get("resource_permissions") or []),
+        "binding_action_count": len(request.get("binding_actions") or []),
+        "decided_by_actor_id": request.get("decided_by_actor_id"),
+        "decision_reason": request.get("decision_reason"),
+        "grant_id": request.get("grant_id"),
+        "created_at": request.get("created_at"),
+        "decided_at": request.get("decided_at"),
+    }
+    event_hub.publish(event, payload)
+    webhook_service.dispatch_event(event, payload)
+
+
 def create_request(
     authority: EffectiveAuthority,
     *,
@@ -388,7 +420,9 @@ def create_request(
             [(request_id, *item) for item in actions],
         )
         conn.commit()
-    return get_request(request_id, authority)
+    request = get_request(request_id, authority)
+    _notify_request("delegation_request_created", request)
+    return request
 
 
 def _normalize_requested_permissions(scope_permissions, resource_permissions, binding_actions):
@@ -497,7 +531,9 @@ def approve_request(
             conn.commit()
             raise APIError("REQUEST_DECIDED", "Delegation request has already been decided", 409)
         conn.commit()
-    return {"request": get_request(request_id, authority), "grant": grant}
+    decided = get_request(request_id, authority)
+    _notify_request("delegation_request_approved", decided)
+    return {"request": decided, "grant": grant}
 
 
 def deny_request(request_id: str, authority: EffectiveAuthority, reason: str | None) -> dict:
@@ -516,4 +552,6 @@ def deny_request(request_id: str, authority: EffectiveAuthority, reason: str | N
         conn.commit()
     if changed.rowcount != 1:
         raise APIError("REQUEST_DECIDED", "Delegation request has already been decided", 409)
-    return get_request(request_id, authority)
+    denied = get_request(request_id, authority)
+    _notify_request("delegation_request_denied", denied)
+    return denied

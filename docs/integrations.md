@@ -939,6 +939,9 @@ Webhooks are **admin-only** and managed from the **Webhooks** page in the dashbo
 | `activity_cancelled` | An activity is cancelled |
 | `activity_recovered` | An activity is recovered (reassigned, resumed, closed) |
 | `connector_executed` | A connector binding action completes |
+| `delegation_request_created` | An agent asks for short-lived delegated authority — the event to route to a phone or chat channel, since pending requests wait on a human decision |
+| `delegation_request_approved` | A delegation request is approved |
+| `delegation_request_denied` | A delegation request is denied |
 
 ### Payload shape
 

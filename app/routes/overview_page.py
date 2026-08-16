@@ -309,6 +309,13 @@ async def dashboard_home(request: Request, session: dict = Depends(require_auth)
         else "user_id = ? AND status IN ('active', 'reassigned')",
         () if is_admin else (session["user_id"],),
     )
+    pending_delegation_count = count_rows(
+        "delegation_requests",
+        "status = 'pending'"
+        if is_admin
+        else "status = 'pending' AND target_user_id = ?",
+        () if is_admin else (session["user_id"],),
+    )
     connector_type_count = len(connector_types)
     enabled_action_count = sum(
         max(len(ct.get("supported_actions") or []) - len(ct.get("disabled_actions") or []), 0)
@@ -327,6 +334,7 @@ async def dashboard_home(request: Request, session: dict = Depends(require_auth)
       <a class="stat-card stat-link" href="/workspaces"><div class="value">{workspace_count}</div><div class="label">Active Workspaces</div></a>
       <a class="stat-card stat-link" href="/activity" id="stat-open-activities"><div class="value">{active_task_count}</div><div class="label">Open Activities</div></a>
       <a class="stat-card stat-link" href="/activity" id="stat-stale-blocked"><div class="value">{len(attention)}</div><div class="label">Stale / Blocked</div></a>
+      <a class="stat-card stat-link" href="/delegation-requests" id="stat-pending-delegations"><div class="value">{pending_delegation_count}</div><div class="label">Pending Delegations</div></a>
       <a class="stat-card stat-link" href="/memory"><div class="value">{memory_count}</div><div class="label">Memory Records</div></a>
     </div>"""
 
@@ -420,6 +428,15 @@ async def dashboard_home(request: Request, session: dict = Depends(require_auth)
     </div>
     <script>
     window.{JS_WINDOW_EVENT} = async function(event) {{
+      if ((event.type || '').startsWith('delegation_request_')) {{
+        var pendingEl = document.getElementById('stat-pending-delegations');
+        if (!pendingEl) return;
+        var res = await apiFetch('/api/delegation-requests');
+        if (!res.ok) return;
+        var pending = ((res.data || {{}}).requests || []).filter(function(r) {{ return r.status === 'pending'; }}).length;
+        pendingEl.querySelector('.value').textContent = pending;
+        return;
+      }}
       if (!(event.type || '').startsWith('activity_')) return;
       var j = await apiFetch('/api/dashboard/activity/summary');
       if (!j.ok) return;

@@ -13,6 +13,9 @@
     'activity_cancelled',
     'activity_recovered',
     'connector_executed',
+    'delegation_request_created',
+    'delegation_request_approved',
+    'delegation_request_denied',
   ];
 
   function connect() {
