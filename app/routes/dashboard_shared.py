@@ -124,6 +124,7 @@ def render_page(
         ("/connectors", "Connectors"),
         ("/credentials", "Credentials"),
         ("/integrations", "Integrations"),
+        ("/delegation-requests", "Delegation"),
         ("/activity", "Activity"),
         ("/audit", "Audit"),
         ("/webhooks", "Webhooks"),

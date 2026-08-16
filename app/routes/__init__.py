@@ -30,6 +30,7 @@ from app.routes.overview_page import router as overview_page_router
 from app.routes.auth_pages import router as auth_pages_router
 from app.routes.settings_page import router as settings_page_router
 from app.routes.webhooks_page import router as webhooks_page_router
+from app.routes.delegation_requests_page import router as delegation_requests_page_router
 from app.routes.events import router as events_router
 from app.routes.webhooks import router as webhooks_router
 
@@ -66,6 +67,7 @@ __all__ = [
     "auth_pages_router",
     "settings_page_router",
     "webhooks_page_router",
+    "delegation_requests_page_router",
     "events_router",
     "webhooks_router",
 ]

@@ -60,6 +60,8 @@ An unprivileged coordinator can request authority without possessing it:
 
 Requests can be inspected with `GET /api/delegation-requests` and `GET /api/delegation-requests/{id}`. Denial uses `POST /api/delegation-requests/{id}/deny`. Decisions are one-time.
 
+Logged-in human users can also review visible requests at `/delegation-requests`. The dashboard supports approving all requested permissions, narrowing by removing requested permissions, or denying with an optional reason. It never displays grant secrets; the normal recipient claim flow remains unchanged. API and MCP authorization remain authoritative for every decision.
+
 ## MCP parity
 
 The stateless `/mcp` transport rebuilds authority for every HTTP request. Send the same two authentication headers on every delegated MCP call. Supported lifecycle and inspection tools are:

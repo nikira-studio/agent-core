@@ -17,6 +17,24 @@ def _request(test_client, agent_token):
     return response.json()["data"]["request"]
 
 
+def test_delegation_requests_dashboard_supports_human_review(
+    test_client, admin_token, agent_token
+):
+    request = _request(test_client, agent_token)
+    test_client.cookies.set("session_token", admin_token)
+
+    page = test_client.get("/delegation-requests")
+    assert page.status_code == 200, page.text
+    assert "Delegation Requests" in page.text
+    assert request["id"] in page.text
+    assert "read approved context" in page.text
+    assert "data-delegation-approve" in page.text
+    assert "data-delegation-deny" in page.text
+    assert "Approval can only keep or narrow" in page.text
+    assert "grant_secret" not in page.text
+    assert "/api/delegation-requests/" in page.text
+
+
 def test_requester_cannot_self_approve_but_admin_can_narrow(
     test_client, admin_token, agent_token
 ):

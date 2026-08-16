@@ -42,6 +42,7 @@ from app.routes import (
     auth_pages_router,
     settings_page_router,
     webhooks_page_router,
+    delegation_requests_page_router,
     events_router,
     webhooks_router,
 )
@@ -268,6 +269,7 @@ def create_app() -> FastAPI:
     app.include_router(auth_pages_router, tags=["auth_pages"])
     app.include_router(settings_page_router, tags=["settings_page"])
     app.include_router(webhooks_page_router, tags=["webhooks_page"])
+    app.include_router(delegation_requests_page_router, tags=["delegation_requests_page"])
     app.include_router(dashboard_api_router, tags=["dashboard_api"])
     app.include_router(backup_router, tags=["backup"])
     app.include_router(events_router, tags=["events"])
