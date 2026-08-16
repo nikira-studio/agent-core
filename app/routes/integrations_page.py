@@ -21,6 +21,19 @@ from app.routes.dashboard_shared import (
 router = APIRouter()
 
 
+def _mcp_tool_listing() -> str:
+    """The full MCP tool list as prose, derived from the manifest.
+
+    Every generated prompt names the available tools. Hardcoded copies of that
+    list drifted independently (three templates, three different subsets), so
+    it is built from the same MANIFEST that /mcp serves.
+    """
+    from app.routes.mcp import MANIFEST
+
+    names = [f"`{tool['name']}`" for tool in MANIFEST["tools"]]
+    return ", ".join(names[:-1]) + f", and {names[-1]}"
+
+
 # Shared memory-discipline guidance interpolated into every generated agent
 # prompt (CLAUDE.md, AGENTS.md, session prompt, assistant onboarding). The
 # specific rules come from observed failures: three different live agents
@@ -970,7 +983,7 @@ def _build_instructions(
 
 - The MCP endpoint is `{base_url}/mcp`. Your client should send requests as JSON with `{{"tool": "...", "params": {{...}}}}`.
 - Authenticate using `Authorization: Bearer ${ENV_PREFIX}API_KEY` header or your client's equivalent auth mechanism.
-- Available tools include: `memory_search`, `memory_get`, `memory_pinned`, `memory_write`, `memory_confirm`, `memory_feedback`, `memory_retract`, `credential_get`, `credential_list`, `activity_update`, `activity_search`, `activity_list`, `get_briefing`, `briefing_list`, `connectors_list`, `connectors_summary`, `connectors_bindings_list`, `connectors_bindings_test`, `connectors_actions_list`, and `connectors_run`.
+- Available tools: {_mcp_tool_listing()}.
 """
 
     return f"""# {APP_NAME} Setup Instructions
@@ -1110,7 +1123,7 @@ def _build_session_prompt(
 
 Use {APP_NAME} MCP for durable workspace memory, handoffs, and workspace context. If this is a handoff, resume, or review of prior work, also inspect the recent activity trail and any generated briefing before making changes. Use `activity_list` and `briefing_list` when you need that trail from MCP.
 Default memory scope for this setup is `{default_scope}`.
-Core MCP tools include `memory_search`, `memory_get`, `memory_pinned`, `memory_write`, `memory_confirm`, `memory_feedback`, `memory_verify`, `memory_reanchor`, `memory_pin`, `memory_move`, `memory_retract`, `credential_get`, `credential_list`, `activity_update`, `activity_search`, `activity_list`, `activity_get`, `activity_pickup`, `get_briefing`, `briefing_list`, `connectors_list`, `connectors_summary`, `connectors_bindings_list`, `connectors_bindings_test`, `connectors_actions_list`, and `connectors_run`.
+Core MCP tools include {_mcp_tool_listing()}.
 Use your private scope `{agent_scope}` only for tool-specific scratch context.
 Use full prefixed scope names exactly as shown; do not use plain workspace IDs or agent IDs as memory scopes.
 Read `{user_scope}` for stable {user_display} preferences and other owner-context details when you have user-scope read access.
@@ -1163,7 +1176,7 @@ def _build_claude_md(
 You are working on the {workspace_name} workspace.
 
 Use {APP_NAME} for durable workspace memory, activity tracking, handoffs, and credential references. If this is a handoff, resume, or review of prior work, also inspect the recent activity trail and any generated briefing before making changes. Use `activity_list` and `briefing_list` when you need that trail from MCP.
-Core MCP tools include `memory_search`, `memory_get`, `memory_pinned`, `memory_write`, `memory_confirm`, `memory_feedback`, `memory_verify`, `memory_reanchor`, `memory_pin`, `memory_move`, `memory_retract`, `credential_get`, `credential_list`, `activity_update`, `activity_search`, `activity_list`, `activity_get`, `activity_pickup`, `get_briefing`, `briefing_list`, `connectors_list`, `connectors_summary`, `connectors_bindings_list`, `connectors_bindings_test`, `connectors_actions_list`, and `connectors_run`.
+Core MCP tools include {_mcp_tool_listing()}.
 
 ## Connection
 
