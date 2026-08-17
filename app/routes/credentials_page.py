@@ -48,7 +48,7 @@ def _expiry_cell(expires_at) -> str:
 
 
 @router.get("/credentials")
-async def credentials_page(request: Request, session: dict = Depends(require_auth)):
+def credentials_page(request: Request, session: dict = Depends(require_auth)):
     ctx = build_user_context(session)
     enforcer = ScopeEnforcer(
         ctx.read_scopes,

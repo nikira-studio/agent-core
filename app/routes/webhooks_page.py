@@ -9,7 +9,7 @@ router = APIRouter()
 
 
 @router.get("/webhooks")
-async def webhooks_page(request: Request, session: dict = Depends(require_auth)):
+def webhooks_page(request: Request, session: dict = Depends(require_auth)):
     from app.services import webhook_service as wh_svc
 
     if session.get("role") != "admin":

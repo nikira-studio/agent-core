@@ -40,7 +40,7 @@ def _require_admin_ctx(ctx: RequestContext = Depends(get_request_context)) -> Re
 
 
 @router.post("")
-async def create_webhook(
+def create_webhook(
     body: CreateWebhookRequest,
     ctx: RequestContext = Depends(_require_admin_ctx),
 ):
@@ -80,7 +80,7 @@ async def create_webhook(
 
 
 @router.get("")
-async def list_webhooks(
+def list_webhooks(
     ctx: RequestContext = Depends(_require_admin_ctx),
 ):
     webhooks = webhook_service.list_webhooks()
@@ -88,7 +88,7 @@ async def list_webhooks(
 
 
 @router.get("/{webhook_id}")
-async def get_webhook(
+def get_webhook(
     webhook_id: str,
     ctx: RequestContext = Depends(_require_admin_ctx),
 ):
@@ -99,7 +99,7 @@ async def get_webhook(
 
 
 @router.put("/{webhook_id}")
-async def update_webhook(
+def update_webhook(
     webhook_id: str,
     body: UpdateWebhookRequest,
     ctx: RequestContext = Depends(_require_admin_ctx),
@@ -143,7 +143,7 @@ async def update_webhook(
 
 
 @router.delete("/{webhook_id}")
-async def delete_webhook(
+def delete_webhook(
     webhook_id: str,
     ctx: RequestContext = Depends(_require_admin_ctx),
 ):
@@ -205,7 +205,7 @@ async def test_webhook(
 
 
 @router.get("/inbound/key/status")
-async def inbound_key_status(
+def inbound_key_status(
     ctx: RequestContext = Depends(_require_admin_ctx),
 ):
     row = inbound_webhook_service.get_active_key_row()
@@ -219,7 +219,7 @@ async def inbound_key_status(
 
 
 @router.post("/inbound/key")
-async def generate_inbound_key(
+def generate_inbound_key(
     ctx: RequestContext = Depends(_require_admin_ctx),
 ):
     try:
@@ -267,7 +267,7 @@ class InboundWebhookRequest(BaseModel):
 
 
 @router.post("/inbound")
-async def receive_inbound(
+def receive_inbound(
     body: InboundWebhookRequest,
     request: Request,
 ):
@@ -324,7 +324,7 @@ async def receive_inbound(
 
 
 @router.get("/{webhook_id}/deliveries")
-async def list_deliveries(
+def list_deliveries(
     webhook_id: str,
     limit: int = 50,
     ctx: RequestContext = Depends(_require_admin_ctx),

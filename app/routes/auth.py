@@ -143,7 +143,7 @@ class AdminUpdateUserRequest(BaseModel):
 
 
 @router.get("/effective-authority")
-async def effective_authority(
+def effective_authority(
     authority: EffectiveAuthority = Depends(get_request_context),
 ):
     """Inspect the caller's current, non-secret effective authority."""
@@ -151,7 +151,7 @@ async def effective_authority(
 
 
 @router.post("/register")
-async def register(body: RegisterRequest, request: Request):
+def register(body: RegisterRequest, request: Request):
     if len(body.password) < 8:
         return error_response("INVALID_PASSWORD", "Password must be at least 8 characters long", 400)
     if "@" not in body.email or "." not in body.email:
@@ -195,7 +195,7 @@ async def register(body: RegisterRequest, request: Request):
 
 
 @router.post("/login")
-async def login(body: LoginRequest, request: Request):
+def login(body: LoginRequest, request: Request):
     client_ip = get_client_ip(request)
     user = get_user_by_email(body.email)
     if not user:
@@ -284,7 +284,7 @@ async def login(body: LoginRequest, request: Request):
 
 
 @router.post("/otp/enroll")
-async def otp_enroll(
+def otp_enroll(
     body: OtpEnrollRequest,
     request: Request,
     session_token: str = Depends(get_session_token),
@@ -313,7 +313,7 @@ async def otp_enroll(
 
 
 @router.post("/otp/confirm")
-async def otp_confirm(
+def otp_confirm(
     body: OtpConfirmRequest,
     request: Request,
     session_token: str = Depends(get_session_token),
@@ -336,7 +336,7 @@ async def otp_confirm(
 
 
 @router.post("/otp/verify")
-async def otp_verify(body: OtpVerifyRequest, request: Request):
+def otp_verify(body: OtpVerifyRequest, request: Request):
     from app.services.auth_service import decode_jwt
     db_session_id = decode_jwt(body.session_id)
     if not db_session_id:
@@ -411,7 +411,7 @@ class OtpDisableRequest(BaseModel):
 
 
 @router.post("/otp/disable")
-async def otp_disable(
+def otp_disable(
     body: OtpDisableRequest,
     request: Request,
     session_token: str = Depends(get_session_token),
@@ -444,7 +444,7 @@ async def otp_disable(
 
 
 @router.post("/logout")
-async def logout(request: Request, session_token: str = Depends(get_session_token)):
+def logout(request: Request, session_token: str = Depends(get_session_token)):
     session = validate_session(session_token)
     if session:
         audit_service.write_event(
@@ -465,7 +465,7 @@ async def logout(request: Request, session_token: str = Depends(get_session_toke
 
 
 @router.post("/password")
-async def change_user_password(
+def change_user_password(
     body: ChangePasswordRequest,
     request: Request,
     session_token: str = Depends(get_session_token),
@@ -492,7 +492,7 @@ async def change_user_password(
 
 
 @router.post("/users")
-async def create_user_endpoint(
+def create_user_endpoint(
     body: AdminCreateUserRequest,
     request: Request,
     session_token: str = Depends(get_session_token),
@@ -538,7 +538,7 @@ async def create_user_endpoint(
 
 
 @router.put("/users/{user_id}")
-async def update_user_endpoint(
+def update_user_endpoint(
     user_id: str,
     body: AdminUpdateUserRequest,
     request: Request,
@@ -586,7 +586,7 @@ async def update_user_endpoint(
 
 
 @router.delete("/users/{user_id}")
-async def delete_user_endpoint(
+def delete_user_endpoint(
     user_id: str,
     request: Request,
     session_token: str = Depends(get_session_token),

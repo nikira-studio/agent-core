@@ -931,7 +931,7 @@ async def connectors_adapters_page(
 
 
 @router.get("/connectors/help")
-async def connectors_help_page(request: Request, session: dict = Depends(require_auth)):
+def connectors_help_page(request: Request, session: dict = Depends(require_auth)):
     body = """
     <div class="page-header"><h1>Connector Help</h1></div>
 
@@ -1003,7 +1003,7 @@ async def connectors_help_page(request: Request, session: dict = Depends(require
 
 
 @router.get("/connectors/directory")
-async def connectors_directory_page(
+def connectors_directory_page(
     request: Request,
     session: dict = Depends(require_auth),
 ):

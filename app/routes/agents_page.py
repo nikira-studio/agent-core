@@ -16,7 +16,7 @@ router = APIRouter()
 
 
 @router.get("/agents")
-async def agents_page(request: Request, session: dict = Depends(require_auth)):
+def agents_page(request: Request, session: dict = Depends(require_auth)):
     from app.services import agent_service, auth_service, workspace_service
 
     is_admin = session.get("role") == "admin"

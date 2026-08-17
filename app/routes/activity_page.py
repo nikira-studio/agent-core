@@ -17,7 +17,7 @@ router = APIRouter()
 
 
 @router.get("/activity")
-async def activity_page(request: Request, session: dict = Depends(require_auth)):
+def activity_page(request: Request, session: dict = Depends(require_auth)):
     from app.services import activity_service
     from app.services.agent_service import list_agents
     from app.services import workspace_service

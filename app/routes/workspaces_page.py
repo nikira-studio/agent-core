@@ -14,7 +14,7 @@ router = APIRouter()
 
 
 @router.get("/workspaces")
-async def workspaces_page(request: Request, session: dict = Depends(require_auth)):
+def workspaces_page(request: Request, session: dict = Depends(require_auth)):
     import json
     from app.services import workspace_service, agent_service
 

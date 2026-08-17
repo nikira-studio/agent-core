@@ -17,7 +17,7 @@ router = APIRouter()
 
 
 @router.get("/audit")
-async def audit_page(request: Request, session: dict = Depends(require_auth)):
+def audit_page(request: Request, session: dict = Depends(require_auth)):
     from app.services import audit_service
 
     if session.get("role") != "admin":

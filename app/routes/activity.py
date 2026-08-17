@@ -46,7 +46,7 @@ def _can_activity(ctx: EffectiveAuthority, activity: dict, operation: str) -> bo
 
 
 @router.post("")
-async def create_activity(
+def create_activity(
     body: CreateActivityRequest,
     ctx: EffectiveAuthority = Depends(get_request_context),
 ):
@@ -101,7 +101,7 @@ async def create_activity(
 
 
 @router.post("/pickup")
-async def pickup_activity(
+def pickup_activity(
     ctx: EffectiveAuthority = Depends(get_request_context),
 ):
     if ctx.is_delegated:
@@ -141,7 +141,7 @@ async def pickup_activity(
 
 # Declared before /{activity_id} so "search" is not captured as an activity id.
 @router.get("/search")
-async def search_activities(
+def search_activities(
     query: str,
     agent_id: Optional[str] = None,
     memory_scope: Optional[str] = None,
@@ -197,7 +197,7 @@ async def search_activities(
 
 
 @router.get("/{activity_id}")
-async def get_activity(
+def get_activity(
     activity_id: str,
     ctx: EffectiveAuthority = Depends(get_request_context),
 ):
@@ -212,7 +212,7 @@ async def get_activity(
 
 
 @router.put("/{activity_id}")
-async def update_activity(
+def update_activity(
     activity_id: str,
     body: UpdateActivityRequest,
     ctx: EffectiveAuthority = Depends(get_request_context),
@@ -267,7 +267,7 @@ async def update_activity(
 
 
 @router.post("/{activity_id}/heartbeat")
-async def heartbeat_activity(
+def heartbeat_activity(
     activity_id: str,
     ctx: EffectiveAuthority = Depends(get_request_context),
 ):
@@ -306,7 +306,7 @@ async def heartbeat_activity(
 
 
 @router.get("")
-async def list_activities(
+def list_activities(
     status: Optional[str] = None,
     agent_id: Optional[str] = None,
     limit: int = 50,
@@ -357,7 +357,7 @@ async def list_activities(
 
 
 @router.delete("/{activity_id}")
-async def cancel_activity(
+def cancel_activity(
     activity_id: str,
     ctx: EffectiveAuthority = Depends(get_request_context),
 ):

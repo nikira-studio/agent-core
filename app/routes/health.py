@@ -7,7 +7,7 @@ router = APIRouter()
 
 
 @router.get("/health")
-async def health_check():
+def health_check():
     try:
         with get_db() as conn:
             conn.execute("SELECT 1")

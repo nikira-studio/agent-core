@@ -234,7 +234,7 @@ async def dashboard_search(
 
 
 @router.get("/")
-async def dashboard_home(request: Request, session: dict = Depends(require_auth)):
+def dashboard_home(request: Request, session: dict = Depends(require_auth)):
     from app.services import activity_service
     from app.services import connector_service
     from app.services.agent_service import list_agents

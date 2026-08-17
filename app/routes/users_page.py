@@ -16,7 +16,7 @@ router = APIRouter()
 
 
 @router.get("/users")
-async def users_page(request: Request, session: dict = Depends(require_auth)):
+def users_page(request: Request, session: dict = Depends(require_auth)):
     from app.services.auth_service import list_users
 
     if session.get("role") != "admin":

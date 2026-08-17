@@ -115,7 +115,7 @@ def _authority_audit_details(agent: dict) -> dict:
 
 
 @router.get("")
-async def list_agents(session: dict = Depends(get_current_session)):
+def list_agents(session: dict = Depends(get_current_session)):
     if _is_admin(session):
         agents = agent_service.list_agents()
     else:
@@ -140,7 +140,7 @@ async def list_agents(session: dict = Depends(get_current_session)):
 
 
 @router.post("")
-async def create_agent(
+def create_agent(
     body: CreateAgentRequest,
     session: dict = Depends(get_current_session),
 ):
@@ -209,7 +209,7 @@ async def create_agent(
 
 
 @router.get("/{agent_id}")
-async def get_agent(agent_id: str, session: dict = Depends(get_current_session)):
+def get_agent(agent_id: str, session: dict = Depends(get_current_session)):
     agent = agent_service.get_agent_by_id(agent_id)
     if not agent:
         return error_response("NOT_FOUND", "Agent not found", 404)
@@ -236,7 +236,7 @@ async def get_agent(agent_id: str, session: dict = Depends(get_current_session))
 
 
 @router.put("/{agent_id}")
-async def update_agent(
+def update_agent(
     agent_id: str,
     body: UpdateAgentRequest,
     session: dict = Depends(get_current_session),
@@ -291,7 +291,7 @@ async def update_agent(
 
 
 @router.delete("/{agent_id}")
-async def delete_agent(agent_id: str, session: dict = Depends(get_current_session)):
+def delete_agent(agent_id: str, session: dict = Depends(get_current_session)):
     agent = agent_service.get_agent_by_id(agent_id)
     if not agent:
         return error_response("NOT_FOUND", "Agent not found", 404)
@@ -314,7 +314,7 @@ async def delete_agent(agent_id: str, session: dict = Depends(get_current_sessio
 
 
 @router.post("/{agent_id}/activate")
-async def activate_agent(agent_id: str, session: dict = Depends(get_current_session)):
+def activate_agent(agent_id: str, session: dict = Depends(get_current_session)):
     agent = agent_service.get_agent_by_id(agent_id)
     if not agent:
         return error_response("NOT_FOUND", "Agent not found", 404)
@@ -337,7 +337,7 @@ async def activate_agent(agent_id: str, session: dict = Depends(get_current_sess
 
 
 @router.post("/{agent_id}/purge")
-async def purge_agent(agent_id: str, session: dict = Depends(get_current_session)):
+def purge_agent(agent_id: str, session: dict = Depends(get_current_session)):
     agent = agent_service.get_agent_by_id(agent_id)
     if not agent:
         return error_response("NOT_FOUND", "Agent not found", 404)
@@ -360,7 +360,7 @@ async def purge_agent(agent_id: str, session: dict = Depends(get_current_session
 
 
 @router.post("/{agent_id}/rotate_key")
-async def rotate_key(agent_id: str, session: dict = Depends(get_current_session)):
+def rotate_key(agent_id: str, session: dict = Depends(get_current_session)):
     agent = agent_service.get_agent_by_id(agent_id)
     if not agent:
         return error_response("NOT_FOUND", "Agent not found", 404)

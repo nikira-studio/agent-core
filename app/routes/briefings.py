@@ -164,7 +164,7 @@ async def create_prd_handoff_briefing(
 
 
 @router.get("/{briefing_id}")
-async def get_briefing(
+def get_briefing(
     briefing_id: str,
     ctx: EffectiveAuthority = Depends(get_request_context),
 ):

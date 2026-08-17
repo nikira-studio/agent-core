@@ -123,9 +123,13 @@ def exclusive_access(drain_timeout: float = 30.0) -> Generator[None, None, None]
 
 
 def get_connection() -> sqlite3.Connection:
-    conn = sqlite3.connect(str(get_db_path()), timeout=30.0)
-    conn.execute("PRAGMA journal_mode=WAL")
+    # busy_timeout is set before any other statement runs: journal_mode needs
+    # locks, and until the pragma applies, the only busy handler is the connect
+    # timeout — which at 30s stalled the whole app under write contention.
+    conn = sqlite3.connect(str(get_db_path()), timeout=5.0)
     conn.execute("PRAGMA busy_timeout=5000")
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA synchronous=NORMAL")
     conn.execute("PRAGMA foreign_keys=ON")
     _load_sqlite_vec(conn)
     conn.row_factory = sqlite3.Row

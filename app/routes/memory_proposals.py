@@ -41,7 +41,7 @@ def _client_ip(request: Request) -> Optional[str]:
 
 
 @router.get("")
-async def list_proposals(
+def list_proposals(
     status: str = "pending",
     scope: Optional[str] = None,
     rule: Optional[str] = None,
@@ -97,7 +97,7 @@ async def review_usefulness(
 
 
 @router.get("/stats")
-async def proposal_stats(session: dict = Depends(require_admin)):
+def proposal_stats(session: dict = Depends(require_admin)):
     """Per-rule verdict history: how often each rule has been right so far."""
     return success_response({"rules": memory_proposal_service.rule_stats()})
 
@@ -139,7 +139,7 @@ async def generate_proposals(
 
 
 @router.post("/{proposal_id}/reanchor")
-async def reanchor_proposal(
+def reanchor_proposal(
     proposal_id: str,
     body: ReanchorProposalRequest,
     request: Request,
@@ -175,7 +175,7 @@ async def reanchor_proposal(
 
 
 @router.post("/{proposal_id}/decide")
-async def decide_proposal(
+def decide_proposal(
     proposal_id: str,
     body: DecideProposalRequest,
     request: Request,

@@ -188,7 +188,7 @@ async def update_dashboard_system_settings(
 
 
 @router.post("/api/dashboard/prune")
-async def prune_dashboard_data(
+def prune_dashboard_data(
     body: ManualPruneRequest,
     request: Request,
     session: dict = Depends(require_admin),
@@ -495,7 +495,7 @@ async def list_ollama_models(url: str, session: dict = Depends(require_admin)):
 
 
 @router.get("/settings")
-async def settings_page(request: Request, session: dict = Depends(require_auth)):
+def settings_page(request: Request, session: dict = Depends(require_auth)):
     from app.database import get_db
 
     user = get_user_by_id(session["user_id"])
@@ -1237,7 +1237,7 @@ async def settings_page(request: Request, session: dict = Depends(require_auth))
 
 
 @router.get("/settings/password")
-async def settings_password_page(
+def settings_password_page(
     request: Request, session: dict = Depends(require_auth)
 ):
     js = """
@@ -1310,7 +1310,7 @@ async def settings_password_page(
 
 
 @router.get("/settings/otp")
-async def settings_otp_page(request: Request, session: dict = Depends(require_auth)):
+def settings_otp_page(request: Request, session: dict = Depends(require_auth)):
     from app.services.auth_service import is_otp_enrolled
 
     enrolled = is_otp_enrolled(session["user_id"])

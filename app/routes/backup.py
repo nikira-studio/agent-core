@@ -244,5 +244,5 @@ async def run_maintenance(session: dict = Depends(require_admin)):
 
 
 @router.get("/maintenance/status")
-async def maintenance_status(session: dict = Depends(require_admin)):
+def maintenance_status(session: dict = Depends(require_admin)):
     return success_response(backup_service.get_maintenance_status())

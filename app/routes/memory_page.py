@@ -69,7 +69,7 @@ def _state_cell(r) -> str:
 
 
 @router.get("/memory")
-async def memory_page(request: Request, session: dict = Depends(require_auth)):
+def memory_page(request: Request, session: dict = Depends(require_auth)):
     from app.services import memory_service
     from app.services.agent_service import list_agents
     from app.services import workspace_service

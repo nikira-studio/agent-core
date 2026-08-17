@@ -38,6 +38,9 @@ class Settings(BaseSettings):
     # Delay before the first automatic run after app startup, so it doesn't
     # contend with startup adapter sync and never fires during a fast test run.
     MAINTENANCE_INITIAL_DELAY_SECONDS: int = 300
+    # Requests slower than this many milliseconds are logged with their
+    # duration, which the access log does not record. Set to 0 to disable.
+    SLOW_REQUEST_LOG_MS: int = 1000
 
     @property
     def data_dir(self) -> Path:

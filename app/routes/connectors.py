@@ -130,7 +130,7 @@ class AdapterInstallRequest(BaseModel):
 
 
 @router.get("")
-async def list_bindings(
+def list_bindings(
     scope: Optional[str] = None,
     connector_type_id: Optional[str] = None,
     enabled: Optional[bool] = None,
@@ -155,7 +155,7 @@ async def list_bindings(
 
 
 @router.post("/resolve")
-async def resolve_binding(
+def resolve_binding(
     body: ResolveBindingRequest,
     ctx: EffectiveAuthority = Depends(get_request_context),
 ):
@@ -167,7 +167,7 @@ async def resolve_binding(
 
 
 @router.post("")
-async def create_binding(
+def create_binding(
     body: CreateBindingRequest,
     ctx: RequestContext = Depends(get_request_context),
 ):
@@ -275,7 +275,7 @@ async def connector_oauth_callback(
 
 
 @router.get("/{binding_id}")
-async def get_binding(
+def get_binding(
     binding_id: str,
     ctx: RequestContext = Depends(get_request_context),
 ):
@@ -295,7 +295,7 @@ async def get_binding(
 
 
 @router.put("/{binding_id}")
-async def update_binding(
+def update_binding(
     binding_id: str,
     body: UpdateBindingRequest,
     ctx: RequestContext = Depends(get_request_context),
@@ -348,7 +348,7 @@ async def update_binding(
 
 
 @router.delete("/{binding_id}")
-async def delete_binding(
+def delete_binding(
     binding_id: str,
     ctx: RequestContext = Depends(get_request_context),
 ):
@@ -481,7 +481,7 @@ async def run_binding_compat(
 
 
 @router.get("/{binding_id}/executions")
-async def list_binding_executions(
+def list_binding_executions(
     binding_id: str,
     limit: int = 50,
     offset: int = 0,
@@ -548,7 +548,7 @@ connector_types_router = APIRouter(
 
 
 @connector_types_router.get("")
-async def list_connector_types(
+def list_connector_types(
     ctx: RequestContext = Depends(get_request_context),
 ):
     types = connector_service.list_connector_types()
@@ -556,7 +556,7 @@ async def list_connector_types(
 
 
 @connector_types_router.get("/summary")
-async def connector_summary(
+def connector_summary(
     connector_type_id: Optional[str] = None,
     scope: Optional[str] = None,
     enabled_only: bool = True,
@@ -663,7 +663,7 @@ async def get_connector_type_tools(
 
 
 @connector_types_router.put("/{connector_type_id}/actions")
-async def update_connector_type_actions(
+def update_connector_type_actions(
     connector_type_id: str,
     body: ActionSettingsRequest,
     ctx: RequestContext = Depends(get_request_context),
@@ -1099,7 +1099,7 @@ async def preview_spec(
 
 
 @connector_types_router.post("/create-http")
-async def create_http_connector(
+def create_http_connector(
     body: CreateHttpConnectorRequest,
     ctx: RequestContext = Depends(get_request_context),
 ):

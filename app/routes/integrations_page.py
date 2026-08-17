@@ -547,7 +547,7 @@ async def generate_agent_connection(
 
 
 @router.get("/integrations")
-async def integrations_page(
+def integrations_page(
     request: Request,
     session: dict = Depends(require_auth),
 ):

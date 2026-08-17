@@ -444,7 +444,7 @@ async def search_memory(
 
 
 @router.post("/get")
-async def get_memory(
+def get_memory(
     body: GetMemoryRequest,
     ctx: EffectiveAuthority = Depends(get_request_context),
 ):
@@ -625,7 +625,7 @@ async def move_memory(
 
 
 @router.delete("/{record_id}")
-async def delete_memory_record(
+def delete_memory_record(
     record_id: str,
     ctx: EffectiveAuthority = Depends(get_request_context),
 ):
@@ -657,7 +657,7 @@ async def delete_memory_record(
 
 
 @router.get("/{record_id}")
-async def get_memory_record(
+def get_memory_record(
     record_id: str,
     ctx: EffectiveAuthority = Depends(get_request_context),
 ):
@@ -672,7 +672,7 @@ async def get_memory_record(
 
 
 @router.get("/{record_id}/chain")
-async def get_memory_chain(
+def get_memory_chain(
     record_id: str,
     ctx: EffectiveAuthority = Depends(get_request_context),
 ):

@@ -39,7 +39,7 @@ def _can_view_workspace(workspace: dict, session: dict) -> bool:
 
 
 @router.get("")
-async def list_workspaces(session: dict = Depends(get_current_session)):
+def list_workspaces(session: dict = Depends(get_current_session)):
     if session.get("role") == "admin":
         workspaces = workspace_service.list_workspaces()
     else:
@@ -48,7 +48,7 @@ async def list_workspaces(session: dict = Depends(get_current_session)):
 
 
 @router.post("")
-async def create_workspace(
+def create_workspace(
     body: CreateWorkspaceRequest,
     session: dict = Depends(get_current_session),
 ):
@@ -81,7 +81,7 @@ async def create_workspace(
 
 
 @router.get("/{workspace_id}")
-async def get_workspace(workspace_id: str, session: dict = Depends(get_current_session)):
+def get_workspace(workspace_id: str, session: dict = Depends(get_current_session)):
     workspace = workspace_service.get_workspace_by_id(workspace_id)
     if not workspace:
         return error_response("NOT_FOUND", "Workspace not found", 404)
@@ -93,7 +93,7 @@ async def get_workspace(workspace_id: str, session: dict = Depends(get_current_s
 
 
 @router.put("/{workspace_id}")
-async def update_workspace(
+def update_workspace(
     workspace_id: str,
     body: UpdateWorkspaceRequest,
     session: dict = Depends(get_current_session),
@@ -125,7 +125,7 @@ async def update_workspace(
 
 
 @router.delete("/{workspace_id}")
-async def deactivate_workspace(workspace_id: str, session: dict = Depends(get_current_session)):
+def deactivate_workspace(workspace_id: str, session: dict = Depends(get_current_session)):
     workspace = workspace_service.get_workspace_by_id(workspace_id)
     if not workspace:
         return error_response("NOT_FOUND", "Workspace not found", 404)
@@ -148,7 +148,7 @@ async def deactivate_workspace(workspace_id: str, session: dict = Depends(get_cu
 
 
 @router.post("/{workspace_id}/activate")
-async def activate_workspace(workspace_id: str, session: dict = Depends(get_current_session)):
+def activate_workspace(workspace_id: str, session: dict = Depends(get_current_session)):
     workspace = workspace_service.get_workspace_by_id(workspace_id)
     if not workspace:
         return error_response("NOT_FOUND", "Workspace not found", 404)
@@ -171,7 +171,7 @@ async def activate_workspace(workspace_id: str, session: dict = Depends(get_curr
 
 
 @router.post("/{workspace_id}/purge")
-async def purge_workspace(workspace_id: str, session: dict = Depends(get_current_session)):
+def purge_workspace(workspace_id: str, session: dict = Depends(get_current_session)):
     workspace = workspace_service.get_workspace_by_id(workspace_id)
     if not workspace:
         return error_response("NOT_FOUND", "Workspace not found", 404)
@@ -194,7 +194,7 @@ async def purge_workspace(workspace_id: str, session: dict = Depends(get_current
 
 
 @router.get("/{workspace_id}/collaborators")
-async def list_collaborators(workspace_id: str, session: dict = Depends(get_current_session)):
+def list_collaborators(workspace_id: str, session: dict = Depends(get_current_session)):
     workspace = workspace_service.get_workspace_by_id(workspace_id)
     if not workspace:
         return error_response("NOT_FOUND", "Workspace not found", 404)
@@ -207,7 +207,7 @@ async def list_collaborators(workspace_id: str, session: dict = Depends(get_curr
 
 
 @router.put("/{workspace_id}/collaborators/{user_id}")
-async def upsert_collaborator(
+def upsert_collaborator(
     workspace_id: str,
     user_id: str,
     body: WorkspaceCollaboratorRequest,
@@ -243,7 +243,7 @@ async def upsert_collaborator(
 
 
 @router.delete("/{workspace_id}/collaborators/{user_id}")
-async def remove_collaborator(
+def remove_collaborator(
     workspace_id: str,
     user_id: str,
     session: dict = Depends(get_current_session),

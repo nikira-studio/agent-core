@@ -18,7 +18,7 @@ router = APIRouter(prefix="/api/dashboard", tags=["dashboard_api"])
 
 
 @router.get("/overview")
-async def dashboard_overview(session: dict = Depends(require_admin)):
+def dashboard_overview(session: dict = Depends(require_admin)):
     agent_count = len(agent_service.list_agents())
     workspace_count = len(workspace_service.list_workspaces())
     recent_activity = activity_service.list_activities(limit=5)
@@ -32,7 +32,7 @@ async def dashboard_overview(session: dict = Depends(require_admin)):
 
 
 @router.get("/memory")
-async def dashboard_memory(
+def dashboard_memory(
     scope: str | None = None,
     memory_class: str | None = None,
     limit: int = 50,
@@ -59,7 +59,7 @@ async def dashboard_memory(
 
 
 @router.get("/credentials")
-async def dashboard_credentials(
+def dashboard_credentials(
     scope: str | None = None,
     limit: int = 50,
     offset: int = 0,
@@ -96,7 +96,7 @@ async def dashboard_credentials(
 
 
 @router.get("/audit")
-async def dashboard_audit(
+def dashboard_audit(
     actor_type: str | None = None,
     actor_id: str | None = None,
     action: str | None = None,
@@ -117,7 +117,7 @@ async def dashboard_audit(
 
 
 @router.get("/activity")
-async def dashboard_activity(
+def dashboard_activity(
     status: str | None = None,
     limit: int = 50,
     offset: int = 0,
@@ -134,7 +134,7 @@ async def dashboard_activity(
 
 
 @router.get("/activity/summary")
-async def dashboard_activity_summary(session: dict = Depends(get_current_session)):
+def dashboard_activity_summary(session: dict = Depends(get_current_session)):
     all_active = activity_service.list_activities(
         user_id=session["user_id"], status="active", limit=1000
     )
@@ -163,7 +163,7 @@ async def rotate_broker(session: dict = Depends(require_admin)):
 
 
 @router.get("/audit/export")
-async def export_audit_csv(
+def export_audit_csv(
     actor_type: str | None = None,
     action: str | None = None,
     resource_type: str | None = None,

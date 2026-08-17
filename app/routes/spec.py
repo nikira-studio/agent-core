@@ -30,7 +30,7 @@ class SpecResponse(BaseModel):
 
 
 @router.get("/spec")
-async def spec(
+def spec(
     ctx: RequestContext = Depends(get_request_context),
 ):
     scope_model = {
@@ -403,7 +403,7 @@ async def spec(
 
 
 @router.get("/spec/public")
-async def spec_public():
+def spec_public():
     return success_response(
         {
             "version": "1.0.0",

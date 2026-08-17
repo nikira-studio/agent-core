@@ -15,6 +15,7 @@ For what these settings actually affect — the memory model, verification, the 
 | `AGENT_CORE_PORT` | `3500` | The port Agent Core listens on |
 | `AGENT_CORE_DATA_PATH` | `./data` | Where Agent Core stores its database, encryption keys, and broker credential. Set this to `/data` inside Docker (see below) |
 | `AGENT_CORE_ENCRYPTION_KEY` | `auto` | Encryption key for stored credentials. Leave as `auto` — Agent Core generates a key on first startup and saves it to `data/credential.key`. Only set this manually if you need to manage the key yourself (advanced use) |
+| `AGENT_CORE_SLOW_REQUEST_LOG_MS` | `1000` | Requests slower than this many milliseconds are logged with their duration, for diagnosing stalls the access log cannot show. Set to `0` to disable |
 
 ---
 

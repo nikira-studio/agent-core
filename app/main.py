@@ -157,6 +157,29 @@ def create_app() -> FastAPI:
         response.headers.setdefault("Referrer-Policy", "no-referrer")
         return response
 
+    if settings.SLOW_REQUEST_LOG_MS > 0:
+
+        @app.middleware("http")
+        async def slow_request_logging(request: Request, call_next):
+            # The access log records completion, not duration, so a stalled
+            # request is invisible after the fact. For streaming responses the
+            # measured time is time-to-first-byte, which keeps long-lived SSE
+            # connections from logging as slow.
+            import time
+
+            start = time.monotonic()
+            response = await call_next(request)
+            duration_ms = (time.monotonic() - start) * 1000
+            if duration_ms >= settings.SLOW_REQUEST_LOG_MS:
+                logging.getLogger("app.slow_requests").warning(
+                    "Slow request: %s %s took %.0fms (status %s)",
+                    request.method,
+                    request.url.path,
+                    duration_ms,
+                    response.status_code,
+                )
+            return response
+
     if ALLOWED_IPS:
 
         @app.middleware("http")

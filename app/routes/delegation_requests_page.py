@@ -33,7 +33,7 @@ def _permission_summary(request: dict) -> str:
 
 
 @router.get("/delegation-requests")
-async def delegation_requests_page(request: Request, session: dict = Depends(require_auth)):
+def delegation_requests_page(request: Request, session: dict = Depends(require_auth)):
     from app.services import delegation_service
 
     authority = permanent_authority(build_user_context(session))

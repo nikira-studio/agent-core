@@ -805,7 +805,7 @@ def _compact_memory_record(record: dict) -> dict:
 
 
 @router.get("/mcp")
-async def get_mcp_manifest(ctx: RequestContext = Depends(get_mcp_request_context)):
+def get_mcp_manifest(ctx: RequestContext = Depends(get_mcp_request_context)):
     return JSONResponse(content=MANIFEST)
 
 

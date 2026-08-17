@@ -71,7 +71,7 @@ class UpdateCredentialRequest(BaseModel):
 
 
 @router.get("/entries")
-async def list_entries(
+def list_entries(
     scope: Optional[str] = None,
     limit: int = 50,
     offset: int = 0,
@@ -111,7 +111,7 @@ async def list_entries(
 
 
 @router.post("/entries")
-async def create_entry(
+def create_entry(
     body: CreateCredentialRequest,
     ctx: RequestContext = Depends(get_request_context),
 ):
@@ -177,7 +177,7 @@ async def create_entry(
 
 
 @router.get("/entries/{entry_id}")
-async def get_entry(
+def get_entry(
     entry_id: str,
     ctx: RequestContext = Depends(get_request_context),
 ):
@@ -213,7 +213,7 @@ async def get_entry(
 
 
 @router.put("/entries/{entry_id}")
-async def update_entry(
+def update_entry(
     entry_id: str,
     body: UpdateCredentialRequest,
     ctx: RequestContext = Depends(get_request_context),
@@ -268,7 +268,7 @@ async def update_entry(
 
 
 @router.delete("/entries/{entry_id}")
-async def delete_entry(
+def delete_entry(
     entry_id: str,
     ctx: RequestContext = Depends(get_request_context),
 ):
@@ -300,7 +300,7 @@ async def delete_entry(
 
 
 @router.post("/entries/{entry_id}/reference")
-async def get_reference(
+def get_reference(
     entry_id: str,
     ctx: RequestContext = Depends(get_request_context),
 ):
@@ -331,7 +331,7 @@ async def get_reference(
 
 
 @router.post("/entries/{entry_id}/reveal")
-async def reveal_entry(
+def reveal_entry(
     entry_id: str,
     ctx: RequestContext = Depends(get_request_context),
 ):
@@ -377,7 +377,7 @@ async def reveal_entry(
 
 
 @router.get("/scopes")
-async def list_scopes(ctx: RequestContext = Depends(get_request_context)):
+def list_scopes(ctx: RequestContext = Depends(get_request_context)):
     enforcer = ScopeEnforcer(
         ctx.read_scopes,
         ctx.write_scopes,
@@ -418,7 +418,7 @@ async def rotate_key(
 
 
 @router.get("/rotate/status")
-async def get_key_rotation_status(
+def get_key_rotation_status(
     ctx: RequestContext = Depends(get_request_context),
 ):
     if not ctx.is_admin:

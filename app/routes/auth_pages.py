@@ -11,7 +11,7 @@ router = APIRouter()
 
 
 @router.get("/login")
-async def login_page(request: Request):
+def login_page(request: Request):
     user_count = count_users()
     if user_count == 0:
         return render_page(
@@ -90,7 +90,7 @@ async def login_page(request: Request):
 
 
 @router.get("/otp")
-async def otp_page(request: Request):
+def otp_page(request: Request):
     return render_page(
         "OTP Verification",
         """
@@ -122,7 +122,7 @@ async def otp_page(request: Request):
 
 
 @router.get("/logout")
-async def logout_page(request: Request):
+def logout_page(request: Request):
     return HTMLResponse("""<html><body>
 <script>fetch('/api/auth/logout',{method:'POST'}).finally(()=>{window.location.href='/login'});</script>
 <p>Logging out...</p></body></html>""")

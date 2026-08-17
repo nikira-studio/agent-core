@@ -44,17 +44,17 @@ class RevokeGrantRequest(BaseModel):
 
 
 @router.get("")
-async def list_grants(authority: EffectiveAuthority = Depends(get_request_context)):
+def list_grants(authority: EffectiveAuthority = Depends(get_request_context)):
     return success_response({"grants": delegation_service.list_grants(authority)})
 
 
 @router.get("/{grant_id}")
-async def get_grant(grant_id: str, authority: EffectiveAuthority = Depends(get_request_context)):
+def get_grant(grant_id: str, authority: EffectiveAuthority = Depends(get_request_context)):
     return success_response({"grant": delegation_service.get_grant(grant_id, authority)})
 
 
 @router.post("")
-async def create_grant(body: CreateGrantRequest, authority: EffectiveAuthority = Depends(get_request_context)):
+def create_grant(body: CreateGrantRequest, authority: EffectiveAuthority = Depends(get_request_context)):
     grant = delegation_service.create_grant(
         authority, recipient_agent_id=body.recipient_agent_id, purpose=body.purpose,
         ttl_seconds=body.ttl_seconds,
@@ -69,7 +69,7 @@ async def create_grant(body: CreateGrantRequest, authority: EffectiveAuthority =
 
 
 @router.post("/{grant_id}/claim")
-async def claim_grant(grant_id: str, authority: EffectiveAuthority = Depends(get_request_context)):
+def claim_grant(grant_id: str, authority: EffectiveAuthority = Depends(get_request_context)):
     if authority.actor_type != "agent" or authority.is_delegated:
         raise APIError("FORBIDDEN", "Only an authenticated recipient may claim a grant", 403)
     grant, secret = delegation_service.claim_grant(grant_id, authority.agent_id)
@@ -78,7 +78,7 @@ async def claim_grant(grant_id: str, authority: EffectiveAuthority = Depends(get
 
 
 @router.post("/{grant_id}/revoke")
-async def revoke_grant(grant_id: str, body: RevokeGrantRequest, authority: EffectiveAuthority = Depends(get_request_context)):
+def revoke_grant(grant_id: str, body: RevokeGrantRequest, authority: EffectiveAuthority = Depends(get_request_context)):
     grant = delegation_service.revoke_grant(grant_id, authority, body.reason)
     audit_service.write_event(authority.actor_type, authority.actor_id, "delegation_grant_revoked", "delegated_grant", grant_id)
     return success_response({"grant": grant})
