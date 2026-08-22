@@ -1,20 +1,20 @@
 # Configuration
 
-Agent Core is configured through environment variables. For local development, copy `.env.example` to `.env` — everything has sensible defaults and it'll run without changes.
+Agent Core is configured through environment variables. For local development, copy `.env.example` to `.env`; it runs without changes.
 
 **The short version:** for a basic local setup, you probably don't need to change anything.
 
-For what these settings actually affect — the memory model, verification, the review queue — see [How It Works](how-it-works.md).
+For what these settings actually affect, such as the memory model, verification, and the review queue, see [How it works](how-it-works.md).
 
 ---
 
-## Core Settings
+## Core settings
 
 | Variable | Default | What it does |
 | --- | --- | --- |
 | `AGENT_CORE_PORT` | `3500` | The port Agent Core listens on |
 | `AGENT_CORE_DATA_PATH` | `./data` | Where Agent Core stores its database, encryption keys, and broker credential. Set this to `/data` inside Docker (see below) |
-| `AGENT_CORE_ENCRYPTION_KEY` | `auto` | Encryption key for stored credentials. Leave as `auto` — Agent Core generates a key on first startup and saves it to `data/credential.key`. Only set this manually if you need to manage the key yourself (advanced use) |
+| `AGENT_CORE_ENCRYPTION_KEY` | `auto` | Encryption key for stored credentials. Leave as `auto`: Agent Core generates a key on first startup and saves it to `data/credential.key`. Only set this manually if you need to manage the key yourself (advanced use) |
 | `AGENT_CORE_SLOW_REQUEST_LOG_MS` | `1000` | Requests slower than this many milliseconds are logged with their duration, for diagnosing stalls the access log cannot show. Set to `0` to disable |
 
 ---
@@ -27,12 +27,12 @@ These control how long dashboard logins stay active.
 | --- | --- | --- |
 | `AGENT_CORE_SESSION_DURATION_HOURS` | `8` | Maximum session lifetime before requiring a new login |
 | `AGENT_CORE_INACTIVITY_TIMEOUT_MINUTES` | `30` | How long a session can sit idle before expiring |
-| `AGENT_CORE_COOKIE_SECURE` | `false` | Set to `true` if Agent Core is served over HTTPS or behind a TLS proxy — makes browser cookies require a secure connection |
+| `AGENT_CORE_COOKIE_SECURE` | `false` | Set to `true` if Agent Core is served over HTTPS or behind a TLS proxy. Makes browser cookies require a secure connection |
 | `AGENT_CORE_TRUSTED_PROXIES` | *(empty)* | Comma-separated proxy IPs that may supply `X-Forwarded-For` for login rate-limit identity |
 
 ---
 
-## Security and Network
+## Security and network
 
 | Variable | Default | What it does |
 | --- | --- | --- |
@@ -43,7 +43,7 @@ These control how long dashboard logins stay active.
 
 ---
 
-## Memory and Agents
+## Memory and agents
 
 | Variable | Default | What it does |
 | --- | --- | --- |
@@ -54,24 +54,24 @@ These control how long dashboard logins stay active.
 
 ---
 
-## Automatic Maintenance
+## Automatic maintenance
 
 | Variable | Default | What it does |
 | --- | --- | --- |
-| `AGENT_CORE_MAINTENANCE_INTERVAL_MINUTES` | `60` | How often the in-process maintenance sweep runs: marks stale activities, prunes scratchpad memories past retention, sweeps `expires_at` TTL'd records, and purges retracted/superseded records past their retention window. Set to `0` to disable the automatic schedule — the manual **Run Maintenance** button in Settings still works |
+| `AGENT_CORE_MAINTENANCE_INTERVAL_MINUTES` | `60` | How often the in-process maintenance sweep runs: marks stale activities, prunes scratchpad memories past retention, sweeps `expires_at` TTL'd records, and purges retracted/superseded records past their retention window. Set to `0` to disable the automatic schedule; the manual **Run Maintenance** button in Settings still works |
 | `AGENT_CORE_MAINTENANCE_INITIAL_DELAY_SECONDS` | `300` | Delay before the first automatic run after startup |
 
 The scratchpad and retracted/superseded retention windows themselves (7 and 30 days by default) are configured from **Settings → System Behavior** in the dashboard. The last run's time, trigger, and results are shown in **Settings → Backup & Restore** and available from `GET /api/backup/maintenance/status`.
 
 The maintenance sweep also prunes the connector execution and webhook delivery logs (30 days by default, `0` keeps them forever) and runs the memory verification pass described below. All of these windows are set from **Settings → System Behavior**.
 
-**Vector search** — the embedding provider, endpoint URL, model, and auth type — is configured from **Settings → Vector Search** in the dashboard, not through environment variables. Semantic search is off by default. When it's disabled or the embedding backend is unreachable, Agent Core falls back to full-text search automatically.
+The embedding provider, endpoint URL, model, and auth type for **vector search** are configured from **Settings → Vector Search** in the dashboard, not through environment variables. Semantic search is off by default. When it's disabled or the embedding backend is unreachable, Agent Core falls back to full-text search automatically.
 
 ---
 
-## Memory Verification
+## Memory verification
 
-Facts can carry a `subject_anchor` naming what would confirm them — `repo:<path>`, `host:<name-or-ip>`, or `service:<binding_id>`. The maintenance sweep checks anchored facts against the real thing and records what it found.
+Facts can carry a `subject_anchor` naming what would confirm them: `repo:<path>`, `host:<name-or-ip>`, or `service:<binding_id>`. The maintenance sweep checks anchored facts against the real thing and records what it found.
 
 To make `repo:` anchors resolvable, map each workspace scope to a directory on the machine running Agent Core. Set `workspace_repo_roots` in `system_settings` to a JSON object:
 
@@ -84,7 +84,7 @@ To make `repo:` anchors resolvable, map each workspace scope to a directory on t
 
 **Anchor paths are relative to that root, never absolute.** The same directory has a different absolute path inside every agent's container, so an absolute anchor is resolvable only by whoever wrote it. Agent Core resolves the relative path against this installation's root, which is what lets agents with different mounts share the same memory.
 
-A scope with no configured root reports `unverifiable` rather than guessing — it never treats "I could not check this" as "this is wrong". `host:` anchors are verified through a connector binding that already targets that host, so credentials stay in the connector layer.
+A scope with no configured root reports `unverifiable` rather than guessing. It never treats "I could not check this" as "this is wrong". `host:` anchors are verified through a connector binding that already targets that host, so credentials stay in the connector layer.
 
 | Setting (in `system_settings`) | Default | What it does |
 | --- | --- | --- |
@@ -94,11 +94,11 @@ A scope with no configured root reports `unverifiable` rather than guessing — 
 
 ---
 
-## Review Model (optional)
+## Review model (optional)
 
 Some judgements cannot be made by rules, because they depend on meaning rather than shape: whether a record is still worth keeping, or whether a newer memory supersedes an older one. Agent Core can use a language model for those.
 
-**It is a capability, not a dependency.** Memory, search, credentials, connectors and the mechanical clean-up rules all work with no model configured. Configuring one turns on the features that need judgement — including for records written long before it existed. Leave it unset and those features report themselves as unconfigured rather than failing.
+**It is a capability, not a dependency.** Memory, search, credentials, connectors and the mechanical clean-up rules all work with no model configured. Configuring one turns on the features that need judgement, including for records written long before it existed. Leave it unset and those features report themselves as unconfigured rather than failing.
 
 Configure it from **Settings → Review Model** in the dashboard, or set these directly:
 
@@ -109,15 +109,15 @@ Configure it from **Settings → Review Model** in the dashboard, or set these d
 | `review_model_binding_id` / `review_model_action` | For `binding`: which binding to call, and its chat-completions action |
 | `review_model_timeout_seconds` | Defaults to 60 |
 
-Point it at a model on a machine you control and record content never leaves it. Point it at a hosted API and it does — that is the trade-off, and it is why there is no default.
+Point it at a model on a machine you control and record content never leaves it. Point it at a hosted API and it does. That is the trade-off, and it is why there is no default.
 
 The **Test** button on that card (or `POST /api/dashboard/review-model/test`) checks it. Configuration alone does not mean a model answers, and these features need one that can follow a format instruction, so the check asks for a small JSON reply and reports what came back.
 
 ---
 
-## Verification Beyond Code
+## Verification beyond code
 
-`repo:`, `host:` and `service:` are what Agent Core can check on its own. What actually settles a record depends on what the record is about — a web page, a policy document, a contact, a ticket — so **anchor types are open**, and an installation teaches the system to check its own by mapping a type to a connector binding it already has:
+`repo:`, `host:` and `service:` are what Agent Core can check on its own. What actually settles a record depends on what the record is about: a web page, a policy document, a contact, a ticket. So **anchor types are open**, and an installation teaches the system to check its own by mapping a type to a connector binding it already has:
 
 ```json
 {
@@ -130,15 +130,15 @@ Stored in `system_settings` under `verification_bindings`. The anchor's value is
 
 **This is JSON configuration by design, and there is no dashboard editor planned.** Custom anchor types are an advanced capability for installations that already run their own connectors; an operator reaching for one is comfortable writing the mapping. A settings form would have to guess at a shape nobody has needed yet, and the built-in `repo:`, `host:` and `service:` types cover what the dashboard is for.
 
-A binding that answers verifies the anchor. One that reports 404/not-found is evidence the subject is gone, and becomes a review proposal. **Anything else — a timeout, an error, an unconfigured type — leaves the record unverifiable rather than condemning it.** An outage is not a false memory, and a system that forgets that will delete true records the first time the network hiccups.
+A binding that answers verifies the anchor. One that reports 404/not-found is evidence the subject is gone, and becomes a review proposal. **A timeout, an error, or an unconfigured type leaves the record unverifiable rather than condemning it.** An outage is not a false memory, and a system that forgets that will delete true records the first time the network hiccups.
 
 Writing a record with an anchor type nothing can check is allowed and warned about, not refused: the anchor still records what *would* settle it, which is useful to a human even when no automation can follow it.
 
 ---
 
-## Usefulness Review (optional, off by default)
+## Usefulness review (optional, off by default)
 
-Agent Core can ask a language model whether a memory record is actionable for a future session — the one judgement the mechanical rules cannot make, since a record can be perfectly accurate and still useless.
+Agent Core can ask a language model whether a memory record is actionable for a future session, the one judgement the mechanical rules cannot make, since a record can be perfectly accurate and still useless.
 
 **This sends record content to whatever model you point it at.** Point it at a model running on your own machine and nothing leaves it; point it at a hosted API and your memory content is sent there. That is why it is off by default and why there is no default provider.
 
@@ -151,11 +151,11 @@ Configure a review model (above), then turn this feature on:
 
 It uses the review model configured above, so a model is set up once for the whole system rather than per feature.
 
-Run it with `POST /api/memory/proposals/review-usefulness` (admin). Records that plainly name a path, command, version, address, or rule are skipped without a model call. Anything the model judges unhelpful becomes a **proposal in the review queue with the model's reason attached** — it is never applied automatically, no matter how accurate it proves, because the cost of a wrong call is deleting a constraint someone depended on.
+Run it with `POST /api/memory/proposals/review-usefulness` (admin). Records that plainly name a path, command, version, address, or rule are skipped without a model call. Anything the model judges unhelpful becomes a **proposal in the review queue with the model's reason attached**. It is never applied automatically, no matter how accurate it proves, because the cost of a wrong call is deleting a constraint someone depended on.
 
 ---
 
-## Data Directory Layout
+## Data directory layout
 
 Agent Core keeps all its state under `AGENT_CORE_DATA_PATH`:
 
@@ -170,14 +170,14 @@ data/
 
 **The key files matter a lot:**
 
-- `credential.key` and `credential.keyring` are gitignored and should never be committed. If you lose the current key file, you lose the ability to decrypt stored credentials — unless you have a backup that includes the key material or a separately saved restored key.
+- `credential.key` and `credential.keyring` are gitignored and should never be committed. If you lose the current key file, you lose the ability to decrypt stored credentials, unless you have a backup that includes the key material or a separately saved restored key.
 - The database and key files need to travel together for local restore, but the dashboard backup export now encrypts the archive with a separate one-time backup key that is shown after export.
 
-**Key rotation:** When you rotate the credential encryption key, Agent Core generates a new primary key, backs up the old one to the keyring, and re-encrypts all credential entries. The keyring means older entries can still be decrypted — nothing breaks during rotation.
+**Key rotation:** When you rotate the credential encryption key, Agent Core generates a new primary key, backs up the old one to the keyring, and re-encrypts all credential entries. The keyring means older entries can still be decrypted; nothing breaks during rotation.
 
 ---
 
-## Docker Setup
+## Docker setup
 
 The example `docker-compose.yml` mounts your local `data/` directory into the container at `/data`:
 
@@ -206,27 +206,27 @@ volumes:
 
 Agent Core runs as **a single process**, and that is the supported configuration. `AGENT_CORE_WORKERS` defaults to `1`.
 
-Some state is held per process rather than in the database, on purpose — it is the kind of state that would cost more to coordinate than it saves:
+Some state is deliberately held per process rather than in the database. It is the kind of state that would cost more to coordinate than it saves:
 
 | State | What a second worker does to it |
 | --- | --- |
-| Rate-limit buckets | Each process keeps its own, so the effective limit is multiplied by the worker count — including the login throttle |
+| Rate-limit buckets | Each process keeps its own, so the effective limit is multiplied by the worker count, including the login throttle |
 | Concurrent-search guard | Same: the cap applies per process, not per installation |
 | Dashboard event stream | A browser is connected to one process and never sees events published by another, so the live view goes quiet at random |
 
 The maintenance sweep is the exception: it takes a lease in the database, so only one process runs it per tick regardless of how many exist.
 
-One effect is not quiet. A **full restore** holds the database still while it swaps the file, and that gate is per process: a second worker knows nothing about it, keeps serving requests against the database being replaced, and its writes go to a file that is about to be unlinked — commits that succeed and then vanish. Raising the worker count makes `replace_all` restore unsafe, not merely imprecise.
+One effect is not quiet. A **full restore** holds the database still while it swaps the file, and that gate is per process: a second worker knows nothing about it, keeps serving requests against the database being replaced, and its writes go to a file that is about to be unlinked, commits that succeed and then vanish. Raising the worker count makes `replace_all` restore unsafe, not merely imprecise.
 
 The rest of the effects above are quiet rather than loud, which is exactly why the default is 1. A single process handles a local-first workload comfortably; horizontal scaling would need shared coordination that does not exist yet.
 
 ---
 
-## Runtime Version
+## Runtime version
 
 The Docker image is the supported runtime and currently uses Python 3.11.
 
-If you're running locally, use Python 3.11 too. Newer Python versions accept syntax that the Docker image will reject — so code that works locally might fail when you rebuild the container.
+If you're running locally, use Python 3.11 too. Newer Python versions accept syntax that the Docker image will reject, so code that works locally might fail when you rebuild the container.
 
 Quick compatibility check:
 
@@ -244,14 +244,14 @@ curl http://localhost:3500/health
 
 ---
 
-## What You Actually Need to Change
+## What you actually need to change
 
 For a local setup, the defaults are usually fine. Here's what's actually worth looking at:
 
-- **`AGENT_CORE_ALLOWED_IPS`** — set this if Agent Core will be accessible to other machines on your network
-- **`AGENT_CORE_BLOCK_INTERNAL_HOSTS`** — set this to `true` if you want to block connector bindings/imports from private, loopback, or link-local hosts.
-- **`AGENT_CORE_ALLOWED_INTERNAL_HOSTS`** — use this only as an exception list when `AGENT_CORE_BLOCK_INTERNAL_HOSTS=true`, for trusted internal services like `firecrawl` or `searxng`
-- **`AGENT_CORE_CORS_ORIGINS`** — set this if you're building a separate web app that needs to make authenticated requests
-- **`AGENT_CORE_COOKIE_SECURE`** — set to `true` if serving over HTTPS
-- **`AGENT_CORE_ENCRYPTION_KEY`** — leave as `auto` unless you have a specific reason to manage the key yourself
-- **Vector search settings** — configured from **Settings → Vector Search** in the dashboard, not here. If your Ollama instance is on a different host, update the URL there after starting
+- **`AGENT_CORE_ALLOWED_IPS`**: set this if Agent Core will be accessible to other machines on your network
+- **`AGENT_CORE_BLOCK_INTERNAL_HOSTS`**: set this to `true` if you want to block connector bindings/imports from private, loopback, or link-local hosts
+- **`AGENT_CORE_ALLOWED_INTERNAL_HOSTS`**: use this only as an exception list when `AGENT_CORE_BLOCK_INTERNAL_HOSTS=true`, for trusted internal services like `firecrawl` or `searxng`
+- **`AGENT_CORE_CORS_ORIGINS`**: set this if you're building a separate web app that needs to make authenticated requests
+- **`AGENT_CORE_COOKIE_SECURE`**: set to `true` if serving over HTTPS
+- **`AGENT_CORE_ENCRYPTION_KEY`**: leave as `auto` unless you have a specific reason to manage the key yourself
+- **Vector search settings**: configured from **Settings → Vector Search** in the dashboard, not here. If your Ollama instance is on a different host, update the URL there after starting

@@ -6,14 +6,14 @@ This document explains how that works, what other protections are in place, and 
 
 ---
 
-## Shared Memory and Cross-Agent Influence
+## Shared memory and cross-agent influence
 
-Memory here is shared on purpose: several agents read and write one corpus, which is what lets you swap agents without losing what they knew. That also makes memory a channel between agents, so a wrong or malicious record does not end when a session does — it persists and is re-read.
+Memory here is shared on purpose: several agents read and write one corpus, which is what lets you swap agents without losing what they knew. That also makes memory a channel between agents, so a wrong or malicious record does not end when a session does. It persists and is re-read.
 
 What limits the blast radius:
 
 - **Scopes** decide what any agent can read or write; nothing is global by default.
-- **Provenance is server-stamped** — who wrote a record, through which channel, during which activity — and cannot be supplied by the caller.
+- **Provenance is server-stamped**: who wrote a record, through which channel, during which activity, and cannot be supplied by the caller.
 - **Standing context is granted, not taken.** Agents can *request* that a record be pinned, but only an operator applies it. A pinned record enters every session in the scope without anyone searching for it, so it is the highest-value target for a poisoned write and the one place an agent's reach is deliberately cut short.
 - **Removal is reversible.** Retraction hides a record and keeps it restorable for the retention window; only the maintenance sweep deletes.
 - **The clean-up rules propose, never act,** so no automated judgement removes a record without a person agreeing.
@@ -22,7 +22,7 @@ What is *not* solved: nothing detects a plausible-but-wrong record written in go
 
 ---
 
-## Where Memory Content Can Leave the Machine
+## Where memory content can leave the machine
 
 Secrets have one controlled path out (below). Memory *content* has three, all off until an operator configures them, and all pointed wherever that operator chose:
 
@@ -30,7 +30,7 @@ Secrets have one controlled path out (below). Memory *content* has three, all of
 | --- | --- | --- |
 | **Embedding backend** | Record content, on write and on search | The embedding endpoint you configured |
 | **Review model** | Record content of the records being judged | The model endpoint or connector binding you configured |
-| **Verification bindings** | The anchor value only — never record content | The binding's service |
+| **Verification bindings** | The anchor value only, never record content | The binding's service |
 
 Point any of these at a service on a machine you control and nothing leaves it. Point one at a hosted API and your memory content is sent there. That is the entire trade-off, and it is why none of them has a default and why the features that use them stay off until switched on.
 
@@ -38,7 +38,7 @@ Connector actions are the fourth outbound path, but those are explicit by nature
 
 ---
 
-## How Secrets Are Stored
+## How secrets are stored
 
 When you store a credential, the value is encrypted with [Fernet](https://cryptography.io/en/latest/fernet/) before it's written to the database. The encryption key lives at `data/credential.key`, and a history of all keys (used after rotation) is in `data/credential.keyring`.
 
@@ -58,28 +58,28 @@ Full backup exports are encrypted with a separate one-time backup key. The encry
 
 ---
 
-## How Identities Are Stored
+## How identities are stored
 
 | Identity | Storage method |
 | --- | --- |
 | User passwords | bcrypt hash |
-| Agent API keys | SHA-256 hash only — shown once at creation and never stored |
+| Agent API keys | SHA-256 hash only, shown once at creation and never stored |
 | Broker credentials | SHA-256 hash in the database; plaintext in `data/broker.credential` |
 
-If an API key or broker credential is lost, rotate it — there's no way to recover the original.
+If an API key or broker credential is lost, rotate it. There's no way to recover the original.
 
 ---
 
-## Scope Model
+## Scope model
 
 Scopes are the permission boundary for everything in Agent Core: memory, credentials, activity records, and briefings. Every operation is checked against the caller's scopes.
 
 | Scope | What it covers |
 | --- | --- |
-| `user:<id>` | A specific user's personal space — memory and credentials they own |
+| `user:<id>` | A specific user's personal space: memory and credentials they own |
 | `agent:<id>` | An agent's own private working space. This scope is intentionally private; other agent keys should not expect to read it unless you explicitly grant access. |
 | `workspace:<id>` | A shared space for project-level collaboration across users or tools. The workspace record is still owned by one user for dashboard/admin visibility, but agents can be granted `workspace:<id>` access to collaborate across users. |
-| `shared` | Intentionally global — any agent with the right grant can read from here |
+| `shared` | Intentionally global; any agent with the right grant can read from here |
 
 Agents have separate `read_scopes` and `write_scopes`. An agent can read from `shared` without being able to write to it. Writing to `shared` requires an explicit grant in `write_scopes`, or the agent's ID must be in `AGENT_CORE_SHARED_SCOPE_AGENTS`.
 
@@ -88,12 +88,12 @@ A few other things worth knowing:
 - **Inactive agents can't authenticate.** Rotating or deactivating an agent immediately revokes access.
 - **Disabled users can't authenticate.** Disabling an account revokes its dashboard sessions immediately and rejects new login sessions. An agent's `default_user_id` is the principal whose workspace access is attenuated at request time; disabling that principal also removes the workspace and personal-user authority it could lend to the agent. The agent owner manages the record and is only the fallback principal for older agents.
 - **Inactive workspaces stop authorizing access.** Deactivating a workspace makes `workspace:<id>` invalid for reads and writes.
-- **Use workspace scopes for collaboration, not personal scopes.** The `agent:<id>` scope is private scratch space — don't use it as a handoff channel. For cross-agent work, use workspace scopes and keep activity and briefing records current. Activity is a mailroom-style handoff board, not an orchestrator: a human or agent can leave work there, but the receiving agent still has to explicitly check for and claim it. Other users do not automatically see a shared workspace row in their own dashboard; they see the shared capability through the agent scopes you grant.
+- **Use workspace scopes for collaboration, not personal scopes.** The `agent:<id>` scope is private scratch space; don't use it as a handoff channel. For cross-agent work, use workspace scopes and keep activity and briefing records current. Activity is a mailroom-style handoff board, not an orchestrator: a human or agent can leave work there, but the receiving agent still has to explicitly check for and claim it. Other users do not automatically see a shared workspace row in their own dashboard; they see the shared capability through the agent scopes you grant.
 - **Share workspaces with users, not with agent identities.** Workspace membership is the source of truth for collaboration. Once a user is added as a collaborator, they can grant their own agents `workspace:<id>` access. At runtime, each stored agent scope is intersected with the principal's current `can_read` or `can_write` bit; merely retaining a collaborator row grants nothing. Revoking or downgrading collaboration therefore stops new runtime access even if an old agent scope is still present.
 
 ---
 
-## Delegated Authority
+## Delegated authority
 
 Scopes are standing access. A delegated grant is the temporary form: a narrowed, expiring slice of one actor's authority, lent to a recipient agent for a single task. The full lifecycle and error codes are in [Delegated Authorization](delegated-authorization-integration.md); these are the security properties it holds to:
 
@@ -108,12 +108,12 @@ Scopes are standing access. A delegated grant is the temporary form: a narrowed,
 
 ---
 
-## The Credential Broker Flow
+## The Credential Broker flow
 
 Here's what happens from the time you store a secret to when a tool actually uses it:
 
 1. You store a secret in Agent Core.
-2. Agent Core returns an `AC_SECRET_*` reference — not the secret.
+2. Agent Core returns an `AC_SECRET_*` reference, not the secret.
 3. The agent's tool configuration includes that reference.
 4. At runtime, the local Credential Broker intercepts the reference.
 5. The broker calls Agent Core's internal `/internal/credentials/resolve` endpoint.
@@ -122,11 +122,11 @@ Here's what happens from the time you store a secret to when a tool actually use
 
 The model's context window never contains your actual secret. It's injected at execution time, on your machine, by the broker.
 
-> The `agent_id` for resolution must come from your integration config — not from model-generated text. The model should never be able to influence which agent identity resolves a secret.
+> The `agent_id` for resolution must come from your integration config, not from model-generated text. The model should never be able to influence which agent identity resolves a secret.
 
 ---
 
-## Connector Execution Flow
+## Connector execution flow
 
 Connectors are the server-side path for external actions:
 
@@ -137,7 +137,7 @@ Connectors are the server-side path for external actions:
 5. **If the action changes state, Agent Core also requires write access to that scope.** Read access to a binding means the agent may query the service, not that it may act through it.
 6. Agent Core resolves the credential internally, calls the external service, logs the execution, and returns the result.
 
-An action counts as read-only when its metadata says so or its HTTP method is `GET`, `HEAD`, or `OPTIONS`. **Anything that cannot be identified requires write.** That is the opposite of the verification pass, where an inconclusive check leaves the record alone — the difference is what a wrong guess costs. There it would delete a true memory; here it would run someone else's `DELETE`.
+An action counts as read-only when its metadata says so or its HTTP method is `GET`, `HEAD`, or `OPTIONS`. **Anything that cannot be identified requires write.** That is the opposite of the verification pass, where an inconclusive check leaves the record alone. The difference is what a wrong guess costs. There it would delete a true memory; here it would run someone else's `DELETE`.
 
 Both transports enforce this identically: `connectors_run` over MCP and `POST /api/connector-bindings/{id}/run` over REST call the same check.
 
@@ -145,7 +145,7 @@ Credential scope controls access to the stored secret. Binding scope controls wh
 
 ---
 
-## PII Protection on Shared Memory
+## PII protection on shared memory
 
 Any write to the `shared` memory scope is automatically scanned for content that looks like:
 
@@ -162,7 +162,7 @@ Search queries that look like credentials, or are too short/noisy (single stop w
 
 ---
 
-## Rate Limits
+## Rate limits
 
 Rate limits protect against runaway agents and misconfigured automation. Limits are in-memory token buckets that reset on process restart.
 
@@ -178,9 +178,9 @@ Rate-limited responses include `X-RateLimit-Limit`, `X-RateLimit-Remaining`, and
 
 ---
 
-## Rotating the Credential Encryption Key
+## Rotating the credential encryption key
 
-If you suspect your encryption key has been exposed — or just as a routine security practice — you can rotate it. This generates a new key, re-encrypts all credential entries, and keeps the old key in the keyring so nothing breaks.
+If you suspect your encryption key has been exposed, or just as a routine security practice, you can rotate it. This generates a new key, re-encrypts all credential entries, and keeps the old key in the keyring so nothing breaks.
 
 **From the dashboard:** Settings → Encryption Key → Rotate Encryption Key (requires admin access)
 
@@ -201,7 +201,7 @@ What happens during rotation:
 4. All credential entries are re-encrypted with the new key
 5. A `credential_key_rotated` audit event is written
 
-After rotation, older entries that were encrypted with previous keys still decrypt correctly — the keyring tries keys in order, most recent first.
+After rotation, older entries that were encrypted with previous keys still decrypt correctly; the keyring tries keys in order, most recent first.
 
 **Restoring a previous key** (e.g., after a bad rotation or from a backup):
 
@@ -226,7 +226,7 @@ Outbound webhooks let external systems receive signed notifications when events 
 
 **Admin-only.** Only admin users can create, edit, or delete webhook registrations. Agent API keys and non-admin sessions have no access to webhook configuration or secrets.
 
-**Secrets are encrypted at rest.** Webhook secrets are encrypted using the same Fernet key used for credentials. They are never returned in API responses — they are write-only on create and update.
+**Secrets are encrypted at rest.** Webhook secrets are encrypted using the same Fernet key used for credentials. They are never returned in API responses; they are write-only on create and update.
 
 **Delivery is fire-and-log-only (v1).** If a receiver is down or slow, the failure is recorded in the delivery log and no retry is attempted. Keep receiver endpoints fast and reliable.
 
@@ -248,7 +248,7 @@ def verify(body: bytes, secret: str, header: str) -> bool:
 
 ---
 
-## Deployment Checklist
+## Deployment checklist
 
 Before making Agent Core accessible beyond localhost:
 

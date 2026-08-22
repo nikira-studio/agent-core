@@ -2,8 +2,8 @@
 
 One manifest file adds any external service to Agent Core. It describes what the service is, what credentials it needs, what actions it exposes, and how Agent Core should call it. The built-in engines handle the rest. No Python is added to your installation. Adapters survive upgrades, and the same file works on any other Agent Core instance when you share it.
 
-- **[Part 1: Using adapters](#part-1-using-adapters)** — installing, binding credentials, calling actions
-- **[Part 2: Building adapters](#part-2-building-adapters)** — the manifest spec, the three backends, templating, auth/refresh/sessions, testing, sharing
+- **[Part 1: Using adapters](#part-1-using-adapters)**: installing, binding credentials, calling actions
+- **[Part 2: Building adapters](#part-2-building-adapters)**: the manifest spec, the three backends, templating, auth/refresh/sessions, testing, sharing
 
 ---
 
@@ -30,7 +30,7 @@ Agent Core has a **two-tier adapter library**:
 
 | Library | Path | Who owns it | Survives upgrade? |
 |---|---|---|---|
-| **System** | `app/adapter_templates/<id>/adapter.json` | shipped with Agent Core, maintained by the project | replaced on each upgrade — it *is* the product |
+| **System** | `app/adapter_templates/<id>/adapter.json` | shipped with Agent Core, maintained by the project | replaced on each upgrade; it *is* the product |
 | **User** | `data/adapters/<id>/adapter.json` | adapters you installed or wrote yourself | **yes**, lives in the data dir alongside the DB |
 
 The Browse Adapters page at **`/connectors/adapters`** lists adapters from both libraries. Installing a system adapter copies it into the user library, so any local edits you make persist across upgrades and you keep the version you tested. If the shipped template later changes, the same page shows **Update** for the installed copy; updating replaces the installed adapter files in place and keeps bindings attached to the same connector type id. Updates are version-driven, so bump the adapter's `version` whenever you change its manifest. The `adapter_installations` DB table is the source of truth for *which* adapters are active in the connector catalog; a restart re-seeds them from there.
@@ -53,7 +53,7 @@ For an adapter you have on disk (or want to author locally):
 1. Create `data/adapters/<adapter-id>/adapter.json`.
 2. Restart Agent Core (or hit the rescan endpoint), or click **Install** on it from the Browse Adapters page.
 
-Invalid manifests are logged and skipped — they never crash startup. The list of valid manifests appears on the Browse page automatically.
+Invalid manifests are logged and skipped; they never crash startup. The list of valid manifests appears on the Browse page automatically.
 
 ### 3. Install from a git URL
 
@@ -69,7 +69,7 @@ Agent Core clones the repo, validates the manifest, runs the dangerous-pattern s
 
 Adapters use the same binding model as every other connector type:
 
-1. **Store the credential.** From `/credentials`, store the secret(s) the adapter needs. For multi-field credentials (OAuth, basic auth with username+password), paste the value as a JSON object — see the adapter's `credential_schema` for the required fields.
+1. **Store the credential.** From `/credentials`, store the secret(s) the adapter needs. For multi-field credentials (OAuth, basic auth with username+password), paste the value as a JSON object; see the adapter's `credential_schema` for the required fields.
 2. **Create a binding.** From `/connectors`, find the adapter's connector type, create a binding scoped to your workspace, and link your stored credential. Add any per-binding config the adapter requires (`requires.config` lists what's needed).
 3. **Call actions from an agent** using `connectors_run`:
 
@@ -92,7 +92,7 @@ From the Browse Adapters page, click **Uninstall** on an installed adapter. This
 - Removes the adapter's connector type from the catalog (its bindings become orphaned).
 - Clears the install record.
 - If the installed adapter came from the system library, removes the installed copy from `data/adapters/` so the system template remains the reinstall source.
-- If the adapter already lived in `data/adapters/`, leaves the file there so you can reinstall later with one click — uninstall is non-destructive of user-authored adapter files.
+- If the adapter already lived in `data/adapters/`, leaves the file there so you can reinstall later with one click; uninstall is non-destructive of user-authored adapter files.
 
 System adapters can be reinstalled from the system library. User-only adapters stay in `data/adapters/` and reinstall from there. If an installed adapter has a newer bundled template available, the Browse Adapters page shows **Update** instead of making you uninstall/reinstall.
 
@@ -106,7 +106,7 @@ Manifests can declare what they need to function via the `requires` block:
 | `requires.env` | environment variables | adapter shown as *unavailable*, install blocked |
 | `requires.config` | per-binding config fields | adapter is installable; the binding itself fails at execution if the field is missing |
 
-`bins` and `env` are **operator-level gates** (something the operator must provision before Agent Core can run the adapter at all). `config` is **per-binding** (the adapter is fine; each binding just needs the right config). This is why an adapter that says `requires: { config: ["base_url"] }` still appears available — you configure it when you create the binding.
+`bins` and `env` are **operator-level gates** (something the operator must provision before Agent Core can run the adapter at all). `config` is **per-binding** (the adapter is fine; each binding just needs the right config). This is why an adapter that says `requires: { config: ["base_url"] }` still appears available; you configure it when you create the binding.
 
 ---
 
@@ -160,12 +160,12 @@ A minimal adapter is a single `adapter.json` file. The structure has two parts: 
 
 **Required fields:** `spec_version` (currently `"1.0"`), `id` (lowercase, `[a-z0-9_]+`), `version` (semver `X.Y.Z`), `backend`.
 
-**`actions[]` shape** — each action takes:
-- `name` — the action key callers pass to `connectors_run`.
-- `description` — agent-oriented; this is what the agent sees when discovering tools. Write it for the agent, not the developer.
-- `side_effect` — `"read"`, `"write"`, or `"destructive"`. Surfaces to the agent so it can confirm before destructive operations.
-- `input_schema` — real JSON Schema for the params. Lets the agent know what to pass without trial and error.
-- `param_aliases` — optional map of alternate caller keys to canonical keys, for example `{ "issueId": "issue_id" }`. Agent Core applies aliases before JSON Schema validation and request rendering. It also infers simple camelCase-to-snake_case aliases when the schema declares the snake_case property, but explicit aliases are clearer for agents and should be preferred in shared adapters.
+**`actions[]` shape**: each action takes:
+- `name`: the action key callers pass to `connectors_run`.
+- `description`: agent-oriented; this is what the agent sees when discovering tools. Write it for the agent, not the developer.
+- `side_effect`: `"read"`, `"write"`, or `"destructive"`. Surfaces to the agent so it can confirm before destructive operations.
+- `input_schema`: real JSON Schema for the params. Lets the agent know what to pass without trial and error.
+- `param_aliases`: optional map of alternate caller keys to canonical keys, for example `{ "issueId": "issue_id" }`. Agent Core applies aliases before JSON Schema validation and request rendering. It also infers simple camelCase-to-snake_case aliases when the schema declares the snake_case property, but explicit aliases are clearer for agents and should be preferred in shared adapters.
 
 Action params are prepared in this order:
 
@@ -192,9 +192,9 @@ Example:
 }
 ```
 
-**`credential_schema.fields[]`** — each field declares `name`, `type`, `secret` (true = redacted in UI/logs), `required`. The UI uses this to build the credential entry form. For single-secret connectors (one `api_key` field), the stored value is the secret string. For multi-field credentials, the stored value is a JSON object with those field names as keys.
+**`credential_schema.fields[]`**: each field declares `name`, `type`, `secret` (true = redacted in UI/logs), `required`. The UI uses this to build the credential entry form. For single-secret connectors (one `api_key` field), the stored value is the secret string. For multi-field credentials, the stored value is a JSON object with those field names as keys.
 
-**`setup`** — optional human-readable binding guidance. `instructions` appears in the New Binding modal, and `documentation_url` must be an HTTPS link. Use it for provider-console steps, OAuth scopes, redirect URIs, and an explanation of which credential fields are optional.
+**`setup`**: optional human-readable binding guidance. `instructions` appears in the New Binding modal, and `documentation_url` must be an HTTPS link. Use it for provider-console steps, OAuth scopes, redirect URIs, and an explanation of which credential fields are optional.
 
 ## The three backends
 
@@ -202,7 +202,7 @@ Agent Core's built-in engines interpret the `backend` block. Pick one based on w
 
 | Backend | When to use | Code? |
 |---|---|---|
-| **`http`** | the service is HTTP, you can describe its requests declaratively | no — pure data |
+| **`http`** | the service is HTTP, you can describe its requests declaratively | no; pure data |
 | **`mcp`** | the service is (or has) a native MCP server you already run | external server, out-of-process |
 | **`cli`** | the service has a local CLI you want to drive (e.g. `gh`, `rclone`) | external binary, out-of-process |
 
@@ -276,15 +276,15 @@ Six common shapes:
 | `none` | (none) | omit `apply` |
 | `api_key` / `bearer` | single secret string in `cred.raw` | `"template": "Bearer {{ cred.raw }}"` in `request_header: Authorization` |
 | `basic` | JSON `{username, password}` in `cred.fields` | `"template": "Basic {{ cred.base64_credentials }}"` (built-in helper that base64-encodes `username:password`) |
-| `oauth2` | JSON `{client_id, client_secret, refresh_token, access_token, expires_at}` | `"template": "Bearer {{ cred.access_token }}"` — pair with a `refresh` block; an `auth.authorization` block enables the dashboard OAuth flow |
+| `oauth2` | JSON `{client_id, client_secret, refresh_token, access_token, expires_at}` | `"template": "Bearer {{ cred.access_token }}"`, paired with a `refresh` block; an `auth.authorization` block enables the dashboard OAuth flow |
 | `custom_header` | single token | `"name": "X-API-Token", "template": "{{ cred.raw }}"` |
-| (anything else) | adapter-internal | the engine just resolves the template — describe whatever wire shape you need |
+| (anything else) | adapter-internal | the engine just resolves the template; describe whatever wire shape you need |
 
 The `apply` block has `target` (`request_header`, `query`, or `body`), `name`, and `template`. You can apply auth multiple ways if needed (most services pick one).
 
 ### `session` (challenge-retry handshake)
 
-For services like Transmission that demand a session ID after a 409, declare a `session` block. The engine handles the handshake internally per request — the agent never sees it:
+For services like Transmission that demand a session ID after a 409, declare a `session` block. The engine handles the handshake internally per request; the agent never sees it:
 
 ```json
 "session": {
@@ -308,7 +308,7 @@ On a triggering response, the engine captures the value from the source, re-issu
 
 ### `refresh` (OAuth2)
 
-For services with access-token expiry, declare a `refresh` block. The engine refreshes under a per-binding lock (concurrent calls won't double-refresh) and retries the action once after the new token lands:
+For services with access-token expiry, declare a `refresh` block. The engine refreshes under a per-binding lock (concurrent calls won't double-refresh) and retries the action once after the new token lands.
 
 For browser-based authorization, also declare `auth.authorization.url`, `auth.authorization.scopes`, and optional `auth.authorization.params`. The dashboard then exposes an **Authorize OAuth** button and stores the returned access and refresh tokens in the linked credential.
 
@@ -330,10 +330,10 @@ For browser-based authorization, also declare `auth.authorization.url`, `auth.au
 }
 ```
 
-- `trigger` — what fires the refresh. `http_status` is reactive; `or_expired` is proactive (checks the named credential field against the current time before sending).
-- `token_url` + `grant` — where to POST and which OAuth grant type to use.
-- `response_map` — which response fields land where in the session.
-- `persist.refresh_token` — if the provider rotates the refresh token, persist the new one to the credential automatically. (Some providers do this; many do not.)
+- `trigger`: what fires the refresh. `http_status` is reactive; `or_expired` is proactive (checks the named credential field against the current time before sending).
+- `token_url` + `grant`: where to POST and which OAuth grant type to use.
+- `response_map`: which response fields land where in the session.
+- `persist.refresh_token`: if the provider rotates the refresh token, persist the new one to the credential automatically. (Some providers do this; many do not.)
 
 ### `requests`
 
@@ -359,12 +359,12 @@ One entry per declared action. Each describes a single HTTP call:
 }
 ```
 
-- `method` — HTTP verb.
-- `path` — appended to `base_url`. Supports `{{ params.x }}` interpolation.
-- `query_params` — map of param name to template.
-- `body.template` — object or string. Renders with the templating engine; non-string values (`True`, `42`, arrays) round-trip with their type preserved, so `"limit": "{{ params.limit | default(10, as=int) }}"` produces a JSON integer, not the string `"10"`.
-- `response.success_when` — a jsonpath-ish expression evaluated on the response. Default: `2xx` status.
-- `response.extract` — jsonpath to pull the useful part out (`$.data`, `$.results.items`, etc.).
+- `method`: HTTP verb.
+- `path`: appended to `base_url`. Supports `{{ params.x }}` interpolation.
+- `query_params`: map of param name to template.
+- `body.template`: object or string. Renders with the templating engine; non-string values (`True`, `42`, arrays) round-trip with their type preserved, so `"limit": "{{ params.limit | default(10, as=int) }}"` produces a JSON integer, not the string `"10"`.
+- `response.success_when`: a jsonpath-ish expression evaluated on the response. Default: `2xx` status.
+- `response.extract`: jsonpath to pull the useful part out (`$.data`, `$.results.items`, etc.).
 
 ## `cli` backend
 
@@ -400,11 +400,11 @@ For wrapping a local CLI tool. The engine runs the binary as a subprocess with `
 }
 ```
 
-- `bin` — the binary name. Declare it in `requires.bins` so the adapter is gated on the binary being installed.
-- `timeout` — seconds; the engine kills the subprocess and returns a `TIMEOUT` error if exceeded.
-- `env` — environment variables to inject (templated). Use this for tokens; never pass secrets via argv.
-- `commands.<action>.args` — array of arguments, each templated. Arrays prevent shell injection.
-- `parse.type` — `"jsonpath"` (parse stdout as JSON, extract by path), `"regex"` (with `pattern`), or `"text"` (return raw stdout).
+- `bin`: the binary name. Declare it in `requires.bins` so the adapter is gated on the binary being installed.
+- `timeout`: seconds; the engine kills the subprocess and returns a `TIMEOUT` error if exceeded.
+- `env`: environment variables to inject (templated). Use this for tokens; never pass secrets via argv.
+- `commands.<action>.args`: array of arguments, each templated. Arrays prevent shell injection.
+- `parse.type`: `"jsonpath"` (parse stdout as JSON, extract by path), `"regex"` (with `pattern`), or `"text"` (return raw stdout).
 
 Non-zero exit code = error (stderr is included in the error message). Exit 0 with malformed JSON for `parse.type: "jsonpath"` returns the raw text.
 
@@ -424,7 +424,7 @@ This is the lightest-weight way to register an MCP server as a named connector i
 
 ## Templating reference
 
-All templates use the same locked-down resolver — no `eval`, no raw Jinja, no shell expansion. Three namespaces and a small set of filters:
+All templates use the same locked-down resolver: no `eval`, no raw Jinja, no shell expansion. Three namespaces and a small set of filters.
 
 ### Namespaces
 
@@ -438,8 +438,8 @@ Bareword namespace access (`{{ params | filter }}`) returns the whole object, us
 
 ### Filters
 
-- **`default(<value>[, as=<type>])`** — supply a fallback when the resolved value is empty/None. The `as=` cast (`int`, `str`, `bool`, `list`) preserves type round-tripping. Example: `"{{ params.limit | default(10, as=int) }}"`.
-- **Built-in cred helpers** — `{{ cred.base64_credentials }}` (base64-encodes `username:password` from `cred.fields`).
+- **`default(<value>[, as=<type>])`**: supply a fallback when the resolved value is empty/None. The `as=` cast (`int`, `str`, `bool`, `list`) preserves type round-tripping. Example: `"{{ params.limit | default(10, as=int) }}"`.
+- **Built-in cred helpers**: `{{ cred.base64_credentials }}` (base64-encodes `username:password` from `cred.fields`).
 
 ### Templating in non-string contexts
 
@@ -489,7 +489,7 @@ def test_my_adapter_renders_correct_request(self):
 
 For a `cli` adapter: patch `subprocess.run`, capture the `args` list, assert the rendered argv matches.
 
-See `tests/integration/test_transmission_adapter.py`, `tests/integration/test_google_workspace_adapter.py`, and `tests/integration/test_github_cli_adapter.py` for full examples shipping with Agent Core. The Google Workspace tests, for example, decode the rendered `raw` field to verify the RFC822 message headers and body, and assert each service's request reaches the right API host — that's the level of rigor request-template tests should reach.
+See `tests/integration/test_transmission_adapter.py`, `tests/integration/test_google_workspace_adapter.py`, and `tests/integration/test_github_cli_adapter.py` for full examples shipping with Agent Core. The Google Workspace tests, for example, decode the rendered `raw` field to verify the RFC822 message headers and body, and assert each service's request reaches the right API host; that's the level of rigor request-template tests should reach.
 
 ## Sharing your adapter
 
@@ -509,7 +509,7 @@ git:owner/repo@ref
 
 via the Browse Adapters page. The ref (branch/tag/commit) is optional. Agent Core clones, validates, runs the dangerous-pattern scan for code-bearing backends, and installs.
 
-A future agent-core registry would make this `agent-core adapters install <slug>` — that path is intentionally deferred until there's demand to operate a hosted catalog.
+A future agent-core registry would make this `agent-core adapters install <slug>`; that path is intentionally deferred until there's demand to operate a hosted catalog.
 
 ## Reference: shipped adapters
 
@@ -573,6 +573,6 @@ For Transmission specifically, keep `base_url` at the server root, such as `http
 
 The adapter module system rests on one explicit choice: **distributable adapters never add code to a user's Agent Core instance.** Every install path produces a manifest in `data/adapters/`, never a Python file in `app/connectors/`. That choice keeps adapters safe to share and upgrade-proof.
 
-`app/connectors/` (the engines) is maintainer territory and is replaced on upgrade — it's the product itself. `app/adapter_templates/` ships the curated catalog. `data/adapters/` is yours. The boundary is the same one OpenClaw skills, OpenAPI specs, and MCP servers already use: data and external processes can be shared safely; in-process code cannot.
+`app/connectors/` (the engines) is maintainer territory and is replaced on upgrade; it's the product itself. `app/adapter_templates/` ships the curated catalog. `data/adapters/` is yours. The boundary is the same one OpenClaw skills, OpenAPI specs, and MCP servers already use: data and external processes can be shared safely; in-process code cannot.
 
-For the deeper design rationale and constraints, the maintainer's plan lives in `plan.md` at the repo root (gitignored — local-only).
+For the deeper design rationale and constraints, the maintainer's plan lives in `plan.md` at the repo root (gitignored, local-only).

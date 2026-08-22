@@ -1,12 +1,12 @@
-# Backup and Restore
+# Backup and restore
 
 Agent Core's state lives in three files: the database (`data/agent-core.db`), the current encryption key, and the key history file. A full backup export wraps those files in an encrypted archive. You keep the encrypted archive and the one-time backup key separately. If you restore the archive without the matching backup key, Agent Core cannot decrypt it.
 
 ---
 
-## Full Backup
+## Full backup
 
-A full backup requires an admin session. This is intentional — the encrypted archive and backup key together contain enough to restore all your credentials, so both are treated as sensitive.
+A full backup requires an admin session. This is intentional: the encrypted archive and backup key together contain enough to restore all your credentials, so both are treated as sensitive.
 
 ```bash
 curl -X POST http://localhost:3500/api/backup/export \
@@ -19,10 +19,10 @@ The exported archive contains the same backup contents as before, but encrypted 
 
 The underlying backup archive contains:
 
-- `agent-core.db` — the full database (memory, agents, credentials metadata, activity, connector types, bindings, and execution history)
-- `credential.key` — the current encryption key
-- `credential.keyring` — all historical keys (needed to decrypt entries from before a key rotation)
-- `manifest.json` — version, timestamp, and SHA-256 checksums for everything in the archive
+- `agent-core.db`: the full database (memory, agents, credentials metadata, activity, connector types, bindings, and execution history)
+- `credential.key`: the current encryption key
+- `credential.keyring`: all historical keys (needed to decrypt entries from before a key rotation)
+- `manifest.json`: version, timestamp, and SHA-256 checksums for everything in the archive
 
 You can also trigger a backup from the dashboard: **Settings → Backup → Export Encrypted Backup**.
 
@@ -44,47 +44,47 @@ curl -X POST http://localhost:3500/api/backup/restore \
 
 **Mode options:**
 
-- **`replace_all`** — replaces your current database and encryption key entirely with the backup contents. Everything you have now is gone. Use this to recover from a corrupted or lost database.
+- **`replace_all`**: replaces your current database and encryption key entirely with the backup contents. Everything you have now is gone. Use this to recover from a corrupted or lost database.
 
-  A full restore holds the database still while it swaps: requests already in flight are allowed to finish, and requests arriving during the swap get a `503` with a `Retry-After` rather than a connection to a file that is about to be replaced. If in-flight work does not finish within the drain window, the restore refuses and changes nothing. **This gate is per process**, so a restore is only safe on the supported single-worker deployment — see [Configuration](configuration.md#workers).
-- **`merge`** — adds records from the backup that don't conflict with existing records. If a record with the same primary key already exists, the current version wins. Useful for combining two independent Agent Core installs or bringing back specific records without overwriting what you have.
+  A full restore holds the database still while it swaps: requests already in flight are allowed to finish, and requests arriving during the swap get a `503` with a `Retry-After` rather than a connection to a file that is about to be replaced. If in-flight work does not finish within the drain window, the restore refuses and changes nothing. **This gate is per process**, so a restore is only safe on the supported single-worker deployment; see [Configuration](configuration.md#workers).
+- **`merge`**: adds records from the backup that don't conflict with existing records. If a record with the same primary key already exists, the current version wins. Useful for combining two independent Agent Core installs or bringing back specific records without overwriting what you have.
 
 Before replacing anything, Agent Core always:
 
 1. Decrypts the archive if you provided a backup key
-2. Validates the ZIP structure — must contain `agent-core.db`, `credential.key`, and `manifest.json`
+2. Validates the ZIP structure: must contain `agent-core.db`, `credential.key`, and `manifest.json`
 3. Verifies SHA-256 checksums match what the manifest says
 4. Creates timestamped copies of your current database and key material in `data/backups/`
 
 If any validation step fails, your existing data is untouched.
 
-### Merge Details
+### Merge details
 
 A merge restore is more surgical:
 
-- Records with primary keys that already exist in the current database are skipped — current wins
+- Records with primary keys that already exist in the current database are skipped; current wins
 - Credential entries from the backup are automatically re-encrypted with your current key if the backup key differs, so they remain readable
-- The merge does not adopt the backup's encryption key — your current key stays in place
+- The merge does not adopt the backup's encryption key; your current key stays in place
 
 **What comes across.** Users, workspaces and their collaborator grants, agents, memory records and their embeddings, review proposals, credential entries, activity, connector types, bindings and execution history, adapter installations, webhook registrations, and system settings.
 
-**What does not, and why.** Audit and webhook delivery logs are a record of what happened on the *other* installation, not state. Sessions, OTP secrets, and the broker credential are this machine's login and identity — importing them would hand out access. OAuth state, session caches, and spilled tool results regenerate on their own.
+**What does not, and why.** Audit and webhook delivery logs are a record of what happened on the *other* installation, not state. Sessions, OTP secrets, and the broker credential are this machine's login and identity; importing them would hand out access. OAuth state, session caches, and spilled tool results regenerate on their own.
 
 **Related records are not re-pointed.** Tables merge independently and the current version wins, so a record whose id already exists here is skipped. Anything that referenced it is skipped too, and counted in `merge.skipped_conflicts`. Otherwise a connector binding from the backup would keep its own id, find its credential's id already taken, and quietly authenticate with *this* installation's unrelated secret. Same id with identical content is a genuine match, not a conflict, and merges normally.
 
 Relationships here are not all foreign keys, and all three forms are covered:
 
-- **direct references** — a binding's `credential_id`, an embedding's `record_id`
-- **scopes** — `workspace:proj` names a workspace, so a memory record or credential from a backup is not filed into a same-named workspace of yours that is a different project
-- **ids inside JSON** — a review proposal's `target_ids_json` names the records it would retract
+- **direct references**: a binding's `credential_id`, an embedding's `record_id`
+- **scopes**: `workspace:proj` names a workspace, so a memory record or credential from a backup is not filed into a same-named workspace of yours that is a different project
+- **ids inside JSON**: a review proposal's `target_ids_json` names the records it would retract
 
 Skipping also cascades: if a binding is not imported because its credential conflicts, an execution belonging to that binding is not imported either. Without that, the execution would be inserted with no binding to attach to and the database constraint would fail the whole merge instead of declining one row.
 
-**A partial merge reports itself as one.** If any table cannot be merged, the response is an error naming that table, and the rows that did come across are kept — undoing a half-finished merge is its own risk. Both the success and failure responses carry `merge.inserted_counts` (how many rows each table gained), `merge.tables_merged`, `merge.failed_tables`, and `merge.skipped_conflicts` — on a failure they appear under `error.details` — so you can see what actually landed rather than inferring it from a message.
+**A partial merge reports itself as one.** If any table cannot be merged, the response is an error naming that table, and the rows that did come across are kept; undoing a half-finished merge is its own risk. Both the success and failure responses carry `merge.inserted_counts` (how many rows each table gained), `merge.tables_merged`, `merge.failed_tables`, and `merge.skipped_conflicts` (on a failure they appear under `error.details`), so you can see what actually landed rather than inferring it from a message.
 
 ---
 
-## Partial Exports
+## Partial exports
 
 These exports are scoped to what the caller has access to, and never include raw credential values.
 
@@ -102,9 +102,9 @@ curl "http://localhost:3500/api/backup/export/memory?fmt=csv" \
   -o memory.csv
 ```
 
-### Credential Metadata
+### Credential metadata
 
-Exports names, scopes, labels, types, and reference names — everything except the actual secrets.
+Exports names, scopes, labels, types, and reference names; everything except the actual secrets.
 
 ```bash
 curl http://localhost:3500/api/backup/export/credentials \
@@ -112,7 +112,7 @@ curl http://localhost:3500/api/backup/export/credentials \
   -o credentials-metadata.json
 ```
 
-### Audit Log
+### Audit log
 
 Admin only. Returns CSV.
 
@@ -124,9 +124,9 @@ curl "http://localhost:3500/api/backup/export/audit?fmt=csv" \
 
 ---
 
-## Health Checks
+## Health checks
 
-Run this to verify Agent Core's operational state — useful after a restore or if something seems off:
+Run this to verify Agent Core's operational state; useful after a restore or if something seems off:
 
 ```bash
 curl http://localhost:3500/api/backup/startup-checks \
@@ -156,6 +156,6 @@ What it does:
 - Marks any activity record `stale` if its heartbeat has exceeded the stale threshold
 - Hard-deletes `scratchpad` memory records older than `scratchpad_retention_days` in system settings (default: 7 days)
 - Hard-deletes any memory record whose `expires_at` TTL has passed
-- Hard-deletes retracted and superseded memory records `retracted_retention_days` after they stopped being active (default: 30 days) — measured from retraction/supersession time, not creation time, so a fresh retraction always gets its full grace window to be restored first
+- Hard-deletes retracted and superseded memory records `retracted_retention_days` after they stopped being active (default: 30 days), measured from retraction/supersession time, not creation time, so a fresh retraction always gets its full grace window to be restored first
 
 Deleted records can't be recovered. Active `fact`, `preference`, and `decision` records without an `expires_at` are never touched. The last run's time, trigger, and per-step counts are shown on the Settings page and at `GET /api/backup/maintenance/status`.

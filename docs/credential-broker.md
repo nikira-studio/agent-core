@@ -1,21 +1,21 @@
 # Credential Broker
 
-Agent Core stores secrets encrypted on disk. When an agent needs one, it doesn't get the actual value — it gets a placeholder reference like `AC_SECRET_SERVICE_TOKEN_1A2B3C4D`. The **Credential Broker** turns that placeholder into the real thing at runtime, injecting it directly into a tool or script without the model ever seeing it.
+Agent Core stores secrets encrypted on disk. When an agent needs one, it doesn't get the actual value; it gets a placeholder reference like `AC_SECRET_SERVICE_TOKEN_1A2B3C4D`. The **Credential Broker** turns that placeholder into the real thing at runtime, injecting it directly into a tool or script without the model ever seeing it.
 
 ```
 What the model sees:   AC_SECRET_SERVICE_TOKEN_1A2B3C4D
 What the tool gets:    the real secret value  (injected at runtime)
 ```
 
-Anything you put in a prompt or config file might end up in a log, a response, or a stored conversation. Agent Core sidesteps this entirely. The broker — a small local script — swaps references for real values in the child process environment. Your actual API keys never enter the model's context window.
+Anything you put in a prompt or config file might end up in a log, a response, or a stored conversation. Agent Core sidesteps this entirely. The broker, a small local script, swaps references for real values in the child process environment. Your actual API keys never enter the model's context window.
 
-## How It Works
+## How it works
 
 Here's the full flow from storage to execution:
 
 1. You store a credential in Agent Core from the **Connectors** page or API.
 2. An agent calls `credential_get` (MCP) or `POST /api/credentials/entries/{id}/reference` (REST).
-3. Agent Core returns an `AC_SECRET_*` reference name — not the secret.
+3. Agent Core returns an `AC_SECRET_*` reference name, not the secret.
 4. The agent passes that reference into a tool configuration or environment variable.
 5. When you run the tool, you wrap the command with the broker script.
 6. The broker scans the environment for `AC_SECRET_*` references.
@@ -23,7 +23,7 @@ Here's the full flow from storage to execution:
 8. Agent Core verifies the broker credential, checks the agent's permissions, and returns the raw value.
 9. The broker injects the real value into the child process environment before the tool starts.
 
-> **Important:** The `agent_id` the broker uses for permission checks comes from your integration configuration — not from the model. The model should never be able to specify which agent identity resolves a secret.
+> **Important:** The `agent_id` the broker uses for permission checks comes from your integration configuration, not from the model. The model should never be able to specify which agent identity resolves a secret.
 
 This broker path is for local tools and scripts that need a secret in their own environment. If you want Agent Core itself to run the external action, use the **Connectors** page and a connector binding instead of the broker.
 
@@ -31,9 +31,9 @@ You can edit credentials from the Connectors page. Metadata changes do not alter
 
 ---
 
-## The Broker Credential
+## The broker credential
 
-The broker needs its own credential to authenticate with Agent Core. This is separate from agent API keys — it's a special token with a narrow purpose: allowing the broker to resolve credentials on behalf of configured agents.
+The broker needs its own credential to authenticate with Agent Core. This is separate from agent API keys; it's a special token with a narrow purpose: allowing the broker to resolve credentials on behalf of configured agents.
 
 When Agent Core starts for the first time, it automatically generates this credential and writes it to `data/broker.credential`. The broker reads that file automatically when run from the repo root or inside the container.
 
@@ -59,7 +59,7 @@ curl -X POST http://localhost:3500/api/dashboard/broker/rotate \
   -H "Authorization: Bearer <admin-session>"
 ```
 
-The new credential comes back in the response **once**. Agent Core doesn't automatically update `data/broker.credential` — you need to write it there yourself:
+The new credential comes back in the response **once**. Agent Core doesn't automatically update `data/broker.credential`; you need to write it there yourself:
 
 ```bash
 echo "ac_broker_new_value_here" > data/broker.credential
@@ -67,7 +67,7 @@ echo "ac_broker_new_value_here" > data/broker.credential
 
 ---
 
-## Using the Broker Script
+## Using the broker script
 
 The broker script is at `runner/agent_core_broker.py`. If you installed via **Docker**, copy it out first:
 
@@ -77,9 +77,9 @@ docker cp agent-core:/app/runner/agent_core_broker.py ./agent_core_broker.py
 
 Then use `python agent_core_broker.py` instead of `python runner/agent_core_broker.py`.
 
-### Environment Injection Mode
+### Environment injection mode
 
-This is the most common mode. Any environment variable in the current shell that contains an `AC_SECRET_*` reference gets that reference swapped for the real value — but only in the child process. Your parent shell is never touched.
+This is the most common mode. Any environment variable in the current shell that contains an `AC_SECRET_*` reference gets that reference swapped for the real value, but only in the child process. Your parent shell is never touched.
 
 ```bash
 export MY_API_KEY="AC_SECRET_SERVICE_TOKEN_1A2B3C4D"
@@ -92,7 +92,7 @@ python runner/agent_core_broker.py \
 
 When `your-tool-or-script` starts, `MY_API_KEY` will contain the real token.
 
-### Header Injection Mode
+### Header injection mode
 
 Resolves references and exposes the real values as `AC_HEADER_*` environment variables, which some HTTP tools can pick up directly as request headers.
 
@@ -105,7 +105,7 @@ python runner/agent_core_broker.py \
 
 ---
 
-## The Resolve Endpoint
+## The resolve endpoint
 
 The broker calls this internally. You generally don't need to use it directly, but it's documented here for transparency and for building custom integrations:
 
@@ -133,7 +133,7 @@ Both conditions must be met for this to succeed:
 
 ---
 
-## Scope Requirements
+## Scope requirements
 
 The `agent_id` you configure for the broker determines what credentials it can resolve. The agent needs read access to the scope where the credential entry lives:
 

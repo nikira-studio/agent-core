@@ -8,7 +8,7 @@ First stable release. Agent Core is a local capability layer for AI agents: shar
 
 ### Memory
 
-- Durable records in four classes — fact, decision, preference, scratchpad — with per-agent scoped access
+- Durable records in four classes (fact, decision, preference, scratchpad) with per-agent scoped access
 - Facts carry subject anchors and are re-verified on a schedule; decisions are left alone by design
 - Two independent timelines per record (transaction time and valid time), with `as_of` search for point-in-time questions
 - Full-text search always; hybrid semantic search when an embedding backend such as Ollama is configured

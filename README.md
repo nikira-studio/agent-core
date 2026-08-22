@@ -1,22 +1,22 @@
 # Agent Core
 
-**A local capability layer for AI agents: shared memory, credentials, connectors, scoped access, and activity tracking — all on your machine.**
+**A local capability layer for AI agents: shared memory, credentials, connectors, scoped access, and activity tracking, all on your machine.**
 
 ---
 
-If you use AI coding agents — Claude Code, Cursor, Codex, or anything else — you've probably run into this:
+If you use AI coding agents like Claude Code, Cursor, or Codex, you've probably run into this:
 
 - You start a new session and have to re-explain the same decisions all over again
 - You juggle API keys and tokens across tools, pasting them into configs and hoping nothing leaks
 - Two agents working on the same project have no idea what the other one has done
 
-Agent Core fixes that. It's a small service you run on your own machine. Your agents connect to it to read and write memory, resolve credentials, and call external services while you keep the control surface local and explicit.
+Agent Core fixes that. It's a small service you run on your own machine. Your agents connect to it to read and write memory, resolve credentials, and call external services, while the controls stay local and explicit.
 
 ![Agent Core explainer](docs/images/explainer.png)
 
 ---
 
-## What Agent Core Is For
+## What Agent Core is for
 
 Agent Core is a local capability and memory layer for agents.
 
@@ -25,7 +25,7 @@ It is good at:
 - keeping durable memory in one place
 - controlling access to credentials and external services
 - lending an agent short-lived, narrowed access for a single task, with human approval
-- exposing server-side connectors as agent tools — imported OpenAPI specs, native MCP servers, and **adapters** (shareable data-manifest integrations for OAuth, session handshakes, and CLI wrappers; see [docs/adapters.md](docs/adapters.md))
+- exposing server-side connectors as agent tools: imported OpenAPI specs, native MCP servers, and **adapters**, which are shareable data-manifest integrations for OAuth, session handshakes, and CLI wrappers (see [docs/adapters.md](docs/adapters.md))
 - showing what agents are doing right now
 
 It is not trying to be:
@@ -34,7 +34,7 @@ It is not trying to be:
 - a scheduler that runs the work for you
 - a replacement for the agent itself
 
-## What You Install
+## What you install
 
 A fresh install gives you a local control layer that agents can actually use:
 
@@ -46,13 +46,13 @@ A fresh install gives you a local control layer that agents can actually use:
 
 ---
 
-## How It Works
+## How it works
 
 Agent Core is a local HTTP server. It speaks REST and MCP (Model Context Protocol), so anything that can make an HTTP request can talk to it. Agents authenticate with an API key and use tools like `memory_search`, `memory_write`, `credential_get`, and the connector discovery/execution tools.
 
-Everything — memory, credentials, and configuration — lives on your disk. The only intentional outbound call in the UI is the public API directory browser for connector imports; operational data still stays local unless you explicitly run a connector against an external service.
+Memory, credentials, and configuration all live on your disk. The only intentional outbound call in the UI is the public API directory browser for connector imports; operational data still stays local unless you explicitly run a connector against an external service.
 
-For the full picture — how memory is modelled, what keeps the corpus honest, how connectors and credentials fit together, and the reasoning behind each — read **[How It Works](docs/how-it-works.md)**.
+For the full picture, read **[How it works](docs/how-it-works.md)**: how memory is modelled, what keeps the corpus honest, how connectors and credentials fit together, and the reasoning behind each.
 
 ```
 ┌──────────────┐     MCP or REST     ┌──────────────────┐
@@ -70,7 +70,7 @@ For the full picture — how memory is modelled, what keeps the corpus honest, h
 
 ---
 
-## What It Looks Like
+## What it looks like
 
 The dashboard gives you a central view of your connected agents, active memory, stored credentials, and connector bindings. After setup, it's the quickest way to confirm the service is running and your agents have what they need.
 
@@ -78,11 +78,11 @@ The dashboard gives you a central view of your connected agents, active memory, 
 
 ---
 
-## Capabilities Your Agents Can Use
+## Capabilities your agents can use
 
-### Memory That Persists Across Sessions
+### Memory that persists across sessions
 
-When an agent makes a decision or learns something useful, it writes that to Agent Core. The next time any agent starts — same tool, different tool, next week — it can search for that context and pick up where things left off.
+When an agent makes a decision or learns something useful, it writes that to Agent Core. The next time any agent starts, whether it's the same tool, a different one, or a week later, it can search for that context and pick up where things left off.
 
 ```
 Claude Code writes: "We decided PostgreSQL over SQLite for the prod database."
@@ -92,19 +92,19 @@ Codex searches:     memory_search("database decision") → gets that record back
 
 Memory is scoped. Agents only see what they're allowed to: their own private agent scope, shared project context, or your personal preferences. Nothing bleeds across unless you want it to.
 
-Memory records are one of two kinds, and the difference decides what the system can do with them. A **fact** is settled by checking — someone could verify it against the code, a host, or a service. A **decision** is settled by someone deciding, and nothing can verify it. That split is what lets Agent Core re-check facts on a schedule while leaving your decisions alone.
+Memory records are one of two kinds, and the difference decides what the system can do with them. A **fact** is settled by checking: someone could verify it against the code, a host, or a service. A **decision** is settled by someone deciding, and nothing can verify it. That split is what lets Agent Core re-check facts on a schedule while leaving your decisions alone.
 
 Facts can name what would confirm them (`repo:<path>`, `host:<name>`, `service:<binding>`), and the maintenance sweep checks them, recording what it found. Search results say how long it has been since anyone confirmed a record, so an agent can tell a fact verified today from one nobody has checked in months. Ranking follows the same principle: how often a record actually gets recalled and whether callers said it helped, rather than a score its author gave itself.
 
-A few records can be **pinned** as standing context — the rules that apply whatever the task is. Those are loaded at the start of a session rather than retrieved, because a constraint that has to win a search can be missed. The list is capped so it stays short enough to actually read.
+A few records can be **pinned** as standing context, the rules that apply whatever the task is. Those are loaded at the start of a session rather than retrieved, because a constraint that has to win a search can be missed. The list is capped so it stays short enough to actually read.
 
-There is also a **clean-up review** in the dashboard. Rules look for records that no longer earn their place — one-off job logs, repeats, claims whose subject has vanished — and propose them. Nothing is applied until you answer, retracting is reversible, and each kind of suggestion keeps a record of how often you agreed with it.
+There is also a **clean-up review** in the dashboard. Rules look for records that no longer earn their place and propose them: one-off job logs, repeats, claims whose subject has vanished. Nothing is applied until you answer, retracting is reversible, and each kind of suggestion keeps a record of how often you agreed with it.
 
-> Without semantic search configured, exact keywords matter more than fuzzy phrasing — `memory_search("authentication")` won't match a record that says "login logic". Use terms that match what was actually written. See [Requirements](#requirements) for how to enable semantic search.
+> Without semantic search configured, exact keywords matter more than fuzzy phrasing. `memory_search("authentication")` won't match a record that says "login logic", so use terms that match what was actually written. See [Requirements](#requirements) for how to enable semantic search.
 
 ![Agent Core memory](docs/images/agent-memory.png)
 
-### Credentials and Connectors
+### Credentials and connectors
 
 The **Connectors** page is where you manage stored credentials and connector bindings. This is the capability layer: agents do not route through a scheduler or OS. They connect to a service catalog and call the capabilities they need, whether that capability came from an imported OpenAPI spec, a native MCP server, an installed adapter, or the built-in Generic HTTP fallback.
 
@@ -130,27 +130,27 @@ At runtime:  Broker injects the token locally, or the connector executor uses it
 
 ![Agent Core service catalog](docs/images/agent-catalog.png)
 
-### Shared Context Across Tools and People
+### Shared context across tools and people
 
-Working with a team, or switching between Claude Code and Cursor on the same project? Create a workspace and grant each agent access to it. When one agent writes a decision or discovers something important to the shared workspace scope, any other agent connected to that workspace can search for it with `memory_search` at the start of their next session. Nothing transfers automatically — agents actively write and read — but that makes the handoff explicit and reliable rather than magic.
+Working with a team, or switching between Claude Code and Cursor on the same project? Create a workspace and grant each agent access to it. When one agent writes a decision or discovers something important to the shared workspace scope, any other agent connected to that workspace can search for it with `memory_search` at the start of their next session. Nothing transfers automatically; agents actively write and read. That makes the handoff explicit and reliable rather than magic.
 
 ![Agent Core agents](docs/images/agent-workspace.png)
 
-### Short-Lived Authority for Agent Teams
+### Short-lived authority for agent teams
 
 Standing scopes fit the agents you use every day. Sometimes an agent should get access for one task only: a coordinator handing work to a worker agent, a nightly job that needs a single connector action, a new tool you aren't ready to trust with anything permanent.
 
-For that, Agent Core supports **delegation** — the same idea as the temporary credentials cloud providers issue (AWS STS, OAuth token exchange), running locally. A grant is always a subset of what its issuer holds, expires within an hour, and *replaces* the recipient's normal access while in use instead of adding to it. Agents that lack authority can request it; the request lands on your dashboard, where you approve it, narrow it, or deny it. No secret ever passes through a model, and every delegated action is attributed in the audit log from the agent that asked to the agent that acted.
+For that, Agent Core supports **delegation**, the local version of the temporary credentials cloud providers issue (AWS STS, OAuth token exchange). A grant is always a subset of what its issuer holds, expires within an hour, and *replaces* the recipient's normal access while in use instead of adding to it. Agents that lack authority can request it; the request lands on your dashboard, where you approve it, narrow it, or deny it. No secret ever passes through a model, and every delegated action is attributed in the audit log from the agent that asked to the agent that acted.
 
-This is what lets agent orchestration frameworks — anything that coordinates worker agents — sit on top of Agent Core without every worker holding broad permanent credentials. Coordination stays in your framework; Agent Core stays the layer that holds identity, authority, and audit. See [How It Works](docs/how-it-works.md#7-delegation-authority-for-one-task) for the mechanism and the [Delegated Authorization contract](docs/delegated-authorization-integration.md) for integration details.
+This is what lets any framework that coordinates worker agents sit on top of Agent Core without every worker holding broad permanent credentials. Coordination stays in your framework; Agent Core stays the layer that holds identity, authority, and audit. See [How it works](docs/how-it-works.md#7-delegation-authority-for-one-task) for the mechanism and the [Delegated Authorization contract](docs/delegated-authorization-integration.md) for integration details.
 
 ---
 
-## Activity and Handoffs
+## Activity and handoffs
 
 The activity dashboard lists active agent tasks, flags sessions that have gone stale (no heartbeat for more than the configured threshold), and surfaces pending handoffs with options to reassign or generate a briefing. When an agent picks up stale work, it can pull a briefing that includes the prior task description, recent decisions, and relevant memory from the workspace scope.
 
-Activity tracking is self-reported — there is no automatic detection of agent work. A working agent must call `activity_update` at the start of a task and periodically as a heartbeat; without that, nothing appears in the dashboard and no briefing can be generated.
+Activity tracking is self-reported. There is no automatic detection of agent work: a working agent must call `activity_update` at the start of a task and periodically as a heartbeat. Without that, nothing appears in the dashboard and no briefing can be generated.
 
 The trail is searchable, and it is the right home for "what did we do on X last month". Durable memory is for what stays true; the activity trail is for what happened. Agents that record per-task progress in memory instead get told so on write.
 
@@ -164,13 +164,13 @@ get_briefing     → pull the prior task description, decisions, and workspace m
 memory_search    → fill in any gaps with a targeted query
 ```
 
-`activity_pickup` returns the next assigned task, or `null` if nothing is waiting. It is an explicit pull — agents check when they start or when idle, not on a schedule. Nothing in this flow is automatic, which means the handoff trail is auditable and the context is always intentional.
+`activity_pickup` returns the next assigned task, or `null` if nothing is waiting. It is an explicit pull: agents check when they start or when idle, not on a schedule. Nothing in this flow is automatic, which means the handoff trail is auditable and the context is always intentional.
 
 ![Agent Core activity](docs/images/agent-activity.png)
 
 ---
 
-## Get Running in Minutes
+## Get running in minutes
 
 ### Docker (recommended)
 
@@ -200,9 +200,9 @@ uvicorn app.main:app --reload --port 3500
 
 ---
 
-## Connect Your First Agent
+## Connect your first agent
 
-Go to **Agents → New Agent** in the dashboard, give it a name, and copy the API key — it's shown once. Then head to the **Integrations** page to get a ready-to-paste config for your specific tool.
+Go to **Agents → New Agent** in the dashboard, give it a name, and copy the API key. It's shown once. Then head to the **Integrations** page to get a ready-to-paste config for your specific tool.
 
 For MCP-compatible clients (Claude Code, Cursor, Claude Desktop):
 
@@ -235,20 +235,20 @@ For REST-based clients or custom integrations, every feature is also available t
 
 | Doc | What's in it |
 | --- | --- |
-| [How It Works](docs/how-it-works.md) | The whole system end to end: memory, activity, credentials, connectors, and why each part works the way it does |
-| [Quickstart](docs/quickstart.md) | Install, first agent, first memory write — end to end |
+| [How it works](docs/how-it-works.md) | The whole system end to end: memory, activity, credentials, connectors, and why each part works the way it does |
+| [Quickstart](docs/quickstart.md) | Install, first agent, first memory write, end to end |
 | [Integrations](docs/integrations.md) | Connecting Claude Code, Cursor, Codex, and other tools |
 | [Credential Broker](docs/credential-broker.md) | How `AC_SECRET_*` references work and how to resolve them at runtime |
 | [Configuration](docs/configuration.md) | Environment variables, ports, and data directory layout |
 | [Security](docs/security.md) | Scope model, secret handling, and deployment checklist |
-| [Delegated Authorization](docs/delegated-authorization-integration.md) | Lending agents short-lived, narrowed authority — the contract for coordinators and agent runtimes |
-| [API Reference](docs/api.md) | Full REST and MCP endpoint reference |
-| [Backup & Restore](docs/backup-restore.md) | Export, restore, and routine maintenance |
+| [Delegated Authorization](docs/delegated-authorization-integration.md) | Lending agents short-lived, narrowed authority, and the contract for coordinators and agent runtimes |
+| [API reference](docs/api.md) | Full REST and MCP endpoint reference |
+| [Backup and restore](docs/backup-restore.md) | Export, restore, and routine maintenance |
 | [Troubleshooting](docs/troubleshooting.md) | Common issues and fixes |
 
 ---
 
-## Your Data Stays on Your Machine
+## Your data stays on your machine
 
 ```
 data/
@@ -259,7 +259,7 @@ data/
   backups/
 ```
 
-`data/` is gitignored. The full backup export from the dashboard bundles the database and encryption key material together — you need both to restore.
+`data/` is gitignored. The full backup export from the dashboard bundles the database and encryption key material together. You need both to restore.
 
 ---
 
@@ -267,7 +267,7 @@ data/
 
 - Docker with Compose, **or** Python 3.11 for local development
 - SQLite with FTS5 (standard in the Docker image and most Python 3.11 builds)
-- Optional: [Ollama](https://ollama.com) for semantic (AI-powered) memory search — falls back to full-text search without it. Configure the endpoint and model from **Settings → Vector Search** in the dashboard after setup
+- Optional: [Ollama](https://ollama.com) for semantic (AI-powered) memory search. Without it, Agent Core falls back to full-text search. Configure the endpoint and model from **Settings → Vector Search** in the dashboard after setup
 
 ---
 

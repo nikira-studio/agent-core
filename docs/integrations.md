@@ -59,7 +59,7 @@ Antigravity uses the same MCP JSON shape, but the endpoint field should be `serv
 }
 ```
 
-### What MCP Gives Your Agents
+### What MCP gives your agents
 
 Once connected, these tools are available in any session:
 
@@ -71,13 +71,13 @@ Once connected, these tools are available in any session:
 | `memory_retract` | Soft-delete a memory record |
 | `memory_move` | Atomically move an active record to a new scope (write access to both scopes required) |
 | `credential_get` | Get an `AC_SECRET_*` reference for a stored credential |
-| `credential_list` | List credential entries the agent can access (metadata and references only — no raw values) |
+| `credential_list` | List credential entries the agent can access (metadata and references only, no raw values) |
 | `activity_update` | Create or update an activity record in the supplied `memory_scope`, including progress notes and a completion result; it never moves an activity across scopes |
 | `activity_get` | Get one activity, together with the memory records written during it |
 | `activity_list` | List activities visible to the current agent or user |
 | `activity_pickup` | Claim the next active work item a human assigned to this agent in authorized scopes |
 | `activity_search` | Search the activity trail for what agents have already worked on |
-| `memory_pinned` | Standing context for your scopes — call once at session start |
+| `memory_pinned` | Standing context for your scopes; call once at session start |
 | `memory_pin` | **Request** that a record become standing context, or stop being it. Queues the request for operator review rather than pinning directly |
 | `memory_confirm` | Mark a record verified against the world (requires evidence saying what you checked) |
 | `memory_feedback` | Report whether a recalled record actually helped |
@@ -85,7 +85,7 @@ Once connected, these tools are available in any session:
 | `memory_reanchor` | Fix a record's pointer when the file moved or the anchor was wrong |
 | `get_briefing` | Pull a briefing when taking over from another agent |
 | `briefing_list` | List generated briefings visible to the current agent or user |
-| `effective_authority` | Report the caller's current effective authority — permanent scopes, or the grant's permissions on a delegated call |
+| `effective_authority` | Report the caller's current effective authority: permanent scopes, or the grant's permissions on a delegated call |
 | `delegations_list` | List delegated grants visible to the caller |
 | `delegation_request` | Ask for short-lived, narrowed authority the caller does not hold; a human reviews it on the dashboard |
 | `delegation_requests_list` | List delegation requests visible to the caller |
@@ -103,24 +103,24 @@ Once connected, these tools are available in any session:
 
 Agents connect, discover authorized tools, and call what they need. Agent Core provides the capabilities and logs the results. It is not a workflow engine.
 
-For memory writes, `slot_key` keeps one active value per slot for preference records, which makes "the current answer" deterministic instead of something retrieval has to guess at. `valid_from` and `valid_to` say when the content was **true in the world**, which is a separate timeline from when the system learned it — set them when a record describes a period other than "from now on", and pass `as_of` to a search to ask what the corpus held to be true at a past moment. See [How It Works](how-it-works.md#two-clocks).
+For memory writes, `slot_key` keeps one active value per slot for preference records, which makes "the current answer" deterministic instead of something retrieval has to guess at. `valid_from` and `valid_to` say when the content was **true in the world**, which is a separate timeline from when the system learned it; set them when a record describes a period other than "from now on", and pass `as_of` to a search to ask what the corpus held to be true at a past moment. See [How It Works](how-it-works.md#two-clocks).
 
 If one agent needs to hand work to another, write the durable state into the shared workspace scope and generate or link a briefing. If you are reviewing prior work, use `memory_search`, `activity_list`, and `briefing_list` together before changing anything. The private `agent:<id>` scope is only for scratch notes for that specific agent and should not be treated as the handoff channel.
 
-If you run a coordinator that farms work out to worker agents — an orchestration framework, a scheduler, or a script of your own — the delegation tools let it request short-lived, narrowed authority per task instead of every worker holding standing broad scopes. See the [Delegated Authorization contract](delegated-authorization-integration.md) for the claim flow and header transport; claiming a grant is REST-only so the secret never appears in a model-visible tool result.
+If you run a coordinator that farms work out to worker agents (an orchestration framework, a scheduler, or a script of your own), the delegation tools let it request short-lived, narrowed authority per task instead of every worker holding standing broad scopes. See the [Delegated Authorization contract](delegated-authorization-integration.md) for the claim flow and header transport; claiming a grant is REST-only so the secret never appears in a model-visible tool result.
 
-### Scope Model
+### Scope model
 
 Agent Core uses a few scope types, each with a distinct purpose and audience. The guiding rule:
 
-**Anything that is shared among agents or tools by default, or that conceptually belongs to a project, domain, or the owner rather than to one agent, belongs in a `workspace:<id>`.** Workspaces are the unit of shared knowledge — create one per domain (a project's development workspace, a personal-knowledge workspace, and so on). They are cheap; make a new one rather than overloading an existing workspace with unrelated facts.
+**Anything that is shared among agents or tools by default, or that conceptually belongs to a project, domain, or the owner rather than to one agent, belongs in a `workspace:<id>`.** Workspaces are the unit of shared knowledge: create one per domain (a project's development workspace, a personal-knowledge workspace, and so on). They are cheap; make a new one rather than overloading an existing workspace with unrelated facts.
 
-- `agent:<id>` — the agent's **own** scope: its scratch notes, operational state, and self-knowledge. Private by default, but shareable — grant another agent read by adding this scope to its read scopes. What does *not* belong here is knowledge that conceptually belongs to the owner rather than the agent, or that several agents should see by default; put that in a workspace (a shared workspace is a cleaner grant than handing out per-agent scope access). Records here survive a rebuild that reuses the same scope name, but a hard purge of the agent deletes them. Don't treat it as the default handoff channel.
-- `user:<id>` — the **human owner's** personal context and preferences. Agents read it for owner context (creator read is automatic in the current UI); write is an explicit, off-by-default grant. It is for facts about the owner, not a general shared store.
-- `workspace:<id>` — the **shared, durable home** for facts, decisions, and handoffs that multiple agents or tools rely on, or that must outlive any single agent. This is the default home for durable memory.
-- `shared` / `global` — a cross-user shared-access path, not just a visibility toggle.
+- `agent:<id>`: the agent's **own** scope: its scratch notes, operational state, and self-knowledge. Private by default, but shareable: grant another agent read by adding this scope to its read scopes. What does *not* belong here is knowledge that conceptually belongs to the owner rather than the agent, or that several agents should see by default; put that in a workspace (a shared workspace is a cleaner grant than handing out per-agent scope access). Records here survive a rebuild that reuses the same scope name, but a hard purge of the agent deletes them. Don't treat it as the default handoff channel.
+- `user:<id>`: the **human owner's** personal context and preferences. Agents read it for owner context (creator read is automatic in the current UI); write is an explicit, off-by-default grant. It is for facts about the owner, not a general shared store.
+- `workspace:<id>`: the **shared, durable home** for facts, decisions, and handoffs that multiple agents or tools rely on, or that must outlive any single agent. This is the default home for durable memory.
+- `shared` / `global`: a cross-user shared-access path, not just a visibility toggle.
 
-Worked example: an assistant that learns durable facts about its owner's contacts should write them to a dedicated workspace (for example a `personal` workspace the owner created and granted it write on) — not to `agent:<assistant>` (siloed and non-portable) and not to a project's development workspace (an unrelated domain).
+Worked example: an assistant that learns durable facts about its owner's contacts should write them to a dedicated workspace (for example a `personal` workspace the owner created and granted it write on), not to `agent:<assistant>` (siloed and non-portable) and not to a project's development workspace (an unrelated domain).
 
 When you generate reusable instructions, keep these distinctions in mind:
 
@@ -130,11 +130,11 @@ When you generate reusable instructions, keep these distinctions in mind:
 | Durable facts/decisions shared among agents or tools | a `workspace:<id>` dedicated to that domain |
 | Owner preferences, with user-scope write granted | the owner's user scope (`preference` class) |
 | Genuinely agent-local scratch | the agent's own `agent:<id>` scope |
-| You have durable/shared knowledge but no workspace is selected | a setup gap — have the owner create or select a workspace and grant write, rather than using `agent:<id>` as a stand-in |
+| You have durable/shared knowledge but no workspace is selected | a setup gap: have the owner create or select a workspace and grant write, rather than using `agent:<id>` as a stand-in |
 
-Agents are not granted user-scope or workspace write by default. If an assistant has no workspace and needs to store durable, shareable knowledge, the fix is to assign it a workspace — not to repurpose its private `agent:<id>` scope as the durable store.
+Agents are not granted user-scope or workspace write by default. If an assistant has no workspace and needs to store durable, shareable knowledge, the fix is to assign it a workspace, not to repurpose its private `agent:<id>` scope as the durable store.
 
-## Connector Setup in Agent Core
+## Connector setup in Agent Core
 
 There are four ways to add a connector, all behind a single **+ Add Connector** dropdown on `/connectors`:
 
@@ -143,7 +143,7 @@ There are four ways to add a connector, all behind a single **+ Add Connector** 
 | **Import API Spec** | the service publishes a REST OpenAPI/Swagger spec |
 | **Import MCP Server** | the service is a native MCP server (HTTP transport) |
 | **Add HTTP Connector** | the service is plain authenticated HTTP and you just need a base URL |
-| **Adapters** | you want to browse the built-in templates or local adapter folders on the Browse Adapters page and install one into the service catalog — see [Adapters](#adapters) |
+| **Adapters** | you want to browse the built-in templates or local adapter folders on the Browse Adapters page and install one into the service catalog; see [Adapters](#adapters) |
 
 For browsing pre-curated catalogs, the **Browse API Directory** page lists 2000+ public OpenAPI specs (powered by apis.guru) you can one-click import.
 
@@ -152,7 +152,7 @@ For browsing pre-curated catalogs, the **Browse API Directory** page lists 2000+
 - Go to `/connectors`
 - Click **+ Add Connector → Import API Spec**
 - Paste a URL, upload a file, or paste the JSON/YAML directly
-- Click **Preview Spec** — this shows the connector name, auth type, base server URL, operation count, and any warnings before anything is saved
+- Click **Preview Spec**: this shows the connector name, auth type, base server URL, operation count, and any warnings before anything is saved
 - Click **Import API** to commit the import
 - Create a binding to a stored credential
 
@@ -171,18 +171,18 @@ Example: for a local Firecrawl deployment, import the public spec from GitHub, t
 
 If you enable `AGENT_CORE_BLOCK_INTERNAL_HOSTS=true`, add `AGENT_CORE_ALLOWED_INTERNAL_HOSTS=firecrawl` in the Agent Core environment. That keeps the imported spec public while routing execution to your trusted internal Firecrawl instance.
 
-### HTTP Connector
+### HTTP connector
 
-Use this when the service does not publish an OpenAPI spec and you just need to make authenticated HTTP calls to a known base URL. This creates a built-in HTTP connector backed by Agent Core's `generic_http` engine — no spec import required.
+Use this when the service does not publish an OpenAPI spec and you just need to make authenticated HTTP calls to a known base URL. This creates a built-in HTTP connector backed by Agent Core's `generic_http` engine; no spec import required.
 
 - Go to `/connectors`
 - Click **+ Add Connector → Add HTTP Connector**
 - Enter a display name and base URL
 - Choose an auth type:
-  - **Bearer** — injects `Authorization: Bearer <credential>` (default; works for most REST APIs)
-  - **Header** — injects the credential into a custom header name you specify
-  - **Query** — appends the credential as a query parameter (e.g. `?api_key=...`)
-  - **None** — no auth header (useful for internal services)
+  - **Bearer**: injects `Authorization: Bearer <credential>` (default; works for most REST APIs)
+  - **Header**: injects the credential into a custom header name you specify
+  - **Query**: appends the credential as a query parameter (e.g. `?api_key=...`)
+  - **None**: no auth header (useful for internal services)
 - Create a binding to a stored credential, then set the scope
 
 The connector type stores the base URL. Binding `config_json` is optional and only needed when you want to override the target per binding or set a custom `test_url`.
@@ -205,7 +205,7 @@ connectors_run(
 
 Agent Core injects the credential server-side, calls the external service, and returns the response. The raw API key never reaches the agent.
 
-**Do not use `credential_get` for this.** HTTP connector bindings handle auth automatically. `credential_get` is for local tools that need to inject the secret themselves — it is not the right path when a connector binding exists.
+**Do not use `credential_get` for this.** HTTP connector bindings handle auth automatically. `credential_get` is for local tools that need to inject the secret themselves; it is not the right path when a connector binding exists.
 
 #### Calling a connector action directly over REST (plug-in scripts)
 
@@ -219,11 +219,11 @@ curl -sS -X POST \
   http://core.example.com/api/connector-bindings/<binding_id>/run
 ```
 
-The body is `{"action": "...", "params": {...}}`. The canonical path is `/api/connector-bindings/{binding_id}/run`; `/api/connectors/{binding_id}/run` is accepted as an alias so the intuitive path doesn't 404. **The MCP `connectors_run` tool is not the same URL** — it dispatches server-side, so testing only through MCP won't catch a wrong REST path in a script.
+The body is `{"action": "...", "params": {...}}`. The canonical path is `/api/connector-bindings/{binding_id}/run`; `/api/connectors/{binding_id}/run` is accepted as an alias so the intuitive path doesn't 404. **The MCP `connectors_run` tool is not the same URL.** It dispatches server-side, so testing only through MCP won't catch a wrong REST path in a script.
 
 #### Test connection behavior
 
-The binding test in the dashboard hits the base URL directly (e.g. `GET https://openrouter.ai/api/v1`). Many REST APIs return HTML or a 404 at their base URL. The test reports failure in those cases. That's normal and doesn't mean the binding is broken. Verify the binding works by running an actual action with `connectors_run` or `connectors_bindings_test` is reliable only for APIs that return a valid response at the base URL (like health check endpoints).
+The binding test in the dashboard hits the base URL directly (e.g. `GET https://openrouter.ai/api/v1`). Many REST APIs return HTML or a 404 at their base URL. The test reports failure in those cases. That's normal and doesn't mean the binding is broken. Verify the binding works by running an actual action with `connectors_run`. `connectors_bindings_test` is reliable only for APIs that return a valid response at the base URL (like health check endpoints).
 
 #### Example: OpenRouter
 
@@ -265,7 +265,7 @@ connectors_run(
 )
 ```
 
-Image responses return base64-encoded data in the `choices[0].message.content` array. The response body can be large — agents should extract the `data` field rather than logging the full response.
+Image responses return base64-encoded data in the `choices[0].message.content` array. The response body can be large; agents should extract the `data` field rather than logging the full response.
 
 Check the [OpenRouter model list](https://openrouter.ai/models) for which models support image generation (`modalities: ["image"]`).
 
@@ -283,18 +283,18 @@ The MCP import is server-side only: it discovers and stores the tool list in Age
 
 ### Adapters
 
-Adapters are the fourth way to add a connector — for services that don't fit OpenAPI/MCP cleanly (OAuth refresh, session handshakes, multi-field credentials, CLI wrappers). An adapter is a single JSON **manifest** that describes a service's actions, auth, and request shape; Agent Core's built-in engines interpret it at runtime, so installing one adds no Python and survives upgrades.
+Adapters are the fourth way to add a connector, for services that don't fit OpenAPI/MCP cleanly: OAuth refresh, session handshakes, multi-field credentials, CLI wrappers. An adapter is a single JSON **manifest** that describes a service's actions, auth, and request shape; Agent Core's built-in engines interpret it at runtime, so installing one adds no Python and survives upgrades.
 
 **Quick install:** go to `/connectors` → **Browse Adapters** → pick one (e.g. `transmission`, `google_workspace`, `github_cli`) → click **Install** → bind a credential and call actions like any other connector. If a newer bundled template is available later, the same page shows **Update** and refreshes the installed copy in place without changing bindings.
 
 #### Google Workspace (one connector for six Google services)
 
-The bundled **`google_workspace`** adapter is a single OAuth2 connector covering **Gmail, Calendar, Drive, Contacts (People), Sheets, and Docs** through one OAuth client and one consent — install it, bind your `client_id` + `client_secret`, click **Authorize Google**, and grant the scopes once.
+The bundled **`google_workspace`** adapter is a single OAuth2 connector covering **Gmail, Calendar, Drive, Contacts (People), Sheets, and Docs** through one OAuth client and one consent. Install it, bind your `client_id` + `client_secret`, click **Authorize Google**, and grant the scopes once.
 
 - **31 actions:** Gmail (`send_email`, `reply`, `create_draft`, `list_messages`, `get_message`, `search_messages`, `get_thread`, `list_labels`, `modify_labels`), Calendar (`list_events`, `get_event`, `create_event`, `update_event`, `delete_event`, `list_calendars`), Drive (`list_files`, `get_file`, `share`, `create_folder`, `delete_file`), Contacts (`list_contacts`, `search_contacts`), Sheets (`create_spreadsheet`, `get_values`, `update_values`, `append_values`, `clear_values`, `get_spreadsheet`), Docs (`get_document`, `create_document`, `insert_text`).
 - **Pick what you want:** authorize all scopes once, then disable the actions you don't use on the connector (`disabled_actions`). To narrow at the consent level, enable only the APIs/scopes you want in Google Cloud and disable the actions whose APIs you didn't enable.
 - **Scopes:** `gmail.modify`, `calendar`, `drive`, `contacts.readonly`, `spreadsheets`, `documents`.
-- **Setup:** create a **Web application** OAuth client; enable the Gmail/Calendar/Drive/People/Sheets/Docs APIs you intend to use; add their scopes to the consent screen; register Agent Core's per-binding callback URL (shown when you click Authorize) in the client's authorized redirect URIs. Tokens issued while the consent screen is in **Testing** expire after 7 days — publish to **Production** for durable refresh tokens.
+- **Setup:** create a **Web application** OAuth client; enable the Gmail/Calendar/Drive/People/Sheets/Docs APIs you intend to use; add their scopes to the consent screen; register Agent Core's per-binding callback URL (shown when you click Authorize) in the client's authorized redirect URIs. Tokens issued while the consent screen is in **Testing** expire after 7 days; publish to **Production** for durable refresh tokens.
 - **Not included:** Drive binary upload/download (binary content doesn't fit the declarative HTTP engine).
 - **Multi-host:** the services live on different API hosts; the adapter uses absolute-URL request paths (which override `base_url`) so one connector reaches `gmail`/`sheets`/`docs`/`people`.googleapis.com plus `www.googleapis.com` for Calendar/Drive.
 
@@ -302,15 +302,15 @@ The adapter and service cards show a binding recipe so you know what to create n
 
 For adapters that define their own request path, set `base_url` to the service root, not the final RPC endpoint. Transmission is the common example: use `http://HOST:PORT`, and the adapter appends `/transmission/rpc` itself. If you omit `ids` from `list_torrents`, Transmission returns the full torrent list. If you supply `download_dir` to `add_torrent`, it must be an absolute path.
 
-**Three backends** the engine understands: `http` (declarative requests with session/refresh support), `mcp` (point at an external MCP server), `cli` (drive a local binary). All run out-of-process or as pure data — adapters never inject Python into your Agent Core process.
+**Three backends** the engine understands: `http` (declarative requests with session/refresh support), `mcp` (point at an external MCP server), `cli` (drive a local binary). All run out-of-process or as pure data; adapters never inject Python into your Agent Core process.
 
 **Three install paths:** the Browse Adapters page (system templates + already-dropped-in user adapters), a drop-in into `data/adapters/<id>/adapter.json`, or `git:owner/repo@ref` for adapters shared from a git repo. Code-bearing backends (`mcp`/`cli`) get a dangerous-pattern scan before enabling.
 
 Uninstall behavior is split by source: system adapters remove the installed copy from `data/adapters/` and clear the catalog entry; user-dropped adapters clear the catalog entry but leave the local file in place so you can reinstall without re-downloading. Updates are driven by the adapter `version`; bump it whenever you change a bundled template. Updating keeps the connector type id stable and preserves bindings.
 
-**👉 For the complete guide — installing, building your own, the manifest schema, templating, OAuth/session patterns, testing, and sharing — see [docs/adapters.md](adapters.md).**
+**For the complete guide: installing, building your own, the manifest schema, templating, OAuth/session patterns, testing, and sharing, see [docs/adapters.md](adapters.md).**
 
-#### HTTP transport only — stdio servers are not supported
+#### HTTP transport only: stdio servers are not supported
 
 Agent Core connects to MCP servers over HTTP. It cannot launch local processes. If your MCP client config uses `command` and `args` fields (stdio transport), that server cannot be imported directly. Options:
 
@@ -321,20 +321,20 @@ Common stdio-based servers that fall into this category: `playwright-mcp`, `chro
 
 #### Transport
 
-- `streamable_http` — preferred for modern MCP servers (MCP spec 2025-03-26+). Use this for hosted services like Context7.
-- `http` — alias; try this if `streamable_http` fails.
+- `streamable_http`: preferred for modern MCP servers (MCP spec 2025-03-26+). Use this for hosted services like Context7.
+- `http`: alias; try this if `streamable_http` fails.
 - Unsupported transports are rejected at import time.
 
 #### Discovery auth vs. binding auth
 
 These are two separate things that serve different purposes.
 
-**Discovery auth** is used only during import and refresh to authenticate the `initialize` / `tools/list` calls. It is not stored anywhere after import. The import form has two fields: **Header name** and **Value** — enter the raw key value directly here (not a credential reference).
+**Discovery auth** is used only during import and refresh to authenticate the `initialize` / `tools/list` calls. It is not stored anywhere after import. The import form has two fields, **Header name** and **Value**: enter the raw key value directly here (not a credential reference).
 
 **Binding auth** is injected at execution time when an agent calls `connectors_run`. Configure it on the binding using a stored credential.
 
 For servers using standard `Authorization: Bearer <token>`:
-- Leave discovery auth blank — most Bearer servers allow unauthenticated tool discovery, or enter `Authorization` / `Bearer your-key` temporarily
+- Leave discovery auth blank (most Bearer servers allow unauthenticated tool discovery), or enter `Authorization` / `Bearer your-key` temporarily
 - Store the token as a credential and create the binding normally; Bearer injection is automatic
 
 For servers using a custom header name (e.g. `CONTEXT7_API_KEY`):
@@ -347,7 +347,7 @@ For servers using a custom header name (e.g. `CONTEXT7_API_KEY`):
 
 MCP bindings can also carry `timeout_ms` in config JSON for slow servers. The endpoint URL must still pass the URL guard; if you enable `AGENT_CORE_BLOCK_INTERNAL_HOSTS=true`, register trusted internal hostnames in `AGENT_CORE_ALLOWED_INTERNAL_HOSTS`.
 
-**OpenCode note:** if you use deny-by-default permissions in OpenCode, allow the MCP tool prefixes explicitly or the server may connect but the tools will stay hidden. The working prefixes for this workspace are `agent-core_*` and `agent-browser_*`.
+**OpenCode note:** if you use deny-by-default permissions in OpenCode, allow the MCP tool prefix explicitly or the server may connect but the tools will stay hidden. The prefix follows the server name in your config, so an `agent-core` MCP server needs `agent-core_*` allowed.
 
 #### Example: Context7
 
@@ -360,7 +360,7 @@ MCP bindings can also carry `timeout_ms` in config JSON for slow servers. The en
    - URL: `https://mcp.context7.com/mcp`
    - Transport: `streamable_http`
    - Discovery auth header: `CONTEXT7_API_KEY` / value: your raw key
-3. Click **Import MCP Server** — Agent Core discovers the tool list
+3. Click **Import MCP Server**: Agent Core discovers the tool list
 4. Click **Bind** on the Context7 connector type:
    - Select your Context7 credential
    - Config JSON: `{"auth_header": "CONTEXT7_API_KEY", "auth_scheme": ""}`
@@ -369,7 +369,7 @@ MCP bindings can also carry `timeout_ms` in config JSON for slow servers. The en
 **Using it from an agent:**
 
 ```
-# Step 1 — resolve the library ID
+# Step 1: resolve the library ID
 connectors_run(
   binding_id = "<context7-binding-id>",
   action     = "resolve-library-id",
@@ -377,7 +377,7 @@ connectors_run(
 )
 # → returns Context7-compatible library IDs like /fastapi/fastapi
 
-# Step 2 — fetch docs
+# Step 2: fetch docs
 connectors_run(
   binding_id = "<context7-binding-id>",
   action     = "get-library-docs",
@@ -413,11 +413,11 @@ Unauthenticated callers can use `/spec/public` for a minimal discovery response.
 
 ---
 
-## Tool-Specific Setup
+## Tool-specific setup
 
 ### Claude Code
 
-**Option 1 — CLI (recommended):**
+**Option 1: CLI (recommended)**
 
 ```bash
 claude mcp add --transport http --scope user agent-core http://localhost:3500/mcp \
@@ -426,7 +426,7 @@ claude mcp add --transport http --scope user agent-core http://localhost:3500/mc
 
 This adds Agent Core to your user-level config so it's available in every project.
 
-**Option 2 — Project config file:**
+**Option 2: Project config file**
 
 Create `.mcp.json` in your repo root (this file can be committed and shared with your team):
 
@@ -461,11 +461,11 @@ This curl test only confirms MCP reachability. For the full end-to-end verificat
 
 You can run that verification prompt immediately after wiring MCP. You do not need a `CLAUDE.md` or `AGENTS.md` file first; those files are only for persistent repository-level instructions when you want them.
 
+Some MCP hosts defer tool loading until the session explicitly discovers them. If a new session cannot see Agent Core tools right away, run the host's tool discovery or load step first, then retry the Agent Core call. That is a host behavior, not an Agent Core setup problem.
+
 **CLAUDE.md snippet:**
 
-The **Integrations** page generates a full `CLAUDE.md` snippet tailored to your agent and workspace. Paste it into your repo's `CLAUDE.md` to give Claude Code context about what's available — which scopes to use, when to search memory, and how to handle credentials. Here's a minimal version to get started:
-
-Some MCP hosts defer tool loading until the session explicitly discovers them. If a new session cannot see Agent Core tools right away, run the host's tool discovery or load step first, then retry the Agent Core call. That is a host behavior, not an Agent Core setup problem.
+The **Integrations** page generates a full `CLAUDE.md` snippet tailored to your agent and workspace. Paste it into your repo's `CLAUDE.md` to give Claude Code context about what's available, which scopes to use, when to search memory, and how to handle credentials. Here's a minimal version to get started:
 
 ```markdown
 ## Agent Core
@@ -475,7 +475,7 @@ You are connected to Agent Core at http://localhost:3500.
 - At startup or when idle, call `activity_pickup` to check for work a human has assigned to you. If it returns an activity, that is your current task. If it returns null, proceed with whatever the user is asking.
 - Search memory at the start of each session: `memory_search` with a natural language query. If a broad query returns little or nothing, retry with exact topic values, exact words from prior records, or a known record id. When embeddings are unavailable, exact tokens and known ids are more reliable than conceptual searches.
 - Store decisions, preferences, and facts: `memory_write`
-- For credentials: use `credential_get` to retrieve an AC_SECRET_* reference — never ask the user for raw API keys
+- For credentials: use `credential_get` to retrieve an AC_SECRET_* reference; never ask the user for raw API keys
 - Send `activity_update` heartbeats every 1–2 minutes while working on a task, always including the activity's explicit `memory_scope`
 - Use `task_note` for short in-flight progress updates with that same `memory_scope`; Core updates only the activity in that scope and never moves one across scopes
 - If the session reloads, a handoff begins, or no active activity exists yet, open a fresh activity first with `status: active` before attempting to close it
@@ -536,7 +536,7 @@ Restart Cursor after saving.
 
 ### Assistants
 
-Use this section for assistant-style agents that manage their own MCP configuration. The agent should update its own config, reload or restart as supported, and verify Agent Core before doing work. Treat user scope as read-only owner context unless the agent is explicitly granted user-scope write access. Durable writes go to the selected workspace scope when one is chosen, otherwise to the agent's own `agent:<id>` scope — which, for an assistant with no workspace, is its durable store, not just scratch.
+Use this section for assistant-style agents that manage their own MCP configuration. The agent should update its own config, reload or restart as supported, and verify Agent Core before doing work. Treat user scope as read-only owner context unless the agent is explicitly granted user-scope write access. Durable writes go to the selected workspace scope when one is chosen, otherwise to the agent's own `agent:<id>` scope. For an assistant with no workspace, that scope is its durable store, not just scratch.
 If you want a fresh bearer token for the generated prompt, use the one-time key button for this output the same way you would for MCP config or environment variables.
 If a workspace is selected in the Integrations page, the generated prompt includes a workspace scope line. Otherwise it stays workspace-free and uses the authenticated/default user scope as the shared context.
 
@@ -587,7 +587,7 @@ Expected Agent Core tools:
 - `connectors_list`, `connectors_summary`, `connectors_bindings_list`, `connectors_actions_list`, `connectors_bindings_test`, `connectors_run`
 
 Operating rules:
-- At startup or when idle, call `activity_pickup` to check for work a human has assigned to you in this workspace. If it returns an activity, that is your current task — read it and start working. Only call pickup once per session start; do not loop infinitely claiming new tasks on your own.
+- At startup or when idle, call `activity_pickup` to check for work a human has assigned to you in this workspace. If it returns an activity, that is your current task: read it and start working. Only call pickup once per session start; do not loop infinitely claiming new tasks on your own.
 - Start meaningful tasks with `activity_update` using `status: active`, a concise `task_description`, and the default shared scope.
 - Refresh activity while actively working, always including that same explicit `memory_scope`; Core updates only the activity in that scope and never moves one across scopes.
 - Before making changes, search memory with `memory_search`.
@@ -612,9 +612,9 @@ If the Agent Core MCP server cannot be added or verified, do not proceed with Ag
 
 ---
 
-### Other MCP Hosts
+### Other MCP hosts
 
-Every MCP-compatible tool needs the same two things: the endpoint URL and the `Authorization` header. The JSON structure above works for any client that supports the `type: http` transport. Key names may vary slightly — check that tool's docs for where to put it.
+Every MCP-compatible tool needs the same two things: the endpoint URL and the `Authorization` header. The JSON structure above works for any client that supports the `type: http` transport. Key names may vary slightly; check that tool's docs for where to put it.
 
 ```json
 {
@@ -632,7 +632,7 @@ Every MCP-compatible tool needs the same two things: the endpoint URL and the `A
 
 ---
 
-## Generating Integration Files from the Dashboard
+## Generating integration files from the dashboard
 
 The **Integrations** page (`/integrations`) generates everything you need for a specific tool in one place:
 
@@ -656,28 +656,28 @@ The Integrations page generates the canonical setup text and downloadable files.
 | Session Prompt | A startup prompt the agent can run at the beginning of each session |
 | Verification Prompt | A one-time prompt that confirms the full end-to-end connection is working |
 
-**Regenerate these after an upgrade.** `CLAUDE.md`, `AGENTS.md`, the Assistants text, and the session prompt are how an agent learns what the system can do — an agent whose instructions predate a capability will not use it. They are repository-level guidance, identical for every agent, and contain no key, so regenerating them is safe at any time and does not invalidate anything. Only the outputs that embed a key (MCP Config, Environment Variables, Assistants) mint a new one, and only when you press **Generate connection**.
+**Regenerate these after an upgrade.** `CLAUDE.md`, `AGENTS.md`, the Assistants text, and the session prompt are how an agent learns what the system can do; an agent whose instructions predate a capability will not use it. They are repository-level guidance, identical for every agent, and contain no key, so regenerating them is safe at any time and does not invalidate anything. Only the outputs that embed a key (MCP Config, Environment Variables, Assistants) mint a new one, and only when you press **Generate connection**.
 
 ---
 
-## Two Ways to Use Secrets
+## Two ways to use secrets
 
 Agent Core gives you two distinct paths for using stored credentials. Pick the one that fits how the action happens:
 
-**Credential Broker — your local tool needs the secret.** The agent gets an `AC_SECRET_*` reference, your local tool gets the real value injected at runtime, and the broker is what does the injection. The secret travels from Agent Core to your local process only, never through the model.
+**Credential Broker: your local tool needs the secret.** The agent gets an `AC_SECRET_*` reference, your local tool gets the real value injected at runtime, and the broker is what does the injection. The secret travels from Agent Core to your local process only, never through the model.
 
-**Connectors — Agent Core runs the action for you.** The agent tells Agent Core which binding to use and what action to run. Agent Core uses the stored credential server-side, calls the external service, and returns the result. The raw secret never leaves Agent Core at all.
+**Connectors: Agent Core runs the action for you.** The agent tells Agent Core which binding to use and what action to run. Agent Core uses the stored credential server-side, calls the external service, and returns the result. The raw secret never leaves Agent Core at all.
 
-### Credential Broker Flow
+### Credential Broker flow
 
 1. The agent calls `credential_get` (MCP) or `POST /api/credentials/entries/{id}/reference` (REST).
-2. Agent Core returns an `AC_SECRET_*` reference — not the actual token.
+2. Agent Core returns an `AC_SECRET_*` reference, not the actual token.
 3. The agent includes that reference in the tool configuration.
 4. When the tool runs, the local Credential Broker intercepts the reference and injects the real value into the tool's environment.
 
 See [Credential Broker](credential-broker.md) for setup instructions.
 
-### Connectors: Agent Core Runs Actions Directly
+### Connectors: Agent Core runs actions directly
 
 If you want Agent Core itself to call an imported OpenAPI spec, native MCP server, installed adapter, or another HTTP service on your behalf, use the **Connectors** page at `/connectors`.
 
@@ -709,7 +709,7 @@ Each binding currently links to one credential. Connector-specific non-secret se
 
 Use `config_json.default_params` when most calls need the same non-secret context. Agent Core merges those defaults before schema validation and execution, and explicit caller params win. Adapter actions can also declare `param_aliases` such as `issueId -> issue_id`; aliases are normalized before validation and before request templates render. This keeps agent-facing schemas forgiving without exposing secrets or requiring agents to repeat stable IDs on every call.
 
-### Workspace Collaboration
+### Workspace collaboration
 
 If a workspace is shared with multiple users, each user can still keep their own agents. The workspace owner or an admin grants the users collaborator access on the workspace record, and those users can then scope their own agents to `workspace:<id>`.
 
@@ -723,7 +723,7 @@ That keeps agent ownership, workspace access, and connector binding scope aligne
 
 If you're importing a spec and using a PAT or other bearer token, the flow is simple: import the spec, create a credential, bind the credential, then call `connectors_run` with the action you want. The agent never needs the raw token, and you never need to paste it into a prompt.
 
-### The Right Mental Model
+### The right mental model
 
 Agent Core is a service layer, not an orchestrator:
 
@@ -736,11 +736,11 @@ Agents decide when to use a service. Agent Core makes the service available, enf
 
 ---
 
-## Activity Tracking
+## Activity tracking
 
 Agents can report what they're working on so you can see live status in the dashboard. This is especially useful when multiple agents are working in parallel, or when one agent leaves work for another agent in the same workspace.
 
-The dashboard receives activity updates in real time over a server-sent event stream (`GET /api/events`). When an agent creates, updates, cancels, or heartbeats an activity, the overview stat cards (Open Activities, Stale / Blocked) and the recent activity table refresh automatically without any page reload. The activity page shows a "refresh" banner when new events arrive. Connector execution completions also surface as a brief indicator on the Connectors page. No polling is required — the browser opens one persistent connection per session and reconnects automatically on disconnect.
+The dashboard receives activity updates in real time over a server-sent event stream (`GET /api/events`). When an agent creates, updates, cancels, or heartbeats an activity, the overview stat cards (Open Activities, Stale / Blocked) and the recent activity table refresh automatically without any page reload. The activity page shows a "refresh" banner when new events arrive. Connector execution completions also surface as a brief indicator on the Connectors page. No polling is required; the browser opens one persistent connection per session and reconnects automatically on disconnect.
 
 ```bash
 # Create an activity when you start a task
@@ -761,7 +761,7 @@ If an agent misses heartbeats for more than `AGENT_CORE_STALE_THRESHOLD_MINUTES`
 
 If you want another agent to pick up the work, tell that agent to check for assigned work in its current workspace. The pickup step is explicit and deliberate: Agent Core stores the work record and the agent claims it when it checks.
 
-## Assigning Work to Agents
+## Assigning work to agents
 
 A human can assign a task to a specific agent from the **Activity** page in the dashboard (click **+ Assign Work**). The form asks for the target agent, the task description, and the workspace scope. The activity is created immediately; the agent session discovers it on the next pickup check.
 
@@ -778,7 +778,7 @@ Agent sessions do not wake up automatically. The pickup is an explicit pull:
 
 **Pickup is workspace-aware.** An agent session only sees activities whose `memory_scope` is within its authorized read scopes. An agent configured for `workspace:project-a` cannot claim a task scoped to `workspace:project-b`, and it cannot claim tasks assigned to a different agent.
 
-**Pickup does not recurse.** The agent should call pickup once per session start (or when explicitly asked to check for work). It should not loop infinitely calling pickup and claiming new tasks on its own — that would make it an orchestrator, which is out of scope for v1.
+**Pickup does not recurse.** The agent should call pickup once per session start (or when explicitly asked to check for work). It should not loop infinitely calling pickup and claiming new tasks on its own; that would make it an orchestrator, which is out of scope for v1.
 
 ### How to trigger pickup
 
@@ -801,11 +801,11 @@ curl -X POST http://localhost:3500/api/activity/pickup \
 2. Create an agent `build-agent` with `workspace:project-a` in its read and write scopes.
 3. In the dashboard, assign a task to `build-agent` and set the scope to `workspace:project-a`.
 4. In the `build-agent` session, call `activity_pickup`. It returns the task.
-5. A session for a different agent (or the same agent but with a different workspace) gets `null` — it cannot see or claim the task.
+5. A session for a different agent (or the same agent but with a different workspace) gets `null`; it cannot see or claim the task.
 
 ---
 
-## Takeover Workflow
+## Takeover workflow
 
 If one agent runs out of tokens, hits a weekly limit, or otherwise needs to stop before finishing, the next agent can continue from Agent Core state instead of starting blind.
 
@@ -816,15 +816,15 @@ The practical flow is:
 3. When work stops, the next agent reads the latest activity, relevant memory, and any generated briefing.
 4. If an activity is stale or being handed off intentionally, generate a briefing with `/api/briefings/handoff` or `get_briefing`. Briefings are on-demand task transfer artifacts, not something the system scheduler produces automatically.
 
-This isn't automatic orchestration — it's a durable handoff trail and mailroom. A different agent picks up where the last one stopped, with full context, instead of starting blind.
+This isn't automatic orchestration; it's a durable handoff trail and mailroom. A different agent picks up where the last one stopped, with full context, instead of starting blind.
 
 If work needs to cross users or workspaces, make that explicit in the activity scope and briefing trail. The safest pattern is: leave the task in the correct workspace, have the receiving agent check for assigned work in that workspace, then claim it. If a broad memory search returns nothing, retry with exact topic values, specific words from prior records, or a known record ID. Conceptual queries miss when embeddings aren't available.
 
 ---
 
-## Handing Work to Another Agent
+## Handing work to another agent
 
-When one agent needs to pass work to another — switching tools, handing off a task, or escalating — you can generate a briefing that gives the incoming agent immediate context:
+When one agent needs to pass work to another (switching tools, handing off a task, or escalating), you can generate a briefing that gives the incoming agent immediate context:
 
 ```bash
 curl -X POST http://localhost:3500/api/briefings/handoff \
@@ -837,7 +837,7 @@ The briefing includes the current task description, any recorded task result, re
 
 ---
 
-## REST Integration
+## REST integration
 
 If your tool doesn't support MCP, every feature is also available through REST using the same agent API key.
 
@@ -856,14 +856,14 @@ Both are managed from the **Webhooks** page in the dashboard (admin-only).
 
 ---
 
-## Inbound Webhook Receiver
+## Inbound webhook receiver
 
 External systems (n8n, Zapier, custom scripts, CI pipelines) can create and manage activities in Agent Core without using MCP by sending authenticated HTTP commands to the inbound endpoint.
 
 ### Setup
 
 1. In the dashboard, go to **Webhooks** → **Inbound Receiver** and click **Generate Key**.
-2. Copy the key — it is shown once, then hashed.
+2. Copy the key; it is shown once, then hashed.
 3. Use the inbound URL shown (`/api/webhooks/inbound`) and pass the key in the `X-Agent-Core-Inbound-Key` header.
 
 ```http
@@ -893,7 +893,7 @@ Commands use dot notation and imperative form. They are not the same as outbound
 
 `activity.assign`, `activity.update`, `activity.cancel`, and `activity.note` all require `activity_id`.
 
-`activity.note` writes only to the audit log — it does not modify the activity record or agent memory.
+`activity.note` writes only to the audit log; it does not modify the activity record or agent memory.
 If `workspace` is supplied on `activity.create`, Agent Core stores it as optional metadata on the activity record for display and downstream automation.
 
 ### Key rotation
@@ -923,7 +923,7 @@ Then later, close the loop:
 
 ---
 
-## Outbound Webhook Notifications
+## Outbound webhook notifications
 
 Agent Core can push signed HTTP notifications to external systems when events occur. This lets automation tools like n8n, Zapier, or custom services react to activity changes or connector executions without polling.
 
@@ -939,7 +939,7 @@ Webhooks are **admin-only** and managed from the **Webhooks** page in the dashbo
 | `activity_cancelled` | An activity is cancelled |
 | `activity_recovered` | An activity is recovered (reassigned, resumed, closed) |
 | `connector_executed` | A connector binding action completes |
-| `delegation_request_created` | An agent asks for short-lived delegated authority — the event to route to a phone or chat channel, since pending requests wait on a human decision |
+| `delegation_request_created` | An agent asks for short-lived delegated authority; the event to route to a phone or chat channel, since pending requests wait on a human decision |
 | `delegation_request_approved` | A delegation request is approved |
 | `delegation_request_denied` | A delegation request is denied |
 
@@ -1011,12 +1011,12 @@ def verify(body: bytes, secret: str, header: str) -> bool:
 
 - **Fire-and-log only.** No retries. If a delivery fails, it is recorded in the delivery log.
 - **5-second timeout.** Receivers should respond quickly; slow endpoints will time out.
-- Deliveries are non-blocking — they do not delay the API response that triggered the event.
+- Deliveries are non-blocking; they do not delay the API response that triggered the event.
 - The delivery log is visible per-webhook in the dashboard under **Deliveries**.
 
 ### Common outbound automation pattern
 
-Push event → external automation decides what to do next. Agent Core does not schedule or orchestrate — it only notifies. Example n8n flow:
+Push event → external automation decides what to do next. Agent Core does not schedule or orchestrate; it only notifies. Example n8n flow:
 
 1. Register a webhook in Agent Core pointing to your n8n webhook URL
 2. Subscribe to `activity_cancelled`

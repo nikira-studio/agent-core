@@ -8,7 +8,7 @@ Something not working? Here's how to diagnose and fix the most common issues.
 
 ### The service won't start
 
-Check the logs first — they almost always tell you exactly what's wrong:
+Check the logs first; they almost always tell you exactly what's wrong:
 
 ```bash
 # Docker
@@ -36,7 +36,7 @@ Fix any errors reported there, then rebuild. Don't use Python 3.12+ syntax unles
 
 ### Database tables are missing
 
-Agent Core creates its schema automatically on startup. If you deleted the database and want a fresh start, delete the file (not the `data/` directory) and restart — Agent Core will rebuild everything on boot.
+Agent Core creates its schema automatically on startup. If you deleted the database and want a fresh start, delete the file (not the `data/` directory) and restart; Agent Core will rebuild everything on boot.
 
 ### The encryption key file is missing
 
@@ -55,7 +55,7 @@ SQLite allows one writer at a time. If you're seeing lock errors, you probably h
 ### My agent key returns `401`
 
 Possible causes:
-- The key was rotated after you copied it — API keys are shown once and can't be retrieved
+- The key was rotated after you copied it (API keys are shown once and can't be retrieved)
 - The agent record has been deactivated
 - The wrong value is in the `Authorization` header
 
@@ -65,7 +65,7 @@ Rotate the key from the dashboard (**Agents → [agent] → Rotate Key**) to get
 
 Only the admin user can access global audit, backup, broker rotation, and user administration routes. The first registered user becomes admin; others are non-admin unless the admin grants that role.
 
-For memory and credentials, agents can only access what their `read_scopes` and `write_scopes` allow. Use workspace scopes (`workspace:<id>`) for cross-user collaboration — don't try to grant one agent another user's personal scope.
+For memory and credentials, agents can only access what their `read_scopes` and `write_scopes` allow. Use workspace scopes (`workspace:<id>`) for cross-user collaboration; don't try to grant one agent another user's personal scope.
 
 ### OTP verification fails
 
@@ -100,7 +100,7 @@ curl http://localhost:3500/api/backup/startup-checks \
   -H "Authorization: Bearer <admin-session>"
 ```
 
-If your SQLite build doesn't include FTS5, the Docker image is the fix — it bundles a compatible Python and SQLite build where FTS5 is always available.
+If your SQLite build doesn't include FTS5, the Docker image is the fix; it bundles a compatible Python and SQLite build where FTS5 is always available.
 
 ---
 
@@ -118,7 +118,7 @@ Work through this checklist:
 
 ### Reveal fails
 
-Revealing a raw credential value requires a user session. Agent API keys can't reveal credentials — this is intentional. Most workflows should not need reveal; use connector bindings for server-side actions or the Credential Broker for local process injection.
+Revealing a raw credential value requires a user session. Agent API keys can't reveal credentials; this is intentional. Most workflows should not need reveal; use connector bindings for server-side actions or the Credential Broker for local process injection.
 
 ### Credential edits did not change the secret
 
@@ -126,7 +126,7 @@ On the Connectors page, the credential edit form has an optional replacement sec
 
 ---
 
-## Backup and Restore
+## Backup and restore
 
 ### Restore is rejected
 
@@ -179,7 +179,7 @@ Without this volume mount, data lives inside the container layer and is gone whe
 
 ---
 
-## Keeping Secrets Out of Version Control
+## Keeping secrets out of version control
 
 Before pushing or sharing:
 

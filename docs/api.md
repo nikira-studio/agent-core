@@ -1,6 +1,6 @@
-# API Reference
+# API reference
 
-Every REST endpoint and MCP tool. For what the concepts mean — scopes, memory classes, anchors, the review queue — see [How It Works](how-it-works.md).
+Every REST endpoint and MCP tool. For what the concepts mean (scopes, memory classes, anchors, the review queue), see [How it works](how-it-works.md).
 
 Base URL: `http://localhost:3500`
 
@@ -32,22 +32,22 @@ The one exception: `GET /mcp` returns the MCP manifest directly.
 
 Three types of callers, three types of credentials:
 
-**Human users** (dashboard and admin operations) — use the session token returned after login:
+**Human users** (dashboard and admin operations) use the session token returned after login:
 ```http
 Authorization: Bearer <session-token>
 ```
 
-**Agents** (memory, credentials, activity, MCP) — use the API key issued when the agent was created:
+**Agents** (memory, credentials, activity, MCP) use the API key issued when the agent was created:
 ```http
 Authorization: Bearer <agent-api-key>
 ```
 
-**The Credential Broker** (internal credential resolution only) — use the broker credential from `data/broker.credential`:
+**The Credential Broker** (internal credential resolution only) uses the broker credential from `data/broker.credential`:
 ```http
 Authorization: Broker <broker-credential>
 ```
 
-Agent API keys start with `ac_sk_`. Broker credentials start with `ac_broker_`. Session tokens are JWTs. Each endpoint accepts only the token type appropriate to the operation — don't mix them up.
+Agent API keys start with `ac_sk_`. Broker credentials start with `ac_broker_`. Session tokens are JWTs. Each endpoint accepts only the token type appropriate to the operation; don't mix them up.
 
 ---
 
@@ -56,7 +56,7 @@ Agent API keys start with `ac_sk_`. Broker credentials start with `ac_broker_`. 
 | Method | Path | Description |
 | --- | --- | --- |
 | `GET` | `/health` | Service and database health |
-| `GET` | `/spec/public` | Version, auth methods, and MCP endpoint — no auth required |
+| `GET` | `/spec/public` | Version, auth methods, and MCP endpoint; no auth required |
 | `GET` | `/spec` | Full capability spec (agent auth required) |
 
 ---
@@ -73,7 +73,7 @@ Agent API keys start with `ac_sk_`. Broker credentials start with `ac_broker_`. 
 | `POST` | `/api/auth/otp/confirm` | Session | Confirm the first TOTP code and enable OTP |
 | `POST` | `/api/auth/otp/verify` | Pending session | Verify OTP during login |
 | `POST` | `/api/auth/otp/disable` | Session + password + OTP | Disable OTP on the account |
-| `GET` | `/api/auth/effective-authority` | Session or agent | The caller's current effective authority — permanent scopes, or the grant's permissions when a delegated request presents a grant header |
+| `GET` | `/api/auth/effective-authority` | Session or agent | The caller's current effective authority: permanent scopes, or the grant's permissions when a delegated request presents a grant header |
 | `POST` | `/api/auth/users` | Admin session | Create a new user account |
 | `PUT` | `/api/auth/users/{user_id}` | Admin session | Update user metadata, role, or `is_active` status |
 | `DELETE` | `/api/auth/users/{user_id}` | Admin session | Delete a user account |
@@ -205,17 +205,17 @@ Write:
 }
 ```
 
-Choosing `memory_class`: a **fact** is settled by checking (someone could verify it against the code, a host, or a service), a **decision** is settled by someone deciding and nothing can verify it. Reporting what you just did is neither — that belongs in `activity_update`.
+Choosing `memory_class`: a **fact** is settled by checking (someone could verify it against the code, a host, or a service), a **decision** is settled by someone deciding and nothing can verify it. Reporting what you just did is neither; that belongs in `activity_update`.
 
 Optional memory metadata:
 
-- `subject_anchor` names what would confirm a fact: `repo:<path>`, `host:<name-or-ip>`, or `service:<binding_id>`. Repo paths are **relative to the workspace root**, never absolute — the same directory has a different absolute path in every agent's container. Omit it when nothing could verify the record, which is normal for a decision.
-- `pinned` marks a record as standing context: returned by `memory_pinned` at session start rather than having to win a search, included in every handoff briefing, and skipped by the clean-up rules. **Agents request pinning rather than performing it** — `memory_pin` queues the request for operator review, because standing context reaches every session in the scope including other agents', which makes it the most influential thing an agent could write. Capped per scope (10 by default, `max_pinned_per_scope`) so the list stays short enough to read in full. Only `fact`, `decision` and `preference` records can be pinned.
+- `subject_anchor` names what would confirm a fact: `repo:<path>`, `host:<name-or-ip>`, or `service:<binding_id>`. Repo paths are **relative to the workspace root**, never absolute: the same directory has a different absolute path in every agent's container. Omit it when nothing could verify the record, which is normal for a decision.
+- `pinned` marks a record as standing context: returned by `memory_pinned` at session start rather than having to win a search, included in every handoff briefing, and skipped by the clean-up rules. **Agents request pinning rather than performing it.** `memory_pin` queues the request for operator review, because standing context reaches every session in the scope including other agents', which makes it the most influential thing an agent could write. Capped per scope (10 by default, `max_pinned_per_scope`) so the list stays short enough to read in full. Only `fact`, `decision` and `preference` records can be pinned.
 - `slot_key` is for preference records when you want one active value per slot. A new preference with the same `scope + slot_key` supersedes the previous active one.
 - `last_confirmed_at` means the record was checked **against the world**. It is set by `memory_confirm` (which requires evidence naming what was checked) or by the verification pass, not by writing the record. Search results report `days_since_confirmed` so a caller can tell a fact verified today from one nobody has checked in months.
-- `valid_from` and `valid_to` bound **when the content was true in the world**, which is not the same question as when the system learned it (`created_at`, `status_changed_at`). Keeping the two apart is what lets the corpus answer "what was true in March" rather than only "what do we believe now". Left unset, a record is taken to start when it was written, so nothing silently claims to have always been true. Supersession closes the old record's `valid_to` automatically — at the successor's `valid_from` when one is given, otherwise at the moment of supersession — and never overwrites an end date the writer set deliberately.
+- `valid_from` and `valid_to` bound **when the content was true in the world**, which is not the same question as when the system learned it (`created_at`, `status_changed_at`). Keeping the two apart is what lets the corpus answer "what was true in March" rather than only "what do we believe now". Left unset, a record is taken to start when it was written, so nothing silently claims to have always been true. Supersession closes the old record's `valid_to` automatically, at the successor's `valid_from` when one is given, otherwise at the moment of supersession, and never overwrites an end date the writer set deliberately.
 - `expires_at` is an ISO datetime after which the record is excluded from search results and swept on the next maintenance run. Useful for time-bounded facts or temporary scratchpad context.
-- `confidence` and `importance` are caller-assigned. Ranking uses observed evidence — how often a record is recalled, whether callers said it helped, and how long since it was confirmed — so there is no need to tune them.
+- `confidence` and `importance` are caller-assigned. Ranking uses observed evidence: how often a record is recalled, whether callers said it helped, and how long since it was confirmed. So there is no need to tune them.
 - `provenance` is server-generated on write and records who wrote the memory, from which channel, and which activity was open at the time; clients do not supply it directly.
 
 Import:
@@ -250,11 +250,11 @@ Search:
 }
 ```
 
-`subject_anchor` filters by prefix, so `repo:app/services` matches everything anchored under it — useful for "what have we recorded about this part of the code".
+`subject_anchor` filters by prefix, so `repo:app/services` matches everything anchored under it: useful for "what have we recorded about this part of the code".
 
-`as_of` asks the corpus what it held to be true at a given moment instead of now. A record is returned when the instant falls inside its validity window, so a fact that has since been replaced comes back for dates before the replacement and its successor comes back for dates after — useful when reconstructing why a past decision looked right at the time. Superseded records are eligible under `as_of` (that is the point); retracted records never are, because retraction says the record should not have been written rather than that it stopped being true. A value that is not a parseable timestamp is rejected with `INVALID_INPUT`.
+`as_of` asks the corpus what it held to be true at a given moment instead of now. A record is returned when the instant falls inside its validity window, so a fact that has since been replaced comes back for dates before the replacement and its successor comes back for dates after: useful when reconstructing why a past decision looked right at the time. Superseded records are eligible under `as_of` (that is the point); retracted records never are, because retraction says the record should not have been written rather than that it stopped being true. A value that is not a parseable timestamp is rejected with `INVALID_INPUT`.
 
-`activity_id` filters to records written during one piece of work. Every write already cites the activity that was open at the time, stamped server-side; this is the traversal back the other way. `activity_get` returns the same set as `produced_records`, and a handoff briefing includes it — so picking up someone else's work shows what it concluded, not only what it was attempting.
+`activity_id` filters to records written during one piece of work. Every write already cites the activity that was open at the time, stamped server-side; this is the traversal back the other way. `activity_get` returns the same set as `produced_records`, and a handoff briefing includes it: picking up someone else's work shows what it concluded, not only what it was attempting.
 
 **Search results are a lean projection**: `id`, `content`, `memory_class`, `scope`, `topic`, `subject_anchor`, `created_at`, `last_confirmed_at`, `record_status`, and a derived `days_since_confirmed`. Lifecycle columns and caller-assigned scores are omitted because a result is for deciding what is relevant, and on a full page that bookkeeping cost more context than the content it surrounded. Pass `"view": "full"` for every column, or use `memory_get` / `GET /api/memory/{id}` to inspect one record.
 
@@ -275,9 +275,9 @@ Writes and imports to `shared` are rejected if the content looks like PII or cre
 
 ---
 
-## Memory Review Queue
+## Memory review queue
 
-Admin only. These endpoints suggest and record decisions about what to retract or pin. **Rules propose; they never apply.** Agents write memory — they do not prune or elevate each other's, which is why nothing here is reachable with an agent key.
+Admin only. These endpoints suggest and record decisions about what to retract or pin. **Rules propose; they never apply.** Agents write memory; they do not prune or elevate each other's, which is why nothing here is reachable with an agent key.
 
 | Method | Path | Description |
 | --- | --- | --- |
@@ -288,14 +288,14 @@ Admin only. These endpoints suggest and record decisions about what to retract o
 | `POST` | `/api/memory/proposals/review-usefulness` | Ask the configured review model which records are not actionable |
 | `GET` | `/api/memory/proposals/stats` | Per-rule verdict history: how often each rule has been right |
 
-Proposals come from two places. **Generation rules** are mechanical and run when you ask for them — from the dashboard's review page or `POST /api/memory/proposals/generate`:
+Proposals come from two places. **Generation rules** are mechanical and run when you ask for them: from the dashboard's review page or `POST /api/memory/proposals/generate`:
 
 | Rule | Finds |
 | --- | --- |
 | `episodic_log` | A task log written as durable memory |
 | `ticket_closeout` | A record about work that has since closed |
 | `duplicate_cluster` | Near-identical records |
-| `stale_volatile` | Facts nobody has confirmed in a long time (facts only — a decision does not go stale because time passed) |
+| `stale_volatile` | Facts nobody has confirmed in a long time (facts only, a decision does not go stale because time passed) |
 
 **Event-driven proposals** are queued as things happen: `anchor_missing` when verification finds the subject gone, `pin_request` when an agent calls `memory_pin`, and `low_value` when the usefulness review finds nothing a future session could act on.
 
@@ -311,7 +311,7 @@ Decide:
 ```
 `verdict` is `accepted` or `rejected`. `outcome` applies to confirm-style proposals, where both answers are accepts because the rule was right to ask either way: `still_current` refreshes the record's confirmation, `no_longer_current` retracts it.
 
-Accepting a retraction is reversible with `POST /api/memory/restore`. That is deliberate — a review that cannot be wrong cheaply is a review nobody will run.
+Accepting a retraction is reversible with `POST /api/memory/restore`. That is deliberate, a review that cannot be wrong cheaply is a review nobody will run.
 
 `low_value` proposals can never be applied automatically, whatever their accept rate. The others could earn automation from a good enough record; a judgement about worth cannot, because the cost of a wrong call is deleting a constraint someone depended on.
 
@@ -351,7 +351,7 @@ Create:
 }
 ```
 
-`expires_at` must be an ISO 8601 instant; anything else is rejected with `422` rather than stored. Sending `null` **clears** the expiry, while omitting the field leaves it alone — the two mean different things. Past its expiry a credential stops resolving: `reveal` answers `410 CREDENTIAL_EXPIRED`, and the broker refuses it. An expiry that cannot be parsed at all (a row written before this was validated) is treated as expired rather than raising. The dashboard shows expired and expiring-soon badges on the credentials list.
+`expires_at` must be an ISO 8601 instant; anything else is rejected with `422` rather than stored. Sending `null` **clears** the expiry, while omitting the field leaves it alone, the two mean different things. Past its expiry a credential stops resolving: `reveal` answers `410 CREDENTIAL_EXPIRED`, and the broker refuses it. An expiry that cannot be parsed at all (a row written before this was validated) is treated as expired rather than raising. The dashboard shows expired and expiring-soon badges on the credentials list.
 
 Update metadata while keeping the current encrypted value:
 ```json
@@ -394,7 +394,7 @@ Restore a previous key (use to recover from a bad rotation, with a key from a ba
 
 ---
 
-## Connector Types
+## Connector types
 
 Connector types are the reusable definitions Agent Core builds from imported OpenAPI specs, native MCP servers, the built-in Generic HTTP fallback, and installed adapters. The connector catalog is instance-wide, so imported connector types and installed adapters are visible to other authenticated users in the same Agent Core deployment.
 
@@ -454,9 +454,9 @@ For OpenAPI-backed connector bindings, `config_json` can override the target bas
 
 ---
 
-## Connector Bindings
+## Connector bindings
 
-Connector bindings link a stored credential to an external service so Agent Core can run actions against that service on behalf of an agent. The credential never leaves Agent Core — the connector executor uses it server-side.
+Connector bindings link a stored credential to an external service so Agent Core can run actions against that service on behalf of an agent. The credential never leaves Agent Core, the connector executor uses it server-side.
 
 Credential scope controls access to the stored secret. Binding scope controls where the connector is available. A binding currently points to one credential; non-secret connector settings belong in `config_json`.
 
@@ -505,7 +505,7 @@ curl -sS -X POST \
   http://core.example.com/api/connector-bindings/<binding_id>/run
 ```
 
-Body shape is `{"action": "...", "params": {...}}`. The canonical path is `/api/connector-bindings/{binding_id}/run`; `/api/connectors/{binding_id}/run` is accepted as an alias so the intuitive path doesn't 404. Note the **MCP `connectors_run` tool dispatches server-side and is not the same as this direct REST path** — testing only through MCP will not surface a wrong REST URL.
+Body shape is `{"action": "...", "params": {...}}`. The canonical path is `/api/connector-bindings/{binding_id}/run`; `/api/connectors/{binding_id}/run` is accepted as an alias so the intuitive path doesn't 404. Note the **MCP `connectors_run` tool dispatches server-side and is not the same as this direct REST path.** Testing only through MCP will not surface a wrong REST URL.
 
 Create:
 ```json
@@ -525,7 +525,7 @@ The dashboard's `/connectors` page provides a UI for all of these operations.
 
 ---
 
-## Internal Broker
+## Internal broker
 
 Only the local Credential Broker should call this route.
 
@@ -540,7 +540,7 @@ Only the local Credential Broker should call this route.
 }
 ```
 
-The broker credential authenticates the request. The `agent_id` must come from trusted runtime configuration — not model-generated text. Agent Core checks that agent's read scopes before returning a raw value.
+The broker credential authenticates the request. The `agent_id` must come from trusted runtime configuration, not model-generated text. Agent Core checks that agent's read scopes before returning a raw value.
 
 ---
 
@@ -570,7 +570,7 @@ Create:
 
 Only the owning agent or an admin can update, heartbeat, cancel, or reassign an activity.
 
-### Activity Pickup
+### Activity pickup
 
 `POST /api/activity/pickup` requires agent authentication. It finds the oldest `active` activity where `assigned_agent_id` matches the calling agent and `memory_scope` is within the agent's authorized read scopes, then heartbeats it to signal the claim.
 
@@ -628,7 +628,7 @@ Briefings include authorized decision, fact, and preference memory linked to the
 
 ## Delegations
 
-Short-lived, narrowed authority that one actor lends to a recipient agent — see [Delegated Authorization](delegated-authorization-integration.md) for the permission model, lifecycle rules, and error codes. Delegated requests authenticate with the recipient's normal API key plus the one-time-claimed grant credential in a dedicated header:
+Short-lived, narrowed authority that one actor lends to a recipient agent; see [Delegated Authorization](delegated-authorization-integration.md) for the permission model, lifecycle rules, and error codes. Delegated requests authenticate with the recipient's normal API key plus the one-time-claimed grant credential in a dedicated header:
 
 ```http
 Authorization: Bearer ac_sk_<recipient-agent-key>
@@ -642,7 +642,7 @@ X-Agent-Core-Grant: ac_dg_<grant-id>.<opaque-secret>
 | `POST` | `/api/delegations` | Session, or agent with `can_delegate` | Issue a grant. Permissions must be a subset of the issuer's current authority; `ttl_seconds` ≤ 3600 |
 | `GET` | `/api/delegations` | Session or agent | List grants visible to the caller |
 | `GET` | `/api/delegations/{grant_id}` | Session or agent | One grant |
-| `POST` | `/api/delegations/{grant_id}/claim` | Recipient agent key, no grant header | One-time claim. Returns `grant_secret` exactly once and activates the grant. REST-only by design — a secret returned as an MCP tool result would be model-visible |
+| `POST` | `/api/delegations/{grant_id}/claim` | Recipient agent key, no grant header | One-time claim. Returns `grant_secret` exactly once and activates the grant. REST-only by design, a secret returned as an MCP tool result would be model-visible |
 | `POST` | `/api/delegations/{grant_id}/revoke` | Issuer, recipient, or admin | Revoke the grant; optional `reason` |
 
 Create a grant:
@@ -668,7 +668,7 @@ An actor without authority can ask for it. Approval produces an `approved_unclai
 
 | Method | Path | Auth | Description |
 | --- | --- | --- | --- |
-| `POST` | `/api/delegation-requests` | Session or agent | Record a pending request (same body shape as grant creation, minus `coordinator_agent_id` — coordinator attribution is server-derived) |
+| `POST` | `/api/delegation-requests` | Session or agent | Record a pending request (same body shape as grant creation, minus `coordinator_agent_id`, coordinator attribution is server-derived) |
 | `GET` | `/api/delegation-requests` | Session or agent | List requests visible to the caller |
 | `GET` | `/api/delegation-requests/{request_id}` | Session or agent | One request |
 | `POST` | `/api/delegation-requests/{request_id}/approve` | Eligible human, or agent with `can_delegate` | Approve, optionally replacing any permission list with a strict subset |
@@ -707,11 +707,11 @@ Dispatch:
 | `memory_write` | Write a memory record |
 | `memory_retract` | Soft-delete a memory record |
 | `memory_move` | Atomically relocate an active record to a new scope (preserves content/class/topic + lineage; write access to both scopes required) |
-| `memory_confirm` | Mark a record verified against the world as of now. Requires `evidence` naming what was checked — reading a record is not checking it |
+| `memory_confirm` | Mark a record verified against the world as of now. Requires `evidence` naming what was checked; reading a record is not checking it |
 | `memory_feedback` | Say whether a recalled record actually helped; feeds observed usefulness into ranking |
 | `memory_verify` | Check anchored facts against the repo path, host or connector binding they describe. Records evidence on passes; queues review for anchors that have vanished |
 | `memory_reanchor` | Repoint a record at what actually describes it, when the file moved or the anchor was wrong |
-| `memory_pinned` | The standing context for the caller's scopes — loaded at session start rather than searched for |
+| `memory_pinned` | The standing context for the caller's scopes; loaded at session start rather than searched for |
 | `memory_pin` | Request that a record become (or stop being) standing context; queues the request for operator review |
 | `credential_get` | Get an `AC_SECRET_*` reference for a credential entry |
 | `credential_list` | List credential metadata and references in authorized scopes |
@@ -719,10 +719,10 @@ Dispatch:
 | `activity_get` | Get an activity record |
 | `activity_list` | List activities visible to the current caller |
 | `activity_pickup` | Claim the next active work item assigned to this agent in authorized scopes |
-| `activity_search` | Full-text search the activity trail — what agents worked on, per task, with results. Use for "what did we do on X"; use `memory_search` for durable facts and decisions |
+| `activity_search` | Full-text search the activity trail: what agents worked on, per task, with results. Use for "what did we do on X"; use `memory_search` for durable facts and decisions |
 | `get_briefing` | Fetch a briefing |
 | `briefing_list` | List briefings visible to the current caller |
-| `effective_authority` | Report the caller's current effective authority — permanent scopes, or the grant's permissions on a delegated call |
+| `effective_authority` | Report the caller's current effective authority, permanent scopes, or the grant's permissions on a delegated call |
 | `delegations_list` | List delegated grants visible to the caller |
 | `delegation_request` | Record a pending request for narrowed, short-lived authority |
 | `delegation_requests_list` | List delegation requests visible to the caller |
@@ -738,7 +738,7 @@ Dispatch:
 | `connectors_resolve` | Deterministically resolve a connector type (plus optional alias, scope, and action) to a single authorized binding |
 | `result_fetch` | Retrieve a slice of a previously offloaded large tool result by handle |
 
-Claiming a delegated grant is intentionally REST-only (`POST /api/delegations/{grant_id}/claim`): the one-time secret must never appear in a tool result a model can read. On delegated MCP calls, send the recipient's API key and the `X-Agent-Core-Grant` header on every request — the stateless `/mcp` transport rebuilds authority each time.
+Claiming a delegated grant is intentionally REST-only (`POST /api/delegations/{grant_id}/claim`): the one-time secret must never appear in a tool result a model can read. On delegated MCP calls, send the recipient's API key and the `X-Agent-Core-Grant` header on every request; the stateless `/mcp` transport rebuilds authority each time.
 
 ### Large tool results (offloading)
 
@@ -774,7 +774,7 @@ Connector responses whose body contains a `data:image/<subtype>;base64,...` payl
 }
 ```
 
-The connector result dict also carries `artifacts_exported` (the count of images exported) so callers can branch on it. Supported subtypes: `png`, `jpeg`, `jpg`, `webp`, `gif`, `svg+xml`, `bmp`, `tiff`. Non-image data URLs and malformed base64 payloads are left in place and fall through to the existing spill path. Each export writes an `connector_artifact_exported` audit row with the binding id and the count exported.
+The connector result dict also carries `artifacts_exported` (the count of images exported) so callers can branch on it. Supported subtypes: `png`, `jpeg`, `jpg`, `webp`, `gif`, `svg+xml`, `bmp`, `tiff`. Non-image data URLs and malformed base64 payloads are left in place and fall through to the existing spill path. Each export writes a `connector_artifact_exported` audit row with the binding id and the count exported.
 
 ---
 
@@ -840,7 +840,7 @@ This endpoint is used internally by the dashboard to push live updates to the ov
 
 ---
 
-## Integrations Setup
+## Integrations setup
 
 Session authentication required. These routes power the setup page that generates instructions, environment files, and verification prompts for a chosen agent/workspace.
 
@@ -853,7 +853,7 @@ Session authentication required. These routes power the setup page that generate
 
 ---
 
-## Backup and Maintenance
+## Backup and maintenance
 
 | Method | Path | Auth | Description |
 | --- | --- | --- | --- |
@@ -886,12 +886,12 @@ Use `mode=merge` to add records from the backup without overwriting existing rec
 
 The Webhooks section covers two independent features:
 
-- **Inbound receiver** — external systems push work commands into Agent Core
-- **Outbound notifications** — Agent Core pushes event notifications to external endpoints
+- **Inbound receiver**, external systems push work commands into Agent Core
+- **Outbound notifications**, Agent Core pushes event notifications to external endpoints
 
 ---
 
-## Inbound Webhooks
+## Inbound webhooks
 
 Allows external systems (n8n, Zapier, custom scripts) to create and manage activities in Agent Core by sending authenticated HTTP POST commands.
 
@@ -926,7 +926,7 @@ Response (201):
   "ok": true,
   "data": {
     "key": "ac_inbound_<token>",
-    "note": "Store this key — it will not be shown again."
+    "note": "Store this key; it will not be shown again."
   }
 }
 ```
@@ -1049,7 +1049,7 @@ Appends a note to the activity's audit trail. Does not modify the activity recor
 
 ---
 
-## Outbound Webhooks
+## Outbound webhooks
 
 Admin-only. Manage outbound webhook registrations and view delivery history.
 
@@ -1211,7 +1211,7 @@ Returns an array of delivery attempts, ordered newest first. Each entry includes
 
 ---
 
-## Rate Limits
+## Rate limits
 
 Rate-limited endpoints include these response headers:
 
