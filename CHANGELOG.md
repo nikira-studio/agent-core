@@ -21,6 +21,8 @@ First stable release. Agent Core is a local capability layer for AI agents: shar
 - Self-reported task trail with heartbeats, staleness detection, and a searchable history of what agents worked on
 - Work assignment from the dashboard with explicit agent pickup, and generated briefings for handoffs
 - Every memory write cites the activity that was open at the time, so a task links to what it concluded
+- Per-execution `workspace_sync` cursors deliver pinned context, assignments, briefings, and workspace changes to each active session
+- Durable change acknowledgements let two sessions with the same agent identity track their progress independently
 
 ### Credentials and connectors
 
@@ -41,4 +43,4 @@ First stable release. Agent Core is a local capability layer for AI agents: shar
 - Web dashboard with live SSE updates, audit log, and generated per-tool integration files
 - Outbound signed webhook notifications and an inbound webhook receiver for external automation
 - Backup and restore bundling the database with its key material; hourly maintenance sweep
-- One REST API and 35 MCP tools over a shared service layer, in a single Docker container with all data on local disk
+- One REST API and 37 MCP tools over a shared service layer, in a single Docker container with all data on local disk

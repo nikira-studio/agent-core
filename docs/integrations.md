@@ -72,6 +72,8 @@ Once connected, these tools are available in any session:
 | `memory_move` | Atomically move an active record to a new scope (write access to both scopes required) |
 | `credential_get` | Get an `AC_SECRET_*` reference for a stored credential |
 | `credential_list` | List credential entries the agent can access (metadata and references only, no raw values) |
+| `workspace_sync` | Start or continue an execution and receive pinned context, assigned activities, and workspace changes after its cursor |
+| `workspace_sync_ack` | Advance an execution's acknowledged cursor after processing a delivered page |
 | `activity_update` | Create or update an activity record in the supplied `memory_scope`, including progress notes and a completion result; it never moves an activity across scopes |
 | `activity_get` | Get one activity, together with the memory records written during it |
 | `activity_list` | List activities visible to the current agent or user |
@@ -105,7 +107,11 @@ Agents connect, discover authorized tools, and call what they need. Agent Core p
 
 For memory writes, `slot_key` keeps one active value per slot for preference records, which makes "the current answer" deterministic instead of something retrieval has to guess at. `valid_from` and `valid_to` say when the content was **true in the world**, which is a separate timeline from when the system learned it; set them when a record describes a period other than "from now on", and pass `as_of` to a search to ask what the corpus held to be true at a past moment. See [How It Works](how-it-works.md#two-clocks).
 
-If one agent needs to hand work to another, write the durable state into the shared workspace scope and generate or link a briefing. If you are reviewing prior work, use `memory_search`, `activity_list`, and `briefing_list` together before changing anything. The private `agent:<id>` scope is only for scratch notes for that specific agent and should not be treated as the handoff channel.
+At session startup, call `workspace_sync` for the shared workspace and keep the returned `execution_id` for that host session. Sync again before you resume, review, hand off, or complete shared work. Process each stable change ID once. A change can appear in both its resource group and `other_session_changes`. Call `workspace_sync_ack` only after you process or intentionally skip the delivered page.
+
+Workspace context is not repository access. If a task points to files outside the current checkout, switch to an authorized checkout or report the mismatch. Do not use memory summaries as a substitute for reviewing the source.
+
+If one agent needs to hand work to another, write the durable state into the shared workspace scope and generate or link a briefing. Use targeted `memory_search`, `activity_list`, and `briefing_list` calls when the sync response does not contain enough older context. The private `agent:<id>` scope is scratch space for that agent, not the handoff channel.
 
 If you run a coordinator that farms work out to worker agents (an orchestration framework, a scheduler, or a script of your own), the delegation tools let it request short-lived, narrowed authority per task instead of every worker holding standing broad scopes. See the [Delegated Authorization contract](delegated-authorization-integration.md) for the claim flow and header transport; claiming a grant is REST-only so the secret never appears in a model-visible tool result.
 
@@ -472,6 +478,10 @@ The **Integrations** page generates a full `CLAUDE.md` snippet tailored to your 
 
 You are connected to Agent Core at http://localhost:3500.
 
+- At session startup, call `workspace_sync` for the shared workspace and reuse its `execution_id` for that session
+- Sync before resuming, reviewing, handing off, or completing shared work
+- Process each stable change ID once, including when it appears in both its resource group and `other_session_changes`
+- Call `workspace_sync_ack` only after incorporating or intentionally skipping the delivered page
 - At startup or when idle, call `activity_pickup` to check for work a human has assigned to you. If it returns an activity, that is your current task. If it returns null, proceed with whatever the user is asking.
 - Search memory at the start of each session: `memory_search` with a natural language query. If a broad query returns little or nothing, retry with exact topic values, exact words from prior records, or a known record id. When embeddings are unavailable, exact tokens and known ids are more reliable than conceptual searches.
 - Store decisions, preferences, and facts: `memory_write`

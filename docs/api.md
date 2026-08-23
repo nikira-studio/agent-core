@@ -138,7 +138,9 @@ Agent IDs are lowercase slugs: `a-z`, `0-9`, hyphens, and underscores. Colons ar
 
 ## Workspaces
 
-Session required. Admins can manage all workspaces. Non-admin users can create and manage workspaces they own. The scope prefix is `workspace:<id>`. A workspace is the shared collaboration scope; other users and agents can be granted access to `workspace:<id>` even if they do not own the workspace row themselves.
+The two workspace read routes accept either a dashboard session or an agent API key. An agent sees only workspaces in its effective read scopes. All workspace creation, management, activation, deletion, and collaborator routes require a dashboard session. Admins can manage all workspaces. Non-admin users can create and manage workspaces they own.
+
+The scope prefix is `workspace:<id>`. A workspace is the shared collaboration scope. Other users and agents can receive access to `workspace:<id>` without owning the workspace row.
 
 | Method | Path | Description |
 | --- | --- | --- |
@@ -544,6 +546,24 @@ The broker credential authenticates the request. The `agent_id` must come from t
 
 ---
 
+## Workspace synchronization
+
+These routes require agent authentication and workspace memory read access. Delegated calls cannot create or use execution cursors.
+
+| Method | Path | Description |
+| --- | --- | --- |
+| `POST` | `/api/workspace-sync` | Start or continue an execution and return workspace changes after its cursor |
+| `POST` | `/api/workspace-sync/ack` | Advance the acknowledged cursor after processing a delivered page |
+| `POST` | `/api/workspace-sync/end` | Mark an execution as ended |
+
+The first sync omits `execution_id`. The response returns a new execution ID, pinned records, assigned activities, and changes grouped into `memory_changes`, `activity_changes`, and `briefing_changes`. `other_session_changes` repeats changes whose `source_execution_id` belongs to another execution. Deduplicate those entries by their stable change ID.
+
+Keep the execution ID for one host session. Pass it to later sync calls and supported write operations for source attribution. Acknowledge `next_cursor` only after processing or intentionally skipping the page. An acknowledgement cannot move past the highest cursor that the server delivered to that execution.
+
+If retention removes changes before an execution reads them, the next response sets `cursor_reset` to `true` and `cursor_reset_reason` to `cursor_expired`.
+
+---
+
 ## Activity
 
 | Method | Path | Auth | Description |
@@ -715,6 +735,8 @@ Dispatch:
 | `memory_pin` | Request that a record become (or stop being) standing context; queues the request for operator review |
 | `credential_get` | Get an `AC_SECRET_*` reference for a credential entry |
 | `credential_list` | List credential metadata and references in authorized scopes |
+| `workspace_sync` | Start or continue an execution and return current context plus workspace changes after its cursor |
+| `workspace_sync_ack` | Advance an execution's acknowledged cursor after processing a delivered page |
 | `activity_update` | Create or update an activity record in the supplied `memory_scope`, including progress notes and completion result; it never moves an activity across scopes |
 | `activity_get` | Get an activity record |
 | `activity_list` | List activities visible to the current caller |

@@ -15,6 +15,7 @@ router = APIRouter(prefix="/api/briefings", tags=["briefings"])
 
 class HandoffBriefingRequest(BaseModel):
     activity_id: str
+    execution_id: str | None = None
 
 
 class PrdHandoffRequest(BaseModel):
@@ -60,6 +61,17 @@ async def create_handoff_briefing(
             return error_response(
                 "SCOPE_DENIED", "Access denied to activity memory scope", 403
             )
+    if body.execution_id and ctx.agent_id:
+        from app.services import workspace_sync_service
+        try:
+            workspace_sync_service.validate_execution(
+                execution_id=body.execution_id, agent_id=ctx.agent_id,
+                user_id=ctx.user_id or "", memory_scope=memory_scope or f"agent:{ctx.agent_id}",
+            )
+        except PermissionError:
+            return error_response("EXECUTION_OWNERSHIP", "Execution belongs to another agent", 403)
+        except ValueError as exc:
+            return error_response(str(exc), "Invalid execution", 400)
 
     requesting_agent = (
         ctx.agent_id
@@ -75,6 +87,7 @@ async def create_handoff_briefing(
             [scope for resource, operation, scope in ctx.scope_permissions if resource == "briefing" and operation == "create"]
             if ctx.is_delegated else ctx.read_scopes
         ),
+        source_execution_id=body.execution_id,
     )
     if not briefing:
         return error_response("BRIEFING_FAILED", "Could not generate briefing", 500)

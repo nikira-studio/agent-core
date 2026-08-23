@@ -20,10 +20,19 @@ router = APIRouter()
 def activity_page(request: Request, session: dict = Depends(require_auth)):
     from app.services import activity_service
     from app.services.agent_service import list_agents
-    from app.services import workspace_service
+    from app.services import workspace_service, workspace_sync_service
 
     activity_service.mark_stale_activities()
     is_admin = session.get("role") == "admin"
+    executions = workspace_sync_service.list_executions(
+        limit=25, user_id=None if is_admin else session["user_id"]
+    )
+    execution_rows = "".join(
+        f"<tr><td>{escape_html(e['agent_id'])}</td><td><code>{escape_html(e['memory_scope'])}</code></td>"
+        f"<td><span class='badge badge-{escape_html(e['status'])}'>{escape_html(e['status'])}</span></td>"
+        f"<td>{local_dt(e.get('last_seen_at'))}</td><td>{e.get('acknowledged_sequence') or 0}</td>"
+        f"<td>{e.get('unacknowledged') or 0}</td></tr>" for e in executions
+    )
 
     page = max(1, int(request.query_params.get("page", 1)))
     status_filter = request.query_params.get("status", "")
@@ -289,6 +298,12 @@ def activity_page(request: Request, session: dict = Depends(require_auth)):
         {activity_prune_button}
     </div></div>
     <div class="card">
+      <h3>Workspace synchronization</h3>
+      <p class="text-muted" style="font-size:0.85rem">Each row is one agent execution with an independent delivery cursor.</p>
+      <div style="overflow-x:auto"><table><thead><tr><th>Agent</th><th>Workspace</th><th>Status</th><th>Last Seen</th><th>Acknowledged</th><th>Unacknowledged</th></tr></thead>
+      <tbody>{execution_rows or "<tr><td colspan=6 class=empty>No synchronized executions yet.</td></tr>"}</tbody></table></div>
+    </div>
+    <div class="card">
       <h3>Tasks</h3>
       <p class="text-muted" style="font-size:0.85rem;margin-bottom:8px">Assign work to agents and track progress. An agent session calls <code>activity_pickup</code> at startup or when idle to claim tasks assigned to it in its configured workspace. Use reassign and briefing when work needs to move between agents.</p>
       <div class="card" style="margin-bottom:12px;padding:14px">
@@ -404,4 +419,3 @@ def activity_page(request: Request, session: dict = Depends(require_auth)):
         js,
         session=session,
     )
-

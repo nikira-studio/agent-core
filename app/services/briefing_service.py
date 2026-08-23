@@ -14,6 +14,7 @@ def generate_handoff_briefing(
     requesting_user_id: str,
     authorized_scopes: Optional[list[str]] = None,
     is_admin: bool = False,
+    source_execution_id: Optional[str] = None,
 ) -> Optional[dict]:
     activity = activity_service.get_activity(activity_id)
     if not activity:
@@ -65,8 +66,8 @@ def generate_handoff_briefing(
         conn.execute(
             """
             INSERT INTO agent_activity
-            (id, agent_id, assigned_agent_id, user_id, task_description, status, memory_scope, started_at, metadata_json)
-            VALUES (?, ?, ?, ?, ?, 'completed', ?, ?, ?)
+            (id, agent_id, assigned_agent_id, user_id, task_description, status, memory_scope, started_at, metadata_json, source_execution_id)
+            VALUES (?, ?, ?, ?, ?, 'completed', ?, ?, ?, ?)
             """,
             (
                 briefing_id,
@@ -84,6 +85,7 @@ def generate_handoff_briefing(
                     "preferences_count": len(preferences),
                     "recent_tasks_count": len(recent_activities),
                 }),
+                source_execution_id,
             ),
         )
         conn.commit()
@@ -133,9 +135,14 @@ def generate_handoff_briefing(
     }
 
     with get_db() as conn:
+        metadata = {
+            "type": "handoff_briefing",
+            "source_activity_id": activity_id,
+            "briefing": briefing,
+        }
         conn.execute(
             "UPDATE agent_activity SET metadata_json = ? WHERE id = ?",
-            (json.dumps({"briefing": briefing}), briefing_id),
+            (json.dumps(metadata), briefing_id),
         )
         conn.commit()
 

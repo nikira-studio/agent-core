@@ -177,6 +177,68 @@ def test_all_generated_prompts_require_activity_scope_continuity():
         )
 
 
+def test_all_generated_prompts_require_workspace_sync_lifecycle():
+    """Every agent format must teach the same execution and cursor contract."""
+    from app.routes.integrations_page import (
+        _build_agents_md,
+        _build_assistants_md,
+        _build_claude_md,
+        _build_instructions,
+        _build_session_prompt,
+    )
+
+    outputs = {
+        "instructions": _build_instructions(
+            "claude_code", "http://x", "user:u", "workspace:w", "agent:a",
+            "Agent", "User", "ws",
+        ),
+        "session_prompt": _build_session_prompt(
+            "claude_code", "http://x", "user:u", "workspace:w", "agent:a",
+            "Agent", "User", "ws",
+        ),
+        "claude_md": _build_claude_md(
+            "http://x", "user:u", "workspace:w", "agent:a", "Agent", "ws"
+        ),
+        "agents_md": _build_agents_md(
+            "http://x", "user:u", "workspace:w", "agent:a", "ws"
+        ),
+        "assistants_md": _build_assistants_md(
+            "http://x", "user:u", "workspace:w", "agent:a"
+        ),
+    }
+    for name, output in outputs.items():
+        for required in (
+            "workspace_sync",
+            "workspace_sync_ack",
+            "execution_id",
+            "stable change ID",
+            "other_session_changes",
+            "intentionally skip",
+            "Workspace context is not repository access",
+            "Pass the session's `execution_id` to supported writes",
+            "sync again until `has_more` is false",
+            "If `cursor_reset` is true",
+            "stop and report the sync failure",
+        ):
+            assert required in output, f"{name} is missing {required} guidance"
+
+
+def test_claude_generator_preloads_workspace_sync_schemas():
+    from app.routes.integrations_page import _build_claude_md
+
+    output = _build_claude_md(
+        "http://x", "user:u", "workspace:w", "agent:a", "Agent", "ws"
+    )
+    preload = (
+        'ToolSearch("select:mcp__agent-core__workspace_sync,'
+        'mcp__agent-core__workspace_sync_ack,'
+        'mcp__agent-core__memory_search,'
+        'mcp__agent-core__activity_update,'
+        'mcp__agent-core__memory_write")'
+    )
+    assert preload in output
+
+
 def test_integrations_generates_env_vars(integrations_client):
     r = integrations_client.get(
         "/integrations?user_id=alex&workspace_id=agent-core&agent_id=claude-code&target=claude_code&output_type=env"
@@ -209,8 +271,15 @@ def test_integrations_generates_verification_prompt(integrations_client):
     html = r.text
     assert "workspace:agent-core" in html
     assert "verification" in html.lower() or "Verify" in html
+    assert "workspace_sync" in html
+    assert "workspace_sync_ack" in html
+    assert "execution_id" in html
     assert "activity_update" in html
     assert "memory_get" in html
+    assert "`scope` set to `workspace:agent-core`" in html
+    assert "`view` set to `full`" in html
+    assert "returned records include the captured record ID" in html
+    assert "memory_get` for the record ID" not in html
     assert "credential_list" in html
     assert "connectors_list" in html
     assert "connectors_bindings_list" in html
@@ -218,6 +287,24 @@ def test_integrations_generates_verification_prompt(integrations_client):
     assert "connectors_bindings_test" in html
     assert "connectors_summary" in html
     assert "task_result" in html
+
+
+def test_verification_prompt_uses_the_real_memory_get_schema():
+    from app.routes.integrations_page import _build_verification_prompt
+    from app.routes.mcp import MANIFEST
+
+    memory_get = next(
+        tool for tool in MANIFEST["tools"] if tool["name"] == "memory_get"
+    )
+    properties = memory_get["inputSchema"]["properties"]
+    prompt = _build_verification_prompt("user:u", "workspace:w")
+
+    assert "scope" in properties
+    assert "view" in properties
+    assert "record_id" not in properties
+    assert "`scope` set to `workspace:w`" in prompt
+    assert "`view` set to `full`" in prompt
+    assert "memory_get` for the record ID" not in prompt
 
 
 def test_integrations_access_checks_show_ok_for_good_agent(integrations_client):

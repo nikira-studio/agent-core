@@ -18,6 +18,9 @@ class Settings(BaseSettings):
     SHARED_SCOPE_AGENTS: str = ""
     TRUSTED_PROXIES: str = ""
     STALE_THRESHOLD_MINUTES: int = 5
+    WORKSPACE_SYNC_BOOTSTRAP_HOURS: int = 24
+    WORKSPACE_CHANGE_RETENTION_DAYS: int = 30
+    EXECUTION_STALE_MINUTES: int = 30
     COOKIE_SECURE: bool = False
     BLOCK_INTERNAL_HOSTS: bool = False
     ALLOWED_INTERNAL_HOSTS: str = ""

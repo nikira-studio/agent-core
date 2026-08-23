@@ -132,7 +132,9 @@ At runtime:  Broker injects the token locally, or the connector executor uses it
 
 ### Shared context across tools and people
 
-Working with a team, or switching between Claude Code and Cursor on the same project? Create a workspace and grant each agent access to it. When one agent writes a decision or discovers something important to the shared workspace scope, any other agent connected to that workspace can search for it with `memory_search` at the start of their next session. Nothing transfers automatically; agents actively write and read. That makes the handoff explicit and reliable rather than magic.
+Working with a team, or switching between Claude Code and Cursor on the same project? Create a workspace and grant each agent access to it. At session startup, an agent calls `workspace_sync` to receive pinned context, assigned activities, new briefings, and workspace changes since that execution's last acknowledged cursor. Targeted `memory_search` calls still fill gaps when the agent needs older context.
+
+Sync is an explicit pull, not a background process. Each session has its own execution ID, even when two sessions use the same agent identity. That lets one Codex session see work recorded by another Codex session without confusing the two sessions.
 
 ![Agent Core agents](docs/images/agent-workspace.png)
 
@@ -157,6 +159,8 @@ The trail is searchable, and it is the right home for "what did we do on X last 
 You can assign work to an agent directly from the dashboard (**Activity → Assign Work**). The agent session discovers that work on the next pickup check:
 
 ```
+workspace_sync    → receive new workspace context and changes for this execution
+workspace_sync_ack → acknowledge a delivered page after processing it
 activity_pickup  → check for work a human assigned to this agent in this workspace
 activity_search  → search what agents have already worked on ("what did we do on X")
 activity_list    → find what's stale or pending (for reviews and handoffs)
@@ -164,7 +168,7 @@ get_briefing     → pull the prior task description, decisions, and workspace m
 memory_search    → fill in any gaps with a targeted query
 ```
 
-`activity_pickup` returns the next assigned task, or `null` if nothing is waiting. It is an explicit pull: agents check when they start or when idle, not on a schedule. Nothing in this flow is automatic, which means the handoff trail is auditable and the context is always intentional.
+`workspace_sync` reports what changed. `activity_pickup` claims the next task assigned to the agent, or returns `null` if nothing is waiting. Both are explicit pulls. Agents call them at session boundaries and task boundaries, not on a background schedule.
 
 ![Agent Core activity](docs/images/agent-activity.png)
 

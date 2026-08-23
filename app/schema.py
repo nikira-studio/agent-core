@@ -505,6 +505,7 @@ def create_schema(conn) -> None:
     conn.executescript(SCHEMA_SQL)
     conn.executescript(SCHEMA_SQL_MEMORY_FTS)
     _ensure_activity_columns(conn)
+    _ensure_workspace_sync_schema(conn)
     _ensure_activity_fts(conn)
     _ensure_memory_proposals_table(conn)
     _widen_proposal_actions(conn)
@@ -623,6 +624,174 @@ def _ensure_activity_columns(conn) -> None:
         conn.execute("ALTER TABLE agent_activity ADD COLUMN task_note TEXT")
     if "task_result" not in columns:
         conn.execute("ALTER TABLE agent_activity ADD COLUMN task_result TEXT")
+    if "source_execution_id" not in columns:
+        conn.execute("ALTER TABLE agent_activity ADD COLUMN source_execution_id TEXT")
+    conn.commit()
+
+
+def _ensure_workspace_sync_schema(conn) -> None:
+    memory_columns = {row["name"] for row in conn.execute("PRAGMA table_info(memory_records)").fetchall()}
+    if "source_execution_id" not in memory_columns:
+        conn.execute("ALTER TABLE memory_records ADD COLUMN source_execution_id TEXT")
+
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS agent_executions (
+            id TEXT PRIMARY KEY,
+            agent_id TEXT NOT NULL,
+            user_id TEXT NOT NULL,
+            memory_scope TEXT NOT NULL,
+            host_session_ref TEXT,
+            status TEXT NOT NULL DEFAULT 'active'
+                CHECK (status IN ('active', 'stale', 'ended')),
+            started_at TEXT NOT NULL,
+            last_seen_at TEXT NOT NULL,
+            ended_at TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_agent_executions_scope
+            ON agent_executions(memory_scope, status, last_seen_at DESC);
+
+        CREATE TABLE IF NOT EXISTS workspace_changes (
+            id TEXT PRIMARY KEY,
+            memory_scope TEXT NOT NULL,
+            sequence INTEGER NOT NULL,
+            change_type TEXT NOT NULL,
+            resource_type TEXT NOT NULL,
+            resource_id TEXT NOT NULL,
+            source_agent_id TEXT,
+            source_execution_id TEXT,
+            summary_json TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(memory_scope, sequence)
+        );
+        CREATE INDEX IF NOT EXISTS idx_workspace_changes_scope_sequence
+            ON workspace_changes(memory_scope, sequence);
+        CREATE INDEX IF NOT EXISTS idx_workspace_changes_created
+            ON workspace_changes(created_at);
+
+        CREATE TABLE IF NOT EXISTS execution_sync_state (
+            execution_id TEXT NOT NULL,
+            memory_scope TEXT NOT NULL,
+            acknowledged_sequence INTEGER NOT NULL DEFAULT 0,
+            highest_delivered_sequence INTEGER NOT NULL DEFAULT 0,
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY(execution_id, memory_scope),
+            FOREIGN KEY(execution_id) REFERENCES agent_executions(id) ON DELETE CASCADE
+        );
+
+        DROP TRIGGER IF EXISTS workspace_memory_ai;
+        DROP TRIGGER IF EXISTS workspace_memory_au;
+        DROP TRIGGER IF EXISTS workspace_activity_ai;
+        DROP TRIGGER IF EXISTS workspace_activity_au;
+
+        CREATE TRIGGER workspace_memory_ai AFTER INSERT ON memory_records
+        WHEN new.scope LIKE 'workspace:%'
+        BEGIN
+            INSERT INTO workspace_changes
+            (id, memory_scope, sequence, change_type, resource_type, resource_id,
+             source_agent_id, source_execution_id, summary_json, created_at)
+            VALUES (
+                lower(hex(randomblob(16))), new.scope,
+                COALESCE((SELECT MAX(sequence) + 1 FROM workspace_changes WHERE memory_scope = new.scope), 1),
+                'memory_written', 'memory', new.id,
+                json_extract(CASE WHEN json_valid(new.provenance_json) THEN new.provenance_json ELSE '{}' END, '$.agent_id'), new.source_execution_id,
+                json_object('topic', new.topic, 'memory_class', new.memory_class,
+                    'record_status', new.record_status,
+                    'preview', substr(new.content, 1, 240)), CURRENT_TIMESTAMP
+            );
+        END;
+
+        CREATE TRIGGER workspace_memory_au AFTER UPDATE ON memory_records
+        WHEN new.scope LIKE 'workspace:%' AND (
+            old.record_status IS NOT new.record_status OR
+            old.last_confirmed_at IS NOT new.last_confirmed_at OR
+            old.pinned IS NOT new.pinned
+        )
+        BEGIN
+            INSERT INTO workspace_changes
+            (id, memory_scope, sequence, change_type, resource_type, resource_id,
+             source_agent_id, source_execution_id, summary_json, created_at)
+            VALUES (
+                lower(hex(randomblob(16))), new.scope,
+                COALESCE((SELECT MAX(sequence) + 1 FROM workspace_changes WHERE memory_scope = new.scope), 1),
+                CASE
+                    WHEN new.record_status = 'superseded' THEN 'memory_superseded'
+                    WHEN new.record_status = 'retracted' THEN 'memory_retracted'
+                    WHEN old.last_confirmed_at IS NOT new.last_confirmed_at THEN 'memory_confirmed'
+                    ELSE 'memory_pin_changed'
+                END,
+                'memory', new.id, json_extract(CASE WHEN json_valid(new.provenance_json) THEN new.provenance_json ELSE '{}' END, '$.agent_id'),
+                new.source_execution_id,
+                json_object('topic', new.topic, 'memory_class', new.memory_class,
+                    'record_status', new.record_status,
+                    'preview', substr(new.content, 1, 240)), CURRENT_TIMESTAMP
+            );
+        END;
+
+        CREATE TRIGGER workspace_activity_ai AFTER INSERT ON agent_activity
+        WHEN new.memory_scope LIKE 'workspace:%' AND NOT (
+            COALESCE(json_extract(CASE WHEN json_valid(new.metadata_json) THEN new.metadata_json ELSE '{}' END, '$.type'), '') = 'handoff_briefing'
+            AND json_extract(CASE WHEN json_valid(new.metadata_json) THEN new.metadata_json ELSE '{}' END, '$.briefing') IS NULL
+        )
+        BEGIN
+            INSERT INTO workspace_changes
+            (id, memory_scope, sequence, change_type, resource_type, resource_id,
+             source_agent_id, source_execution_id, summary_json, created_at)
+            VALUES (
+                lower(hex(randomblob(16))), new.memory_scope,
+                COALESCE((SELECT MAX(sequence) + 1 FROM workspace_changes WHERE memory_scope = new.memory_scope), 1),
+                CASE WHEN json_extract(CASE WHEN json_valid(new.metadata_json) THEN new.metadata_json ELSE '{}' END, '$.type') = 'handoff_briefing'
+                    OR json_extract(CASE WHEN json_valid(new.metadata_json) THEN new.metadata_json ELSE '{}' END, '$.briefing') IS NOT NULL
+                    THEN 'briefing_created' ELSE 'activity_created' END,
+                CASE WHEN json_extract(CASE WHEN json_valid(new.metadata_json) THEN new.metadata_json ELSE '{}' END, '$.type') = 'handoff_briefing'
+                    OR json_extract(CASE WHEN json_valid(new.metadata_json) THEN new.metadata_json ELSE '{}' END, '$.briefing') IS NOT NULL
+                    THEN 'briefing' ELSE 'activity' END,
+                new.id, new.agent_id, new.source_execution_id,
+                json_object('task_description', new.task_description, 'task_note', new.task_note,
+                    'task_result', new.task_result, 'status', new.status,
+                    'assigned_agent_id', new.assigned_agent_id), CURRENT_TIMESTAMP
+            );
+        END;
+
+        CREATE TRIGGER workspace_activity_au AFTER UPDATE ON agent_activity
+        WHEN new.memory_scope LIKE 'workspace:%' AND (
+            old.task_description IS NOT new.task_description OR
+            old.task_note IS NOT new.task_note OR
+            old.task_result IS NOT new.task_result OR
+            old.status IS NOT new.status OR
+            old.assigned_agent_id IS NOT new.assigned_agent_id OR
+            old.metadata_json IS NOT new.metadata_json
+        )
+        BEGIN
+            INSERT INTO workspace_changes
+            (id, memory_scope, sequence, change_type, resource_type, resource_id,
+             source_agent_id, source_execution_id, summary_json, created_at)
+            VALUES (
+                lower(hex(randomblob(16))), new.memory_scope,
+                COALESCE((SELECT MAX(sequence) + 1 FROM workspace_changes WHERE memory_scope = new.memory_scope), 1),
+                CASE
+                    WHEN (
+                            json_extract(CASE WHEN json_valid(old.metadata_json) THEN old.metadata_json ELSE '{}' END, '$.type') = 'handoff_briefing'
+                            OR json_extract(CASE WHEN json_valid(new.metadata_json) THEN new.metadata_json ELSE '{}' END, '$.type') = 'handoff_briefing'
+                         )
+                         AND json_extract(CASE WHEN json_valid(old.metadata_json) THEN old.metadata_json ELSE '{}' END, '$.briefing') IS NULL
+                         AND json_extract(CASE WHEN json_valid(new.metadata_json) THEN new.metadata_json ELSE '{}' END, '$.briefing') IS NOT NULL THEN 'briefing_created'
+                    WHEN old.assigned_agent_id IS NOT new.assigned_agent_id THEN 'activity_reassigned'
+                    WHEN new.status = 'completed' THEN 'activity_completed'
+                    WHEN new.status = 'blocked' THEN 'activity_blocked'
+                    ELSE 'activity_updated'
+                END,
+                CASE WHEN json_extract(CASE WHEN json_valid(new.metadata_json) THEN new.metadata_json ELSE '{}' END, '$.type') = 'handoff_briefing'
+                    OR json_extract(CASE WHEN json_valid(new.metadata_json) THEN new.metadata_json ELSE '{}' END, '$.briefing') IS NOT NULL
+                    THEN 'briefing' ELSE 'activity' END,
+                new.id, new.agent_id, new.source_execution_id,
+                json_object('task_description', new.task_description, 'task_note', new.task_note,
+                    'task_result', new.task_result, 'status', new.status,
+                    'assigned_agent_id', new.assigned_agent_id), CURRENT_TIMESTAMP
+            );
+        END;
+        """
+    )
     conn.commit()
 
 

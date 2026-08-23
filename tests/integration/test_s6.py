@@ -68,6 +68,29 @@ def test_spec_includes_all_mcp_tools(test_client, admin_token):
     )
 
 
+def test_memory_pinned_description_matches_workspace_sync_guidance(
+    test_client, admin_token
+):
+    from app.routes.mcp import MANIFEST
+
+    response = test_client.get(
+        "/spec", headers={"Authorization": f"Bearer {admin_token}"}
+    )
+    assert response.status_code == 200
+
+    manifest_tool = next(
+        tool for tool in MANIFEST["tools"] if tool["name"] == "memory_pinned"
+    )
+    spec_tool = next(
+        tool
+        for tool in response.json()["data"]["mcp_tools"]
+        if tool["name"] == "memory_pinned"
+    )
+    assert spec_tool["description"] == manifest_tool["description"]
+    assert "workspace_sync already returns pinned records" in manifest_tool["description"]
+    assert "other authorized scopes" in manifest_tool["description"]
+
+
 def test_spec_includes_connector_endpoints(test_client, admin_token):
     r = test_client.get(
         "/spec",

@@ -210,7 +210,12 @@ def spec(
         },
         {
             "name": "memory_pinned",
-            "description": "Standing context for your scopes — loaded at session start rather than searched for",
+            "description": (
+                "Standing context for your authorized scopes. workspace_sync already returns "
+                "pinned records for its workspace. Call memory_pinned at session start only "
+                "when you also need standing rules from other authorized scopes or no "
+                "workspace sync applies. Pinned records are loaded, not searched for."
+            ),
             "inputSchema": {},
         },
         {
@@ -255,6 +260,25 @@ def spec(
             "name": "activity_pickup",
             "description": "Claim the next active work item assigned to this agent in authorized scopes",
             "inputSchema": {},
+        },
+        {
+            "name": "workspace_sync",
+            "description": "Synchronize workspace context and changes for one agent execution",
+            "inputSchema": {
+                "memory_scope": "string",
+                "execution_id": "string?",
+                "after_cursor": "integer?",
+                "limit": "integer?",
+            },
+        },
+        {
+            "name": "workspace_sync_ack",
+            "description": "Acknowledge a delivered workspace synchronization cursor",
+            "inputSchema": {
+                "memory_scope": "string",
+                "execution_id": "string",
+                "cursor": "integer",
+            },
         },
         {
             "name": "connectors_list",

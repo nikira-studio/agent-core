@@ -1206,8 +1206,10 @@ def try_acquire_maintenance_lock(lease_seconds: int = 120) -> bool:
 
 def run_scheduled_maintenance(triggered_by: str = "manual") -> dict:
     from app.services.activity_service import mark_stale_activities
+    from app.services.workspace_sync_service import run_maintenance as run_sync_maintenance
 
     stale_count = mark_stale_activities()
+    sync_maintenance = run_sync_maintenance()
 
     retention_days = _system_setting_int("scratchpad_retention_days", 7)
 
@@ -1401,6 +1403,7 @@ def run_scheduled_maintenance(triggered_by: str = "manual") -> dict:
 
     result = {
         "stale_activities_marked": stale_count,
+        **sync_maintenance,
         "scratchpad_pruned": pruned,
         "ttl_swept": ttl_deleted,
         "retracted_purged": purged,

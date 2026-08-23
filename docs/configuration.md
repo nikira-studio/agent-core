@@ -49,6 +49,9 @@ These control how long dashboard logins stay active.
 | --- | --- | --- |
 | `AGENT_CORE_SHARED_SCOPE_AGENTS` | *(empty)* | Comma-separated agent IDs that can write to the `shared` memory scope, in addition to any agent that has `shared` explicitly in its `write_scopes`. This does not grant credential access |
 | `AGENT_CORE_STALE_THRESHOLD_MINUTES` | `5` | How long an agent can go without sending a heartbeat before its active task is automatically marked stale |
+| `AGENT_CORE_WORKSPACE_SYNC_BOOTSTRAP_HOURS` | `24` | How much recent workspace change history a new execution receives on its first sync |
+| `AGENT_CORE_WORKSPACE_CHANGE_RETENTION_DAYS` | `30` | How long maintenance keeps durable workspace change rows |
+| `AGENT_CORE_EXECUTION_STALE_MINUTES` | `30` | How long an execution can go without a sync before maintenance marks it stale. This status is informational |
 | `AGENT_CORE_TOOL_RESULT_SPILL_THRESHOLD` | `8000` | MCP tool outputs larger than this many serialized characters are stored in Agent Core and returned as a `result_fetch` handle. Set to `0` to disable spilling |
 | `AGENT_CORE_TOOL_RESULT_SPILL_TTL_HOURS` | `24` | How long spilled tool results remain retrievable before cleanup |
 
@@ -58,7 +61,7 @@ These control how long dashboard logins stay active.
 
 | Variable | Default | What it does |
 | --- | --- | --- |
-| `AGENT_CORE_MAINTENANCE_INTERVAL_MINUTES` | `60` | How often the in-process maintenance sweep runs: marks stale activities, prunes scratchpad memories past retention, sweeps `expires_at` TTL'd records, and purges retracted/superseded records past their retention window. Set to `0` to disable the automatic schedule; the manual **Run Maintenance** button in Settings still works |
+| `AGENT_CORE_MAINTENANCE_INTERVAL_MINUTES` | `60` | How often the in-process maintenance sweep runs: marks stale activities and executions, prunes expired workspace changes and scratchpad memories, sweeps `expires_at` records, and purges retracted or superseded records past retention. Set to `0` to disable the automatic schedule; the manual **Run Maintenance** button in Settings still works |
 | `AGENT_CORE_MAINTENANCE_INITIAL_DELAY_SECONDS` | `300` | Delay before the first automatic run after startup |
 
 The scratchpad and retracted/superseded retention windows themselves (7 and 30 days by default) are configured from **Settings → System Behavior** in the dashboard. The last run's time, trigger, and results are shown in **Settings → Backup & Restore** and available from `GET /api/backup/maintenance/status`.

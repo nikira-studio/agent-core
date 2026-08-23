@@ -19,6 +19,7 @@ class CreateActivityRequest(BaseModel):
     memory_scope: Optional[str] = None
     metadata_json: Optional[str] = None
     assigned_agent_id: Optional[str] = None
+    execution_id: Optional[str] = None
 
 
 class UpdateActivityRequest(BaseModel):
@@ -26,6 +27,7 @@ class UpdateActivityRequest(BaseModel):
     task_note: Optional[str] = None
     task_result: Optional[str] = None
     metadata_json: Optional[str] = None
+    execution_id: Optional[str] = None
 
 
 class RecoveryRequest(BaseModel):
@@ -73,6 +75,17 @@ def create_activity(
         return error_response(
             "SCOPE_DENIED", f"Access denied to memory_scope: {memory_scope}", 403
         )
+    if body.execution_id and ctx.agent_id:
+        from app.services import workspace_sync_service
+        try:
+            workspace_sync_service.validate_execution(
+                execution_id=body.execution_id, agent_id=ctx.agent_id,
+                user_id=ctx.user_id or "", memory_scope=memory_scope,
+            )
+        except PermissionError:
+            return error_response("EXECUTION_OWNERSHIP", "Execution belongs to another agent", 403)
+        except ValueError as exc:
+            return error_response(str(exc), "Invalid execution", 400)
 
     activity = activity_service.create_activity(
         agent_id=effective_agent_id,
@@ -80,6 +93,7 @@ def create_activity(
         task_description=body.task_description,
         memory_scope=memory_scope,
         metadata_json=body.metadata_json,
+        source_execution_id=body.execution_id,
     )
 
     audit_service.write_event(
@@ -223,6 +237,17 @@ def update_activity(
 
     if not _can_activity(ctx, activity, "update"):
         return error_response("FORBIDDEN", "Access denied", 403)
+    if body.execution_id and ctx.agent_id:
+        from app.services import workspace_sync_service
+        try:
+            workspace_sync_service.validate_execution(
+                execution_id=body.execution_id, agent_id=ctx.agent_id,
+                user_id=ctx.user_id or "", memory_scope=activity.get("memory_scope") or f"agent:{ctx.agent_id}",
+            )
+        except PermissionError:
+            return error_response("EXECUTION_OWNERSHIP", "Execution belongs to another agent", 403)
+        except ValueError as exc:
+            return error_response(str(exc), "Invalid execution", 400)
 
     if body.status and body.status not in ACTIVITY_STATUSES:
         return error_response("INVALID_STATUS", f"Invalid status: {body.status}", 400)
@@ -240,6 +265,7 @@ def update_activity(
         task_note=body.task_note,
         task_result=body.task_result,
         metadata_json=body.metadata_json,
+        source_execution_id=body.execution_id,
     )
     if not success:
         return error_response("UPDATE_FAILED", "Activity update failed", 500)

@@ -188,6 +188,14 @@ def set_subject_anchor(
             "WHERE id = ? AND record_status = 'active'",
             (normalized, provenance, record_id),
         )
+        from app.services.workspace_sync_service import record_change
+        record_change(
+            conn, memory_scope=record["scope"], change_type="memory_reanchored",
+            resource_type="memory", resource_id=record_id, source_agent_id=changed_by,
+            summary={"topic": record.get("topic"), "memory_class": record["memory_class"],
+                     "subject_anchor": normalized, "record_status": record["record_status"],
+                     "preview": record["content"][:240]},
+        )
         conn.commit()
     return get_memory_record(record_id)
 
@@ -922,6 +930,7 @@ def write_memory(
     expires_at: Optional[str] = None,
     subject_anchor: Optional[str] = None,
     allow_pii_shared: bool = False,
+    source_execution_id: Optional[str] = None,
 ) -> tuple[dict, str | None]:
     if memory_class not in MEMORY_CLASSES:
         raise ValueError(f"Invalid memory_class: {memory_class}")
@@ -1028,8 +1037,8 @@ def write_memory(
             (id, content, memory_class, scope, topic, confidence, importance,
              source_kind, created_at, record_status, supersedes_id,
              provenance_json, slot_key, valid_from, valid_to, last_confirmed_at, expires_at,
-             subject_anchor)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?)
+             subject_anchor, source_execution_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 record_id,
@@ -1049,6 +1058,7 @@ def write_memory(
                 normalized_last_confirmed_at,
                 normalized_expires_at,
                 normalized_subject_anchor,
+                source_execution_id,
             ),
         )
         conn.commit()

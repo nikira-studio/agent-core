@@ -14,6 +14,7 @@ def create_activity(
     task_description: str,
     memory_scope: Optional[str] = None,
     metadata_json: Optional[str] = None,
+    source_execution_id: Optional[str] = None,
 ) -> dict:
     activity_id = secrets.token_urlsafe(16)
     now = utc_now_iso()
@@ -23,11 +24,11 @@ def create_activity(
             """
             INSERT INTO agent_activity
             (id, agent_id, assigned_agent_id, user_id, task_description, status, memory_scope,
-             started_at, heartbeat_at, metadata_json)
-            VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?, ?)
+             started_at, heartbeat_at, metadata_json, source_execution_id)
+            VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?)
             """,
             (activity_id, agent_id, agent_id, user_id, task_description, memory_scope,
-             now, now, metadata_json),
+             now, now, metadata_json, source_execution_id),
         )
         conn.commit()
 
@@ -80,6 +81,7 @@ def update_activity(
     memory_scope: Optional[str] = None,
     status: Optional[str] = None,
     metadata_json: Optional[str] = None,
+    source_execution_id: Optional[str] = None,
 ) -> bool:
     updates = []
     params = []
@@ -106,6 +108,9 @@ def update_activity(
     if metadata_json is not None:
         updates.append("metadata_json = ?")
         params.append(metadata_json)
+    if source_execution_id is not None:
+        updates.append("source_execution_id = ?")
+        params.append(source_execution_id)
 
     if not updates:
         return False

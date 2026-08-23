@@ -6,7 +6,7 @@ LEFT JOIN narrows nothing on its own, so without a predicate beside it the
 and owners of every project on the installation.
 """
 
-from app.services import workspace_service
+from app.services import agent_service, workspace_service
 from app.services.auth_service import create_session, create_user
 
 
@@ -99,3 +99,72 @@ def test_the_service_agrees_with_the_per_workspace_check(test_client, admin_toke
             assert (workspace_id in listed) == allowed, (
                 f"{subject}: listing says {workspace_id in listed}, check says {allowed}"
             )
+
+
+def test_agent_lists_and_reads_only_workspaces_in_its_read_scopes(
+    test_client, admin_token
+):
+    workspace_service.create_workspace("foo", "Foo", "admin")
+    workspace_service.create_workspace("bar", "Bar", "admin")
+    _, api_key = agent_service.create_agent(
+        "catalogagent",
+        "Catalog Agent",
+        "admin",
+        read_scopes=["workspace:foo"],
+        write_scopes=[],
+    )
+    headers = {"Authorization": f"Bearer {api_key}"}
+
+    listed = test_client.get("/api/workspaces", headers=headers)
+    assert listed.status_code == 200, listed.json()
+    assert [workspace["id"] for workspace in listed.json()["data"]["workspaces"]] == [
+        "foo"
+    ]
+
+    allowed = test_client.get("/api/workspaces/foo", headers=headers)
+    assert allowed.status_code == 200, allowed.json()
+    assert allowed.json()["data"]["workspace"]["id"] == "foo"
+
+    denied = test_client.get("/api/workspaces/bar", headers=headers)
+    assert denied.status_code == 403
+    assert denied.json()["error"]["code"] == "FORBIDDEN"
+
+
+def test_agent_without_workspace_scopes_gets_an_empty_catalog(
+    test_client, admin_token
+):
+    workspace_service.create_workspace("private", "Private", "admin")
+    _, api_key = agent_service.create_agent(
+        "scopelessagent",
+        "Scopeless Agent",
+        "admin",
+        read_scopes=[],
+        write_scopes=[],
+    )
+
+    response = test_client.get(
+        "/api/workspaces", headers={"Authorization": f"Bearer {api_key}"}
+    )
+    assert response.status_code == 200, response.json()
+    assert response.json()["data"]["workspaces"] == []
+
+
+def test_agent_workspace_key_does_not_gain_management_access(
+    test_client, admin_token
+):
+    workspace_service.create_workspace("readonly", "Read Only", "admin")
+    _, api_key = agent_service.create_agent(
+        "readonlyagent",
+        "Read Only Agent",
+        "admin",
+        read_scopes=["workspace:readonly"],
+        write_scopes=["workspace:readonly"],
+    )
+    headers = {"Authorization": f"Bearer {api_key}"}
+
+    response = test_client.put(
+        "/api/workspaces/readonly",
+        headers=headers,
+        json={"name": "Agents Cannot Rename Workspaces"},
+    )
+    assert response.status_code == 401

@@ -138,7 +138,7 @@ You should see:
 
 If you get a `401`, you're using the wrong key. Make sure it's the agent API key, not your dashboard password. A connection error means Agent Core isn't running on port 3500.
 
-After the MCP connection is working, run the generated **Verification Prompt** in the connected agent. That prompt writes a workspace memory record, reads it back, checks credential and connector visibility, and updates activity so you can confirm the full end-to-end setup from the agent side.
+After the MCP connection is working, run the generated **Verification Prompt** in the connected agent. The prompt starts a workspace execution, verifies change delivery and acknowledgement, writes and reads memory, checks credential and connector visibility, and updates activity.
 
 ---
 

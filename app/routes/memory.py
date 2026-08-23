@@ -82,6 +82,7 @@ class WriteMemoryRequest(BaseModel):
     valid_to: Optional[str] = None
     last_confirmed_at: Optional[str] = None
     expires_at: Optional[str] = None
+    execution_id: Optional[str] = None
 
 
 class ImportMemorySource(BaseModel):
@@ -154,6 +155,17 @@ async def write_memory(
             return error_response("INVALID_SUPERSESSION", "Cannot supersede non-active record", 400)
         if not ctx.can("memory", "write", scope=old_record["scope"]):
             return error_response("SCOPE_DENIED", "Access denied to scope of record being superseded", 403)
+    if body.execution_id:
+        from app.services import workspace_sync_service
+        try:
+            workspace_sync_service.validate_execution(
+                execution_id=body.execution_id, agent_id=ctx.agent_id or "",
+                user_id=ctx.user_id or "", memory_scope=body.scope,
+            )
+        except PermissionError:
+            return error_response("EXECUTION_OWNERSHIP", "Execution belongs to another agent", 403)
+        except ValueError as exc:
+            return error_response(str(exc), "Invalid execution", 400)
 
     try:
         record, pii_flag = await asyncio.to_thread(
@@ -173,6 +185,7 @@ async def write_memory(
             valid_to=body.valid_to,
             last_confirmed_at=body.last_confirmed_at,
             expires_at=body.expires_at,
+            source_execution_id=body.execution_id,
         )
     except ValueError as e:
         return error_response("INVALID_INPUT", str(e), 400)

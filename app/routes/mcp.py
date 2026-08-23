@@ -163,6 +163,7 @@ MANIFEST = {
                     "valid_to": {"type": "string"},
                     "last_confirmed_at": {"type": "string"},
                     "expires_at": {"type": "string", "description": "ISO datetime after which this record is excluded from search results and swept on next maintenance run"},
+                    "execution_id": {"type": "string", "description": "Execution returned by workspace_sync for source attribution"},
                 },
                 "required": ["content", "memory_class", "scope"],
             },
@@ -170,10 +171,10 @@ MANIFEST = {
         {
             "name": "memory_pinned",
             "description": (
-                "The standing context for your scopes: rules and constraints the operator "
-                "wants applied to every session. Call this once at the start of a session — "
-                "these are loaded, not searched for, because a constraint that has to win a "
-                "search can be missed."
+                "Standing context for your authorized scopes. workspace_sync already returns "
+                "pinned records for its workspace. Call memory_pinned at session start only "
+                "when you also need standing rules from other authorized scopes or no "
+                "workspace sync applies. Pinned records are loaded, not searched for."
             ),
             "inputSchema": {"type": "object", "properties": {}},
         },
@@ -330,6 +331,7 @@ MANIFEST = {
                     "task_result": {"type": "string"},
                     "status": {"type": "string"},
                     "memory_scope": {"type": "string"},
+                    "execution_id": {"type": "string"},
                 },
             },
         },
@@ -390,6 +392,34 @@ MANIFEST = {
             "inputSchema": {
                 "type": "object",
                 "properties": {},
+            },
+        },
+        {
+            "name": "workspace_sync",
+            "description": "Synchronize pinned context, assigned activities, briefings, memory changes, and activity changes since this execution's cursor. Process each stable change id only once even when it appears in more than one group.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "memory_scope": {"type": "string"},
+                    "execution_id": {"type": "string"},
+                    "after_cursor": {"type": "integer", "minimum": 0},
+                    "limit": {"type": "integer", "default": 100, "maximum": 200},
+                    "host_session_ref": {"type": "string"},
+                },
+                "required": ["memory_scope"],
+            },
+        },
+        {
+            "name": "workspace_sync_ack",
+            "description": "Acknowledge workspace changes through a delivered cursor for this execution",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "memory_scope": {"type": "string"},
+                    "execution_id": {"type": "string"},
+                    "cursor": {"type": "integer", "minimum": 0},
+                },
+                "required": ["memory_scope", "execution_id", "cursor"],
             },
         },
         {
@@ -1142,6 +1172,17 @@ async def _handle_custom_mcp_tool(body: dict, ctx: RequestContext):
         scope = params["scope"]
         if not ctx.can("memory", "write", scope=scope):
             return _mcp_error("SCOPE_DENIED", "Access denied to this scope", 403)
+        if params.get("execution_id"):
+            from app.services import workspace_sync_service
+            try:
+                workspace_sync_service.validate_execution(
+                    execution_id=params["execution_id"], agent_id=ctx.agent_id,
+                    user_id=ctx.user_id or "", memory_scope=scope,
+                )
+            except PermissionError:
+                return _mcp_error("EXECUTION_OWNERSHIP", "Execution belongs to another agent", 403)
+            except ValueError as exc:
+                return _mcp_error(str(exc), "Invalid execution", 400)
         if params["memory_class"] not in MEMORY_CLASSES:
             return _mcp_error(
                 "INVALID_CLASS", f"memory_class must be one of {MEMORY_CLASSES}", 400
@@ -1194,6 +1235,7 @@ async def _handle_custom_mcp_tool(body: dict, ctx: RequestContext):
                 valid_to=params.get("valid_to"),
                 last_confirmed_at=params.get("last_confirmed_at"),
                 expires_at=params.get("expires_at"),
+                source_execution_id=params.get("execution_id"),
             )
         except ValueError as e:
             return _mcp_error("INVALID_INPUT", str(e), 400)
@@ -1558,6 +1600,17 @@ async def _handle_custom_mcp_tool(body: dict, ctx: RequestContext):
         memory_scope = params.get("memory_scope") or f"agent:{ctx.agent_id}"
         if not enforcer.can_write(memory_scope):
             return _mcp_error("SCOPE_DENIED", "Access denied to memory_scope", 403)
+        if params.get("execution_id"):
+            from app.services import workspace_sync_service
+            try:
+                workspace_sync_service.validate_execution(
+                    execution_id=params["execution_id"], agent_id=ctx.agent_id,
+                    user_id=ctx.user_id or "", memory_scope=memory_scope,
+                )
+            except PermissionError:
+                return _mcp_error("EXECUTION_OWNERSHIP", "Execution belongs to another agent", 403)
+            except ValueError as exc:
+                return _mcp_error(str(exc), "Invalid execution", 400)
         existing = activity_service.get_active_activity_for_agent(
             ctx.agent_id, ctx.user_id, memory_scope=memory_scope
         )
@@ -1579,6 +1632,7 @@ async def _handle_custom_mcp_tool(body: dict, ctx: RequestContext):
                     task_note=params.get("task_note"),
                     task_result=params.get("task_result"),
                     status=params["status"],
+                    source_execution_id=params.get("execution_id"),
                 )
             elif params.get("task_description") or params.get("task_note") or params.get("task_result"):
                 activity_service.update_activity(
@@ -1586,6 +1640,7 @@ async def _handle_custom_mcp_tool(body: dict, ctx: RequestContext):
                     task_description=params.get("task_description"),
                     task_note=params.get("task_note"),
                     task_result=params.get("task_result"),
+                    source_execution_id=params.get("execution_id"),
                 )
             else:
                 activity_service.heartbeat_activity(existing["id"])
@@ -1640,6 +1695,7 @@ async def _handle_custom_mcp_tool(body: dict, ctx: RequestContext):
                 user_id=ctx.user_id or "",
                 task_description=params["task_description"],
                 memory_scope=memory_scope,
+                source_execution_id=params.get("execution_id"),
             )
             audit_service.write_event(
                 actor_type="agent",
@@ -1848,6 +1904,39 @@ async def _handle_custom_mcp_tool(body: dict, ctx: RequestContext):
                 "data": {"briefings": briefings, "count": len(briefings)},
             }
         )
+
+    elif tool in ("workspace_sync", "workspace_sync_ack"):
+        from app.services import workspace_sync_service
+
+        if ctx.is_delegated:
+            return _mcp_error("FORBIDDEN", "Delegated workspace sync is unsupported", 403)
+        memory_scope = params["memory_scope"]
+        if not enforcer.can_read(memory_scope):
+            return _mcp_error("SCOPE_DENIED", "Access denied to this workspace", 403)
+        try:
+            if tool == "workspace_sync":
+                result = workspace_sync_service.sync_workspace(
+                    agent_id=ctx.agent_id,
+                    user_id=ctx.user_id or "",
+                    memory_scope=memory_scope,
+                    execution_id=params.get("execution_id"),
+                    after_cursor=params.get("after_cursor"),
+                    limit=params.get("limit", 100),
+                    host_session_ref=params.get("host_session_ref"),
+                )
+            else:
+                result = workspace_sync_service.acknowledge(
+                    agent_id=ctx.agent_id,
+                    user_id=ctx.user_id or "",
+                    execution_id=params["execution_id"],
+                    memory_scope=memory_scope,
+                    cursor=params["cursor"],
+                )
+        except PermissionError:
+            return _mcp_error("EXECUTION_OWNERSHIP", "Execution belongs to another agent", 403)
+        except ValueError as exc:
+            return _mcp_error(str(exc), "Invalid execution or cursor", 400)
+        return JSONResponse(content={"ok": True, "data": result})
 
     elif tool == "connectors_list":
         from app.services import connector_service

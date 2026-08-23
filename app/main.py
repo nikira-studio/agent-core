@@ -23,6 +23,7 @@ from app.routes import (
     memory_proposals_router,
     activity_router,
     briefings_router,
+    workspace_sync_router,
     mcp_router,
     integrations_page_router,
     dashboard_api_router,
@@ -276,6 +277,7 @@ def create_app() -> FastAPI:
     app.include_router(memory_router, tags=["memory"])
     app.include_router(activity_router, tags=["activity"])
     app.include_router(briefings_router, tags=["briefings"])
+    app.include_router(workspace_sync_router, tags=["workspace_sync"])
     app.include_router(mcp_router, tags=["mcp"])
     app.include_router(connector_router, tags=["connector_bindings"])
     app.include_router(connector_compat_router, tags=["connector_bindings"])

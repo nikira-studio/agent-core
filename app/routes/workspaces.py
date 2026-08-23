@@ -3,7 +3,8 @@ from pydantic import BaseModel
 from typing import Optional
 
 from app.services import audit_service, workspace_service
-from app.security.dependencies import get_current_session
+from app.security.dependencies import get_current_session, get_request_context
+from app.security.effective_authority import EffectiveAuthority
 from app.security.response_helpers import success_response, error_response
 from app.models.enums import normalize_id
 
@@ -32,18 +33,30 @@ def _can_manage_workspace(workspace: dict, session: dict) -> bool:
     return session.get("role") == "admin" or workspace.get("owner_user_id") == session["user_id"]
 
 
-def _can_view_workspace(workspace: dict, session: dict) -> bool:
-    if session.get("role") == "admin" or workspace.get("owner_user_id") == session["user_id"]:
+def _can_view_workspace(workspace: dict, ctx: EffectiveAuthority) -> bool:
+    if ctx.is_admin or workspace.get("owner_user_id") == ctx.user_id:
         return True
-    return workspace_service.can_user_read_workspace(session["user_id"], workspace["id"])
+    return workspace_service.can_user_read_workspace(ctx.user_id, workspace["id"])
 
 
 @router.get("")
-def list_workspaces(session: dict = Depends(get_current_session)):
-    if session.get("role") == "admin":
+def list_workspaces(ctx: EffectiveAuthority = Depends(get_request_context)):
+    if ctx.agent_id:
+        workspace_ids = {
+            scope.split(":", 1)[1]
+            for scope in ctx.read_scopes
+            if scope.startswith("workspace:")
+            and ctx.can("memory", "read", scope=scope)
+        }
+        workspaces = [
+            workspace
+            for workspace_id in sorted(workspace_ids)
+            if (workspace := workspace_service.get_workspace_by_id(workspace_id))
+        ]
+    elif ctx.is_admin:
         workspaces = workspace_service.list_workspaces()
     else:
-        workspaces = workspace_service.list_accessible_workspaces(session["user_id"])
+        workspaces = workspace_service.list_accessible_workspaces(ctx.user_id)
     return success_response({"workspaces": workspaces})
 
 
@@ -81,12 +94,21 @@ def create_workspace(
 
 
 @router.get("/{workspace_id}")
-def get_workspace(workspace_id: str, session: dict = Depends(get_current_session)):
+def get_workspace(
+    workspace_id: str,
+    ctx: EffectiveAuthority = Depends(get_request_context),
+):
     workspace = workspace_service.get_workspace_by_id(workspace_id)
     if not workspace:
         return error_response("NOT_FOUND", "Workspace not found", 404)
 
-    if not _can_view_workspace(workspace, session):
+    if ctx.agent_id:
+        can_view = ctx.can(
+            "memory", "read", scope=f"workspace:{workspace_id}"
+        )
+    else:
+        can_view = _can_view_workspace(workspace, ctx)
+    if not can_view:
         return error_response("FORBIDDEN", "Access denied", 403)
 
     return success_response({"workspace": workspace})

@@ -211,6 +211,8 @@ Memory holds what stays true. The activity trail holds what happened: one record
 
 ```
 activity_update   open a task, heartbeat every minute or two, close with a result
+workspace_sync    receive pinned context, assignments, briefings, and changes since this execution's cursor
+workspace_sync_ack acknowledge a delivered page after processing it
 activity_search   "what did we do on X last month"
 activity_list     what is stale or pending
 activity_get      one task, plus the memory records written during it
@@ -223,6 +225,10 @@ It is **self-reported on purpose**. There is no detection of agent work: an agen
 Because every memory write cites the activity that was open at the time, the trail links both ways: `activity_get` returns what a task concluded, not only what it was attempting. Picking up someone else's work shows both.
 
 Work assigned from the dashboard is **pulled, not pushed**: `activity_pickup` returns the next assigned task or `null`. Agents check when they start or when idle. Nothing arrives unbidden, which is what keeps the handoff trail auditable.
+
+Workspace changes use the same pull model. `workspace_sync` creates an execution ID for one host session and returns changes after that execution's acknowledged cursor. The response separates memory, activity, and briefing changes. `other_session_changes` repeats changes written by another execution as a convenience, so clients process each stable change ID only once. After processing a page, the client advances its cursor with `workspace_sync_ack`.
+
+The durable change log does not replace memory, activities, or briefings. It tells a session which source records changed. Agent Core retains change rows for a bounded period, so an expired cursor returns `cursor_reset: true` and a recent bootstrap instead of pretending that no changes occurred.
 
 ---
 
