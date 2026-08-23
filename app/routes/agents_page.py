@@ -41,11 +41,16 @@ def agents_page(request: Request, session: dict = Depends(require_auth)):
         for user in selectable_users:
             user_id = user["id"]
             checked = " checked" if prefix == "ca-read" and user_id == session["user_id"] else ""
+            required = (
+                ' data-required-scope="true" disabled'
+                if prefix == "ca-read" and user_id == session["user_id"]
+                else ""
+            )
             owner_label = " (owner context)" if user_id == session["user_id"] else ""
             user_label = "User" if user_id == session["user_id"] else user.get("display_name") or user_id
             h += (
                 f'<label class="checkbox-label" data-scope-row="user:{escape_html(user_id)}">'
-                f'<input type="checkbox" data-scope="user:{escape_html(user_id)}"{checked}>'
+                f'<input type="checkbox" data-scope="user:{escape_html(user_id)}"{checked}{required}>'
                 f' <span>{escape_html(user_label)} '
                 f'<code>user:{escape_html(user_id)}</code>{owner_label}</span></label>'
             )
@@ -87,7 +92,8 @@ def agents_page(request: Request, session: dict = Depends(require_auth)):
         read_scopes = agent_service.parse_scopes(a.get("read_scopes_json", "[]"))
         write_scopes = agent_service.parse_scopes(a.get("write_scopes_json", "[]"))
         own_scope = f"agent:{a['id']}"
-        read_extra = [s for s in read_scopes if s != own_scope]
+        principal_scope = f"user:{a.get('default_user_id') or a.get('owner_user_id')}"
+        read_extra = [s for s in read_scopes if s not in (own_scope, principal_scope)]
         write_extra = [s for s in write_scopes if s != own_scope]
         shared_badge = (
             "<span class='badge badge-info'>Shared</span>"
@@ -96,6 +102,7 @@ def agents_page(request: Request, session: dict = Depends(require_auth)):
         )
         access_summary = (
             f"<span class='scope-tag' title='Implicit private scope'>{escape_html(own_scope)}</span>"
+            f"<span class='scope-tag' title='Inherited principal scope'>{escape_html(principal_scope)}</span>"
             f"{shared_badge}"
             f"<span class='text-muted'> + {len(read_extra)} read / {len(write_extra)} write grants</span>"
         )
@@ -157,7 +164,9 @@ def agents_page(request: Request, session: dict = Depends(require_auth)):
     }
     function applyLeastPrivilegedPreset() {
       ['ca-read-scopes', 'ca-write-scopes', 'ca-recall-scopes'].forEach(function(containerId) {
-        document.querySelectorAll('#' + containerId + ' input').forEach(function(input) { input.checked = false; });
+        document.querySelectorAll('#' + containerId + ' input').forEach(function(input) {
+          input.checked = input.dataset.requiredScope === 'true';
+        });
       });
       const recallAll = document.getElementById('ca-recall-all');
       if (recallAll) recallAll.checked = false;
@@ -286,7 +295,10 @@ def agents_page(request: Request, session: dict = Depends(require_auth)):
         const isRecall = containerId === 'edit-recall-scopes';
         document.querySelectorAll('#' + containerId + ' input').forEach(input => {
           const isOwnScope = input.dataset.scope === 'agent:' + a.id;
-          input.disabled = Boolean(readOnly) || isOwnScope || input.dataset.requiredScope === 'true';
+          const isPrincipalRead = containerId === 'edit-read-scopes' &&
+            input.dataset.scope === 'user:' + (a.default_user_id || a.owner_user_id);
+          if (isPrincipalRead) input.checked = true;
+          input.disabled = Boolean(readOnly) || isOwnScope || isPrincipalRead || input.dataset.requiredScope === 'true';
           const label = input.closest('label');
           if (!label) return;
           if (isOwnScope && isRecall) {
@@ -419,7 +431,7 @@ def agents_page(request: Request, session: dict = Depends(require_auth)):
     </div></div>
     <div class="card">
       <h3>Agent Access</h3>
-      <p class="text-muted access-summary">An agent's private scope is always present. Owner/default identity does not itself grant personal-memory access: its owner user scope starts selected for convenience and may be removed. Administrators may explicitly grant another user's personal scope; use workspaces for ordinary shared collaboration.</p>
+      <p class="text-muted access-summary">An agent always has its private scope and read access to its active principal's user scope. User-scope write access is never inherited. Administrators may explicitly grant another user's scope; use workspaces for ordinary shared collaboration.</p>
     </div>
 
     <div class="card">
@@ -448,12 +460,12 @@ def agents_page(request: Request, session: dict = Depends(require_auth)):
           </div>
           <div class="form-group">
             <button type="button" class="btn btn-sm btn-secondary" onclick="applyLeastPrivilegedPreset()">Use least-privileged service-agent preset</button>
-            <p class="form-hint">Private agent scope only; no personal, workspace, or shared scopes; delegation disabled. You can add explicit authority afterward.</p>
+            <p class="form-hint">Private agent read/write scope, inherited owner user read scope, no workspace or shared scopes, and delegation disabled. You can add explicit authority afterward.</p>
           </div>
           <div class="form-group">
             <label>Can Read From</label>
             {ca_read_html}
-            <p class="form-hint">Your personal context starts selected for convenience. Uncheck it for a private-scope-only agent. The agent's own private scope is always included.</p>
+            <p class="form-hint">The active principal's user scope is inherited and cannot be removed. The agent's private scope is also always included.</p>
           </div>
           <div class="form-group">
             <label>Can Write To</label>
@@ -505,7 +517,7 @@ def agents_page(request: Request, session: dict = Depends(require_auth)):
           <div class="form-group">
             <label>Can Read From</label>
             {edit_read_html}
-            <p class="form-hint">The agent's private scope is automatic and hidden here. Checked items are extra places this agent can retrieve from.</p>
+            <p class="form-hint">The agent's private scope is automatic and hidden here. Its active principal's user scope is inherited and locked. Checked items are extra places this agent can retrieve from.</p>
           </div>
           <div class="form-group">
             <label>Can Write To</label>

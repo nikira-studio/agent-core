@@ -98,10 +98,6 @@ def test_connectors_run_exports_data_url_image(
             "disabled_actions": [],
         }
     )
-    monkeypatch.setattr(
-        connector_service, "action_requires_write", lambda ct, action: False
-    )
-
     r = _call_tool(
         test_client,
         agent_token,
@@ -175,10 +171,6 @@ def test_connectors_run_non_image_oversized_body_still_spills(
             "disabled_actions": [],
         }
     )
-    monkeypatch.setattr(
-        connector_service, "action_requires_write", lambda ct, action: False
-    )
-
     r = _call_tool(
         test_client,
         agent_token,

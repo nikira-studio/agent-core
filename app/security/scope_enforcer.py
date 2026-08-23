@@ -114,6 +114,15 @@ def build_agent_context(agent: dict) -> "RequestContext":
 
     read_scopes = attenuate(stored_read_scopes, readable_workspace_ids)
     write_scopes = attenuate(stored_write_scopes, writable_workspace_ids)
+    # A user-scoped resource belongs to the active principal, not to one
+    # particular agent record. Keep this derived at request time so agents with
+    # explicit/custom scope lists and older keys inherit the same read umbrella.
+    # Deliberately do not add it to write_scopes: user-scoped memory and other
+    # stored resources still require an explicit write grant. Connector binding
+    # visibility is read-based and authorizes every enabled connector action.
+    principal_scope = f"user:{user_id}" if user_id else None
+    if principal_is_active and principal_scope and principal_scope not in read_scopes:
+        read_scopes.append(principal_scope)
     read_set = set(read_scopes)
     own_scope = f"agent:{agent['id']}"
     recall_json = agent.get("default_recall_scopes_json")

@@ -133,13 +133,10 @@ Connectors are the server-side path for external actions:
 1. You create a stored credential.
 2. You create a connector binding that points to that credential and has its own scope.
 3. An agent calls `connectors_run` with a binding ID, action, and parameters.
-4. Agent Core verifies the agent can read the binding scope.
-5. **If the action changes state, Agent Core also requires write access to that scope.** Read access to a binding means the agent may query the service, not that it may act through it.
-6. Agent Core resolves the credential internally, calls the external service, logs the execution, and returns the result.
+4. Agent Core verifies that the binding is visible to the agent. Binding visibility grants access to every action enabled on the connector type.
+5. Agent Core resolves the credential internally, calls the external service, logs the execution, and returns the result.
 
-An action counts as read-only when its metadata says so or its HTTP method is `GET`, `HEAD`, or `OPTIONS`. **Anything that cannot be identified requires write.** That is the opposite of the verification pass, where an inconclusive check leaves the record alone. The difference is what a wrong guess costs. There it would delete a true memory; here it would run someone else's `DELETE`.
-
-Both transports enforce this identically: `connectors_run` over MCP and `POST /api/connector-bindings/{id}/run` over REST call the same check.
+Both transports enforce binding visibility identically: `connectors_run` over MCP and `POST /api/connector-bindings/{id}/run` over REST call the same check. Connector types define the available actions; bindings decide which users, agents, or workspaces can use the connection. Delegated grants may narrow access to exact binding/action pairs.
 
 Credential scope controls access to the stored secret. Binding scope controls where the connector is available. In normal workspace use, set both to the same workspace.
 

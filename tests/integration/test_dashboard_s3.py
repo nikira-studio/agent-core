@@ -83,6 +83,7 @@ class TestAgentsPage:
         assert "Can Write To" in r.text
         assert "Other users can use this scope" in r.text
         assert "User <code>user:admin</code> (owner context)" in r.text
+        assert "read access to its active principal's user scope" in r.text
 
     def test_agents_edit_modal_shows_owner_and_default_user(self, admin_client):
         r = admin_client.get("/agents")
@@ -104,6 +105,8 @@ class TestAgentsPage:
         )
         assert "const privateScope = 'agent:' + agentId" in r.text
         assert "Use least-privileged service-agent preset" in r.text
+        assert "inherited owner user read scope" in r.text
+        assert 'data-scope="user:admin" checked data-required-scope="true" disabled' in r.text
         assert "function applyLeastPrivilegedPreset" in r.text
         assert 'id="ca-authority-preview"' in r.text
         assert "Permanent authority after creation" in r.text
@@ -117,15 +120,15 @@ class TestAgentsPage:
         assert "body.read_scopes.push(ownScope)" in r.text
         assert "body.write_scopes.push(ownScope)" in r.text
 
-    def test_non_admin_agent_page_makes_owner_user_scope_optional(
+    def test_non_admin_agent_page_marks_owner_user_scope_as_inherited(
         self, user_client
     ):
         r = user_client.get("/agents")
         assert r.status_code == 200
         assert 'data-scope="user:user1"' in r.text
-        assert 'data-required-scope="true"' not in r.text
+        assert 'data-scope="user:user1" checked data-required-scope="true" disabled' in r.text
         assert "owner context" in r.text
-        assert "Uncheck it for a private-scope-only agent" in r.text
+        assert "inherited and cannot be removed" in r.text
         assert "body.read_scopes.includes(userScope)" not in r.text
 
     def test_admin_agent_page_exposes_delegation_control_and_user_scopes(

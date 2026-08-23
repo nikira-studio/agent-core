@@ -924,9 +924,7 @@ function renderActions() {
       '<thead><tr><th style="width:72px">Enable</th><th>Action</th><th>Details</th></tr></thead>' +
       '<tbody>' + filtered.map(function(t) {
         const policy = t.capability_policy || {};
-        const authorization = t.authorization || {};
         const policyBits = [];
-        if (authorization.required_scope_operation) policyBits.push('Requires ' + authorization.required_scope_operation + ' scope' + (authorization.source ? ' (' + authorization.source.replace(/_/g, ' ') + ')' : ''));
         if (policy.risk_level) policyBits.push('Risk: ' + policy.risk_level);
         if (policy.approval_required === true) policyBits.push('Approval required');
         if (policy.idempotent === true) policyBits.push('Idempotent');

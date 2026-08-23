@@ -236,7 +236,6 @@ class TestConnectorActionsSchema:
             json={
                 "capability_policy_overrides": {
                     "search": {
-                        "authorization_class": "read",
                         "risk_level": "low",
                         "idempotent": True,
                         "tags": ["lookup"],
@@ -258,9 +257,8 @@ class TestConnectorActionsSchema:
         rest_tool = rest.json()["data"]["tools"][0]
         mcp_tool = mcp.json()["data"]["tools"][0]
         assert rest_tool["capability_policy"] == mcp_tool["capability_policy"]
-        assert rest_tool["authorization"] == mcp_tool["authorization"] == {
-            "required_scope_operation": "read", "source": "operator"
-        }
+        assert "authorization" not in rest_tool
+        assert "authorization" not in mcp_tool
 
 
 class TestTransmissionActionsSchema:

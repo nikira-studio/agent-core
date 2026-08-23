@@ -275,7 +275,7 @@ connectors_run            do it, server-side
 
 Adapters declare their requirements, and a binding only exposes actions whose requirements are met, so a half-configured integration presents as unavailable rather than failing at the moment an agent depends on it. Every execution is logged, and the log is pruned on the same retention sweep as everything else.
 
-**Read and write are separate here too.** Reading a binding lets an agent query the service; an action that changes state additionally requires write access to the binding's scope. Read-only is inferred from the action's method (`GET`, `HEAD`, `OPTIONS`), and anything that cannot be identified needs write, because the cost of guessing wrong is running a destructive call on someone's behalf.
+Binding visibility grants access to every action enabled on the connector type. Connector types define which actions exist and which are disabled; bindings decide which users, agents, or workspaces can use the connection. Delegated grants can narrow temporary access to exact binding/action pairs.
 
 ---
 

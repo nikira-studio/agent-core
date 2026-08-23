@@ -86,9 +86,9 @@ Bindings may define `endpoint_url_override` for native MCP deployments. Agent Co
 
 ## Capability policy metadata
 
-REST connector tool lists and MCP `connectors_actions_list` return `capability_policy` (advisory metadata such as risk, idempotency, approval requirement, expected latency, sensitivity, purpose, and tags) plus `authorization` with the effective required scope operation and its source.
+REST connector tool lists and MCP `connectors_actions_list` return `capability_policy`, which contains advisory metadata such as risk, idempotency, approval requirement, expected latency, sensitivity, purpose, and tags.
 
-Imported specifications, manifests, and MCP annotations may supply advisory metadata, but cannot make an unknown or non-HTTP-read action read-only. Unknown actions require write scope. Administrators may save a per-action operator policy through `PUT /api/connector-types/{id}/actions`, including `authorization_class: "read" | "write"`; this is the only supported path that can classify a non-obvious action as read-only. Changes are audited.
+Permanent binding visibility grants access to every enabled connector action. Delegated grants are narrower: they enumerate the exact binding/action pairs the recipient may run. Administrators may enable or disable connector actions through `PUT /api/connector-types/{id}/actions`; changes are audited.
 
 ## Expected integration errors
 

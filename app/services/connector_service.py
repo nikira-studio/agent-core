@@ -19,7 +19,6 @@ CAPABILITY_POLICY_FIELDS = (
     "expected_latency", "background_execution", "data_sensitivity",
     "event_producing", "purpose", "tags",
 )
-CAPABILITY_AUTHORIZATION_CLASSES = frozenset({"read", "write"})
 _execution_authority: ContextVar[object | None] = ContextVar(
     "connector_execution_authority", default=None
 )
@@ -62,30 +61,6 @@ def capability_policy_override(connector_type: dict, action: str) -> dict:
     return value if isinstance(value, dict) else {}
 
 
-def action_authorization_metadata(connector_type: dict, action: str) -> dict:
-    """Authorization classification with a source the caller can inspect.
-
-    Imported action metadata is advisory. Only an operator-saved override can
-    classify a non-obvious action as read-only; all unknown actions fail closed
-    to write authority.
-    """
-    override = capability_policy_override(connector_type, action)
-    auth_class = override.get("authorization_class")
-    if auth_class in CAPABILITY_AUTHORIZATION_CLASSES:
-        return {"required_scope_operation": auth_class, "source": "operator"}
-    meta = _action_meta(connector_type, action)
-    side_effect = str(meta.get("side_effect") or "").strip().lower()
-    if side_effect in ("write", "writes", "destructive", "delete", "mutating"):
-        return {"required_scope_operation": "write", "source": "remote_or_manifest"}
-    method = str(meta.get("method") or "").strip().upper()
-    if not method:
-        head = str(action or "").strip().split(" ", 1)[0].upper()
-        method = head if head.isalpha() else ""
-    if method in READ_ONLY_METHODS:
-        return {"required_scope_operation": "read", "source": "http_method"}
-    return {"required_scope_operation": "write", "source": "fail_closed"}
-
-
 def _with_capability_policy(connector_type: dict, tool: dict) -> dict:
     action = tool.get("action") or tool.get("name") or ""
     result = dict(tool)
@@ -93,7 +68,6 @@ def _with_capability_policy(connector_type: dict, tool: dict) -> dict:
         _action_meta(connector_type, action),
         capability_policy_override(connector_type, action),
     )
-    result["authorization"] = action_authorization_metadata(connector_type, action)
     return result
 
 
@@ -1297,28 +1271,6 @@ def _action_meta(connector_type: dict, action: str) -> dict:
     return {}
 
 
-READ_ONLY_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
-
-
-def action_requires_write(connector_type: dict, action: str) -> bool:
-    """Whether running this action needs write access to the binding's scope.
-
-    Read access to a binding means "you may see and query this service"; it was
-    never meant to mean "you may change things through it". Actions carry an
-    HTTP method, either in the metadata or at the front of the action name, and
-    a GET is the one case we can positively identify as read-only.
-
-    Anything we cannot identify requires write. That is the opposite of the
-    verification pass, where an inconclusive check leaves the record alone —
-    the difference is what an error costs. There, guessing wrong deletes a true
-    memory; here, guessing wrong runs someone else's DELETE. When in doubt,
-    verification does nothing and this asks for the stronger grant.
-    """
-    return action_authorization_metadata(connector_type, action)[
-        "required_scope_operation"
-    ] != "read"
-
-
 def _prepare_action_params(
     connector_type: dict,
     action: str,
@@ -1607,10 +1559,7 @@ def audit_delegated_execution_denial(authority, binding_id: str, action: str) ->
 
 
 def can_run_binding_action(authority, binding: dict, connector_type: dict, action: str) -> bool:
-    if authority.is_delegated:
-        return authority.can_binding_action(binding["id"], action, scope=binding["scope"])
-    operation = "execute" if action_requires_write(connector_type, action) else "read"
-    return authority.can("connector", operation, scope=binding["scope"])
+    return authority.can_binding_action(binding["id"], action, scope=binding["scope"])
 
 
 def execute_binding_action_with_logging(

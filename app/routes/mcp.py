@@ -2096,14 +2096,6 @@ async def _handle_custom_mcp_tool(body: dict, ctx: RequestContext):
         )
         if not connector_type:
             return _mcp_error("NOT_FOUND", "Connector type not found", 200)
-        if not ctx.is_delegated and connector_service.action_requires_write(
-            connector_type, action
-        ) and not enforcer.can_write(binding["scope"]):
-            return _mcp_error(
-                "SCOPE_DENIED",
-                "This action changes state, which needs write access to the binding's scope",
-                200,
-            )
         result = await asyncio.to_thread(
             connector_service.execute_authorized_binding_action_with_logging,
             params["binding_id"],

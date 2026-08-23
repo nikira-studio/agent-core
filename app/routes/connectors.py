@@ -431,15 +431,6 @@ async def run_binding(
             return error_response("SCOPE_DENIED", "Access denied to this binding action", 403)
     elif not enforcer.can_read(binding["scope"]):
         return error_response("SCOPE_DENIED", "Access denied to this binding", 403)
-    connector_type = connector_service.get_connector_type(binding["connector_type_id"])
-    if not ctx.is_delegated and connector_service.action_requires_write(
-        connector_type or {}, action
-    ) and not enforcer.can_write(binding["scope"]):
-        return error_response(
-            "SCOPE_DENIED",
-            "This action changes state, which needs write access to the binding's scope",
-            403,
-        )
     result = await asyncio.to_thread(
         connector_service.execute_authorized_binding_action_with_logging,
         binding_id,
@@ -687,18 +678,13 @@ def update_connector_type_actions(
             )
         disabled_actions.append(action)
 
-    allowed_policy_fields = set(connector_service.CAPABILITY_POLICY_FIELDS) | {
-        "authorization_class"
-    }
+    allowed_policy_fields = set(connector_service.CAPABILITY_POLICY_FIELDS)
     overrides = {}
     for action, policy in body.capability_policy_overrides.items():
         if action not in valid_actions:
             return error_response("INVALID_ACTION", f"Unknown action for this connector type: {action}", 400)
         if not isinstance(policy, dict) or not set(policy).issubset(allowed_policy_fields):
             return error_response("INVALID_POLICY", "Capability policy contains unsupported fields", 400)
-        auth_class = policy.get("authorization_class")
-        if auth_class is not None and auth_class not in connector_service.CAPABILITY_AUTHORIZATION_CLASSES:
-            return error_response("INVALID_POLICY", "authorization_class must be read or write", 400)
         overrides[action] = policy
 
     connector_service.update_connector_type_actions(connector_type_id, disabled_actions)

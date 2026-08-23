@@ -259,10 +259,10 @@ def test_principal_disable_and_issuer_scope_downgrade_invalidate_immediately(
         "/api/delegations",
         headers={"Authorization": f"Bearer {agent_token}"},
         json={
-            "recipient_agent_id": "testagent", "purpose": "attenuation", "ttl_seconds": 60,
-            "scope_permissions": [
-                {"resource_type": "memory", "operation": "read", "scope": "user:admin"}
-            ],
+                "recipient_agent_id": "testagent", "purpose": "attenuation", "ttl_seconds": 60,
+                "scope_permissions": [
+                    {"resource_type": "memory", "operation": "read", "scope": "shared"}
+                ],
         },
     )
     assert agent_grant.status_code == 201, agent_grant.json()
