@@ -67,7 +67,7 @@ def test_admin_settings_exposes_real_system_behavior_controls(admin_client):
     html = r.text
     assert "Scratchpad Retention" in html
     assert "scratchpad-retention-days" in html
-    assert "solo-mode-enabled" in html
+    assert "solo-mode-enabled" not in html
     assert "/api/dashboard/system-settings" in html
     assert "Run Maintenance" in html
     assert "Scratchpad memories pruned" in html
@@ -581,7 +581,7 @@ def test_admin_delete_user_cascades_owned_data(admin_client):
 def test_admin_can_update_system_behavior_settings(admin_client):
     r = admin_client.post(
         "/api/dashboard/system-settings",
-        json={"scratchpad_retention_days": "14", "solo_mode_enabled": "false"},
+        json={"scratchpad_retention_days": "14"},
     )
     assert r.status_code == 200, r.json()
 
@@ -591,12 +591,8 @@ def test_admin_can_update_system_behavior_settings(admin_client):
         retention = conn.execute(
             "SELECT value FROM system_settings WHERE key = 'scratchpad_retention_days'"
         ).fetchone()
-        solo = conn.execute(
-            "SELECT value FROM system_settings WHERE key = 'solo_mode_enabled'"
-        ).fetchone()
 
     assert retention["value"] == "14"
-    assert solo["value"] == "false"
 
 
 def test_admin_can_update_retracted_retention_days(admin_client):
@@ -734,4 +730,3 @@ def test_session_carries_timezone(clean_db):
     session = create_session("tzuser", channel="dashboard")
     validated = validate_session(session["session_id"])
     assert validated["timezone"] == "Asia/Tokyo"
-

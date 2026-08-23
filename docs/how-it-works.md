@@ -65,7 +65,7 @@ A scope is a named box. Every memory record lives in exactly one, and every agen
 | Scope | For | Default access |
 | --- | --- | --- |
 | `agent:<id>` | One agent's own scratch and self-knowledge | Private to that agent |
-| `user:<id>` | The human owner's context and preferences | Agents read; write is an explicit grant |
+| `user:<id>` | The active principal's context and preferences | Every active agent for that principal inherits read access; write is an explicit grant |
 | `workspace:<id>` | Shared, durable knowledge for a project or domain | Granted per agent |
 | `shared` / `global` | Cross-user shared access | Explicit |
 

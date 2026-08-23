@@ -54,16 +54,6 @@ def generate_api_key() -> tuple[str, str]:
     return plaintext, key_hash
 
 
-def is_solo_mode_enabled() -> bool:
-    with get_db() as conn:
-        row = conn.execute(
-            "SELECT value FROM system_settings WHERE key = 'solo_mode_enabled'"
-        ).fetchone()
-    if not row:
-        return True
-    return str(row["value"]).strip().lower() in ("1", "true", "yes", "on")
-
-
 def create_agent(
     agent_id: str,
     display_name: str,

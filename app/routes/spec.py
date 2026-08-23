@@ -394,14 +394,8 @@ def spec(
         "credential_key_handling": "replace_all decrypts the encrypted archive using the backup key; merge preserves the current encryption key and re-encrypts imported credential entries when the backup key differs",
     }
 
-    from app.services.agent_service import is_solo_mode_enabled
-
     feature_flags = {
         "semantic_search": "hybrid FTS5 + vector similarity when embedding backend and sqlite-vec are available",
-        "solo_mode": {
-            "enabled": is_solo_mode_enabled(),
-            "description": "When enabled, new agents automatically receive user:owner read scope",
-        },
         "shared_scope_pii_gate": "shared-scope writes are rejected if PII is detected",
         "supersession_tracking": "Memory records can supersede each other; chains are queryable",
     }

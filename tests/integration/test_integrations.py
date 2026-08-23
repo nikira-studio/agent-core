@@ -26,7 +26,8 @@ def setup_integrations_data(clean_db):
         agent_id="claude-code",
         display_name="Claude Code",
         owner_user_id="alex",
-        read_scopes=["agent:claude-code", "workspace:agent-core", "user:alex"],
+        # Principal user read access is derived at request time, not stored.
+        read_scopes=["agent:claude-code", "workspace:agent-core"],
         write_scopes=["agent:claude-code", "workspace:agent-core"],
     )
 
@@ -239,6 +240,41 @@ def test_claude_generator_preloads_workspace_sync_schemas():
     assert preload in output
 
 
+def test_all_generated_prompts_describe_principal_and_connector_authority():
+    from app.routes.integrations_page import (
+        CONNECTOR_BINDING_GUIDANCE,
+        _build_agents_md,
+        _build_assistants_md,
+        _build_claude_md,
+        _build_instructions,
+        _build_session_prompt,
+    )
+
+    outputs = {
+        "instructions": _build_instructions(
+            "claude_code", "http://x", "user:u", "workspace:w", "agent:a",
+            "Agent", "User", "ws",
+        ),
+        "session_prompt": _build_session_prompt(
+            "claude_code", "http://x", "user:u", "workspace:w", "agent:a",
+            "Agent", "User", "ws",
+        ),
+        "claude_md": _build_claude_md(
+            "http://x", "user:u", "workspace:w", "agent:a", "Agent", "ws"
+        ),
+        "agents_md": _build_agents_md(
+            "http://x", "user:u", "workspace:w", "agent:a", "ws"
+        ),
+        "assistants_md": _build_assistants_md(
+            "http://x", "user:u", "workspace:w", "agent:a"
+        ),
+    }
+    for name, output in outputs.items():
+        assert "automatically inherit read access" in output, name
+        assert "when you have user-scope read access" not in output, name
+        assert CONNECTOR_BINDING_GUIDANCE in output, name
+
+
 def test_integrations_generates_env_vars(integrations_client):
     r = integrations_client.get(
         "/integrations?user_id=alex&workspace_id=agent-core&agent_id=claude-code&target=claude_code&output_type=env"
@@ -305,6 +341,8 @@ def test_verification_prompt_uses_the_real_memory_get_schema():
     assert "`scope` set to `workspace:w`" in prompt
     assert "`view` set to `full`" in prompt
     assert "memory_get` for the record ID" not in prompt
+    assert "Call it again with `scope` set to `user:u`" in prompt
+    assert "If you can read `user:u`" not in prompt
 
 
 def test_integrations_access_checks_show_ok_for_good_agent(integrations_client):

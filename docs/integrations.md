@@ -122,7 +122,7 @@ Agent Core uses a few scope types, each with a distinct purpose and audience. Th
 **Anything that is shared among agents or tools by default, or that conceptually belongs to a project, domain, or the owner rather than to one agent, belongs in a `workspace:<id>`.** Workspaces are the unit of shared knowledge: create one per domain (a project's development workspace, a personal-knowledge workspace, and so on). They are cheap; make a new one rather than overloading an existing workspace with unrelated facts.
 
 - `agent:<id>`: the agent's **own** scope: its scratch notes, operational state, and self-knowledge. Private by default, but shareable: grant another agent read by adding this scope to its read scopes. What does *not* belong here is knowledge that conceptually belongs to the owner rather than the agent, or that several agents should see by default; put that in a workspace (a shared workspace is a cleaner grant than handing out per-agent scope access). Records here survive a rebuild that reuses the same scope name, but a hard purge of the agent deletes them. Don't treat it as the default handoff channel.
-- `user:<id>`: the **human owner's** personal context and preferences. Agents read it for owner context (creator read is automatic in the current UI); write is an explicit, off-by-default grant. It is for facts about the owner, not a general shared store.
+- `user:<id>`: the **human owner's** personal context and preferences. Every active agent automatically inherits read access to its principal user's scope. Write is an explicit, off-by-default grant. It is for facts about the owner, not a general shared store.
 - `workspace:<id>`: the **shared, durable home** for facts, decisions, and handoffs that multiple agents or tools rely on, or that must outlive any single agent. This is the default home for durable memory.
 - `shared` / `global`: a cross-user shared-access path, not just a visibility toggle.
 
@@ -582,7 +582,7 @@ Setup instructions:
 - If the MCP server cannot be configured or verified, stop and ask for the missing value instead of guessing.
 
 Scope guidance:
-- Use the authenticated/default user scope as read-only owner context when you have user-scope read access.
+- Use the authenticated/default user scope as read-only owner context. Active agents automatically inherit read access to their principal user's scope.
 - Write durable memory to the selected workspace scope when one is chosen, otherwise to your own agent scope (`agent:<id>`). Agents are not granted user-scope or workspace write by default, so with no workspace your agent scope is your durable store, not just scratch.
 - Store stable user preferences in the user scope only if user-scope write was explicitly granted; otherwise write them to your durable scope (workspace, or your agent scope when no workspace).
 - To revise a fact or decision, write the new record with `supersedes_id`; use a `slot_key` to keep one active value per slot for `preference` records (slot_key is valid for the preference class only).
@@ -710,6 +710,8 @@ Credential scope and binding scope are both intentional:
 
 - **Credential scope** controls who can access the stored secret.
 - **Binding scope** controls where the connector is available to agents.
+
+Binding visibility grants access to every action enabled on the connector type. Disable an action on the connector type to remove it from all bindings. Use a delegated grant to restrict temporary access to exact binding/action pairs.
 
 For normal workspace use, set both to the same workspace. For advanced use, a credential in a user scope can power multiple workspace bindings if the acting agent has access to both.
 

@@ -29,7 +29,7 @@ First stable release. Agent Core is a local capability layer for AI agents: shar
 - Fernet-encrypted credential store with key rotation and a keyring for old entries
 - Agents receive `AC_SECRET_*` references, never raw values; a local broker resolves them at runtime
 - Connector catalog built from OpenAPI imports, native MCP servers, shareable adapters, or generic HTTP
-- Scoped bindings with read/write separation, requirement gating, and deterministic resolution
+- Scoped bindings with connector-controlled actions, requirement gating, and deterministic resolution
 
 ### Delegated authorization
 

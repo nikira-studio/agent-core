@@ -399,4 +399,4 @@ def test_feature_flags_includes_semantic_search(test_client, admin_token):
     assert r.status_code == 200
     ff = r.json()["data"]["feature_flags"]
     assert "semantic_search" in ff
-    assert "solo_mode" in ff
+    assert "solo_mode" not in ff

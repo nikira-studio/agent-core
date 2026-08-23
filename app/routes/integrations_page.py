@@ -83,6 +83,8 @@ REPOSITORY_BOUNDARY_GUIDANCE = """Workspace context is not repository access. If
 
 WORKSPACE_SYNC_OPERATING_RULES = """Pass the session's `execution_id` to supported writes, including `activity_update`, `memory_write`, and briefing creation. If `has_more` is true, process and acknowledge the current page, then sync again until `has_more` is false. If `cursor_reset` is true, treat the returned bootstrap as incomplete history and inspect the relevant memory, activity trail, and briefings. If sync fails, continue only when the task does not depend on current shared state. For a review, resume, or handoff, stop and report the sync failure."""
 
+CONNECTOR_BINDING_GUIDANCE = """A visible connector binding grants access to every action enabled on its connector type. Use the connector type's action controls to disable actions for all bindings. Use delegated grants to restrict temporary access to exact binding/action pairs."""
+
 
 # ─── INTEGRATIONS ─────────────────────────────────────────────────────────────
 
@@ -240,14 +242,15 @@ def _agent_setup_access_model(
     is_admin=False,
 ):
     from app.services import workspace_service
-    from app.services.agent_service import parse_scopes
+    from app.security.scope_enforcer import build_agent_context
 
     agent_id = agent["id"]
     workspace_scope = f"workspace:{workspace['id']}" if workspace else ""
     user_scope = f"user:{user_id}"
     agent_scope = f"agent:{agent_id}"
-    read_scopes = parse_scopes(agent.get("read_scopes_json", "[]"))
-    write_scopes = parse_scopes(agent.get("write_scopes_json", "[]"))
+    context = build_agent_context(agent)
+    read_scopes = context.read_scopes
+    write_scopes = context.write_scopes
     workspace_ids = {
         scope.split(":", 1)[1]
         for scope in read_scopes + write_scopes
@@ -307,10 +310,7 @@ def _agent_setup_access_model(
     elif can_read_user:
         checks.append({"label": "User preference read access", "status": "ok"})
     else:
-        checks.append({"label": "No user preference access", "status": "warning"})
-        checks.append(
-            {"label": "Recommended: add user scope to agent", "status": "warning"}
-        )
+        checks.append({"label": "Selected user is not the agent's active principal", "status": "warning"})
 
     if enforcer.can_read(agent_scope) and enforcer.can_write(agent_scope):
         checks.append({"label": "Agent private scope", "status": "ok"})
@@ -1009,7 +1009,7 @@ You are connected to {APP_NAME}.
 2. Sync before resuming, reviewing, handing off, or completing shared work. Process each stable change ID once, including when it appears in both its resource group and `other_session_changes`. Call `workspace_sync_ack` only after you incorporate or intentionally skip the delivered page.
 3. Call `activity_pickup` at startup or when idle to check for assigned work. If it returns an activity, read it, start working, and send heartbeats. If it returns null, proceed with the user's task.
 4. Search memory in `{default_scope}` for relevant older context. If the search returns little or nothing, retry with exact topic values, exact keywords, or a known record ID. For a handoff, resume, or review, use `activity_list` and `briefing_list` when the sync response does not contain enough history.
-5. Search `{user_scope}` for user preferences and owner context only when you have user-scope read access.
+5. Search `{user_scope}` for user preferences and owner context. Active agents automatically inherit read access to their principal's user scope.
 6. Create or update an activity record when starting a meaningful task. Include `{default_scope}` as `memory_scope` on every heartbeat, progress note, completion, or blocked update. {APP_NAME} updates only the activity in that scope and never moves one across scopes. Use `task_note` for progress and `task_result` when closing the task.
 7. Store durable decisions and handoff notes in `{default_scope}`.
 8. Use `credential_list` and `credential_get` to retrieve credential references. Never ask for raw secrets.
@@ -1038,6 +1038,7 @@ When a task may require an external service, credential, API token, repository h
 6. Use `connectors_run` when {APP_NAME} should perform the external action server-side.
 
 Prefer connector bindings over local secret handling when both are available, because the raw credential stays inside {APP_NAME}.
+{CONNECTOR_BINDING_GUIDANCE}
 
 ## API Key
 
@@ -1136,7 +1137,7 @@ Default memory scope for this setup is `{default_scope}`.
 Core MCP tools include {_mcp_tool_listing()}.
 Use your private scope `{agent_scope}` only for tool-specific scratch context.
 Use full prefixed scope names exactly as shown; do not use plain workspace IDs or agent IDs as memory scopes.
-Read `{user_scope}` for stable {user_display} preferences and other owner-context details when you have user-scope read access.
+Read `{user_scope}` for stable {user_display} preferences and other owner-context details. Active agents automatically inherit read access to their principal's user scope.
 Use credential references through {APP_NAME} MCP; never request or print raw secrets.
 Activity records are operational task tracking, not durable memory. At session startup, call `workspace_sync` for `{default_scope}` before starting meaningful work. Reuse the returned `execution_id` for that session. Synchronize again before resuming, reviewing, handing off, or completing shared work. Process each stable change ID once even when it appears in both a resource group and `other_session_changes`, then call `workspace_sync_ack` after incorporating or intentionally skipping the page. At the start of every non-trivial user task, immediately call `activity_update` with a concise `task_description`, `memory_scope` set to `{default_scope}`, and `status` set to `active`. When you are starting fresh or have gone idle, call `activity_pickup` to claim work a human assigned to you in your scopes. It returns nothing when nothing is waiting; work is pulled, never pushed, so an agent that never asks never sees it.
 
@@ -1149,6 +1150,7 @@ If the session has to stop early or hits a token limit, leave the activity curre
 If work needs to move across users or workspaces, make that explicit in the activity scope and handoff notes rather than assuming a hidden policy layer.
 If the client has hooks or plugins, use them to automate memory/activity capture; if it does not, treat this prompt as the source of truth for those expectations.
 When an external service is needed, use `credential_list`, `credential_get`, `connectors_summary`, `connectors_list`, `connectors_bindings_list`, `connectors_actions_list`, `connectors_bindings_test`, and `connectors_run` instead of asking the user to hand-wire secrets or run manual service calls.
+{CONNECTOR_BINDING_GUIDANCE}
 
 ## Memory Workflow
 
@@ -1156,7 +1158,7 @@ At the start of a meaningful task:
 
 1. Start or refresh the activity record using `activity_update`.
 2. Search `{default_scope}` with 2-3 focused queries for relevant architecture, decisions, prior bugs, and current project state. If the search returns little or nothing, retry with exact topic values, exact keywords from prior records, or a known record id. When embeddings are unavailable, broad conceptual queries can miss; exact tokens and known ids are more reliable.
-3. Search `{user_scope}` only when you have user-scope read access and user preferences or personal workflow may matter.
+3. Search `{user_scope}` when user preferences or personal workflow may matter.
 4. Use `memory_get` with a scope to list or read records; use `memory_search` to find records by query, topic, or class (there is no fetch-by-id).
 
 Write memory only when it will help a future session:
@@ -1202,7 +1204,7 @@ The active {APP_NAME} user and agent identities are determined by the MCP/API ke
 ## Memory Scopes
 
 Use `{default_scope}` for default memory in this setup.
-Read the authenticated/default user scope from your {APP_NAME} connection for stable personal preferences and owner-context details when you have user-scope read access.
+Read the authenticated/default user scope from your {APP_NAME} connection for stable personal preferences and owner-context details. Active agents automatically inherit read access to their principal's user scope.
 {private_scope_guidance}
 Use full prefixed scope names exactly as shown. Do not use plain workspace IDs like `{workspace_name}` or agent IDs like `{agent_display}` as memory scopes.
 
@@ -1212,7 +1214,7 @@ At the start of a meaningful task:
 
 1. Start or refresh the activity record using the Activity Tracking workflow below.
 2. Search `{default_scope}` with 2-3 focused queries for relevant architecture, decisions, prior bugs, and current project state. If the search returns little or nothing, retry with exact topic values, exact keywords from prior records, or a known record id. When embeddings are unavailable, broad conceptual queries can miss; exact tokens and known ids are more reliable.
-3. Search the authenticated/default user scope only when you have user-scope read access and user preferences or personal workflow may matter.
+3. Search the authenticated/default user scope when user preferences or personal workflow may matter.
 4. Use `memory_get` with a scope to list or read records; use `memory_search` to find records by query, topic, or class (there is no fetch-by-id).
 
 Write memory only when it will help a future session:
@@ -1246,6 +1248,7 @@ When a task may require an external service, credential, API token, repository h
 6. Use `connectors_run` when {APP_NAME} should perform the external action server-side.
 
 Prefer connector bindings over local secret handling when both are available, because the raw credential stays inside {APP_NAME}.
+{CONNECTOR_BINDING_GUIDANCE}
 
 ## Activity Tracking
 
@@ -1312,7 +1315,7 @@ If your host defers tool availability, run its tool discovery/load step first so
 ## Memory Scope Guidance
 
 Default memory scope for this setup is `{default_scope}`.
-Read the authenticated/default user scope from your {APP_NAME} connection for stable personal preferences and owner-context details when you have user-scope read access.
+Read the authenticated/default user scope from your {APP_NAME} connection for stable personal preferences and owner-context details. Active agents automatically inherit read access to their principal's user scope.
 Use your authenticated {APP_NAME} private scope, usually `agent:<your-agent-id>`, for private scratch notes only.
 Use full prefixed scope names exactly as shown. Do not use plain workspace IDs or agent IDs as memory scopes.
 
@@ -1353,7 +1356,7 @@ At the start of a meaningful task:
 2. Start or refresh the activity record using the Activity Workflow above.
 3. Search `{default_scope}` with 2-3 focused queries for relevant architecture, decisions, prior bugs, and current project state. If the search returns little or nothing, retry with exact topic values, exact keywords from prior records, or a known record id. When embeddings are unavailable, broad conceptual queries can miss; exact tokens and known ids are more reliable.
 4. If this is a handoff, resume, or review of prior work, inspect the recent activity trail and any generated briefing before making changes.
-5. Search the authenticated/default user scope only when you have user-scope read access and user preferences or personal workflow may matter.
+5. Search the authenticated/default user scope when user preferences or personal workflow may matter.
 6. Use `memory_get` with a scope to list or read records; use `memory_search` to find records by query, topic, or class (there is no fetch-by-id).
 
 Write memory only when it will help a future session:
@@ -1382,6 +1385,7 @@ When a task may require an external service, credential, API token, repository h
 6. Use `connectors_run` when {APP_NAME} should perform the external action server-side.
 
 Prefer connector bindings over local secret handling when both are available, because the raw credential stays inside {APP_NAME}.
+{CONNECTOR_BINDING_GUIDANCE}
 This file is the manual fallback when the client has no lifecycle hook or plugin layer.
 
 ## Codex Notes
@@ -1469,7 +1473,7 @@ If your host defers tool availability, run its tool discovery/load step first so
 The guiding rule: anything that is shared across agents or tools by default, or that belongs to the owner or a shared domain rather than to you, belongs in a `workspace:<id>`. Your `{agent_scope}` scope is for your own scratch, operational state, and self-knowledge; it is private by default (another agent can read it only if granted that scope), so it is not the home for the owner's personal facts or for knowledge several agents should share.
 
 {durable_guidance}
-Read `{user_scope}` for stable owner preferences and owner-context details. Treat the user scope as read-only unless your key was explicitly granted user-scope write; it is for facts about the owner, not a general shared store.
+Read `{user_scope}` for stable owner preferences and owner-context details. Active agents automatically inherit read access to their principal's user scope. Treat the user scope as read-only unless your key was explicitly granted user-scope write; it is for facts about the owner, not a general shared store.
 Use full prefixed scope names exactly as shown. Do not use plain workspace IDs or agent IDs as memory scopes.
 
 {recall_intro} Your key may ALSO be granted read access to other workspaces — other projects, or other agents' work — but those are NOT in your default recall. When the owner asks you something general, answer only from your default scopes. Reach into another scope ONLY when the request is explicitly about that project or topic, by naming it: `memory_search(scope="workspace:<id>")` or `memory_get(scope="workspace:<id>")`. Treat other-project access as on-demand, never the default — an unscoped search deliberately will not return them.
@@ -1534,6 +1538,7 @@ When a task may require an external service, credential, API token, repository h
 6. Use `connectors_run` when {APP_NAME} should perform the external action server-side.
 
 Prefer connector bindings over local secret handling when both are available, because the raw credential stays inside {APP_NAME}.
+{CONNECTOR_BINDING_GUIDANCE}
 """
 
 
@@ -1706,7 +1711,7 @@ def _build_verification_prompt(user_scope, workspace_scope):
 7. Call `memory_pinned` and report how many standing-context records came back. Zero is correct on a fresh install. `workspace_sync` already returned the workspace's pinned records; this call checks standing context across the caller's other authorized scopes.
 8. Call `activity_search` for a word from your task description and confirm that this session's activity comes back.
 9. Call `credential_list` and report whether credential references are visible. Do not reveal or print raw secrets.
-10. Call `connectors_summary` to list visible connector capability and binding health. Then call `connectors_bindings_list` with no scope to see everything visible to this agent. If you can read `{user_scope}`, call it again with `scope` set to `{user_scope}`. If you can read `{workspace_scope}`, call it again with `scope` set to `{workspace_scope}`. Report user-scoped and workspace-scoped bindings separately if both exist.
+10. Call `connectors_summary` to list visible connector capability and binding health. Then call `connectors_bindings_list` with no scope to see everything visible to this agent. Call it again with `scope` set to `{user_scope}` and again with `scope` set to `{workspace_scope}`. Report user-scoped and workspace-scoped bindings separately.
 11. Call `connectors_actions_list` with a real connector type ID from `connectors_list`. Report whether connector actions are visible.
 12. If at least one enabled binding is visible, call `connectors_bindings_test` on a non-destructive binding and report the result. If none are visible, say so.
 13. Use `task_note` for intermediate updates. Finish with `activity_update`, the same `memory_scope` and `execution_id`, `status` set to `completed`, and a short `task_result`. If the session reloads or no active activity exists, open a fresh verification activity before closing it.

@@ -54,7 +54,6 @@ async def update_dashboard_system_settings(
 
     body = await request.json()
     retention_raw = str(body.get("scratchpad_retention_days", "")).strip()
-    solo_raw = str(body.get("solo_mode_enabled", "")).strip().lower()
 
     try:
         retention_days = int(retention_raw)
@@ -91,14 +90,8 @@ async def update_dashboard_system_settings(
                 400,
             )
 
-    if solo_raw not in ("true", "false"):
-        return error_response(
-            "INVALID_SOLO_MODE", "Solo mode must be true or false", 400
-        )
-
     settings_to_save = {
         "scratchpad_retention_days": str(retention_days),
-        "solo_mode_enabled": solo_raw,
     }
     if retracted_retention_days is not None:
         settings_to_save["retracted_retention_days"] = str(retracted_retention_days)
@@ -528,9 +521,6 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
     execution_log_retention_days = get_system_setting("execution_log_retention_days", "30")
     webhook_log_retention_days = get_system_setting("webhook_log_retention_days", "30")
     memory_dedupe_similarity = get_system_setting("memory_dedupe_similarity", "0.92")
-    solo_mode_enabled = (
-        get_system_setting("solo_mode_enabled", "true").lower() == "true"
-    )
     credential_count = count_rows("credentials")
 
     account_html = f"""
@@ -675,7 +665,6 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
 
     system_settings_html = ""
     if is_admin:
-        solo_checked = "checked" if solo_mode_enabled else ""
         system_settings_html = f"""
     <div class="card">
       <h3>System Behavior</h3>
@@ -710,11 +699,6 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
           <input type="number" id="webhook-log-retention-days" min="0" max="365" value="{escape_html(webhook_log_retention_days)}" style="width:120px">
           <p class="form-hint">Used by Run Maintenance. Webhook delivery attempts older than this are deleted. Set to 0 to keep them forever.</p>
         </div>
-        <label class="checkbox-label">
-          <input type="checkbox" id="solo-mode-enabled" {solo_checked}>
-          New API-created agents automatically read their owner's user scope
-        </label>
-        <p class="form-hint">Used when an agent is created without explicit scopes. Existing agents are not changed; edit their access on the Agents page.</p>
         <button type="submit" class="btn">Save Behavior Settings</button>
       </form>
       <div id="system-settings-result" style="margin-top:12px"></div>
@@ -1052,7 +1036,6 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
         memory_dedupe_similarity: document.getElementById('memory-dedupe-similarity').value,
         execution_log_retention_days: document.getElementById('execution-log-retention-days').value,
         webhook_log_retention_days: document.getElementById('webhook-log-retention-days').value,
-        solo_mode_enabled: document.getElementById('solo-mode-enabled').checked ? 'true' : 'false',
       }};
       const j = await apiFetch('/api/dashboard/system-settings', {{
         method: 'POST',
@@ -1459,5 +1442,4 @@ def settings_otp_page(request: Request, session: dict = Depends(require_auth)):
         js,
         session=session,
     )
-
 
