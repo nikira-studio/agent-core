@@ -43,10 +43,12 @@ wired as an MCP server, the provider reuses that same single source of truth.
 
 Other config (environment variables)
 ------------------------------------
-* ``AGENT_CORE_SCOPE``    Reserved for v2 write-back. NOT used for recall —
-                          prefetch searches every scope the token can read.
+* ``AGENT_CORE_SCOPE``    Reserved for v2 write-back. Not used for recall.
+                          Agent Core applies the key's default recall scopes.
                           Default: unset
 * ``AGENT_CORE_LIMIT``    Max records injected per turn. Default: ``5``
+* ``AGENT_CORE_MAX_CONTEXT_CHARS``  Max characters injected per turn.
+                          Default: ``12000``
 * ``AGENT_CORE_TIMEOUT``  HTTP timeout in seconds. Default: ``4``
 
 Activate in ``$HERMES_HOME/config.yaml``::
@@ -67,6 +69,10 @@ from typing import Any, Dict, List, Optional
 from agent.memory_provider import MemoryProvider
 
 logger = logging.getLogger(__name__)
+
+DEFAULT_MAX_CONTEXT_CHARS = 12_000
+MIN_MAX_CONTEXT_CHARS = 512
+MAX_MAX_CONTEXT_CHARS = 50_000
 
 
 def _env(*names: str, default: str = "") -> str:
@@ -161,6 +167,21 @@ class AgentCoreMemoryProvider(MemoryProvider):
         except (TypeError, ValueError):
             self._limit = 5
         try:
+            self._max_context_chars = max(
+                MIN_MAX_CONTEXT_CHARS,
+                min(
+                    MAX_MAX_CONTEXT_CHARS,
+                    int(
+                        _env(
+                            "AGENT_CORE_MAX_CONTEXT_CHARS",
+                            default=str(DEFAULT_MAX_CONTEXT_CHARS),
+                        )
+                    ),
+                ),
+            )
+        except (TypeError, ValueError):
+            self._max_context_chars = DEFAULT_MAX_CONTEXT_CHARS
+        try:
             self._timeout = max(1.0, float(_env("AGENT_CORE_TIMEOUT", default="4")))
         except (TypeError, ValueError):
             self._timeout = 4.0
@@ -178,8 +199,8 @@ class AgentCoreMemoryProvider(MemoryProvider):
 
     def initialize(self, session_id: str, **kwargs) -> None:
         logger.debug(
-            "agent_core memory provider initialized (url=%s, limit=%d, timeout=%.1fs)",
-            self._url, self._limit, self._timeout,
+            "agent_core memory provider initialized (url=%s, limit=%d, max_context_chars=%d, timeout=%.1fs)",
+            self._url, self._limit, self._max_context_chars, self._timeout,
         )
 
     def system_prompt_block(self) -> str:
@@ -237,9 +258,8 @@ class AgentCoreMemoryProvider(MemoryProvider):
     # -- internals -----------------------------------------------------------
 
     def _search(self, query: str) -> List[Dict[str, Any]]:
-        # NB: no "scope" field => Agent Core searches every scope the token can
-        # read (agent scope + owner user context + workspaces). That is exactly
-        # what we want for recall. AGENT_CORE_SCOPE is only for v2 write-back.
+        # No scope means Agent Core applies the key's default recall scopes.
+        # AGENT_CORE_SCOPE is reserved for v2 write-back.
         payload = json.dumps({"query": query, "limit": self._limit}).encode("utf-8")
         req = urllib.request.Request(
             f"{self._url}/api/memory/search",
@@ -260,9 +280,9 @@ class AgentCoreMemoryProvider(MemoryProvider):
         records = data.get("records") or []
         return records if isinstance(records, list) else []
 
-    @staticmethod
-    def _format(records: List[Dict[str, Any]]) -> str:
+    def _format(self, records: List[Dict[str, Any]]) -> str:
         lines = ["Relevant records from Agent Core memory:"]
+        used = len(lines[0])
         for r in records:
             if not isinstance(r, dict):
                 continue
@@ -278,7 +298,15 @@ class AgentCoreMemoryProvider(MemoryProvider):
             if conf is not None:
                 meta_bits.append(f"conf={conf}")
             meta = " · ".join(meta_bits)
-            lines.append(f"- [{meta}] {content}" if meta else f"- {content}")
+            entry = f"- [{meta}] {content}" if meta else f"- {content}"
+            remaining = self._max_context_chars - used - 1
+            if remaining <= 0:
+                break
+            if len(entry) > remaining:
+                lines.append(entry[: max(0, remaining - 3)].rstrip() + "...")
+                break
+            lines.append(entry)
+            used += len(entry) + 1
         # Only the header => nothing useful; return empty so prefetch_all skips it.
         return "\n".join(lines) if len(lines) > 1 else ""
 

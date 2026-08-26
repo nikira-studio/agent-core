@@ -98,8 +98,8 @@ def test_integrations_generates_claude_md(integrations_client):
     assert "Agent ID:" not in output
 
 
-def test_all_generated_prompts_include_memory_discipline_guidance():
-    """Every generated agent artifact must carry the anti-repetition memory
+def test_full_instruction_templates_include_memory_discipline_guidance():
+    """Long-form repository instructions must carry the anti-repetition memory
     rule ("one memory per insight, not per occurrence"). Added after three
     different live agents each wrote one fact/decision record per monitor
     tick / watchdog refire / idle heartbeat (140+ near-duplicates), because
@@ -108,7 +108,6 @@ def test_all_generated_prompts_include_memory_discipline_guidance():
     from app.routes.integrations_page import (
         MEMORY_DISCIPLINE_GUIDANCE,
         _build_agents_md,
-        _build_assistants_md,
         _build_claude_md,
         _build_instructions,
         _build_session_prompt,
@@ -132,9 +131,6 @@ def test_all_generated_prompts_include_memory_discipline_guidance():
         "agents_md": _build_agents_md(
             "http://x", "user:u", "workspace:w", "agent:a", "ws"
         ),
-        "assistants_md": _build_assistants_md(
-            "http://x", "user:u", "workspace:w", "agent:a"
-        ),
     }
     for name, output in outputs.items():
         assert needle in output, f"{name} is missing the memory-discipline guidance"
@@ -143,11 +139,10 @@ def test_all_generated_prompts_include_memory_discipline_guidance():
         )
 
 
-def test_all_generated_prompts_require_activity_scope_continuity():
-    """Every client must keep lifecycle updates in the activity's scope."""
+def test_full_instruction_templates_require_activity_scope_continuity():
+    """Long-form repository instructions must keep lifecycle updates in scope."""
     from app.routes.integrations_page import (
         _build_agents_md,
-        _build_assistants_md,
         _build_claude_md,
         _build_instructions,
         _build_session_prompt,
@@ -167,9 +162,6 @@ def test_all_generated_prompts_require_activity_scope_continuity():
         ),
         "agents_md": _build_agents_md(
             "http://x", "user:u", "workspace:w", "agent:a", "ws"
-        ),
-        "assistants_md": _build_assistants_md(
-            "http://x", "user:u", "workspace:w", "agent:a"
         ),
     }
     for name, output in outputs.items():
@@ -178,11 +170,10 @@ def test_all_generated_prompts_require_activity_scope_continuity():
         )
 
 
-def test_all_generated_prompts_require_workspace_sync_lifecycle():
-    """Every agent format must teach the same execution and cursor contract."""
+def test_full_instruction_templates_require_workspace_sync_lifecycle():
+    """Long-form repository instructions must teach the sync contract."""
     from app.routes.integrations_page import (
         _build_agents_md,
-        _build_assistants_md,
         _build_claude_md,
         _build_instructions,
         _build_session_prompt,
@@ -202,9 +193,6 @@ def test_all_generated_prompts_require_workspace_sync_lifecycle():
         ),
         "agents_md": _build_agents_md(
             "http://x", "user:u", "workspace:w", "agent:a", "ws"
-        ),
-        "assistants_md": _build_assistants_md(
-            "http://x", "user:u", "workspace:w", "agent:a"
         ),
     }
     for name, output in outputs.items():
@@ -240,11 +228,10 @@ def test_claude_generator_preloads_workspace_sync_schemas():
     assert preload in output
 
 
-def test_all_generated_prompts_describe_principal_and_connector_authority():
+def test_full_instruction_templates_describe_principal_and_connector_authority():
     from app.routes.integrations_page import (
         CONNECTOR_BINDING_GUIDANCE,
         _build_agents_md,
-        _build_assistants_md,
         _build_claude_md,
         _build_instructions,
         _build_session_prompt,
@@ -264,9 +251,6 @@ def test_all_generated_prompts_describe_principal_and_connector_authority():
         ),
         "agents_md": _build_agents_md(
             "http://x", "user:u", "workspace:w", "agent:a", "ws"
-        ),
-        "assistants_md": _build_assistants_md(
-            "http://x", "user:u", "workspace:w", "agent:a"
         ),
     }
     for name, output in outputs.items():

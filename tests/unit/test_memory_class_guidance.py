@@ -154,7 +154,6 @@ def test_every_agent_template_teaches_the_current_workflow():
     """
     from app.routes.integrations_page import (
         _build_agents_md,
-        _build_assistants_md,
         _build_claude_md,
         _build_instructions,
         _build_session_prompt,
@@ -178,9 +177,6 @@ def test_every_agent_template_teaches_the_current_workflow():
         ),
         "AGENTS.md": _build_agents_md(
             "http://localhost:3500", "user:alex", "workspace:proj", "agent:codex", "Proj"
-        ),
-        "assistants": _build_assistants_md(
-            "http://localhost:3500", "user:alex", "workspace:proj", "agent:codex"
         ),
         "instructions": _build_instructions(
             "http://localhost:3500", "codex", "user:alex", "workspace:proj",

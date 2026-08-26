@@ -64,6 +64,15 @@ class TestPaperclipAdapterManifest:
         assert action["input_schema"]["required"] == ["run_id"]
         assert "runId" in action["input_schema"]["properties"]
 
+    def test_list_issues_accepts_a_bounded_limit(self):
+        manifest, err = load_and_validate(ADAPTER_PATH)
+        assert err is None
+        action = next(a for a in manifest.actions if a["name"] == "list_issues")
+        limit = action["input_schema"]["properties"]["limit"]
+        assert limit["type"] == "integer"
+        assert limit["minimum"] == 1
+        assert limit["maximum"] == 1000
+
 
 class TestPaperclipGetIssueWireLevel:
     def test_get_issue_with_canonical_issue_id(self):
@@ -77,6 +86,36 @@ class TestPaperclipGetIssueWireLevel:
 
         assert result["success"] is True
         assert calls[0]["url"] == "https://paperclip.example.com/api/issues/STA-559"
+
+
+class TestPaperclipListIssuesWireLevel:
+    def test_list_issues_forwards_limit(self):
+        engine = make_engine()
+        calls: list = []
+        mock_response(engine, {"issues": []}, calls)
+
+        result = engine.execute(
+            "list_issues", {"company_id": "company-1", "limit": 3}, cred(), CONFIG_JSON
+        )
+
+        assert result["success"] is True
+        assert calls[0]["url"] == (
+            "https://paperclip.example.com/api/companies/company-1/issues?limit=3"
+        )
+
+    def test_list_issues_enforces_limit_when_paperclip_ignores_it(self):
+        engine = make_engine()
+        calls: list = []
+        mock_response(engine, [{"id": "first"}, {"id": "second"}], calls)
+
+        result = engine.execute(
+            "list_issues", {"company_id": "company-1", "limit": 1}, cred(), CONFIG_JSON
+        )
+
+        assert result["success"] is True
+        assert result["body"] == [{"id": "first"}]
+        assert result["limit_applied_locally"] is True
+        assert "second" not in result["body_preview"]
 
     def test_get_issue_with_aliased_issue_id(self):
         engine = make_engine()

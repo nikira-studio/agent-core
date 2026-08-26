@@ -546,78 +546,37 @@ Restart Cursor after saving.
 
 ### Assistants
 
-Use this section for assistant-style agents that manage their own MCP configuration. The agent should update its own config, reload or restart as supported, and verify Agent Core before doing work. Treat user scope as read-only owner context unless the agent is explicitly granted user-scope write access. Durable writes go to the selected workspace scope when one is chosen, otherwise to the agent's own `agent:<id>` scope. For an assistant with no workspace, that scope is its durable store, not just scratch.
-If you want a fresh bearer token for the generated prompt, use the one-time key button for this output the same way you would for MCP config or environment variables.
-If a workspace is selected in the Integrations page, the generated prompt includes a workspace scope line. Otherwise it stays workspace-free and uses the authenticated/default user scope as the shared context.
+Use **Assistants** when an agent manages its own MCP configuration. The generated text is a concise onboarding guide, not a replacement for repository instructions. It gives the agent its connection values, scope rules, and the minimum Agent Core workflow. Use the generated `AGENTS.md` or `CLAUDE.md` for the full operating contract in a repository.
+
+If you select a workspace on the Integrations page, the prompt directs durable shared memory to that workspace. Without a workspace, it tells the agent to request one before it stores owner-facing or shared facts. The agent scope remains private scratch space.
+
+For Hermes, add the generated server to `mcp_servers.agent_core` in `$HERMES_HOME/config.yaml` or `~/.hermes/config.yaml`. Other assistants use their normal MCP configuration location.
+
+Generate a connection before you copy the text. This creates a one-time bearer token in the output. The prompt never writes the token into repository instruction files.
 
 ```text
-You are onboarding to Agent Core.
+# Agent Core Assistant Onboarding
 
-Agent Core is a local capability layer for:
-- shared memory
-- activity tracking
-- handoffs and briefings
-- credential references
-- connector discovery and execution
+Use Agent Core for memory, task tracking, and stored credentials.
 
-Agent Core repository: https://github.com/nikira-studio/agent-core
+## Connect
 
-Connection values:
 - MCP URL: <AGENT_CORE_MCP_URL>
 - Bearer token: <AGENT_CORE_API_KEY>
 
-Task:
-1. Use the connection values above to add Agent Core as an MCP server in your own configuration.
-2. Verify the connection.
-3. Use Agent Core tools as your durable shared backend.
-4. Do not treat chat history as durable memory.
+Add these values to your MCP configuration, reload or restart, and confirm that the server is available. Do not write API keys to instruction files.
 
-Setup instructions:
-- Update your own MCP configuration using the connection values above.
-- Register Agent Core under the appropriate MCP server entry for this tool.
-- Write the final config using the connection values above.
-- If the server already exists in config, update it rather than creating duplicates.
-- After saving config, reload MCP or restart the agent as supported.
-- Verify that the Agent Core server is visible before doing any Agent Core work.
-- If the MCP server cannot be configured or verified, stop and ask for the missing value instead of guessing.
+## Scopes
 
-Scope guidance:
-- Use the authenticated/default user scope as read-only owner context. Active agents automatically inherit read access to their principal user's scope.
-- Write durable memory to the selected workspace scope when one is chosen, otherwise to your own agent scope (`agent:<id>`). Agents are not granted user-scope or workspace write by default, so with no workspace your agent scope is your durable store, not just scratch.
-- Store stable user preferences in the user scope only if user-scope write was explicitly granted; otherwise write them to your durable scope (workspace, or your agent scope when no workspace).
-- To revise a fact or decision, write the new record with `supersedes_id`; use a `slot_key` to keep one active value per slot for `preference` records (slot_key is valid for the preference class only).
+Write durable shared memory to the selected workspace. Read the user scope for stable owner context. Keep private scratch notes in the agent scope. Search another workspace only when the request is explicitly about that project.
 
-When writing the config, use the MCP URL and bearer token from the connection values section above. Do not duplicate them elsewhere in the prompt.
+## Work with Agent Core
 
-Expected Agent Core tools:
-- `memory_search`, `memory_get`, `memory_write`, `memory_retract`
-- `activity_pickup`, `activity_update`, `activity_get`, `activity_list`, `activity_search`
-- `briefing_list`, `get_briefing`
-- `credential_list`, `credential_get`
-- `connectors_list`, `connectors_summary`, `connectors_bindings_list`, `connectors_actions_list`, `connectors_bindings_test`, `connectors_run`
-
-Operating rules:
-- At startup or when idle, call `activity_pickup` to check for work a human has assigned to you in this workspace. If it returns an activity, that is your current task: read it and start working. Only call pickup once per session start; do not loop infinitely claiming new tasks on your own.
-- Start meaningful tasks with `activity_update` using `status: active`, a concise `task_description`, and the default shared scope.
-- Refresh activity while actively working, always including that same explicit `memory_scope`; Core updates only the activity in that scope and never moves one across scopes.
-- Before making changes, search memory with `memory_search`.
-- For handoffs or reviews, use `activity_list` and `briefing_list` first.
-- Write durable facts and decisions to Agent Core memory with `memory_write`.
-- Use `memory_retract` only when a record should no longer be active.
-- Never store raw secrets in memory; use `credential_get` for `AC_SECRET_*` references instead.
-- Use `credential_list` first when credentials may be needed.
-- Use `connectors_list` and `connectors_bindings_list` to discover connectors.
-- Use `connectors_actions_list` before unfamiliar connectors.
-- Use `connectors_run` for server-side external actions.
-- Use the workspace scope when available; otherwise use the authenticated/default user scope.
-- Use full prefixed scope names exactly as provided by Agent Core. Do not invent scope names.
-
-Behavioral goals:
-- Treat Agent Core as the durable system of record.
-- Treat chat history as temporary.
-- Keep connector and credential usage minimal and intentional.
-
-If the Agent Core MCP server cannot be added or verified, do not proceed with Agent Core-dependent work.
+1. At session start, call `workspace_sync` and acknowledge all returned pages.
+2. Start meaningful tasks with `activity_update` in the selected workspace.
+3. Search relevant memory before acting. Review activities and briefings before a handoff, review, or resume.
+4. Store durable facts and decisions in the workspace. Keep routine progress in activity records.
+5. Check credential references and connector bindings before asking for manual setup or a raw secret.
 ```
 
 ---

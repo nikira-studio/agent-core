@@ -1028,7 +1028,7 @@ You are connected to {APP_NAME}.
 
 ## Credentials And Connectors
 
-When a task may require an external service, credential, API token, repository host, chat service, browser service, or Composio-style connector, check {APP_NAME} before asking the user for setup details.
+When a task may require an external service, credential, API token, repository host, chat service, browser service, or connector, check {APP_NAME} before asking the user for setup details.
 
 1. Use `credential_list` to discover available credential references in authorized scopes.
 2. Use `credential_get` only when you need a specific `{CREDENTIAL_PREFIX}*` reference for a local tool or command. Never ask the user for raw secrets and never print raw secrets.
@@ -1238,7 +1238,7 @@ Never ask users for raw credential values.
 
 ## Connectors
 
-When a task may require an external service, credential, API token, repository host, chat service, browser service, or Composio-style connector, check {APP_NAME} before asking the user for setup details.
+When a task may require an external service, credential, API token, repository host, chat service, browser service, or connector, check {APP_NAME} before asking the user for setup details.
 
 1. Use `credential_list` to discover available credential references in authorized scopes.
 2. Use `credential_get` only when you need a specific `{CREDENTIAL_PREFIX}*` reference for a local tool or command. Never ask the user for raw secrets and never print raw secrets.
@@ -1375,7 +1375,7 @@ Keep memory content concise. Add a short `topic` as a label. Do not bother tunin
 
 ## Credentials And Connectors
 
-When a task may require an external service, credential, API token, repository host, chat service, browser service, or Composio-style connector, check {APP_NAME} before asking the user for setup details.
+When a task may require an external service, credential, API token, repository host, chat service, browser service, or connector, check {APP_NAME} before asking the user for setup details.
 
 1. Use `credential_list` to discover available credential references in authorized scopes.
 2. Use `credential_get` only when you need a specific `{CREDENTIAL_PREFIX}*` reference for a local tool or command. Never ask the user for raw secrets and never print raw secrets.
@@ -1399,29 +1399,21 @@ This file is the manual fallback when the client has no lifecycle hook or plugin
 
 
 def _build_assistants_md(base_url, user_scope, workspace_scope, agent_scope, api_key=None, default_recall_scopes_json=None):
-    # Operational writes (activity tracking, searches) go to the writable scope an
-    # agent actually has: the selected workspace when one is chosen, otherwise its
-    # own agent scope. Durable, shareable KNOWLEDGE is different: it belongs in a
-    # workspace, never in the private agent scope. Agents are not granted user-scope
-    # or workspace write by default, so the user scope is read-only unless granted.
+    # Operational writes can use the selected workspace or the agent's private
+    # scope. Durable, shareable knowledge always belongs in a workspace.
     durable_scope = workspace_scope or agent_scope
-    # Where the prompt tells the agent to put durable facts/decisions. With a
-    # workspace, that is the workspace. Without one, we must NOT present the private
-    # agent scope as a durable store (that mistake silos owner knowledge); we point
-    # the agent at requesting a workspace instead.
     durable_label = (
         f"`{workspace_scope}`"
         if workspace_scope
-        else "your assigned workspace (ask the owner to create or grant one — not your private agent scope)"
+        else "your assigned workspace (ask the owner to create or grant one, not your private agent scope)"
     )
     durable_guidance = (
-        f"Write durable, shareable memory to `{workspace_scope}` (the selected workspace)."
+        f"Write durable, shareable memory to `{workspace_scope}`."
         if workspace_scope
         else (
-            f"No workspace is selected, so you have no shared durable store yet. Ask the"
-            f" owner to create or select a workspace and grant you write before storing"
-            f" shared or owner-facing facts; keep only your own agent-local notes in"
-            f" `{agent_scope}` until then."
+            "No workspace is selected. Ask the owner to create or grant one before "
+            "storing shared or owner-facing facts. Keep only private notes in "
+            f"`{agent_scope}` until then."
         )
     )
     recall_list = None
@@ -1434,15 +1426,12 @@ def _build_assistants_md(base_url, user_scope, workspace_scope, agent_scope, api
             recall_list = None
     if recall_list:
         recall_intro = (
-            "Default vs on-demand recall: your configured default recall scopes are "
+            "Your default recall scopes are "
             + ", ".join(f"`{s}`" for s in recall_list)
-            + " — an unscoped `memory_search`/`memory_get` recalls only these."
+            + ". An unscoped `memory_search` or `memory_get` searches only these scopes."
         )
     else:
-        recall_intro = (
-            f"Default vs on-demand recall: your everyday recall scopes are `{durable_scope}` "
-            f"(your own working store) and `{user_scope}` (owner facts)."
-        )
+        recall_intro = f"Use `{durable_scope}` for current work and `{user_scope}` for owner facts."
     connection_key = _connection_key_value(api_key)
     workspace_context_line = (
         f"- Workspace scope: `{workspace_scope}` (use this for shared collaboration in the selected workspace)."
@@ -1451,94 +1440,34 @@ def _build_assistants_md(base_url, user_scope, workspace_scope, agent_scope, api
     )
     return f"""# {APP_NAME} Assistant Onboarding
 
-Use {APP_NAME} as the durable backend for assistant-style agents that manage their own MCP configuration.
+Use {APP_NAME} for memory, task tracking, and stored credentials.
 
-## {APP_NAME}
-
-- **Base URL:** {base_url}
-{workspace_context_line}
-
-## Connection Values
+## Connect
 
 - **MCP URL:** {base_url}/mcp
 - **Bearer token:** {connection_key}
 
-Use the one-time key button when you need a fresh bearer token. The generated output should use the value above directly.
+For Hermes, add this server as `mcp_servers.agent_core` in `$HERMES_HOME/config.yaml` or `~/.hermes/config.yaml`. Other assistants should use their normal MCP configuration. Then reload or restart your agent and confirm the server is available. Use the one-time key button only when you need a fresh token.
 
-The active {APP_NAME} user and agent identities are determined by the MCP/API key configured in your tool, not by this file. Do not add API keys to this file.
-If your host defers tool availability, run its tool discovery/load step first so the {APP_NAME} MCP tools are available before you try to call them.
+Your MCP key determines your active user and agent identity. Do not write API keys to instruction files.
 
-## Memory Scope Guidance
+## Scopes
 
-The guiding rule: anything that is shared across agents or tools by default, or that belongs to the owner or a shared domain rather than to you, belongs in a `workspace:<id>`. Your `{agent_scope}` scope is for your own scratch, operational state, and self-knowledge; it is private by default (another agent can read it only if granted that scope), so it is not the home for the owner's personal facts or for knowledge several agents should share.
-
+{workspace_context_line}
 {durable_guidance}
-Read `{user_scope}` for stable owner preferences and owner-context details. Active agents automatically inherit read access to their principal's user scope. Treat the user scope as read-only unless your key was explicitly granted user-scope write; it is for facts about the owner, not a general shared store.
-Use full prefixed scope names exactly as shown. Do not use plain workspace IDs or agent IDs as memory scopes.
+Read `{user_scope}` for stable owner preferences and context. It is read-only unless explicitly granted write access. Use `{agent_scope}` only for private scratch notes.
 
-{recall_intro} Your key may ALSO be granted read access to other workspaces — other projects, or other agents' work — but those are NOT in your default recall. When the owner asks you something general, answer only from your default scopes. Reach into another scope ONLY when the request is explicitly about that project or topic, by naming it: `memory_search(scope="workspace:<id>")` or `memory_get(scope="workspace:<id>")`. Treat other-project access as on-demand, never the default — an unscoped search deliberately will not return them.
+{recall_intro} An unscoped search stays in those scopes. Do not fan recall across other workspaces. Search another `workspace:<id>` on demand, only when the request is explicitly about that project.
 
-## Setup
+## Work with Agent Core
 
-1. Add {APP_NAME} as an MCP server using the connection values provided for this session.
-2. Update your own MCP configuration in the location your agent normally uses.
-3. Reload or restart the agent as supported.
-4. Verify that the {APP_NAME} server is visible before doing any {APP_NAME} work.
+1. At session start, call `workspace_sync` for `{durable_scope}` and reuse its `execution_id`. Acknowledge each processed page with `workspace_sync_ack`; continue until `has_more` is false.
+2. Before a meaningful task, call `activity_update` with `memory_scope` set to `{durable_scope}` and `status` set to `active`. Keep updates in that scope, use `task_note` for progress, and close with `task_result`.
+3. Search relevant workspace memory before acting. For a handoff, review, or resume, inspect `activity_list` and `briefing_list` too.
+4. Write durable facts and decisions to {durable_label}. A fact needs a `subject_anchor`; routine progress belongs in activity records, not memory.
+5. Before requesting manual setup or a raw secret, check available credential references and connector bindings. Run connector actions through {APP_NAME} when possible.
 
-## Operating Rules
-
-Activity records are operational task tracking, not durable memory.
-
-At session startup, call `workspace_sync` for `{durable_scope}` and reuse its `execution_id` for the session. Sync before resuming, reviewing, handing off, or completing shared work. Process each stable change ID once, including when it appears in both its resource group and `other_session_changes`. Acknowledge a page with `workspace_sync_ack` only after you incorporate or intentionally skip it.
-
-{REPOSITORY_BOUNDARY_GUIDANCE}
-
-{WORKSPACE_SYNC_OPERATING_RULES}
-
-At the start of every meaningful task, call `activity_update` immediately with:
-
-- `task_description`: a concise description of the current task
-- `memory_scope`: `{durable_scope}`
-- `status`: `active`
-
-While actively working, call `activity_update` again every 1-2 minutes as a heartbeat. Use `task_note` for interim progress updates and update `task_description` if the task changes materially.
-Include `{durable_scope}` as `memory_scope` on every heartbeat, progress note, completion, or blocked update. Core updates only the activity in that scope and never moves one across scopes.
-
-When you are starting fresh or have gone idle, call `activity_pickup` to claim work a human assigned to you in your scopes. It returns nothing when nothing is waiting; work is pulled, never pushed, so an agent that never asks never sees it.
-
-If the session reloads, a handoff begins, or no active activity exists yet, open a fresh activity first with `status: active` before attempting to close it. Before your final response, call `activity_update` with `status: completed` and a short `task_result` summary when the task is complete. Use `task_note` for in-flight updates. Use `status: blocked` if you cannot proceed and need user input.
-
-At the start of a meaningful task:
-
-1. Search `{durable_scope}` with focused queries for relevant context, prior decisions, and current state, and search `{user_scope}` for owner preferences and context. If a search returns little, retry with exact topic values or exact keywords from prior records.
-2. Stay in your default scopes by default. Do not fan recall across other workspaces your key can read. Only when the request is explicitly about another project, search that project's `workspace:<id>` by naming it directly; otherwise an unscoped search will mix unrelated projects into your answer.
-3. If this is a handoff, resume, or review of prior work, inspect `activity_list` and `briefing_list` before making changes.
-4. Use `memory_get` with a scope to list or read records; use `memory_search` to find records by query, topic, or class. There is no fetch-by-id.
-
-Write memory only when it will help a future session:
-
-- `decision` in {durable_label} for durable choices, tradeoffs, rejected options, and why they were chosen.
-- `fact` in {durable_label} for stable implementation facts, integration details, constraints, and verified behavior.
-- `preference` in `{user_scope}` only if your key has user-scope write; otherwise write it to {durable_label}. Preferences support `slot_key` to keep one active value per slot (`slot_key` is valid for the `preference` class only).
-- `scratchpad` in your agent scope `{agent_scope}` for temporary private notes.
-
-{MEMORY_RECORD_GUIDANCE}
-- To revise a `fact` or `decision`, write the new record with `supersedes_id` set to the prior record's id; reserve `memory_retract` for records that are simply wrong.
-
-Do not write memory for routine progress, command output, facts already obvious from files, secrets, raw credentials, or noisy transient debugging notes.
-{MEMORY_DISCIPLINE_GUIDANCE}
-
-When a task may require an external service, credential, API token, repository host, chat service, browser service, or Composio-style connector, check {APP_NAME} before asking the user for setup details.
-
-1. Use `credential_list` to discover available credential references in authorized scopes.
-2. Use `credential_get` only when you need a specific `{CREDENTIAL_PREFIX}*` reference for a local tool or command. Never ask the user for raw secrets and never print raw secrets.
-3. Use `connectors_summary` for a compact capability overview, or `connectors_list` and `connectors_bindings_list` when you need raw connector and binding lists.
-4. Use `connectors_actions_list` before running an unfamiliar connector action.
-5. Use `connectors_bindings_test` when a binding may be stale or unverified.
-6. Use `connectors_run` when {APP_NAME} should perform the external action server-side.
-
-Prefer connector bindings over local secret handling when both are available, because the raw credential stays inside {APP_NAME}.
-{CONNECTOR_BINDING_GUIDANCE}
+For full operational guidance, use the generated `AGENTS.md` or `CLAUDE.md` for the relevant repository.
 """
 
 

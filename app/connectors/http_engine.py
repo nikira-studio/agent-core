@@ -162,7 +162,8 @@ class HttpEngine(BaseConnector):
                 attempts += 1
 
         self._raise_on_errors(resp, credential)
-        return self._extract(resp, request_def, config)
+        result = self._extract(resp, request_def, config)
+        return self._apply_response_limit(result, request_def, merged_params)
 
     def _capture_from_response(self, resp, session_spec: dict) -> dict:
         """Pull the session token out of a challenge response per session.capture."""
@@ -600,6 +601,38 @@ class HttpEngine(BaseConnector):
             result["body"] = extracted
 
         return result
+
+    def _apply_response_limit(
+        self, result: dict, request_def: dict, params: dict
+    ) -> dict:
+        resp_spec = request_def.get("response", {})
+        limited_body, limited = self._limit_list_response(
+            result.get("body"), resp_spec, params
+        )
+        if limited:
+            result["body"] = limited_body
+            result["body_preview"] = json.dumps(limited_body)[:2000]
+            result["limit_applied_locally"] = True
+        return result
+
+    @staticmethod
+    def _limit_list_response(body: Any, response_spec: dict, params: dict) -> tuple[Any, bool]:
+        """Enforce a list limit when an upstream API accepts but ignores it.
+
+        Adapters opt in through ``response.limit_list_by_param``. This keeps the
+        fallback explicit and avoids silently trimming arbitrary API responses.
+        """
+        param_name = response_spec.get("limit_list_by_param")
+        limit = params.get(param_name) if isinstance(param_name, str) else None
+        if (
+            not isinstance(body, list)
+            or isinstance(limit, bool)
+            or not isinstance(limit, int)
+            or limit < 1
+            or len(body) <= limit
+        ):
+            return body, False
+        return body[:limit], True
 
     def _evaluate_jsonpath(self, condition: str, body: Any, resp) -> bool:
         if "result == " in condition:

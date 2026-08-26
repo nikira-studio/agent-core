@@ -1165,8 +1165,21 @@ tr:hover td {
 }
 
 th.actions-cell {
+  display: table-cell;
   text-align: right;
   background: var(--panel2) !important;
+}
+
+/* Table cells must remain table cells. Flex layout here makes the header and
+   body calculate separate action-column widths. Action wrappers use this
+   class too, so limit the override to direct table cells. */
+td.actions-cell {
+  display: table-cell;
+  text-align: right;
+}
+
+td.actions-cell > .btn + .btn {
+  margin-left: 8px;
 }
 
 th.activity-actions-header {

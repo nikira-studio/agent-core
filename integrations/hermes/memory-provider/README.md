@@ -66,8 +66,9 @@ is needed** — the provider reuses that single source of truth for the secret.
 |---|---|---|---|
 | `AGENT_CORE_API_KEY` | no¹ | from `mcp_servers.agent_core` | Bearer token. `AGENT_CORE_BEARER` is an alias. |
 | `AGENT_CORE_URL` | no | from `mcp_servers.agent_core.url`, else `http://localhost:3500` | Base URL of the Agent Core instance. |
-| `AGENT_CORE_SCOPE` | no | unset | **Reserved for v2 write-back only.** Not used for recall — prefetch searches every scope the token can read. |
+| `AGENT_CORE_SCOPE` | no | unset | **Reserved for v2 write-back only.** Not used for recall. Agent Core applies the key's default recall scopes. |
 | `AGENT_CORE_LIMIT` | no | `5` | Max records injected per turn. |
+| `AGENT_CORE_MAX_CONTEXT_CHARS` | no | `12000` | Max characters injected per turn (range: 512-50000). |
 | `AGENT_CORE_TIMEOUT` | no | `4` | HTTP timeout (seconds). |
 
 ¹ Required only if Agent Core is **not** configured as an MCP server. If no token

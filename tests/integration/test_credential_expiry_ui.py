@@ -6,6 +6,8 @@ connector that depends on it starts failing, and nothing on the page connects
 the two.
 """
 
+from pathlib import Path
+
 from app.services import credential_service
 from app.time_utils import utc_now
 
@@ -85,6 +87,14 @@ def test_provenance_is_shown_on_the_row(test_client, admin_token):
     _credential("traceable")
     page = test_client.get("/credentials", headers=_headers(admin_token)).text
     assert "added " in page
+
+
+def test_actions_column_keeps_table_cell_layout():
+    """Flex belongs on a button wrapper, never on a table header or table cell."""
+    css = Path("app/dashboard/static/css/dashboard.css").read_text()
+
+    assert "th.actions-cell {\n  display: table-cell;" in css
+    assert "td.actions-cell {\n  display: table-cell;" in css
 
 
 # --- the API behind it -----------------------------------------------------
