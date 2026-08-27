@@ -41,6 +41,14 @@ Add it to any MCP-compatible client with this config:
 }
 ```
 
+### Connect from another machine
+
+The `http://localhost:3500/mcp` examples are for Agent Core and the client on the same machine. Agent Core also accepts HTTP on a trusted private network. The endpoint remains `/mcp`; the dashboard login page at `/` is not the MCP endpoint.
+
+For a desktop or browser-based client on another machine, terminate TLS at a reverse proxy and use `https://<host>/mcp`. Those clients may refuse a remote `http://` MCP URL because it would send the bearer token without encryption. Configure a trusted certificate before you add the connection.
+
+To check that a public endpoint is reachable, request `https://<host>/mcp` without a bearer token. `401 Unauthorized` confirms that the MCP route is reachable and requires authentication. It does not indicate that the route is wrong.
+
 ### Antigravity
 
 Antigravity uses the same MCP JSON shape, but the endpoint field should be `serverUrl` instead of `url`:
