@@ -69,6 +69,40 @@ def test_integrations_page_loads(integrations_client):
     assert 'id="target"' not in html
     assert 'id="output_type"' not in html
     assert "setup-tabs" in html
+    assert 'data-setup-path="connection"' in html
+    assert 'data-setup-path="workspace-instructions"' in html
+    assert "1. Connect a client" in html
+    assert "2. Add or refresh workspace instructions" in html
+    assert "Connection doctor" in html
+    assert 'id="test-connection-details-btn"' in html
+    assert "/mcp" in html
+
+
+def test_integrations_keeps_connection_setup_separate_from_workspace_guidance(
+    integrations_client,
+):
+    common = (
+        "/integrations?user_id=alex&workspace_id=agent-core&agent_id=claude-code"
+        "&target=claude_code&output_type="
+    )
+
+    instruction_page = integrations_client.get(common + "agents_md")
+    assert instruction_page.status_code == 200
+    assert "You can refresh them" in instruction_page.text
+    assert "id='generate-connection-btn'" not in instruction_page.text
+    assert "Refresh Preview" in instruction_page.text
+
+    connection_page = integrations_client.get(common + "mcp_json")
+    assert connection_page.status_code == 200
+    assert "Generating a key-bearing output rotates" in connection_page.text
+    assert "id='generate-connection-btn'" in connection_page.text
+
+
+def test_agent_setup_extra_js_exposes_the_exact_mcp_endpoint():
+    from app.routes.integrations_page import _agent_setup_extra_js
+
+    scripts = _agent_setup_extra_js("https://core.example.test")
+    assert 'window._AC_MCP_URL = "https://core.example.test/mcp"' in scripts
 
 
 def test_integrations_shows_selectors(integrations_client):

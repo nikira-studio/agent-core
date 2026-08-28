@@ -6,6 +6,18 @@ Agent Core is a self-hosted MCP and HTTP service. It gives Claude Code, Codex, C
 
 **Agent Core sits beside agents, not above them.**
 
+## Start with memory, then add capabilities
+
+Most installations need only shared memory at first. Add the next layer when a real task needs it.
+
+1. [Install Agent Core](#get-running-in-minutes), create an agent, and connect it with MCP.
+2. [Write and recall shared memory](#memory-that-persists-across-sessions). This is the default reason to use Agent Core.
+3. Add [encrypted credentials and the Credential Broker](docs/credential-broker.md) when a local tool needs a secret without putting it in a prompt.
+4. Add [connector bindings](docs/integrations.md#connectors-agent-core-runs-actions-directly) when Agent Core should call an external service itself.
+5. Use activities, workspaces, briefings, delegation, webhooks, backups, and administration when your work needs them.
+
+You do not need to configure every capability before your first agent can use memory.
+
 ---
 
 If you use AI coding agents like Claude Code, Cursor, or Codex, you've probably run into this:
@@ -246,9 +258,9 @@ For REST-based clients or custom integrations, every feature is also available t
 
 | Doc | What's in it |
 | --- | --- |
-| [How it works](docs/how-it-works.md) | The whole system end to end: memory, activity, credentials, connectors, and why each part works the way it does |
-| [Quickstart](docs/quickstart.md) | Install, first agent, first memory write, end to end |
-| [Integrations](docs/integrations.md) | Connecting Claude Code, Cursor, Codex, and other tools |
+| [Quickstart](docs/quickstart.md) | Install, connect an agent, write shared memory, then add credentials and connectors when needed |
+| [Integrations](docs/integrations.md) | Set up MCP, credentials, connectors, activities, collaboration, and webhooks in that order |
+| [How it works](docs/how-it-works.md) | The system model and full feature set: memory, activity, credentials, connectors, delegation, and maintenance |
 | [Credential Broker](docs/credential-broker.md) | How `AC_SECRET_*` references work and how to resolve them at runtime |
 | [Configuration](docs/configuration.md) | Environment variables, ports, and data directory layout |
 | [Security](docs/security.md) | Scope model, secret handling, and deployment checklist |

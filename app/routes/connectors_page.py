@@ -230,7 +230,7 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
     with get_db() as conn:
         execution_rows = conn.execute(
             """
-            SELECT ce.id, ce.binding_id, ce.action, ce.result_status, ce.error_message,
+            SELECT ce.id, ce.binding_id, ce.action, ce.result_status, ce.error_message, ce.failure_category,
                    ce.executed_at, cb.name as binding_name, cb.scope, ct.display_name as connector_display_name
             FROM connector_executions ce
             JOIN connector_bindings cb ON ce.binding_id = cb.id
@@ -403,7 +403,7 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
           <td><code>{escape_html(execution.get("action", ""))}</code></td>
           <td><span class="badge" style="{badge_style}">{escape_html(status)}</span></td>
           <td>{local_dt(execution.get("executed_at"))}</td>
-          <td>{escape_html(str(execution.get("error_message", ""))[:48])}</td>
+          <td>{escape_html(execution.get("failure_category", "").replace("_", " ") or str(execution.get("error_message", ""))[:48])}</td>
         </tr>"""
     if execution_rows_html:
         executions_html = f"""

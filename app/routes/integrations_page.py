@@ -224,6 +224,25 @@ def _agent_setup_output_options(target=None):
     ]
 
 
+CONNECTION_OUTPUT_TYPES = frozenset({"mcp_json", "env", "assistants_md"})
+
+
+def _agent_setup_output_groups(target=None):
+    options = _agent_setup_output_options(target)
+    return (
+        [
+            option
+            for option in options
+            if option[0] in CONNECTION_OUTPUT_TYPES
+        ],
+        [
+            option
+            for option in options
+            if option[0] not in CONNECTION_OUTPUT_TYPES
+        ],
+    )
+
+
 def _agent_setup_target_label(target):
     return {
         "claude_code": "Claude Code",
@@ -680,7 +699,6 @@ def integrations_page(
         if any(c["status"] == "warning" for c in access_checks):
             checks_html += "<p class='text-muted' style='font-size:0.8rem;margin-top:8px'>Warnings indicate missing access. Review access on the Agents page or generate the prompt anyway.</p>"
 
-    output_tabs = ""
     current_params = {
         "user_id": user_id,
         "workspace_id": workspace_id,
@@ -688,11 +706,21 @@ def integrations_page(
     }
     from urllib.parse import urlencode
 
-    for value, label, _filename in _agent_setup_output_options(target):
-        params = dict(current_params)
-        params["output_type"] = value
-        active = "active" if value == output_type else ""
-        output_tabs += f'<a class="setup-tab {active}" href="{page_path}?{urlencode(params)}">{escape_html(label)}</a>\n'
+    def output_tabs(options):
+        tabs = ""
+        for value, label, _filename in options:
+            params = dict(current_params)
+            params["output_type"] = value
+            active = "active" if value == output_type else ""
+            tabs += (
+                f'<a class="setup-tab {active}" '
+                f'href="{page_path}?{urlencode(params)}">{escape_html(label)}</a>\n'
+            )
+        return tabs
+
+    connection_options, instruction_options = _agent_setup_output_groups(target)
+    connection_tabs = output_tabs(connection_options)
+    instruction_tabs = output_tabs(instruction_options)
     filename = next(
         (f for v, _l, f in _agent_setup_output_options(target) if v == output_type),
         f"{APP_SLUG}-output.txt",
@@ -707,9 +735,7 @@ def integrations_page(
             f"<button type='button' class='btn btn-sm btn-secondary'"
             f" data-download-filename='{escape_html(filename)}'>Download</button>"
         )
-        regenerate_btn = (
-            "<button type='submit' class='btn btn-sm btn-secondary'>Regenerate</button>"
-        )
+        regenerate_btn = "<button type='submit' class='btn btn-sm btn-secondary'>Refresh Preview</button>"
         connection_label = (
             "Generate One-Time Key + MCP Config"
             if output_type == "mcp_json"
@@ -789,8 +815,26 @@ def integrations_page(
 
       <div class="form-section" id="generated-output">
         <h2>Generated Output</h2>
-        <div class="setup-tabs">{output_tabs}</div>
+        <div class="setup-output-group" data-setup-path="connection">
+          <h3>1. Connect a client</h3>
+          <p>Use these outputs the first time you connect a client, or when you deliberately replace its MCP settings or bearer key. Generating a key-bearing output rotates the selected agent's key.</p>
+          <div class="setup-tabs">{connection_tabs}</div>
+        </div>
+        <div class="setup-output-group" data-setup-path="workspace-instructions">
+          <h3>2. Add or refresh workspace instructions</h3>
+          <p>Use these outputs for a repository or a single session. They contain no bearer key. You can refresh them after an Agent Core update or reuse them in another workspace without changing an MCP connection.</p>
+          <div class="setup-tabs">{instruction_tabs}</div>
+        </div>
         <div class="alert alert-warning" id="connection-warning" style="display:none"></div>
+        <div class="connection-doctor" id="connection-doctor">
+          <div>
+            <h3>Connection doctor</h3>
+            <p>Use the exact MCP URL below, not the site root. This check never stores a bearer key.</p>
+            <code>{escape_html(base_url)}/mcp</code>
+          </div>
+          <button type="button" class="btn btn-sm btn-secondary" id="test-connection-details-btn" onclick="testConnectionDetails()">Test connection details</button>
+        </div>
+        <div class="connection-doctor-result" id="connection-doctor-result" aria-live="polite"></div>
         {output_label_html}
         {output_display}
         <div class="output-actions">{connection_btn}{copy_btn}{download_btn}{regenerate_btn}</div>
@@ -809,11 +853,11 @@ def integrations_page(
     """
 
     return render_page(
-        "Integrations", body, page_path, _agent_setup_extra_js(), session=session
+        "Integrations", body, page_path, _agent_setup_extra_js(base_url), session=session
     )
 
 
-def _agent_setup_extra_js():
+def _agent_setup_extra_js(base_url):
     # Server-derived constants the static integrations.js reads off window;
     # the rest of the JS lives in /static/js/integrations.js (browser-cached).
     bracket = "{{" + ENV_PREFIX + "API_KEY}}"
@@ -823,9 +867,10 @@ def _agent_setup_extra_js():
         f"window._AC_APP_SLUG = {json.dumps(APP_SLUG)};"
         f"window._AC_API_KEY_BRACKET = {json.dumps(bracket)};"
         f"window._AC_API_KEY_ANGLE = {json.dumps(angle)};"
+        f"window._AC_MCP_URL = {json.dumps(f'{base_url}/mcp')};"
         "</script>"
     )
-    return constants + '<script src="/static/js/integrations.js?v=20260626"></script>'
+    return constants + '<script src="/static/js/integrations.js?v=20260828"></script>'
 
 
 # Outputs that embed the agent's API key, and therefore require rotating it.

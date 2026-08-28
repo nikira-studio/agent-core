@@ -6,6 +6,8 @@ This doc is about wiring tools up. For what the pieces are and why they behave a
 
 The dashboard **Integrations** page at `/integrations` generates ready-to-paste configs for specific tools and is usually the fastest path. This doc explains what's happening under the hood and covers cases the generator doesn't handle. The current presets include Claude Code, Codex, Cursor, Windsurf, Antigravity, and a generic MCP/REST path.
 
+Start small. First connect an agent over MCP and use a workspace for durable shared memory. Add stored credentials when a local tool needs a secret, then add connector bindings when Agent Core should run an external action. Activities, workspaces, webhooks, and delegation build on that path when you need them.
+
 The dashboard **Connectors** page at `/connectors` is where you register external capabilities for Agent Core itself. It supports:
 
 - importing OpenAPI specs as connector types
@@ -48,6 +50,14 @@ The `http://localhost:3500/mcp` examples are for Agent Core and the client on th
 For a desktop or browser-based client on another machine, terminate TLS at a reverse proxy and use `https://<host>/mcp`. Those clients may refuse a remote `http://` MCP URL because it would send the bearer token without encryption. Configure a trusted certificate before you add the connection.
 
 To check that a public endpoint is reachable, request `https://<host>/mcp` without a bearer token. `401 Unauthorized` confirms that the MCP route is reachable and requires authentication. It does not indicate that the route is wrong.
+
+### Check a connection
+
+The dashboard **Integrations** page separates one-time client connection from reusable workspace instructions. Use **Test connection details** to confirm that the current server exposes the expected `/mcp` endpoint. If the browser still holds a one-time key that you generated there, the check also confirms that key without saving or displaying it.
+
+When the browser has no saved key, use the generated **Verification Prompt** in the configured client. Agent Core stores only a hash of each agent key, so the dashboard cannot recover an existing key to test it.
+
+Clients and setup tools can discover public connection metadata at `/.well-known/agent-core.json`. The document contains the MCP URL, transport, authentication type, documentation link, and version. It never contains credentials, scopes, connector bindings, or installation state.
 
 ### Antigravity
 
@@ -633,7 +643,7 @@ The Integrations page generates the canonical setup text and downloadable files.
 | Session Prompt | A startup prompt the agent can run at the beginning of each session |
 | Verification Prompt | A one-time prompt that confirms the full end-to-end connection is working |
 
-**Regenerate these after an upgrade.** `CLAUDE.md`, `AGENTS.md`, the Assistants text, and the session prompt are how an agent learns what the system can do; an agent whose instructions predate a capability will not use it. They are repository-level guidance, identical for every agent, and contain no key, so regenerating them is safe at any time and does not invalidate anything. Only the outputs that embed a key (MCP Config, Environment Variables, Assistants) mint a new one, and only when you press **Generate connection**.
+**Refresh workspace guidance after an upgrade.** `CLAUDE.md`, `AGENTS.md`, Instructions, Session Prompt, and Verification Prompt teach an already connected agent how to use new capabilities. They contain no key, so regenerating them is safe and does not change an MCP connection. MCP Config, Environment Variables, and Assistants onboarding can embed a key. They generate or rotate that key only when you press **Generate connection**.
 
 ---
 

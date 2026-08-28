@@ -190,6 +190,72 @@ async function generateConnectionConfig() {
   btn.textContent = btn.dataset.label || 'Generate One-Time Key + Config';
 }
 
+function setConnectionDoctorResult(message, kind) {
+  const result = document.getElementById('connection-doctor-result');
+  if (!result) return;
+  result.className = 'connection-doctor-result ' + kind;
+  result.textContent = message;
+}
+
+async function testConnectionDetails() {
+  const btn = document.getElementById('test-connection-details-btn');
+  const mcpUrl = window._AC_MCP_URL;
+  if (!btn || !mcpUrl) return;
+
+  btn.disabled = true;
+  btn.textContent = 'Testing...';
+  setConnectionDoctorResult('', '');
+
+  try {
+    const endpointResponse = await fetch(mcpUrl, { headers: { Accept: 'application/json' } });
+    if (endpointResponse.status !== 401) {
+      setConnectionDoctorResult(
+        'The MCP endpoint responded, but it did not require bearer authentication as expected. Check the server authentication settings.',
+        'warning'
+      );
+      return;
+    }
+
+    const key = getStoredIntegrationConnectionKey();
+    if (!key) {
+      setConnectionDoctorResult(
+        'The MCP endpoint is reachable and requires a bearer key. No one-time key is saved in this browser, so run the Verification Prompt in the configured client to test its key.',
+        'success'
+      );
+      return;
+    }
+
+    const keyResponse = await fetch(mcpUrl, {
+      headers: {
+        Accept: 'application/json',
+        Authorization: 'Bearer ' + key
+      }
+    });
+    if (!keyResponse.ok) {
+      setConnectionDoctorResult(
+        'The MCP endpoint is reachable, but the saved one-time key was rejected. Generate a new connection artifact only if you want to replace the configured key.',
+        'warning'
+      );
+      return;
+    }
+
+    const manifest = await keyResponse.json();
+    const count = Array.isArray(manifest.tools) ? manifest.tools.length : 0;
+    setConnectionDoctorResult(
+      'The MCP endpoint and saved one-time key work. The server returned ' + count + ' tools.',
+      'success'
+    );
+  } catch (e) {
+    setConnectionDoctorResult(
+      'The browser could not reach the MCP endpoint. Check the URL, TLS certificate, reverse proxy, and client network, then reload the MCP client.',
+      'error'
+    );
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Test connection details';
+  }
+}
+
 document.addEventListener('DOMContentLoaded', applyStoredIntegrationConnectionKey);
 document.addEventListener('DOMContentLoaded', restoreSetupScrollPosition);
 window.addEventListener('beforeunload', saveSetupScrollPosition);

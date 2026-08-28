@@ -1,8 +1,17 @@
 # Quickstart
 
-This guide takes you from zero to a running Agent Core with your first agent connected and writing memory. Takes about 10 minutes.
+This guide takes you from zero to a running Agent Core with an agent that can write and recall shared memory. The final steps show how to add credentials and connectors when a task needs them.
 
 Agent Core is a local capability layer for agents: memory, credentials, connectors, and activity tracking. It is not a scheduler or orchestration OS. Your agents connect to it when they need services.
+
+## What you set up
+
+1. Run Agent Core and create an agent identity.
+2. Connect that agent over MCP and verify shared memory.
+3. Store a credential only when a local tool or external service needs one.
+4. Add a connector binding only when Agent Core should call that service itself.
+
+Activities, workspaces, handoffs, delegation, webhooks, and backup are available later. They do not block the first memory workflow.
 
 ---
 

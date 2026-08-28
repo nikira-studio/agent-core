@@ -146,6 +146,21 @@ def test_action_health_reports_failure_rates(clean_db):
     assert health["get_me"]["failure_rate"] == 0.0
 
 
+def test_action_health_reports_caller_validation_separately(clean_db):
+    binding = _binding()
+    message = "Invalid parameters: '3' is not of type 'integer'"
+    for _ in range(5):
+        connector_service.log_execution(
+            binding_id=binding["id"], action="list_issues", params_json="{}",
+            result_status="failure", error_message=message,
+            error_code="INVALID_REQUEST",
+            failure_category=connector_service.classify_failure("INVALID_REQUEST", message),
+        )
+
+    health = connector_service.action_health(binding["id"])
+    assert health[0]["failure_categories"] == ["caller_validation"]
+
+
 def test_action_health_ignores_calls_outside_the_window(clean_db):
     binding = _binding()
     _log(binding["id"], "list_issues", status="error", age_days=90)

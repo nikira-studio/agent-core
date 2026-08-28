@@ -1582,6 +1582,11 @@ def execute_binding_action_with_logging(
         result_body_json=json.dumps(result) if result.get("success") else None,
         error_message=result.get("error") if not result.get("success") else None,
         duration_ms=duration_ms,
+        error_code=result.get("error_code") if not result.get("success") else None,
+        failure_category=(
+            classify_failure(result.get("error_code"), result.get("error"))
+            if not result.get("success") else None
+        ),
     )
     binding = get_binding(binding_id) or {}
     connector_type = (
@@ -1622,6 +1627,29 @@ EXECUTION_BODY_MAX_CHARS = 16_000
 FAILING_ACTION_THRESHOLD = 0.2
 FAILING_ACTION_MIN_CALLS = 5
 
+FAILURE_CATEGORIES = frozenset({
+    "caller_validation", "credential", "remote_service", "network", "rate_limited", "unknown",
+})
+
+
+def classify_failure(error_code: Optional[str], error_message: Optional[str]) -> str:
+    """Classify a connector failure without exposing request or credential data."""
+    code = (error_code or "").upper()
+    message = (error_message or "").lower()
+    if code in {"INVALID_ACTION", "INVALID_REQUEST", "INVALID_CONFIGURATION", "DISABLED_ACTION"}:
+        return "caller_validation"
+    if "invalid parameters" in message or "is not of type" in message or "required property" in message:
+        return "caller_validation"
+    if code in {"NO_CREDENTIAL", "AUTH_EXPIRED", "UNAUTHORIZED", "FORBIDDEN"}:
+        return "credential"
+    if code == "RATE_LIMITED" or "rate limit" in message:
+        return "rate_limited"
+    if "timeout" in message or "connection" in message or "network" in message:
+        return "network"
+    if code in {"EXECUTION_ERROR", "PROVIDER_ERROR"}:
+        return "remote_service"
+    return "unknown"
+
 
 def _truncate_execution_body(body: Optional[str]) -> Optional[str]:
     if body is None or len(body) <= EXECUTION_BODY_MAX_CHARS:
@@ -1641,6 +1669,8 @@ def log_execution(
     result_body_json: Optional[str] = None,
     error_message: Optional[str] = None,
     duration_ms: Optional[int] = None,
+    error_code: Optional[str] = None,
+    failure_category: Optional[str] = None,
 ) -> str:
     execution_id = secrets.token_urlsafe(16)
     result_body_json = _truncate_execution_body(result_body_json)
@@ -1663,8 +1693,8 @@ def log_execution(
             INSERT INTO connector_executions
             (id, binding_id, action, params_json, result_status, result_body_json, error_message, duration_ms,
              actor_type, actor_id, principal_user_id, executor_agent_id, issuer_actor_id,
-             coordinator_agent_id, grant_id, correlation_id, authorization_mode)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             coordinator_agent_id, grant_id, correlation_id, authorization_mode, error_code, failure_category)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 execution_id,
@@ -1676,6 +1706,8 @@ def log_execution(
                 error_message,
                 duration_ms,
                 *attribution,
+                error_code,
+                failure_category,
             ),
         )
         conn.commit()
@@ -1716,6 +1748,7 @@ def action_health(binding_id: Optional[str] = None, days: int = 30) -> list[dict
             SELECT ce.binding_id, cb.name AS binding_name, ce.action,
                    COUNT(*) AS calls,
                    SUM(CASE WHEN ce.result_status != 'success' THEN 1 ELSE 0 END) AS failures,
+                   GROUP_CONCAT(DISTINCT CASE WHEN ce.result_status != 'success' THEN ce.failure_category END) AS failure_categories,
                    MAX(ce.executed_at) AS last_called_at
             FROM connector_executions ce
             LEFT JOIN connector_bindings cb ON cb.id = ce.binding_id
@@ -1738,6 +1771,7 @@ def action_health(binding_id: Optional[str] = None, days: int = 30) -> list[dict
                 "calls": calls,
                 "failures": failures,
                 "failure_rate": round(failures / calls, 3) if calls else 0.0,
+                "failure_categories": sorted(filter(None, (row["failure_categories"] or "").split(","))),
                 "last_called_at": row["last_called_at"],
             }
         )

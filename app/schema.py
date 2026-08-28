@@ -402,6 +402,8 @@ CREATE TABLE IF NOT EXISTS connector_executions (
     grant_id TEXT,
     correlation_id TEXT,
     authorization_mode TEXT,
+    error_code TEXT,
+    failure_category TEXT,
     executed_at TEXT DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (binding_id) REFERENCES connector_bindings(id)
 );
@@ -512,6 +514,7 @@ def create_schema(conn) -> None:
     _ensure_agents_default_recall_column(conn)
     _ensure_agents_delegation_column(conn)
     _ensure_connector_execution_authority_columns(conn)
+    _ensure_connector_execution_failure_columns(conn)
     _ensure_binding_resolution_columns(conn)
     _ensure_memory_metadata_columns(conn)
     _drop_retired_memory_columns(conn)
@@ -595,6 +598,14 @@ def _ensure_connector_execution_authority_columns(conn) -> None:
         "authorization_mode",
     )
     for column in wanted:
+        if column not in columns:
+            conn.execute(f"ALTER TABLE connector_executions ADD COLUMN {column} TEXT")
+    conn.commit()
+
+
+def _ensure_connector_execution_failure_columns(conn) -> None:
+    columns = {row["name"] for row in conn.execute("PRAGMA table_info(connector_executions)").fetchall()}
+    for column in ("error_code", "failure_category"):
         if column not in columns:
             conn.execute(f"ALTER TABLE connector_executions ADD COLUMN {column} TEXT")
     conn.commit()

@@ -34,6 +34,7 @@ from app.routes.delegation_requests_page import router as delegation_requests_pa
 from app.routes.events import router as events_router
 from app.routes.webhooks import router as webhooks_router
 from app.routes.workspace_sync import router as workspace_sync_router
+from app.routes.discovery import router as discovery_router
 
 __all__ = [
     "health_router",
@@ -72,4 +73,5 @@ __all__ = [
     "events_router",
     "webhooks_router",
     "workspace_sync_router",
+    "discovery_router",
 ]
