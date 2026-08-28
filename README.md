@@ -1,6 +1,10 @@
 # Agent Core
 
-**A local capability layer for AI agents: shared memory, credentials, connectors, scoped access, and activity tracking, all on your machine.**
+**Shared memory and controlled capabilities for the agents you already use.**
+
+Agent Core is a self-hosted MCP and HTTP service. It gives Claude Code, Codex, Cursor, and custom agents durable context, encrypted credentials, scoped connector access, and an auditable activity trail.
+
+**Agent Core sits beside agents, not above them.**
 
 ---
 
@@ -10,28 +14,28 @@ If you use AI coding agents like Claude Code, Cursor, or Codex, you've probably 
 - You juggle API keys and tokens across tools, pasting them into configs and hoping nothing leaks
 - Two agents working on the same project have no idea what the other one has done
 
-Agent Core fixes that. It's a small service you run on your own machine. Your agents connect to it to read and write memory, resolve credentials, and call external services, while the controls stay local and explicit.
+Agent Core fixes that. It is a small service that you run on your own machine. Your agents connect to it to read and write memory, resolve credentials, and call external services, while the controls stay local and explicit.
 
 ![Agent Core explainer](docs/images/explainer.png)
 
 ---
 
-## What Agent Core is for
+## What Agent Core does
 
-Agent Core is a local capability and memory layer for agents.
+Agent Core provides:
 
-It is good at:
+- durable memory in one place
+- access control for credentials and external services
+- short-lived, narrowed authority for a single task, with human approval
+- server-side connectors for imported OpenAPI specs, native MCP servers, and **adapters**, which are shareable data-manifest integrations for OAuth, session handshakes, and CLI wrappers (see [docs/adapters.md](docs/adapters.md))
+- activity visibility and on-demand handoffs
 
-- keeping durable memory in one place
-- controlling access to credentials and external services
-- lending an agent short-lived, narrowed access for a single task, with human approval
-- exposing server-side connectors as agent tools: imported OpenAPI specs, native MCP servers, and **adapters**, which are shareable data-manifest integrations for OAuth, session handshakes, and CLI wrappers (see [docs/adapters.md](docs/adapters.md))
-- showing what agents are doing right now
+Agent Core is not:
 
-It is not trying to be:
-
-- a full agent operating system
-- a scheduler that runs the work for you
+- an agent runtime or agent framework
+- a coding assistant or computer-use environment
+- a scheduler or orchestration engine
+- a sandbox or cloud execution environment
 - a replacement for the agent itself
 
 ## What you install
@@ -55,17 +59,20 @@ Memory, credentials, and configuration all live on your disk. The only intention
 For the full picture, read **[How it works](docs/how-it-works.md)**: how memory is modelled, what keeps the corpus honest, how connectors and credentials fit together, and the reasoning behind each.
 
 ```
-┌──────────────┐     MCP or REST     ┌──────────────────┐
-│  Claude Code │ ──────────────────► │                  │
-│  Cursor      │ ──────────────────► │   Agent Core     │
-│  Codex       │ ──────────────────► │   localhost:3500 │
-│  any agent   │ ──────────────────► │                  │
-└──────────────┘                     └──────────────────┘
-                                              │
-                                 ┌────────────┴─────────────┐
-                                 │  SQLite + encrypted      │
-                                 │  credentials on disk     │
-                                 └──────────────────────────┘
+┌──────────────┐     MCP or HTTP     ┌────────────────────────────┐
+│  Claude Code │ ──────────────────► │         Agent Core         │
+│  Cursor      │ ──────────────────► │ shared memory              │
+│  Codex       │ ──────────────────► │ encrypted credentials      │
+│  any agent   │ ──────────────────► │ scoped connector access    │
+└──────────────┘                     │ activity and handoffs      │
+                                     └────────────┬───────────────┘
+                                                  │
+                       ┌──────────────────────────┴──────────────────────────┐
+                       ▼                                                     ▼
+          ┌─────────────────────────┐                         ┌─────────────────────────┐
+          │ SQLite and encrypted    │                         │ External services       │
+          │ credentials on your disk│                         │ via connector bindings  │
+          └─────────────────────────┘                         └─────────────────────────┘
 ```
 
 ---

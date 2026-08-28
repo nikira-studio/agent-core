@@ -1,0 +1,39 @@
+# Agent Core
+
+Agent Core is a self-hosted shared memory and capability service for AI agents.
+It sits beside agents such as Claude Code, Codex, Cursor, and custom runtimes.
+It does not run, schedule, or replace those agents.
+
+## What it provides
+
+- Durable, scoped memory that agents can share across sessions and runtimes.
+- Encrypted credential storage. Agents receive references instead of raw secrets.
+- Connector bindings that run external API, MCP, adapter, and HTTP actions server-side.
+- Scoped access, short-lived delegated authority, and an audit trail.
+- Activity records and on-demand briefings for visible work and handoffs.
+
+## Interfaces
+
+- MCP at `/mcp` for agent tools.
+- REST API for integrations and automation.
+- Dashboard for setup, access control, connector bindings, and activity review.
+
+## Product boundary
+
+Agent Core is not an agent framework, agent runtime, coding assistant, scheduler,
+or sandbox. An agent runtime decides what work to do. Agent Core holds the shared
+state and controlled capabilities that the runtime uses.
+
+## Data model and deployment
+
+Agent Core is local-first and self-hosted. Memory, credentials, and configuration
+live on the operator's disk. Connector calls leave the host only when an agent
+explicitly runs a bound external action.
+
+## Start here
+
+- [README](README.md): product overview and installation.
+- [How it works](docs/how-it-works.md): architecture and design choices.
+- [Quickstart](docs/quickstart.md): install and connect an agent.
+- [Integrations](docs/integrations.md): MCP and REST connection details.
+- [Security](docs/security.md): scopes, credentials, and deployment guidance.
