@@ -12,6 +12,7 @@ from app.connectors.manifest import (
     load_and_validate,
 )
 import jsonschema
+import pytest
 
 
 # ─── load_and_validate ────────────────────────────────────────────────────────
@@ -418,6 +419,23 @@ class TestSchema:
             "backend": {"type": "mcp"},
         }
         jsonschema.validate(data, ADAPTER_MANIFEST_SCHEMA)
+
+    def test_schema_rejects_unsupported_mcp_transport_and_contract(self):
+        base = {
+            "spec_version": "1.0",
+            "id": "mcp_conn",
+            "version": "1.0.0",
+        }
+        with pytest.raises(jsonschema.ValidationError):
+            jsonschema.validate(
+                {**base, "backend": {"type": "mcp", "transport_type": "sse"}},
+                ADAPTER_MANIFEST_SCHEMA,
+            )
+        with pytest.raises(jsonschema.ValidationError):
+            jsonschema.validate(
+                {**base, "backend": {"type": "mcp", "tool_contract": "loose"}},
+                ADAPTER_MANIFEST_SCHEMA,
+            )
 
     def test_schema_allows_cli_backend(self):
         data = {

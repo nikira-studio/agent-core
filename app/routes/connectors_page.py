@@ -391,6 +391,9 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
     execution_rows_html = ""
     for execution in visible_executions:
         status = execution.get("result_status") or "unknown"
+        failure_category = execution.get("failure_category") or ""
+        error_message = execution.get("error_message") or ""
+        execution_note = failure_category.replace("_", " ") or str(error_message)[:48]
         if status == "success":
             badge_style = "background:rgba(80,200,120,0.15);color:var(--success)"
         elif status in ("failure", "error"):
@@ -403,7 +406,7 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
           <td><code>{escape_html(execution.get("action", ""))}</code></td>
           <td><span class="badge" style="{badge_style}">{escape_html(status)}</span></td>
           <td>{local_dt(execution.get("executed_at"))}</td>
-          <td>{escape_html(execution.get("failure_category", "").replace("_", " ") or str(execution.get("error_message", ""))[:48])}</td>
+          <td>{escape_html(execution_note)}</td>
         </tr>"""
     if execution_rows_html:
         executions_html = f"""

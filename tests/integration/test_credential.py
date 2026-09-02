@@ -78,6 +78,109 @@ def test_credential_update_writes_audit_event(test_client, agent_token):
     assert audit_service.query_events(action="credential_entry_updated", resource_type="credential")[-1]["resource_id"] == entry_id
 
 
+def test_credential_scope_move_preserves_secret_and_reports_linked_bindings(
+    test_client, admin_token
+):
+    from app.database import get_db
+    from app.services import audit_service, connector_service
+
+    create_r = test_client.post(
+        "/api/credentials/entries",
+        headers={"Authorization": f"Bearer {admin_token}"},
+        json={"scope": "user:admin", "name": "move-me", "value": "secret-value"},
+    )
+    assert create_r.status_code == 201, create_r.json()
+    entry_id = create_r.json()["data"]["entry"]["id"]
+    reference_name = create_r.json()["data"]["entry"]["reference_name"]
+    connector_type = connector_service.list_connector_types()[0]
+    connector_service.create_binding(
+        connector_type_id=connector_type["id"],
+        name="Move test binding",
+        scope="user:admin",
+        credential_id=entry_id,
+        created_by="admin",
+    )
+    with get_db() as conn:
+        encrypted_before = conn.execute(
+            "SELECT value_encrypted FROM credentials WHERE id = ?", (entry_id,)
+        ).fetchone()["value_encrypted"]
+
+    move_r = test_client.put(
+        f"/api/credentials/entries/{entry_id}",
+        headers={"Authorization": f"Bearer {admin_token}"},
+        json={"scope": "workspace:world-monitor"},
+    )
+    assert move_r.status_code == 200, move_r.json()
+    assert move_r.json()["data"]["move"] == {
+        "old_scope": "user:admin",
+        "new_scope": "workspace:world-monitor",
+        "binding_scopes": ["user:admin"],
+    }
+    with get_db() as conn:
+        moved = conn.execute(
+            "SELECT id, scope, reference_name, value_encrypted FROM credentials WHERE id = ?",
+            (entry_id,),
+        ).fetchone()
+    assert dict(moved) == {
+        "id": entry_id,
+        "scope": "workspace:world-monitor",
+        "reference_name": reference_name,
+        "value_encrypted": encrypted_before,
+    }
+    event = audit_service.query_events(
+        action="credential_entry_moved", resource_type="credential"
+    )[-1]
+    assert event["resource_id"] == entry_id
+
+
+def test_credential_scope_move_requires_write_access_to_destination(test_client, clean_db):
+    from app.services.auth_service import create_session, create_user
+
+    create_user("regular", "regular@test.local", "testpassword123", "Regular", "user")
+    create_user("other", "other@test.local", "testpassword123", "Other", "user")
+    token = create_session("regular")["session_id"]
+    create_r = test_client.post(
+        "/api/credentials/entries",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"scope": "user:regular", "name": "private", "value": "secret"},
+    )
+    entry_id = create_r.json()["data"]["entry"]["id"]
+
+    move_r = test_client.put(
+        f"/api/credentials/entries/{entry_id}",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"scope": "user:other"},
+    )
+    assert move_r.status_code == 403
+    assert move_r.json()["error"]["code"] == "SCOPE_DENIED"
+
+
+def test_credential_scope_move_and_rename_are_atomic(test_client, admin_token):
+    first = test_client.post(
+        "/api/credentials/entries",
+        headers={"Authorization": f"Bearer {admin_token}"},
+        json={"scope": "user:admin", "name": "source", "value": "one"},
+    ).json()["data"]["entry"]
+    test_client.post(
+        "/api/credentials/entries",
+        headers={"Authorization": f"Bearer {admin_token}"},
+        json={"scope": "workspace:world-monitor", "name": "taken", "value": "two"},
+    )
+
+    response = test_client.put(
+        f"/api/credentials/entries/{first['id']}",
+        headers={"Authorization": f"Bearer {admin_token}"},
+        json={"scope": "workspace:world-monitor", "name": "taken"},
+    )
+    assert response.status_code == 409
+
+    from app.services import credential_service
+
+    unchanged = credential_service.get_credential(first["id"])
+    assert unchanged["scope"] == "user:admin"
+    assert unchanged["name"] == "source"
+
+
 def test_credential_list_entries(test_client, agent_token):
     test_client.post(
         "/api/credentials/entries",

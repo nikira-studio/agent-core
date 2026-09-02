@@ -64,7 +64,7 @@ class TestAdapterLibrary:
         data = r.json()["data"]
         adapters = data["adapters"]
         ids = {a["id"] for a in adapters}
-        assert {"transmission", "google_workspace", "github_cli"}.issubset(ids)
+        assert {"transmission", "google_workspace", "github_cli", "securo"}.issubset(ids)
         transmission = next(a for a in adapters if a["id"] == "transmission")
         assert transmission["source_kind"] == "system"
         assert transmission["installed"] is False
@@ -81,6 +81,9 @@ class TestAdapterLibrary:
             "client_secret",
         ]
         assert "Authorize OAuth" in workspace["setup"]["instructions"]
+        securo = next(adapter for adapter in adapters if adapter["id"] == "securo")
+        assert securo["requirements_summary"]["config"] == ["base_url"]
+        assert securo["requirements_summary"]["credential_fields"] == ["api_key"]
 
     def test_install_and_uninstall_builtin_adapter(
         self, test_client, admin_token, monkeypatch, tmp_path

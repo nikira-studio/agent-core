@@ -187,7 +187,10 @@ def credentials_page(request: Request, session: dict = Depends(require_auth)):
           </div>
           <div class="form-group">
             <label>Scope</label>
-            <input type="text" id="edit-credential-scope" autocomplete="off" disabled>
+            <select id="edit-credential-scope" required>
+              {scope_options}
+            </select>
+            <p class="form-hint">Moving a credential changes who can access the stored secret. Linked bindings stay in their current scope.</p>
           </div>
           <div class="form-group">
             <label>Replace Secret Value</label>
@@ -205,6 +208,6 @@ def credentials_page(request: Request, session: dict = Depends(require_auth)):
     </div>
     """
 
-    extra_js = '<script src="/static/js/credentials.js?v=20260626"></script>'
+    extra_js = '<script src="/static/js/credentials.js?v=20260901"></script>'
 
     return render_page("Credentials", body, "/credentials", extra_js, session=session)

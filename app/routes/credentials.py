@@ -58,6 +58,7 @@ class CreateCredentialRequest(BaseModel):
 
 
 class UpdateCredentialRequest(BaseModel):
+    scope: Optional[str] = None
     name: Optional[str] = None
     label: Optional[str] = None
     value: Optional[str] = None
@@ -253,18 +254,49 @@ def update_entry(
     if "expires_at" in body.model_fields_set:
         updates["expires_at"] = body.expires_at
 
-    credential_service.update_credential(entry_id, **updates)
+    move_result = None
+    try:
+        if body.scope is not None and body.scope != entry["scope"]:
+            if not enforcer.can_write(body.scope):
+                return error_response(
+                    "SCOPE_DENIED", "Access denied to the destination scope", 403
+                )
+            move_result = credential_service.move_credential(
+                entry_id, body.scope, **updates
+            )
+        else:
+            credential_service.update_credential(entry_id, **updates)
+    except sqlite3.IntegrityError:
+        return error_response(
+            "DUPLICATE_CREDENTIAL",
+            "A credential with that name already exists in the destination scope.",
+            409,
+        )
 
     audit_service.write_event(
         actor_type=ctx.actor_type,
         actor_id=ctx.actor_id,
-        action="credential_entry_updated",
+        action="credential_entry_moved" if move_result else "credential_entry_updated",
         resource_type="credential",
         resource_id=entry_id,
         result="success",
+        details=(
+            {
+                "old_scope": move_result["old_scope"],
+                "new_scope": move_result["new_scope"],
+                "linked_binding_scopes": move_result["binding_scopes"],
+            }
+            if move_result
+            else None
+        ),
     )
 
-    return success_response({"message": "Credential entry updated"})
+    return success_response(
+        {
+            "message": "Credential entry moved" if move_result else "Credential entry updated",
+            "move": move_result,
+        }
+    )
 
 
 @router.delete("/entries/{entry_id}")

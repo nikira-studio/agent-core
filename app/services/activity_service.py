@@ -171,6 +171,53 @@ def list_activities(
         return [dict(row) for row in rows]
 
 
+def list_attention_activities(
+    user_id: Optional[str] = None,
+    limit: int = 8,
+    lookback_days: Optional[int] = None,
+) -> list[dict]:
+    """Return current unresolved work for the Overview attention queue.
+
+    Activity history is intentionally retained, so a blocked or stale record
+    must not remain an alert indefinitely.  A later completed retry of the
+    exact same task also resolves the older alert for dashboard purposes while
+    preserving both records in the Activity trail.
+    """
+    if lookback_days is None:
+        lookback_days = settings.ATTENTION_LOOKBACK_DAYS
+    cutoff = (utc_now() - timedelta(days=max(0, lookback_days))).isoformat()
+
+    conditions = [
+        "a.status IN ('stale', 'blocked')",
+        "datetime(a.updated_at) >= datetime(?)",
+        """NOT EXISTS (
+            SELECT 1 FROM agent_activity completed
+            WHERE completed.status = 'completed'
+              AND completed.user_id = a.user_id
+              AND completed.agent_id = a.agent_id
+              AND completed.task_description = a.task_description
+              AND datetime(completed.started_at) >= datetime(a.started_at)
+        )""",
+    ]
+    params: list = [cutoff]
+    if user_id:
+        conditions.append("a.user_id = ?")
+        params.append(user_id)
+
+    with get_db() as conn:
+        rows = conn.execute(
+            f"""
+            SELECT a.{ACTIVITY_COLUMNS.replace(', ', ', a.')}
+            FROM agent_activity a
+            WHERE {' AND '.join(conditions)}
+            ORDER BY datetime(a.updated_at) DESC
+            LIMIT ?
+            """,
+            [*params, max(0, limit)],
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+
 ACTIVITY_COLUMNS = (
     "id, agent_id, user_id, assigned_agent_id, reassigned_from_agent_id, "
     "task_description, task_note, task_result, status, memory_scope, started_at, "

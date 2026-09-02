@@ -163,6 +163,56 @@ def update_credential(entry_id: str, **fields) -> bool:
         return cursor.rowcount > 0
 
 
+def move_credential(entry_id: str, target_scope: str, **fields) -> dict | None:
+    """Move and edit a credential in one transaction.
+
+    Keeping the scope and field updates together prevents an API error during a
+    rename from leaving the credential in its destination scope anyway.
+    """
+    parts = target_scope.split(":", 1)
+    normalized_scope = (
+        f"{parts[0]}:{normalize_id(parts[1])}"
+        if len(parts) == 2 and parts[0] in ("user", "agent", "workspace")
+        else target_scope
+    )
+    with get_db() as conn:
+        row = conn.execute(
+            "SELECT id, name, scope FROM credentials WHERE id = ?", (entry_id,)
+        ).fetchone()
+        if not row:
+            return None
+        current_scope = row["scope"]
+        binding_scopes = [
+            binding["scope"]
+            for binding in conn.execute(
+                "SELECT DISTINCT scope FROM connector_bindings WHERE credential_id = ? ORDER BY scope",
+                (entry_id,),
+            ).fetchall()
+        ]
+        allowed = ("name", "label", "value_encrypted", "metadata_json", "expires_at")
+        nullable = ("expires_at",)
+        updates = ["scope = ?"]
+        params = [normalized_scope]
+        for key, value in fields.items():
+            if key in allowed and (value is not None or key in nullable):
+                if key == "name" and not str(value).strip():
+                    raise ValueError("Credential entry name cannot be empty")
+                updates.append(f"{key} = ?")
+                params.append(value)
+        updates.append("updated_at = CURRENT_TIMESTAMP")
+        params.append(entry_id)
+        conn.execute(
+            f"UPDATE credentials SET {', '.join(updates)} WHERE id = ?",
+            params,
+        )
+        conn.commit()
+    return {
+        "old_scope": current_scope,
+        "new_scope": normalized_scope,
+        "binding_scopes": binding_scopes,
+    }
+
+
 def delete_credential(entry_id: str) -> bool:
     with get_db() as conn:
         conn.execute(

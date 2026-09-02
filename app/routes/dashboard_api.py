@@ -135,17 +135,18 @@ def dashboard_activity(
 
 @router.get("/activity/summary")
 def dashboard_activity_summary(session: dict = Depends(get_current_session)):
+    user_id = None if session.get("role") == "admin" else session["user_id"]
     all_active = activity_service.list_activities(
-        user_id=session["user_id"], status="active", limit=1000
+        user_id=user_id, status="active", limit=1000
     )
-    all_stale = activity_service.list_activities(
-        user_id=session["user_id"], status="stale", limit=1000
+    attention = activity_service.list_attention_activities(
+        user_id=user_id, limit=1000
     )
-    recent = activity_service.list_activities(user_id=session["user_id"], limit=10)
+    recent = activity_service.list_activities(user_id=user_id, limit=10)
     return success_response(
         {
             "active_count": len(all_active),
-            "stale_count": len(all_stale),
+            "attention_count": len(attention),
             "recent": recent,
         }
     )

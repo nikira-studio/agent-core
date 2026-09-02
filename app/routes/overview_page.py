@@ -5,6 +5,7 @@ from fastapi import APIRouter, Request, Depends
 from pydantic import BaseModel
 
 from app.branding import APP_NAME, JS_WINDOW_EVENT
+from app.config import settings
 from app.security.context import RequestContext
 from app.security.dependencies import get_request_context
 from app.security.response_helpers import success_response, error_response
@@ -277,9 +278,7 @@ def dashboard_home(request: Request, session: dict = Depends(require_auth)):
         )
         connector_execution_count = count_rows("connector_executions")
         recent_activity = activity_service.list_activities(limit=8)
-        attention = activity_service.list_activities(
-            status="stale", limit=8
-        ) + activity_service.list_activities(status="blocked", limit=8)
+        attention = activity_service.list_attention_activities(limit=8)
     else:
         agents = list_agents(owner_user_id=session["user_id"])
         workspaces = list_workspaces(owner_user_id=session["user_id"])
@@ -296,10 +295,8 @@ def dashboard_home(request: Request, session: dict = Depends(require_auth)):
         recent_activity = activity_service.list_activities(
             user_id=session["user_id"], limit=8
         )
-        attention = activity_service.list_activities(
-            user_id=session["user_id"], status="stale", limit=8
-        ) + activity_service.list_activities(
-            user_id=session["user_id"], status="blocked", limit=8
+        attention = activity_service.list_attention_activities(
+            user_id=session["user_id"], limit=8
         )
 
     active_task_count = count_rows(
@@ -321,7 +318,6 @@ def dashboard_home(request: Request, session: dict = Depends(require_auth)):
         max(len(ct.get("supported_actions") or []) - len(ct.get("disabled_actions") or []), 0)
         for ct in connector_types
     )
-    attention = attention[:8]
     users_card = ""
     if is_admin:
         user_count = count_rows("users")
@@ -333,7 +329,7 @@ def dashboard_home(request: Request, session: dict = Depends(require_auth)):
       <a class="stat-card stat-link" href="/agents"><div class="value">{agent_count}</div><div class="label">Active Agents</div></a>
       <a class="stat-card stat-link" href="/workspaces"><div class="value">{workspace_count}</div><div class="label">Active Workspaces</div></a>
       <a class="stat-card stat-link" href="/activity" id="stat-open-activities"><div class="value">{active_task_count}</div><div class="label">Open Activities</div></a>
-      <a class="stat-card stat-link" href="/activity" id="stat-stale-blocked"><div class="value">{len(attention)}</div><div class="label">Stale / Blocked</div></a>
+      <a class="stat-card stat-link" href="/activity" id="stat-stale-blocked"><div class="value">{len(attention)}</div><div class="label">Needs Attention</div></a>
       <a class="stat-card stat-link" href="/delegation-requests" id="stat-pending-delegations"><div class="value">{pending_delegation_count}</div><div class="label">Pending Delegations</div></a>
       <a class="stat-card stat-link" href="/memory"><div class="value">{memory_count}</div><div class="label">Memory Records</div></a>
     </div>"""
@@ -379,8 +375,9 @@ def dashboard_home(request: Request, session: dict = Depends(require_auth)):
             for a in attention
         )
         attention_html = f"""
-    <div class="card attention-card">
+    <div class="card attention-card" id="overview-needs-attention">
       <h3>Needs Attention</h3>
+      <p class="text-muted" style="margin-top:-6px">Currently blocked or stale work from the last {settings.ATTENTION_LOOKBACK_DAYS} days. Resolved retries are excluded.</p>
       <table><thead><tr><th>Task</th><th>Status</th><th>Agent</th><th></th></tr></thead><tbody>{attention_rows}</tbody></table>
     </div>"""
 
@@ -444,7 +441,7 @@ def dashboard_home(request: Request, session: dict = Depends(require_auth)):
       var openEl = document.getElementById('stat-open-activities');
       if (openEl) openEl.querySelector('.value').textContent = data.active_count || 0;
       var staleEl = document.getElementById('stat-stale-blocked');
-      if (staleEl) staleEl.querySelector('.value').textContent = data.stale_count || 0;
+      if (staleEl) staleEl.querySelector('.value').textContent = data.attention_count || 0;
       var tbody = document.getElementById('overview-activity-tbody');
       if (!tbody) return;
       var recent = (data.recent || []).slice(0, 6);
@@ -458,9 +455,10 @@ def dashboard_home(request: Request, session: dict = Depends(require_auth)):
           '<td><div class="text-truncate" title="' + escapeHtml(a.task_description || '') + '">' + escapeHtml(a.task_description || '') + '</div></td>' +
           '<td><span class="badge badge-' + escapeHtml(a.status || '') + '">' + escapeHtml(a.status || '') + '</span></td>' +
           '<td>' + escapeHtml(a.assigned_agent_id || '') + '</td>' +
-          '<td>' + escapeHtml(ts) + '</td>' +
+          '<td>' + ts + '</td>' +
         '</tr>';
       }}).join('');
+      applyLocalTimes(tbody);
     }};
     async function runDashboardSearch(e) {{
       if (e) e.preventDefault();
@@ -527,5 +525,3 @@ def dashboard_home(request: Request, session: dict = Depends(require_auth)):
         "/",
         session=session,
     )
-
-

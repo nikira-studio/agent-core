@@ -26,6 +26,7 @@ AUDIT_ACTIONS = (
     "agent_purged",
     "credential_entry_created",
     "credential_entry_updated",
+    "credential_entry_moved",
     "credential_entry_deleted",
     "credential_reference",
     "credential_reveal",

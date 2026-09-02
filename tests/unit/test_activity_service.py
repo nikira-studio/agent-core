@@ -132,3 +132,47 @@ def test_claim_returns_oldest_activity_first(clean_db):
     claimed = claim_next_activity("agentA", ["agent:agentA"])
     assert claimed is not None
     assert claimed["id"] == act1["id"]
+
+
+def test_attention_excludes_old_and_resolved_activities(clean_db):
+    from app.database import get_db
+    from app.services.activity_service import (
+        create_activity,
+        list_attention_activities,
+        update_activity,
+    )
+
+    old = create_activity("agentA", "testuser", "Old blocked task")
+    update_activity(old["id"], status="blocked")
+    resolved = create_activity("agentA", "testuser", "Retry this task")
+    update_activity(resolved["id"], status="blocked")
+    retry = create_activity("agentA", "testuser", "Retry this task")
+    update_activity(retry["id"], status="completed")
+    current = create_activity("agentA", "testuser", "Current blocked task")
+    update_activity(current["id"], status="blocked")
+
+    with get_db() as conn:
+        conn.execute(
+            "UPDATE agent_activity SET updated_at = '2020-01-01T00:00:00+00:00' WHERE id = ?",
+            (old["id"],),
+        )
+        conn.commit()
+
+    attention = list_attention_activities(user_id="testuser", lookback_days=3)
+    assert [activity["id"] for activity in attention] == [current["id"]]
+
+
+def test_attention_keeps_unrelated_current_blocker(clean_db):
+    from app.services.activity_service import (
+        create_activity,
+        list_attention_activities,
+        update_activity,
+    )
+
+    blocked = create_activity("agentA", "testuser", "Needs a decision")
+    update_activity(blocked["id"], status="blocked")
+    completed = create_activity("agentA", "testuser", "Different completed task")
+    update_activity(completed["id"], status="completed")
+
+    attention = list_attention_activities(user_id="testuser", lookback_days=3)
+    assert [activity["id"] for activity in attention] == [blocked["id"]]

@@ -39,6 +39,38 @@ def test_dashboard_pages_load_with_static_assets(authenticated_client):
         assert 'src="/static/img/logo.png"' in html, f"{page} missing logo"
 
 
+def test_connectors_page_renders_execution_without_failure_category(
+    authenticated_client,
+):
+    from app.services import connector_service
+
+    connector_type = connector_service.list_connector_types()[0]
+    binding = connector_service.create_binding(
+        connector_type_id=connector_type["id"],
+        name="Null category binding",
+        scope="user:admin",
+        created_by="admin",
+    )
+    connector_service.log_execution(
+        binding_id=binding["id"],
+        action="test",
+        params_json="{}",
+        result_status="failure",
+        error_message="A useful error message",
+    )
+
+    r = authenticated_client.get("/connectors")
+    assert r.status_code == 200
+    assert "A useful error message" in r.text
+
+
+def test_credentials_page_allows_a_credential_scope_move(authenticated_client):
+    r = authenticated_client.get("/credentials")
+    assert r.status_code == 200
+    assert '<select id="edit-credential-scope" required>' in r.text
+    assert "Moving a credential changes who can access the stored secret" in r.text
+
+
 def test_public_auth_pages_do_not_start_the_authenticated_event_stream(test_client):
     for page in ("/login", "/otp"):
         r = test_client.get(page)
@@ -79,7 +111,7 @@ def test_overview_surfaces_operational_sections(authenticated_client):
     assert "Users" in html
     assert "Active Agents" in html
     assert "Open Activities" in html
-    assert "Stale / Blocked" in html
+    assert "Needs Attention" in html
     assert "Memory Records" in html
     assert "Capability Snapshot" in html
     assert "Recent Activity" in html
@@ -87,6 +119,49 @@ def test_overview_surfaces_operational_sections(authenticated_client):
     assert "Quick Actions" not in html
     assert "action-list" not in html
     assert "quick-action" not in html
+    # localDt returns a span. The live event refresh must insert that markup,
+    # not escape it as visible text, and then localize the new timestamp.
+    assert "'<td>' + ts + '</td>'" in html
+    assert "applyLocalTimes(tbody);" in html
+
+
+def test_overview_attention_omits_resolved_and_historical_activities(authenticated_client):
+    from app.database import get_db
+    from app.services import activity_service
+
+    old = activity_service.create_activity("admin", "admin", "Old blocked task")
+    activity_service.update_activity(old["id"], status="blocked")
+    resolved = activity_service.create_activity("admin", "admin", "Resolved retry")
+    activity_service.update_activity(resolved["id"], status="blocked")
+    retry = activity_service.create_activity("admin", "admin", "Resolved retry")
+    activity_service.update_activity(retry["id"], status="completed")
+    current = activity_service.create_activity("admin", "admin", "Current blocker")
+    activity_service.update_activity(current["id"], status="blocked")
+    with get_db() as conn:
+        conn.execute(
+            "UPDATE agent_activity SET updated_at = '2020-01-01T00:00:00+00:00' WHERE id = ?",
+            (old["id"],),
+        )
+        conn.commit()
+
+    html = authenticated_client.get("/").text
+    attention = html.split('id="overview-needs-attention"', 1)[1].split("</table>", 1)[0]
+    assert "Current blocker" in attention
+    assert "Old blocked task" not in attention
+    assert "Resolved retry" not in attention
+    assert "Resolved retries are excluded." in attention
+
+
+def test_admin_activity_summary_keeps_global_overview_scope(authenticated_client):
+    from app.services import activity_service
+
+    activity = activity_service.create_activity(
+        "another-agent", "another-user", "Visible to the admin live refresh"
+    )
+    response = authenticated_client.get("/api/dashboard/activity/summary")
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert any(item["id"] == activity["id"] for item in data["recent"])
 
 
 def test_connectors_page_surfaces_credentials_workflow(authenticated_client):

@@ -1,0 +1,63 @@
+{
+  "spec_version": "1.0",
+  "id": "securo",
+  "display_name": "Securo",
+  "version": "1.0.0",
+  "author": "agent-core team",
+  "description": "Securo personal-finance MCP adapter. It reads finance data and can submit Securo's proposal-based changes through an external MCP token.",
+  "setup": {
+    "instructions": "Connect Agent Core to a self-hosted Securo instance.\n\n1. Enable Securo's AI Agents and expose its MCP server over HTTP. The MCP URL normally ends in /mcp, for example https://securo.example.com/mcp.\n2. In Securo, open Settings > AI Agents and create an external MCP token.\n3. Install this adapter, then create a binding with base_url set to the full MCP URL and api_key set to the external MCP token. Agent Core sends the token as Authorization: Bearer <token>.\n\nSecuro's tool list must match the released adapter contract. If your instance has a newer or older MCP tool set, update the adapter before using it. Agent Core blocks private and loopback URLs when internal-host blocking is enabled.",
+    "documentation_url": "https://github.com/securo-finance/securo"
+  },
+  "credential_schema": {
+    "fields": [
+      {
+        "name": "api_key",
+        "type": "string",
+        "secret": true,
+        "required": true,
+        "description": "Securo external MCP token. It is sent as a Bearer token."
+      }
+    ]
+  },
+  "requires": { "config": ["base_url"] },
+  "actions": [
+    { "name": "list_accounts", "description": "List accounts and balances.", "side_effect": "read", "input_schema": { "type": "object" } },
+    { "name": "get_account_summary", "description": "Get income, expenses, and net for an account.", "side_effect": "read", "input_schema": { "type": "object" } },
+    { "name": "aggregate", "description": "Aggregate transactions by metric and grouping.", "side_effect": "read", "input_schema": { "type": "object" } },
+    { "name": "get_budget_vs_actual", "description": "Compare budgets with spending.", "side_effect": "read", "input_schema": { "type": "object" } },
+    { "name": "list_categories", "description": "List categories.", "side_effect": "read", "input_schema": { "type": "object" } },
+    { "name": "list_groups", "description": "List expense-sharing groups.", "side_effect": "read", "input_schema": { "type": "object" } },
+    { "name": "get_group_balances", "description": "Get group balances.", "side_effect": "read", "input_schema": { "type": "object" } },
+    { "name": "list_group_settlements", "description": "List group settlements.", "side_effect": "read", "input_schema": { "type": "object" } },
+    { "name": "search_knowledge_base", "description": "Search the agent knowledge base.", "side_effect": "read", "input_schema": { "type": "object" } },
+    { "name": "list_recurring_transactions", "description": "List recurring transactions.", "side_effect": "read", "input_schema": { "type": "object" } },
+    { "name": "list_assets", "description": "List assets and investments.", "side_effect": "read", "input_schema": { "type": "object" } },
+    { "name": "list_goals", "description": "List savings goals.", "side_effect": "read", "input_schema": { "type": "object" } },
+    { "name": "list_budgets", "description": "List budgets.", "side_effect": "read", "input_schema": { "type": "object" } },
+    { "name": "list_payees", "description": "List payees.", "side_effect": "read", "input_schema": { "type": "object" } },
+    { "name": "propose_categorize", "description": "Propose transaction categorization.", "side_effect": "write", "input_schema": { "type": "object" } },
+    { "name": "propose_create_category", "description": "Propose a new category.", "side_effect": "write", "input_schema": { "type": "object" } },
+    { "name": "propose_create_budget", "description": "Propose a new budget.", "side_effect": "write", "input_schema": { "type": "object" } },
+    { "name": "propose_create_transaction", "description": "Propose a transaction.", "side_effect": "write", "input_schema": { "type": "object" } },
+    { "name": "propose_create_recurring_transaction", "description": "Propose a recurring transaction.", "side_effect": "write", "input_schema": { "type": "object" } },
+    { "name": "propose_update_recurring_transaction", "description": "Propose a recurring transaction update.", "side_effect": "write", "input_schema": { "type": "object" } },
+    { "name": "propose_cancel_recurring_transaction", "description": "Propose a recurring transaction cancellation.", "side_effect": "write", "input_schema": { "type": "object" } },
+    { "name": "propose_create_goal", "description": "Propose a savings goal.", "side_effect": "write", "input_schema": { "type": "object" } },
+    { "name": "propose_create_payee_rule", "description": "Propose a payee rule.", "side_effect": "write", "input_schema": { "type": "object" } },
+    { "name": "get_net_worth", "description": "Get net worth.", "side_effect": "read", "input_schema": { "type": "object" } },
+    { "name": "get_income_expenses", "description": "Get income and expenses.", "side_effect": "read", "input_schema": { "type": "object" } },
+    { "name": "get_cash_flow", "description": "Get cash flow.", "side_effect": "read", "input_schema": { "type": "object" } },
+    { "name": "get_dashboard_snapshot", "description": "Get the dashboard summary.", "side_effect": "read", "input_schema": { "type": "object" } },
+    { "name": "search_all", "description": "Search across finance data.", "side_effect": "read", "input_schema": { "type": "object" } },
+    { "name": "list_transactions", "description": "List transactions.", "side_effect": "read", "input_schema": { "type": "object" } }
+  ],
+  "backend": {
+    "type": "mcp",
+    "base_url": { "from": "config", "field": "base_url" },
+    "auth": { "type": "api_key" },
+    "transport_type": "streamable_http",
+    "tool_contract": "names_only",
+    "test_action": "list_accounts"
+  }
+}

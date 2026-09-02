@@ -182,6 +182,10 @@ def _seed_unavailable(manifest: Manifest) -> None:
             supported_actions_json=row["supported_actions_json"],
             backend_type=row["backend_type"],
             backend_json=row["backend_json"],
+            endpoint_url=row.get("endpoint_url"),
+            transport_type=row.get("transport_type"),
+            capabilities_json=row.get("capabilities_json"),
+            tool_snapshot_json=row.get("tool_snapshot_json"),
         )
         return
 
@@ -195,6 +199,10 @@ def _seed_unavailable(manifest: Manifest) -> None:
         required_credential_fields=json.loads(row["required_credential_fields_json"]),
         backend_type=row["backend_type"],
         backend_json=row["backend_json"],
+        endpoint_url=row.get("endpoint_url"),
+        transport_type=row.get("transport_type"),
+        capabilities_json=row.get("capabilities_json"),
+        tool_snapshot_json=row.get("tool_snapshot_json"),
     )
 
 
@@ -212,6 +220,10 @@ def _upsert_connector_type(manifest: Manifest) -> dict:
             supported_actions_json=row["supported_actions_json"],
             backend_type=row["backend_type"],
             backend_json=row["backend_json"],
+            endpoint_url=row.get("endpoint_url"),
+            transport_type=row.get("transport_type"),
+            capabilities_json=row.get("capabilities_json"),
+            tool_snapshot_json=row.get("tool_snapshot_json"),
         )
         return connector_service.get_connector_type(manifest.id)
 
@@ -225,6 +237,10 @@ def _upsert_connector_type(manifest: Manifest) -> dict:
         required_credential_fields=json.loads(row["required_credential_fields_json"]),
         backend_type=row["backend_type"],
         backend_json=row["backend_json"],
+        endpoint_url=row.get("endpoint_url"),
+        transport_type=row.get("transport_type"),
+        capabilities_json=row.get("capabilities_json"),
+        tool_snapshot_json=row.get("tool_snapshot_json"),
     )
 
 

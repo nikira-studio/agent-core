@@ -200,7 +200,14 @@ def _parse_json_object(value: Optional[str]) -> Optional[dict]:
 
 def effective_mcp_endpoint(binding: dict, connector_type: dict) -> str:
     """One endpoint-selection rule shared by test, discovery, and execution."""
-    return binding.get("endpoint_url_override") or connector_type.get("endpoint_url") or ""
+    if binding.get("endpoint_url_override"):
+        return binding["endpoint_url_override"]
+    if connector_type.get("backend_type") == "mcp":
+        config = _parse_json_object(binding.get("config_json")) or {}
+        endpoint = config.get("base_url") or config.get("endpoint_url")
+        if isinstance(endpoint, str) and endpoint.strip():
+            return endpoint.strip()
+    return connector_type.get("endpoint_url") or ""
 
 
 _NON_STRUCTURAL_SCHEMA_KEYS = {
@@ -326,6 +333,15 @@ def validate_mcp_binding_contract(
     actual = tools if tools is not None else discover_mcp_binding_tools(
         binding, connector_type, credential
     )
+    backend = _parse_json_object(connector_type.get("backend_json")) or {}
+    if backend.get("tool_contract") == "names_only":
+        expected_names = {tool.get("name") for tool in expected if tool.get("name")}
+        actual_names = {tool.get("name") for tool in actual if tool.get("name")}
+        if expected_names == actual_names:
+            return
+        raise ValueError(
+            "Endpoint tool names do not match this connector type; update the adapter or register a separate connector type"
+        )
     if mcp_tool_contract_fingerprint(actual) != mcp_tool_contract_fingerprint(expected):
         raise ValueError(
             "Endpoint tool contract does not match this connector type; register a separate connector type"

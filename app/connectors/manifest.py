@@ -87,6 +87,14 @@ ADAPTER_MANIFEST_SCHEMA = {
                     ]
                 },
                 "auth": {"type": "object"},
+                "transport_type": {
+                    "type": "string",
+                    "enum": ["streamable_http", "http"],
+                },
+                "tool_contract": {
+                    "type": "string",
+                    "enum": ["strict", "names_only"],
+                },
                 "test_action": {"type": "string"},
                 "session": {"type": "object"},
                 "refresh": {"type": "object"},
@@ -145,16 +153,33 @@ class Manifest:
             auth_type = "api_key"
         else:
             auth_type = "none"
+        backend_type = self.backend.get("type")
+        is_mcp = backend_type == "mcp"
+        mcp_tools = [
+            {
+                "name": action["name"],
+                "description": action.get("description", ""),
+                "inputSchema": action.get("input_schema", {"type": "object"}),
+                "annotations": {
+                    "readOnlyHint": action.get("side_effect", "none") in ("none", "read"),
+                },
+            }
+            for action in self.actions
+        ]
         return {
             "id": self.id,
             "display_name": self.display_name or self.id,
             "description": self.description or "",
             "version": self.version,
-            "provider_type": "builtin",
+            "provider_type": "mcp" if is_mcp else "builtin",
             "auth_type": auth_type,
             "required_credential_fields_json": json.dumps(credential_fields),
             "supported_actions_json": json.dumps(self.actions),
-            "backend_type": self.backend.get("type"),
+            "endpoint_url": self.backend.get("base_url") if isinstance(self.backend.get("base_url"), str) else None,
+            "transport_type": self.backend.get("transport_type") if is_mcp else None,
+            "capabilities_json": json.dumps({"tools": True}) if is_mcp else None,
+            "tool_snapshot_json": json.dumps({"tools": mcp_tools}) if is_mcp else None,
+            "backend_type": backend_type,
             "backend_json": json.dumps(self.backend),
         }
 

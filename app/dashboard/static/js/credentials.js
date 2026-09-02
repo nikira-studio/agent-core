@@ -45,6 +45,7 @@ async function editCredential(id) {
   document.getElementById('edit-credential-name').value = c.name || '';
   document.getElementById('edit-credential-label').value = c.label || '';
   document.getElementById('edit-credential-scope').value = c.scope || '';
+  document.getElementById('edit-credential-scope').dataset.originalScope = c.scope || '';
   document.getElementById('edit-credential-value').value = '';
   // Back to a date in the viewer's timezone, so what they saved is what they see.
   document.getElementById('edit-credential-expires').value = c.expires_at
@@ -58,12 +59,17 @@ async function submitEditCredential(e) {
   const id = document.getElementById('edit-credential-id').value;
   const replacementValue = document.getElementById('edit-credential-value').value;
   const body = {
+    scope: document.getElementById('edit-credential-scope').value,
     name: document.getElementById('edit-credential-name').value,
     label: document.getElementById('edit-credential-label').value || null,
   };
   if (replacementValue) body.value = replacementValue;
   // Sent even when empty: clearing the field is how an expiry is removed.
   body.expires_at = endOfDayUtc(document.getElementById('edit-credential-expires').value);
+  const originalScope = document.getElementById('edit-credential-scope').dataset.originalScope;
+  if (body.scope !== originalScope && !confirm(
+    'Move this credential from ' + originalScope + ' to ' + body.scope + '? Linked connector bindings will stay in their current scope.'
+  )) return;
   const j = await apiFetch('/api/credentials/entries/' + id, { method: 'PUT', body: JSON.stringify(body) });
   if (j.ok) {
     showToast('Credential updated', 'success');
