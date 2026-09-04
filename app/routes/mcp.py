@@ -1,14 +1,14 @@
 import asyncio
 import json
 import logging
-import re
+
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse, Response
+from jsonschema import Draft202012Validator
 
 from app.security.dependencies import get_mcp_request_context
 from app.security.scope_enforcer import ScopeEnforcer
-from app.security.context import RequestContext
-from app.security.pii_detector import contains_pii
+from app.security.effective_authority import EffectiveAuthority
 from app.branding import APP_NAME, CREDENTIAL_PREFIX, MCP_SERVER_DESCRIPTION
 from app.services import (
     memory_service,
@@ -23,10 +23,14 @@ from app.services import (
 )
 from app.config import settings
 from app.models.enums import MEMORY_CLASSES, SOURCE_KINDS
+from app.operations.connector_actions import run_connector_action
+from app.operations.memory import (
+    MemoryOperationError,
+    validate_search_query,
+    write_memory as run_memory_write,
+)
 
 logger = logging.getLogger(__name__)
-
-
 
 router = APIRouter(prefix="", tags=["mcp"])
 
@@ -614,6 +618,10 @@ _REQUIRED_PARAMS = {
     tool["name"]: tuple(tool.get("inputSchema", {}).get("required", []))
     for tool in MANIFEST["tools"]
 }
+_TOOL_VALIDATORS = {
+    tool["name"]: Draft202012Validator(tool["inputSchema"])
+    for tool in MANIFEST["tools"]
+}
 
 # The schema already explains each parameter. Reusing those descriptions means a
 # caller that omits one is told what it is for, not just that it is missing.
@@ -630,6 +638,30 @@ def _missing_required_params(tool: str, params: dict) -> list[str]:
     """Required parameters the caller left out, per the published manifest."""
     required = _REQUIRED_PARAMS.get(tool, ())
     return [name for name in required if params.get(name) is None]
+
+
+def _invalid_params_message(tool: str, params) -> str | None:
+    if not isinstance(params, dict):
+        return "params must be an object"
+    validator = _TOOL_VALIDATORS.get(tool)
+    if validator is None:
+        return None
+    # Keep domain-specific enum errors (for example INVALID_CLASS) stable; the
+    # manifest validator owns structural/type failures that would otherwise
+    # reach handlers as TypeError or ValueError.
+    errors = sorted(
+        (
+            error
+            for error in validator.iter_errors(params)
+            if error.validator not in {"enum", "required"}
+        ),
+        key=lambda error: tuple(str(part) for part in error.path),
+    )
+    if not errors:
+        return None
+    error = errors[0]
+    location = ".".join(str(part) for part in error.path)
+    return f"{location}: {error.message}" if location else error.message
 
 
 def _missing_params_message(tool: str, missing: list[str]) -> str:
@@ -684,7 +716,7 @@ def _mcp_tool_result_from_custom_response(response: JSONResponse) -> JSONRespons
 
 
 def _maybe_offload_tool_result(
-    tool_name: str, text: str, is_error: bool, ctx: RequestContext
+    tool_name: str, text: str, is_error: bool, ctx: EffectiveAuthority
 ) -> str:
     """Offload oversized successful tool results to spill storage.
 
@@ -722,26 +754,10 @@ def _maybe_offload_tool_result(
     return json.dumps(spill, indent=2, default=str)
 
 
-def _query_noise_free(query: str) -> bool:
-    q = query.strip()
-    if len(q) <= 2:
-        return False
-    trivial = [
-        r"^(the|a|an|is|are|was|were|i|you|he|she|it|we|they)\s*$",
-        r"^[.,;:!?]+$",
-    ]
-    for p in trivial:
-        if re.match(p, q, re.IGNORECASE):
-            return False
-    if contains_pii(q):
-        return False
-    return True
 
 
 
-
-
-def _memory_provenance(ctx: RequestContext, source_kind: str, scope: str) -> str:
+def _memory_provenance(ctx: EffectiveAuthority, source_kind: str, scope: str) -> str:
     return memory_service.provenance_for_write(
         actor_type=ctx.actor_type,
         actor_id=ctx.actor_id,
@@ -835,14 +851,14 @@ def _compact_memory_record(record: dict) -> dict:
 
 
 @router.get("/mcp")
-def get_mcp_manifest(ctx: RequestContext = Depends(get_mcp_request_context)):
+def get_mcp_manifest(ctx: EffectiveAuthority = Depends(get_mcp_request_context)):
     return JSONResponse(content=MANIFEST)
 
 
 @router.post("/mcp")
 async def handle_mcp_tool(
     request: Request,
-    ctx: RequestContext = Depends(get_mcp_request_context),
+    ctx: EffectiveAuthority = Depends(get_mcp_request_context),
 ):
     try:
         body = await request.json()
@@ -855,7 +871,7 @@ async def handle_mcp_tool(
     return await _handle_custom_mcp_tool(body, ctx)
 
 
-async def _handle_mcp_jsonrpc(body: dict, request: Request, ctx: RequestContext):
+async def _handle_mcp_jsonrpc(body: dict, request: Request, ctx: EffectiveAuthority):
     request_id = body.get("id")
     method = body.get("method")
 
@@ -920,7 +936,7 @@ async def _handle_mcp_jsonrpc(body: dict, request: Request, ctx: RequestContext)
     return _jsonrpc_error(request_id, -32601, f"Method not found: {method}")
 
 
-async def _handle_custom_mcp_tool(body: dict, ctx: RequestContext):
+async def _handle_custom_mcp_tool(body: dict, ctx: EffectiveAuthority):
     enforcer = ScopeEnforcer(
         ctx.read_scopes,
         ctx.write_scopes,
@@ -934,6 +950,10 @@ async def _handle_custom_mcp_tool(body: dict, ctx: RequestContext):
 
     if not tool:
         return _mcp_error("TOOL_REQUIRED", "tool name is required", 400)
+
+    invalid = _invalid_params_message(tool, params)
+    if invalid:
+        return _mcp_error("INVALID_PARAMS", invalid, 400)
 
     missing = _missing_required_params(tool, params)
     if missing:
@@ -1006,13 +1026,10 @@ async def _handle_custom_mcp_tool(body: dict, ctx: RequestContext):
         return JSONResponse(content={"ok": True, "data": result})
 
     if tool == "memory_search":
-        query_text = params.get("query", "").strip()
-        if not _query_noise_free(query_text):
-            return _mcp_error(
-                "QUERY_NOISE",
-                "Query is too trivial or contains credential-like pattern",
-                400,
-            )
+        try:
+            query_text = validate_search_query(params.get("query", ""))
+        except MemoryOperationError as exc:
+            return _mcp_error(exc.code, exc.message, exc.status_code)
         memory_class = params.get("memory_class")
         if memory_class and memory_class not in MEMORY_CLASSES:
             return _mcp_error(
@@ -1169,112 +1186,13 @@ async def _handle_custom_mcp_tool(body: dict, ctx: RequestContext):
         )
 
     elif tool == "memory_write":
-        scope = params["scope"]
-        if not ctx.can("memory", "write", scope=scope):
-            return _mcp_error("SCOPE_DENIED", "Access denied to this scope", 403)
-        if params.get("execution_id"):
-            from app.services import workspace_sync_service
-            try:
-                workspace_sync_service.validate_execution(
-                    execution_id=params["execution_id"], agent_id=ctx.agent_id,
-                    user_id=ctx.user_id or "", memory_scope=scope,
-                )
-            except PermissionError:
-                return _mcp_error("EXECUTION_OWNERSHIP", "Execution belongs to another agent", 403)
-            except ValueError as exc:
-                return _mcp_error(str(exc), "Invalid execution", 400)
-        if params["memory_class"] not in MEMORY_CLASSES:
-            return _mcp_error(
-                "INVALID_CLASS", f"memory_class must be one of {MEMORY_CLASSES}", 400
-            )
-        source_kind = params.get("source_kind", "agent_inference")
-        if source_kind not in SOURCE_KINDS:
-            return _mcp_error(
-                "INVALID_SOURCE_KIND", f"source_kind must be one of {SOURCE_KINDS}", 400
-            )
-        confidence = params.get("confidence", 0.5)
-        importance = params.get("importance", 0.5)
-        if not 0.0 <= confidence <= 1.0:
-            return _mcp_error(
-                "INVALID_CONFIDENCE", "confidence must be between 0.0 and 1.0", 400
-            )
-        if not 0.0 <= importance <= 1.0:
-            return _mcp_error(
-                "INVALID_IMPORTANCE", "importance must be between 0.0 and 1.0", 400
-            )
-        supersedes_id = params.get("supersedes_id")
-        if supersedes_id:
-            old = memory_service.get_memory_record(supersedes_id)
-            if not old:
-                return _mcp_error("NOT_FOUND", "Record to supersede not found", 404)
-            if old["record_status"] != "active":
-                return _mcp_error(
-                    "INVALID_SUPERSESSION", "Cannot supersede non-active record", 400
-                )
-            if not ctx.can("memory", "write", scope=old["scope"]):
-                return _mcp_error(
-                    "SCOPE_DENIED",
-                    "Access denied to scope of record being superseded",
-                    403,
-                )
         try:
-            record, pii_flag = await asyncio.to_thread(
-                memory_service.write_memory,
-                content=params["content"],
-                memory_class=params["memory_class"],
-                scope=scope,
-                topic=params.get("topic"),
-                confidence=confidence,
-                importance=importance,
-                source_kind=source_kind,
-                supersedes_id=supersedes_id,
-                provenance_json=_memory_provenance(ctx, source_kind, scope),
-                subject_anchor=params.get("subject_anchor"),
-                slot_key=params.get("slot_key"),
-                valid_from=params.get("valid_from"),
-                valid_to=params.get("valid_to"),
-                last_confirmed_at=params.get("last_confirmed_at"),
-                expires_at=params.get("expires_at"),
-                source_execution_id=params.get("execution_id"),
+            payload = await run_memory_write(
+                params, ctx, channel="mcp", route="/mcp"
             )
-        except ValueError as e:
-            return _mcp_error("INVALID_INPUT", str(e), 400)
-        if pii_flag == "PII_DETECTED":
-            return _mcp_error(
-                "PII_DETECTED",
-                "Content contains PII and cannot be written to shared scope",
-                422,
-            )
-        audit_service.write_event(
-            actor_type="agent",
-            actor_id=ctx.agent_id,
-            action="memory_write",
-            resource_type="memory_record",
-            resource_id=record["id"],
-            result="success",
-            details=_memory_audit_details(
-                record,
-                action="create",
-                source_kind=source_kind,
-            ),
-        )
-        # Advisory only, and computed after the write so a slow embedding check
-        # can never cost the caller its record.
-        payload = {"record": record}
-        warnings = await asyncio.to_thread(
-            memory_service.assess_memory_write,
-            content=params["content"],
-            scope=scope,
-            memory_class=params["memory_class"],
-            topic=params.get("topic"),
-            exclude_id=record["id"],
-            subject_anchor=params.get("subject_anchor"),
-        )
-        if warnings:
-            payload["warnings"] = warnings
-        return JSONResponse(
-            content={"ok": True, "data": payload}, status_code=201
-        )
+        except MemoryOperationError as exc:
+            return _mcp_error(exc.code, exc.message, exc.status_code)
+        return JSONResponse(content={"ok": True, "data": payload}, status_code=201)
 
     elif tool == "memory_pinned":
         candidates = ctx.default_recall_scopes or ctx.read_scopes
@@ -1756,7 +1674,6 @@ async def _handle_custom_mcp_tool(body: dict, ctx: RequestContext):
         status = params.get("status")
         limit = min(int(params.get("limit", 50) or 50), 100)
         offset = max(int(params.get("offset", 0) or 0), 0)
-        fetch_limit = min(max(limit + offset, 50), 200)
         enforcer = ScopeEnforcer(
             ctx.read_scopes,
             ctx.write_scopes,
@@ -1764,25 +1681,29 @@ async def _handle_custom_mcp_tool(body: dict, ctx: RequestContext):
             is_admin=ctx.is_admin,
             active_workspace_ids=ctx.active_workspace_ids,
         )
-        raw_activities = activity_service.list_activities(
-            status=status,
-            limit=fetch_limit,
-            offset=0,
+        authorized_scopes = (
+            None
+            if ctx.is_admin or ctx.is_delegated
+            else enforcer.filter_readable_scopes(ctx.read_scopes)
         )
-        activities = []
-        for activity in raw_activities:
-            memory_scope = activity.get("memory_scope") or f"agent:{activity['agent_id']}"
-            if ctx.is_delegated:
-                if not ctx.can_resource("activity", "read", activity["id"]):
-                    continue
-            elif not ctx.is_admin and not enforcer.can_read(memory_scope):
-                continue
-            if agent_filter and activity.get("agent_id") != agent_filter and activity.get("assigned_agent_id") != agent_filter:
-                continue
-            if assigned_filter and activity.get("assigned_agent_id") != assigned_filter:
-                continue
-            activities.append(activity)
-        activities = activities[offset : offset + limit]
+        authorized_ids = (
+            [
+                resource_id
+                for resource, operation, resource_id in ctx.resource_permissions
+                if resource == "activity" and operation == "read"
+            ]
+            if ctx.is_delegated
+            else None
+        )
+        activities = activity_service.list_activities(
+            status=status,
+            agent_id=agent_filter,
+            assigned_agent_id=assigned_filter,
+            authorized_scopes=authorized_scopes,
+            authorized_resource_ids=authorized_ids,
+            limit=limit,
+            offset=offset,
+        )
         return JSONResponse(
             content={
                 "ok": True,
@@ -1794,30 +1715,31 @@ async def _handle_custom_mcp_tool(body: dict, ctx: RequestContext):
         query = params.get("query") or ""
         limit = min(int(params.get("limit", 20) or 20), 100)
         offset = max(int(params.get("offset", 0) or 0), 0)
-        # Scope filtering happens after the query, same as activity_list, so
-        # over-fetch to keep a page full once unreadable rows are dropped.
-        fetch_limit = min(max((limit + offset) * 3, 50), 300)
-        raw_activities = activity_service.search_activities(
+        authorized_scopes = (
+            None
+            if ctx.is_admin or ctx.is_delegated
+            else enforcer.filter_readable_scopes(ctx.read_scopes)
+        )
+        authorized_ids = (
+            [
+                resource_id
+                for resource, operation, resource_id in ctx.resource_permissions
+                if resource == "activity" and operation == "read"
+            ]
+            if ctx.is_delegated
+            else None
+        )
+        activities = activity_service.search_activities(
             query,
             agent_id=params.get("agent_id"),
             status=params.get("status"),
             memory_scope=params.get("memory_scope"),
             since=params.get("since"),
-            limit=fetch_limit,
-            offset=0,
+            authorized_scopes=authorized_scopes,
+            authorized_resource_ids=authorized_ids,
+            limit=limit,
+            offset=offset,
         )
-        activities = []
-        for activity in raw_activities:
-            memory_scope = (
-                activity.get("memory_scope") or f"agent:{activity['agent_id']}"
-            )
-            if ctx.is_delegated:
-                if not ctx.can_resource("activity", "read", activity["id"]):
-                    continue
-            elif not ctx.is_admin and not enforcer.can_read(memory_scope):
-                continue
-            activities.append(activity)
-        activities = activities[offset : offset + limit]
         return JSONResponse(
             content={
                 "ok": True,
@@ -1872,32 +1794,27 @@ async def _handle_custom_mcp_tool(body: dict, ctx: RequestContext):
         agent_filter = params.get("agent_id")
         limit = min(int(params.get("limit", 50) or 50), 100)
         offset = max(int(params.get("offset", 0) or 0), 0)
-        fetch_limit = min(max(limit + offset, 50), 200)
-        raw_briefings = briefing_service.list_briefings(
+        authorized_scopes = (
+            None
+            if ctx.is_admin or ctx.is_delegated
+            else enforcer.filter_readable_scopes(ctx.read_scopes)
+        )
+        authorized_ids = (
+            [
+                resource_id
+                for resource, operation, resource_id in ctx.resource_permissions
+                if resource == "activity" and operation == "read"
+            ]
+            if ctx.is_delegated
+            else None
+        )
+        briefings = briefing_service.list_briefings(
             agent_id=agent_filter if ctx.is_admin else None,
-            limit=fetch_limit,
-            offset=0,
+            authorized_scopes=authorized_scopes,
+            authorized_resource_ids=authorized_ids,
+            limit=limit,
+            offset=offset,
         )
-        enforcer = ScopeEnforcer(
-            ctx.read_scopes,
-            ctx.write_scopes,
-            ctx.agent_id,
-            is_admin=ctx.is_admin,
-            active_workspace_ids=ctx.active_workspace_ids,
-        )
-        briefings = []
-        for briefing in raw_briefings:
-            memory_scope = briefing.get("memory_scope") or f"agent:{briefing.get('agent_id')}"
-            if ctx.is_delegated:
-                activity_id = briefing.get("id")
-                if not ctx.can("briefing", "read", scope=memory_scope) or not ctx.can_resource("activity", "read", activity_id):
-                    continue
-            elif not ctx.is_admin and not enforcer.can_read(memory_scope):
-                continue
-            if agent_filter and briefing.get("agent_id") != agent_filter and briefing.get("assigned_agent_id") != agent_filter:
-                continue
-            briefings.append(briefing)
-        briefings = briefings[offset : offset + limit]
         return JSONResponse(
             content={
                 "ok": True,
@@ -2067,7 +1984,8 @@ async def _handle_custom_mcp_tool(body: dict, ctx: RequestContext):
     elif tool == "connectors_summary":
         from app.services import connector_service
 
-        summary = connector_service.build_capability_summary(
+        summary = await asyncio.to_thread(
+            connector_service.build_capability_summary,
             enforcer,
             connector_type_id=params.get("connector_type_id"),
             scope=params.get("scope"),
@@ -2076,33 +1994,18 @@ async def _handle_custom_mcp_tool(body: dict, ctx: RequestContext):
         return JSONResponse(content={"ok": True, "data": summary})
 
     elif tool == "connectors_run":
-        from app.services import connector_service
-
-        binding = connector_service.get_binding(params["binding_id"])
-        if not binding:
-            return _mcp_error("NOT_FOUND", "Binding not found", 200)
         action = params["action"]
-        if ctx.is_delegated:
-            if not ctx.can_binding_action(params["binding_id"], action, scope=binding["scope"]):
-                connector_service.audit_delegated_execution_denial(ctx, params["binding_id"], action)
-                return _mcp_error("SCOPE_DENIED", "Access denied to this binding action", 200)
-        elif not enforcer.can_read(binding["scope"]):
-            return _mcp_error("SCOPE_DENIED", "Access denied to this binding", 200)
-        if not binding.get("enabled"):
-            return _mcp_error("DISABLED", "Binding is disabled", 200)
-
-        connector_type = connector_service.get_connector_type(
-            binding["connector_type_id"]
-        )
-        if not connector_type:
-            return _mcp_error("NOT_FOUND", "Connector type not found", 200)
-        result = await asyncio.to_thread(
-            connector_service.execute_authorized_binding_action_with_logging,
+        outcome = await asyncio.to_thread(
+            run_connector_action,
             params["binding_id"],
             action,
             params.get("params") or {},
             ctx,
         )
+        if not outcome.ok:
+            return _mcp_error(outcome.error_code, outcome.error_message, 200)
+        binding = outcome.binding
+        result = outcome.result
         if result.get("success") and "body" in result:
             new_body, exported_count = artifact_export_service.export_connector_body(
                 result["body"]
@@ -2134,21 +2037,6 @@ async def _handle_custom_mcp_tool(body: dict, ctx: RequestContext):
         if not result.get("success") and result.get("error_code") == "RATE_LIMITED":
             return _mcp_error("RATE_LIMITED", result["error"], 200)
 
-        duration_ms = result.get("duration_ms")
-        audit_service.write_event(
-            actor_type=ctx.actor_type,
-            actor_id=ctx.actor_id,
-            action="connector_action_executed",
-            resource_type="connector_binding",
-            resource_id=params["binding_id"],
-            result=result.get("success") and "success" or "failure",
-            details={
-                "connector_type_id": binding["connector_type_id"],
-                "action": params["action"],
-                "duration_ms": duration_ms,
-                "transport": result.get("transport"),
-            },
-        )
         return JSONResponse(content={"ok": True, "data": result})
 
     else:

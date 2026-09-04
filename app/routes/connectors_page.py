@@ -204,14 +204,13 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
         active_workspace_ids=ctx.active_workspace_ids,
     )
 
-    # Scan the adapter library once and reuse it for both the connector-type
-    # filter and the per-type binding guidance (avoids a second full scan).
+    # Adapter setup metadata belongs to the filesystem-backed browse catalog,
+    # not the service catalog.  Fetch it separately so ordinary connector-type
+    # reads elsewhere stay SQLite-only.
     available_adapters = {
         entry["id"]: entry for entry in await asyncio.to_thread(adapter_loader.list_available_adapters)
     }
-    connector_types = connector_service.list_connector_types(
-        available_adapters=available_adapters
-    )
+    connector_types = connector_service.list_connector_types()
     binding_guidance = {
         ct["id"]: _binding_guidance_for_connector_type(
             ct, available_adapters.get(ct["id"])
@@ -227,23 +226,32 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
     visible_binding_count = len(visible_bindings)
     enabled_binding_count = len([b for b in visible_bindings if b.get("enabled")])
     failed_binding_count = len([b for b in visible_bindings if b.get("last_error")])
+    readable_scopes = None if ctx.is_admin else enforcer.filter_readable_scopes(ctx.read_scopes)
     with get_db() as conn:
-        execution_rows = conn.execute(
-            """
-            SELECT ce.id, ce.binding_id, ce.action, ce.result_status, ce.error_message, ce.failure_category,
-                   ce.executed_at, cb.name as binding_name, cb.scope, ct.display_name as connector_display_name
-            FROM connector_executions ce
-            JOIN connector_bindings cb ON ce.binding_id = cb.id
-            JOIN connector_types ct ON cb.connector_type_id = ct.id
-            ORDER BY ce.executed_at DESC
-            LIMIT 40
-            """
-        ).fetchall()
-    visible_executions = [
-        dict(row)
-        for row in execution_rows
-        if ctx.is_admin or enforcer.can_read(row["scope"])
-    ][:8]
+        scope_clause = ""
+        scope_params = []
+        if readable_scopes is not None:
+            if not readable_scopes:
+                execution_rows = []
+            else:
+                placeholders = ",".join("?" for _ in readable_scopes)
+                scope_clause = f"WHERE cb.scope IN ({placeholders})"
+                scope_params = readable_scopes
+        if readable_scopes is None or readable_scopes:
+            execution_rows = conn.execute(
+                f"""
+                SELECT ce.id, ce.binding_id, ce.action, ce.result_status, ce.error_message, ce.failure_category,
+                       ce.executed_at, cb.name as binding_name, cb.scope, ct.display_name as connector_display_name
+                FROM connector_executions ce
+                JOIN connector_bindings cb ON ce.binding_id = cb.id
+                JOIN connector_types ct ON cb.connector_type_id = ct.id
+                {scope_clause}
+                ORDER BY ce.executed_at DESC
+                LIMIT 8
+                """,
+                scope_params,
+            ).fetchall()
+    visible_executions = [dict(row) for row in execution_rows]
 
     workspaces = (
         workspace_service.list_workspaces()
@@ -618,6 +626,7 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
             </select>
           </div>
           <div id="binding-existing-credential-fields" class="form-group">
+            <label for="binding-credential">Stored Credential</label>
             <select id="binding-credential">
               <option value="">-- Select stored credential --</option>
               {credential_opts}
@@ -885,7 +894,10 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
     </div>
     """
 
-    extra_js = '<script src="/static/js/connectors.js?v=20260630"></script>'
+    extra_js = (
+        '<script src="/static/js/adapter-actions.js?v=20260902"></script>'
+        '<script src="/static/js/connectors.js?v=20260902"></script>'
+    )
     return render_page("Connectors", body, "/connectors", extra_js, session=session)
 
 
@@ -926,10 +938,11 @@ async def connectors_adapters_page(
       <div id="adapter-grid" class="connector-types-grid">{adapter_cards or "<div class='empty'>No adapters available yet.</div>"}</div>
     </div>
     """
-
-
     body = body.replace("Agent Core", APP_NAME)
-    extra_js = '<script src="/static/js/connectors-adapters.js?v=20260626"></script>'
+    extra_js = (
+        '<script src="/static/js/adapter-actions.js?v=20260902"></script>'
+        '<script src="/static/js/connectors-adapters.js?v=20260902"></script>'
+    )
     return render_page("Browse Adapters", body, "/connectors", extra_js, session=session)
 
 

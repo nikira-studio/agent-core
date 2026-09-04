@@ -87,6 +87,16 @@ class TestCliEngineTemplating:
         result = engine._render("dir={{ config.workdir }}", {}, {"workdir": "/tmp"})
         assert result == "dir=/tmp"
 
+    def test_render_keyless_config_uses_the_config_object(self):
+        engine = CliEngine(make_ct({"bin": "gh", "commands": {}}))
+        result = engine._render("{{ config }}", {"wrong": True}, {"right": True})
+        assert result == "{'right': True}"
+
+    def test_render_keyless_credential_does_not_leak_params(self):
+        engine = CliEngine(make_ct({"bin": "gh", "commands": {}}))
+        result = engine._render("{{ cred }}", {"secret": "not-a-credential"}, {})
+        assert result == "{{ cred }}"
+
     def test_render_multiple_placeholders(self):
         engine = CliEngine(make_ct({"bin": "gh", "commands": {}}))
         result = engine._render(

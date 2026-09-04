@@ -10,6 +10,7 @@ from typing import Any, Optional
 
 from app.connectors import BaseConnector
 from app.connectors.base import Credential
+from app.connectors.value_utils import extract_jsonpath, parse_json_object
 from app.connectors.errors import (
     AuthExpiredError,
     RateLimitedError,
@@ -129,7 +130,7 @@ class HttpEngine(BaseConnector):
                 "error": f"No request defined for action: {action}",
             }
 
-        config = _parse_json(config_json)
+        config = parse_json_object(config_json)
         defaults = config.get("default_params", {})
         if not isinstance(defaults, dict):
             defaults = {}
@@ -427,7 +428,7 @@ class HttpEngine(BaseConnector):
         first_action = next(iter(request_def.keys()), None)
         if not first_action:
             return {"session": current_session}
-        config = _parse_json(config_json)
+        config = parse_json_object(config_json)
         req_tpl = request_def[first_action]
         req = self._build_request(req_tpl, {}, config)
         self._apply_auth(req, credential, current_session, config)
@@ -645,16 +646,7 @@ class HttpEngine(BaseConnector):
         return 200 <= resp.status < 300
 
     def _extract_jsonpath(self, path: str, body: Any, resp) -> Any:
-        if path.startswith("$."):
-            parts = path[2:].split(".")
-            current = body
-            for part in parts:
-                if isinstance(current, dict):
-                    current = current.get(part)
-                else:
-                    return None
-            return current
-        return body
+        return extract_jsonpath(path, body)
 
 
 class _HTTPErrorResponse:
@@ -672,16 +664,6 @@ class _HTTPErrorResponse:
 
     def read(self) -> bytes:
         return self._body
-
-
-def _parse_json(config_json: Optional[str]) -> dict:
-    if not config_json:
-        return {}
-    try:
-        val = json.loads(config_json)
-        return val if isinstance(val, dict) else {}
-    except json.JSONDecodeError:
-        return {}
 
 
 def _render_dict(

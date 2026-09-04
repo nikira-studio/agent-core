@@ -246,37 +246,24 @@ def dashboard_home(request: Request, session: dict = Depends(require_auth)):
     is_admin = session.get("role") == "admin"
     user_scope = f"user:{session['user_id']}"
 
-    def count_rows(table: str, where: str = "1=1", params: tuple = ()) -> int:
-        with get_db() as conn:
-            row = conn.execute(
-                f"SELECT COUNT(*) AS count FROM {table} WHERE {where}", params
-            ).fetchone()
-            return int(row["count"] if row else 0)
-
-    def count_connector_executions(where: str = "1=1", params: tuple = ()) -> int:
-        with get_db() as conn:
-            row = conn.execute(
-                f"""
-                SELECT COUNT(*) AS count
-                FROM connector_executions ce
-                JOIN connector_bindings cb ON ce.binding_id = cb.id
-                WHERE {where}
-                """,
-                params,
-            ).fetchone()
-            return int(row["count"] if row else 0)
-
     if is_admin:
         agents = list_agents()
         workspaces = list_workspaces()
         connector_types = connector_service.list_connector_types()
         agent_count = len([a for a in agents if a.get("is_active")])
         workspace_count = len([p for p in workspaces if p.get("is_active")])
-        memory_count = count_rows("memory_records", "record_status = 'active'")
-        enabled_connector_binding_count = count_rows(
-            "connector_bindings", "enabled = 1"
-        )
-        connector_execution_count = count_rows("connector_executions")
+        with get_db() as conn:
+            counts = conn.execute(
+                """
+                SELECT
+                    (SELECT COUNT(*) FROM memory_records WHERE record_status = 'active') AS memory_count,
+                    (SELECT COUNT(*) FROM connector_bindings WHERE enabled = 1) AS binding_count,
+                    (SELECT COUNT(*) FROM connector_executions) AS execution_count,
+                    (SELECT COUNT(*) FROM agent_activity WHERE status IN ('active', 'reassigned')) AS task_count,
+                    (SELECT COUNT(*) FROM delegation_requests WHERE status = 'pending') AS delegation_count,
+                    (SELECT COUNT(*) FROM users) AS user_count
+                """
+            ).fetchone()
         recent_activity = activity_service.list_activities(limit=8)
         attention = activity_service.list_attention_activities(limit=8)
     else:
@@ -285,13 +272,19 @@ def dashboard_home(request: Request, session: dict = Depends(require_auth)):
         connector_types = connector_service.list_connector_types()
         agent_count = len([a for a in agents if a.get("is_active")])
         workspace_count = len([p for p in workspaces if p.get("is_active")])
-        memory_count = count_rows(
-            "memory_records", "scope = ? AND record_status = 'active'", (user_scope,)
-        )
-        enabled_connector_binding_count = count_rows(
-            "connector_bindings", "scope = ? AND enabled = 1", (user_scope,)
-        )
-        connector_execution_count = count_connector_executions("cb.scope = ?", (user_scope,))
+        with get_db() as conn:
+            counts = conn.execute(
+                """
+                SELECT
+                    (SELECT COUNT(*) FROM memory_records WHERE scope = ? AND record_status = 'active') AS memory_count,
+                    (SELECT COUNT(*) FROM connector_bindings WHERE scope = ? AND enabled = 1) AS binding_count,
+                    (SELECT COUNT(*) FROM connector_executions ce JOIN connector_bindings cb ON ce.binding_id = cb.id WHERE cb.scope = ?) AS execution_count,
+                    (SELECT COUNT(*) FROM agent_activity WHERE user_id = ? AND status IN ('active', 'reassigned')) AS task_count,
+                    (SELECT COUNT(*) FROM delegation_requests WHERE status = 'pending' AND target_user_id = ?) AS delegation_count,
+                    0 AS user_count
+                """,
+                (user_scope, user_scope, user_scope, session["user_id"], session["user_id"]),
+            ).fetchone()
         recent_activity = activity_service.list_activities(
             user_id=session["user_id"], limit=8
         )
@@ -299,20 +292,11 @@ def dashboard_home(request: Request, session: dict = Depends(require_auth)):
             user_id=session["user_id"], limit=8
         )
 
-    active_task_count = count_rows(
-        "agent_activity",
-        "status IN ('active', 'reassigned')"
-        if is_admin
-        else "user_id = ? AND status IN ('active', 'reassigned')",
-        () if is_admin else (session["user_id"],),
-    )
-    pending_delegation_count = count_rows(
-        "delegation_requests",
-        "status = 'pending'"
-        if is_admin
-        else "status = 'pending' AND target_user_id = ?",
-        () if is_admin else (session["user_id"],),
-    )
+    memory_count = int(counts["memory_count"])
+    enabled_connector_binding_count = int(counts["binding_count"])
+    connector_execution_count = int(counts["execution_count"])
+    active_task_count = int(counts["task_count"])
+    pending_delegation_count = int(counts["delegation_count"])
     connector_type_count = len(connector_types)
     enabled_action_count = sum(
         max(len(ct.get("supported_actions") or []) - len(ct.get("disabled_actions") or []), 0)
@@ -320,7 +304,7 @@ def dashboard_home(request: Request, session: dict = Depends(require_auth)):
     )
     users_card = ""
     if is_admin:
-        user_count = count_rows("users")
+        user_count = int(counts["user_count"])
         users_card = f'<a class="stat-card stat-link" href="/users"><div class="value">{user_count}</div><div class="label">Users</div></a>'
 
     stat_cards = f"""

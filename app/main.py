@@ -50,6 +50,7 @@ from app.routes import (
 )
 from app.database import DatabaseUnavailable
 from app.security.exceptions import APIError
+from app.security.request_size import RequestBodyLimitMiddleware
 from app.services.broker_service import ensure_broker_credential
 from app.database import init_db
 
@@ -92,36 +93,6 @@ def create_app() -> FastAPI:
         description=f"{APP_NAME} local-first AI agent control layer",
         lifespan=_lifespan,
     )
-
-    @app.middleware("http")
-    async def size_limit_middleware(request: Request, call_next):
-        content_length = request.headers.get("content-length")
-        if content_length:
-            try:
-                declared_size = int(content_length)
-            except ValueError:
-                return JSONResponse(
-                    status_code=400,
-                    content={
-                        "ok": False,
-                        "error": {
-                            "code": "INVALID_CONTENT_LENGTH",
-                            "message": "Malformed Content-Length header",
-                        },
-                    },
-                )
-            if declared_size > MAX_REQUEST_SIZE:
-                return JSONResponse(
-                    status_code=413,
-                    content={
-                        "ok": False,
-                        "error": {
-                            "code": "PAYLOAD_TOO_LARGE",
-                            "message": "Request body too large",
-                        },
-                    },
-                )
-        return await call_next(request)
 
     @app.middleware("http")
     async def reject_body_grant_credentials(request: Request, call_next):
@@ -233,6 +204,9 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    # Added last so it is the outermost application middleware and enforces the
+    # byte limit before JSON inspection, authentication, or route parsing.
+    app.add_middleware(RequestBodyLimitMiddleware, max_bytes=MAX_REQUEST_SIZE)
 
     @app.exception_handler(APIError)
     async def api_error_handler(request: Request, exc: APIError) -> JSONResponse:
@@ -312,9 +286,16 @@ def create_app() -> FastAPI:
     from app.connectors import generic_http  # noqa: F401 - registers Generic HTTP connector
 
     try:
-        from app.services.adapter_loader import discover_and_seed_adapters
+        from app.services.adapter_loader import (
+            discover_and_seed_adapters,
+            list_available_adapters,
+        )
 
         discover_and_seed_adapters()
+        # Parse the small, filesystem-backed browse catalog before accepting
+        # traffic.  The loader caches it with file-change invalidation, so the
+        # first Connectors request is not burdened with manifest validation.
+        list_available_adapters()
     except Exception as exc:
         logging.exception("Failed to restore installed adapters: %s", exc)
 

@@ -1,17 +1,10 @@
 import asyncio
-import re
 
 from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel
 from typing import Optional
 
 from app.services import memory_service, audit_service, embedding_service
-
-try:
-    from app.services import embedding_service
-    _EMBED_AVAILABLE = True
-except Exception:
-    _EMBED_AVAILABLE = False
 from app.security.dependencies import get_request_context
 from app.security.effective_authority import EffectiveAuthority
 from app.security.rate_limiter import RL, CSG
@@ -20,26 +13,17 @@ from app.security.response_helpers import (
 )
 from app.models.enums import MEMORY_CLASSES, SOURCE_KINDS
 from app.security.pii_detector import contains_pii
+from app.operations.memory import (
+    MemoryOperationError,
+    validate_search_query,
+    write_memory as run_memory_write,
+)
 
 
 router = APIRouter(prefix="/api/memory", tags=["memory"])
 
 
 
-
-
-def _memory_provenance(ctx: EffectiveAuthority, source_kind: str, scope: str) -> str:
-    return memory_service.provenance_for_write(
-        actor_type=ctx.actor_type,
-        actor_id=ctx.actor_id,
-        channel="api",
-        route="/api/memory/write",
-        source_kind=source_kind,
-        scope=scope,
-        user_id=ctx.user_id,
-        agent_id=ctx.agent_id,
-        extras=ctx.safe_attribution(),
-    )
 
 
 def _memory_import_provenance(
@@ -132,94 +116,12 @@ async def write_memory(
         return rate_limited_response("RATE_LIMITED", "memory_write rate limit exceeded", **info)
 
     rate_headers = rate_limit_headers(**info)
-    if not ctx.can("memory", "write", scope=body.scope):
-        return error_response("SCOPE_DENIED", "Access denied to this scope", 403)
-
-    if body.memory_class not in MEMORY_CLASSES:
-        return error_response("INVALID_CLASS", f"memory_class must be one of {MEMORY_CLASSES}", 400)
-
-    if body.source_kind not in SOURCE_KINDS:
-        return error_response("INVALID_SOURCE_KIND", f"source_kind must be one of {SOURCE_KINDS}", 400)
-
-    if not 0.0 <= body.confidence <= 1.0:
-        return error_response("INVALID_CONFIDENCE", "confidence must be between 0.0 and 1.0", 400)
-
-    if not 0.0 <= body.importance <= 1.0:
-        return error_response("INVALID_IMPORTANCE", "importance must be between 0.0 and 1.0", 400)
-
-    if body.supersedes_id:
-        old_record = memory_service.get_memory_record(body.supersedes_id)
-        if not old_record:
-            return error_response("NOT_FOUND", "Record to supersede not found", 404)
-        if old_record["record_status"] != "active":
-            return error_response("INVALID_SUPERSESSION", "Cannot supersede non-active record", 400)
-        if not ctx.can("memory", "write", scope=old_record["scope"]):
-            return error_response("SCOPE_DENIED", "Access denied to scope of record being superseded", 403)
-    if body.execution_id:
-        from app.services import workspace_sync_service
-        try:
-            workspace_sync_service.validate_execution(
-                execution_id=body.execution_id, agent_id=ctx.agent_id or "",
-                user_id=ctx.user_id or "", memory_scope=body.scope,
-            )
-        except PermissionError:
-            return error_response("EXECUTION_OWNERSHIP", "Execution belongs to another agent", 403)
-        except ValueError as exc:
-            return error_response(str(exc), "Invalid execution", 400)
-
     try:
-        record, pii_flag = await asyncio.to_thread(
-            memory_service.write_memory,
-            content=body.content,
-            memory_class=body.memory_class,
-            scope=body.scope,
-            topic=body.topic,
-            confidence=body.confidence,
-            importance=body.importance,
-            source_kind=body.source_kind,
-            supersedes_id=body.supersedes_id,
-            subject_anchor=body.subject_anchor,
-            provenance_json=_memory_provenance(ctx, body.source_kind, body.scope),
-            slot_key=body.slot_key,
-            valid_from=body.valid_from,
-            valid_to=body.valid_to,
-            last_confirmed_at=body.last_confirmed_at,
-            expires_at=body.expires_at,
-            source_execution_id=body.execution_id,
+        payload = await run_memory_write(
+            body.model_dump(), ctx, channel="api", route="/api/memory/write"
         )
-    except ValueError as e:
-        return error_response("INVALID_INPUT", str(e), 400)
-
-    if pii_flag == "PII_DETECTED":
-        return error_response(
-            "PII_DETECTED",
-            "Content contains PII and cannot be written to shared scope",
-            422,
-        )
-
-    audit_service.write_event(
-        actor_type=ctx.actor_type,
-        actor_id=ctx.actor_id,
-        action="memory_write",
-        resource_type="memory_record",
-        resource_id=record["id"],
-        result="success",
-    )
-
-    # Advisory only, and computed after the write so a slow embedding check can
-    # never cost the caller its record.
-    payload = {"record": record}
-    warnings = await asyncio.to_thread(
-        memory_service.assess_memory_write,
-        content=body.content,
-        scope=body.scope,
-        memory_class=body.memory_class,
-        topic=body.topic,
-        exclude_id=record["id"],
-        subject_anchor=body.subject_anchor,
-    )
-    if warnings:
-        payload["warnings"] = warnings
+    except MemoryOperationError as exc:
+        return error_response(exc.code, exc.message, exc.status_code)
 
     return success_response_with_headers(payload, rate_headers, status_code=201)
 
@@ -351,27 +253,16 @@ async def search_memory(
         return error_response("CONCURRENT_LIMIT", "Too many concurrent searches", 429)
 
     try:
-        query_text = body.query.strip()
-        if len(query_text) <= 2:
-            return error_response("QUERY_TOO_SHORT", "Query must be at least 2 characters", 400)
-
-        trivial_patterns = [
-            r"^(the|a|an|is|are|was|were|i|you|he|she|it|we|they)\s*$",
-            r"^[.,;:!?]+$",
-        ]
-        for pattern in trivial_patterns:
-            if re.match(pattern, query_text, re.IGNORECASE):
-                return error_response("QUERY_NOISE", "Query is too trivial", 400)
+        try:
+            validate_search_query(body.query)
+        except MemoryOperationError as exc:
+            return error_response(exc.code, exc.message, exc.status_code)
 
         if body.memory_class and body.memory_class not in MEMORY_CLASSES:
             return error_response("INVALID_CLASS", f"memory_class must be one of {MEMORY_CLASSES}", 400)
 
         if not 0.0 <= body.min_confidence <= 1.0:
             return error_response("INVALID_CONFIDENCE", "min_confidence must be between 0.0 and 1.0", 400)
-
-        from app.security.pii_detector import contains_pii
-        if contains_pii(query_text):
-            return error_response("QUERY_NOISE", "Query contains credential-like pattern", 400)
 
         if body.scope:
             if not ctx.can("memory", "read", scope=body.scope):

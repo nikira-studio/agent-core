@@ -27,7 +27,7 @@ from typing import Optional
 
 import httpx
 
-from app.database import get_db
+from app.services import system_settings_service
 
 logger = logging.getLogger(__name__)
 
@@ -35,30 +35,29 @@ PROVIDERS = ("", "ollama", "binding")
 DEFAULT_TIMEOUT_SECONDS = 60
 
 
-def _setting(key: str, default: str = "") -> str:
-    try:
-        with get_db() as conn:
-            row = conn.execute(
-                "SELECT value FROM system_settings WHERE key = ?", (key,)
-            ).fetchone()
-        return (row["value"] if row else default) or default
-    except Exception:
-        return default
-
-
 def get_config() -> dict:
     """How to reach a model, if one is configured at all."""
-    provider = _setting("review_model_provider").strip().lower()
+    values = system_settings_service.read_raw(
+        {
+            "review_model_provider": "",
+            "review_model_url": "",
+            "review_model_name": "",
+            "review_model_binding_id": "",
+            "review_model_action": "POST /chat/completions",
+            "review_model_timeout_seconds": str(DEFAULT_TIMEOUT_SECONDS),
+        }
+    )
+    provider = values["review_model_provider"].strip().lower()
     if provider not in PROVIDERS:
         provider = ""
     config = {
         "provider": provider,
-        "url": _setting("review_model_url").rstrip("/"),
-        "model": _setting("review_model_name"),
-        "binding_id": _setting("review_model_binding_id"),
-        "action": _setting("review_model_action", "POST /chat/completions"),
+        "url": values["review_model_url"].rstrip("/"),
+        "model": values["review_model_name"],
+        "binding_id": values["review_model_binding_id"],
+        "action": values["review_model_action"],
         "timeout_seconds": int(
-            _setting("review_model_timeout_seconds", str(DEFAULT_TIMEOUT_SECONDS))
+            values["review_model_timeout_seconds"]
             or DEFAULT_TIMEOUT_SECONDS
         ),
     }

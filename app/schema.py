@@ -253,6 +253,7 @@ CREATE INDEX IF NOT EXISTS idx_activity_user_status ON agent_activity(user_id, s
 CREATE INDEX IF NOT EXISTS idx_activity_agent_status ON agent_activity(agent_id, status, updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_activity_assigned_agent ON agent_activity(assigned_agent_id, status, updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_activity_heartbeat ON agent_activity(status, heartbeat_at);
+CREATE INDEX IF NOT EXISTS idx_activity_scope_started ON agent_activity(memory_scope, started_at DESC);
 
 -- Audit log table
 CREATE TABLE IF NOT EXISTS audit_log (
@@ -280,6 +281,15 @@ CREATE TABLE IF NOT EXISTS broker_credentials (
     is_active INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0, 1)),
     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
     rotated_at TEXT
+);
+
+-- Ordered application schema revisions. Baseline DDL remains idempotent for
+-- fresh databases; compatibility work is recorded and never rescanned once
+-- successfully applied.
+CREATE TABLE IF NOT EXISTS schema_migrations (
+    revision INTEGER PRIMARY KEY,
+    name TEXT NOT NULL UNIQUE,
+    applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 -- System settings table
@@ -506,6 +516,32 @@ END;
 def create_schema(conn) -> None:
     conn.executescript(SCHEMA_SQL)
     conn.executescript(SCHEMA_SQL_MEMORY_FTS)
+    _apply_schema_migrations(conn)
+    _create_current_indexes(conn)
+    _seed_connector_types(conn)
+
+
+def _apply_schema_migrations(conn) -> None:
+    migrations = (
+        (1, "normalize-current-schema", _migrate_001_current_schema),
+        (2, "canonical-system-settings", _migrate_002_canonical_system_settings),
+    )
+    applied = {
+        row["revision"]
+        for row in conn.execute("SELECT revision FROM schema_migrations").fetchall()
+    }
+    for revision, name, migrate in migrations:
+        if revision in applied:
+            continue
+        migrate(conn)
+        conn.execute(
+            "INSERT INTO schema_migrations (revision, name) VALUES (?, ?)",
+            (revision, name),
+        )
+        conn.commit()
+
+
+def _migrate_001_current_schema(conn) -> None:
     _ensure_activity_columns(conn)
     _ensure_workspace_sync_schema(conn)
     _ensure_activity_fts(conn)
@@ -520,6 +556,16 @@ def create_schema(conn) -> None:
     _drop_retired_memory_columns(conn)
     _ensure_connector_type_provider_columns(conn)
     _ensure_adapter_installations_table(conn)
+    _ensure_user_timezone_column(conn)
+    _ensure_user_active_column(conn)
+    _ensure_connector_type_action_state_column(conn)
+    _ensure_connector_type_capability_policy_column(conn)
+    _ensure_connector_type_spec_columns(conn)
+    _ensure_connector_type_backend_columns(conn)
+    _ensure_webhook_tables(conn)
+    _ensure_inbound_webhook_table(conn)
+    _ensure_connector_session_cache_table(conn)
+    _normalize_vector_api_key_storage(conn)
     conn.execute(
         """
         INSERT OR IGNORE INTO workspace_collaborators
@@ -528,6 +574,63 @@ def create_schema(conn) -> None:
         FROM workspaces
         """
     )
+    conn.commit()
+
+
+def _normalize_vector_api_key_storage(conn) -> None:
+    columns = {
+        row["name"]
+        for row in conn.execute("PRAGMA table_info(system_settings)").fetchall()
+    }
+    if "value_encrypted" not in columns:
+        return
+    conn.execute(
+        "UPDATE system_settings SET value = value_encrypted "
+        "WHERE key = 'vector_api_key' AND value_encrypted IS NOT NULL "
+        "AND value_encrypted != ''"
+    )
+
+
+def _migrate_002_canonical_system_settings(conn) -> None:
+    """Replace legacy id-keyed settings tables with the canonical key table."""
+    columns = {
+        row["name"]: row
+        for row in conn.execute("PRAGMA table_info(system_settings)").fetchall()
+    }
+    if columns.get("key") and columns["key"]["pk"] == 1:
+        return
+    _normalize_vector_api_key_storage(conn)
+    conn.execute(
+        """
+        CREATE TABLE system_settings_canonical (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL,
+            updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+    conn.execute(
+        """
+        INSERT INTO system_settings_canonical (key, value, updated_at)
+        SELECT current.key, current.value, current.updated_at
+        FROM system_settings AS current
+        WHERE current.key IS NOT NULL
+          AND current.rowid = (
+              SELECT candidate.rowid
+              FROM system_settings AS candidate
+              WHERE candidate.key = current.key
+              ORDER BY candidate.updated_at DESC, candidate.rowid DESC
+              LIMIT 1
+          )
+        """
+    )
+    conn.execute("DROP TABLE system_settings")
+    conn.execute(
+        "ALTER TABLE system_settings_canonical RENAME TO system_settings"
+    )
+
+
+def _create_current_indexes(conn) -> None:
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_memory_slot ON memory_records(scope, memory_class, slot_key, record_status)"
     )
@@ -562,16 +665,6 @@ def create_schema(conn) -> None:
         "WHERE pinned = 1 AND record_status = 'active'"
     )
     conn.commit()
-    _ensure_user_timezone_column(conn)
-    _ensure_user_active_column(conn)
-    _ensure_connector_type_action_state_column(conn)
-    _ensure_connector_type_capability_policy_column(conn)
-    _ensure_connector_type_spec_columns(conn)
-    _ensure_connector_type_backend_columns(conn)
-    _ensure_webhook_tables(conn)
-    _ensure_inbound_webhook_table(conn)
-    _ensure_connector_session_cache_table(conn)
-    _seed_connector_types(conn)
 
 
 def _ensure_agents_default_recall_column(conn) -> None:

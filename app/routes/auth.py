@@ -5,6 +5,8 @@ from pydantic import BaseModel
 from app.services import audit_service
 from app.services.auth_service import (
     create_user,
+    create_initial_admin,
+    RegistrationDisabledError,
     get_user_by_email,
     count_users,
     create_session,
@@ -23,13 +25,18 @@ from app.services.auth_service import (
     delete_user,
     update_user,
 )
-from app.security.response_helpers import success_response, error_response, rate_limited_response
+from app.security.response_helpers import (
+    success_response,
+    error_response,
+    rate_limited_response,
+)
 from app.security.rate_limiter import RL
 from app.models.enums import normalize_id
 from app.config import settings
 from app.time_utils import parse_utc_datetime, utc_now
 from app.security.dependencies import get_request_context
 from app.security.effective_authority import EffectiveAuthority
+from app.security.session_token import get_session_token
 
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
@@ -43,16 +50,6 @@ def get_client_ip(request: Request) -> str:
     return request.client.host if request.client else "unknown"
 
 
-def get_session_token(request: Request) -> str:
-    auth_header = request.headers.get("Authorization", "")
-    if auth_header.startswith("Bearer "):
-        return auth_header[7:]
-    token = request.cookies.get("session_token")
-    if token:
-        return token
-    return ""
-
-
 def _request_is_https(request: Request | None) -> bool:
     """True when the request reached us over HTTPS. Honors X-Forwarded-Proto only
     from a configured trusted proxy (mirrors get_client_ip), else uses the
@@ -60,13 +57,20 @@ def _request_is_https(request: Request | None) -> bool:
     if request is None:
         return False
     if request.client and request.client.host in settings.trusted_proxy_list:
-        proto = (request.headers.get("x-forwarded-proto") or "").split(",")[0].strip().lower()
+        proto = (
+            (request.headers.get("x-forwarded-proto") or "")
+            .split(",")[0]
+            .strip()
+            .lower()
+        )
         if proto:
             return proto == "https"
     return request.url.scheme == "https"
 
 
-def set_session_cookie(response, session_id: str, request: Request | None = None) -> None:
+def set_session_cookie(
+    response, session_id: str, request: Request | None = None
+) -> None:
     # Force Secure when explicitly configured, or automatically when the request
     # is HTTPS — so an HTTPS deployment that forgot to set COOKIE_SECURE still
     # gets a Secure session cookie instead of leaking it over plaintext.
@@ -153,28 +157,32 @@ def effective_authority(
 @router.post("/register")
 def register(body: RegisterRequest, request: Request):
     if len(body.password) < 8:
-        return error_response("INVALID_PASSWORD", "Password must be at least 8 characters long", 400)
+        return error_response(
+            "INVALID_PASSWORD", "Password must be at least 8 characters long", 400
+        )
     if "@" not in body.email or "." not in body.email:
         return error_response("INVALID_EMAIL", "Invalid email format", 400)
 
-    user_count = count_users()
-    if user_count > 0:
-        return error_response("REGISTRATION_DISABLED", "User registration is disabled", 403)
+    if count_users() > 0:
+        return error_response(
+            "REGISTRATION_DISABLED", "User registration is disabled", 403
+        )
 
     try:
         user_id = normalize_id(body.email.split("@")[0])
     except ValueError:
         user_id = f"admin_{secrets.token_hex(4)}"
 
-    role = "admin" if user_count == 0 else "user"
-
     try:
-        user = create_user(
+        user = create_initial_admin(
             user_id=user_id,
             email=body.email,
             password=body.password,
             display_name=body.display_name,
-            role=role,
+        )
+    except RegistrationDisabledError:
+        return error_response(
+            "REGISTRATION_DISABLED", "User registration is disabled", 403
         )
     except Exception:
         return error_response("USER_EXISTS", "User could not be created", 400)
@@ -188,26 +196,43 @@ def register(body: RegisterRequest, request: Request):
     )
 
     response = success_response({"user_id": user["id"], "role": user["role"]})
-    if user_count == 0:
-        session = create_session(user["id"], channel="dashboard", expiry_hours=settings.SESSION_DURATION_HOURS)
-        set_session_cookie(response, session["session_id"], request)
+    session = create_session(
+        user["id"], channel="dashboard", expiry_hours=settings.SESSION_DURATION_HOURS
+    )
+    set_session_cookie(response, session["session_id"], request)
     return response
 
 
 @router.post("/login")
 def login(body: LoginRequest, request: Request):
     client_ip = get_client_ip(request)
+    allowed_ip, info_ip = RL.peek("user", client_ip, "login_failed")
+    if not allowed_ip:
+        return rate_limited_response(
+            "RATE_LIMITED", "Too many failed login attempts", **info_ip
+        )
     user = get_user_by_email(body.email)
+    if user:
+        allowed_user, info_user = RL.peek("user", user["id"], "login_failed")
+        if not allowed_user:
+            return rate_limited_response(
+                "RATE_LIMITED", "Too many failed login attempts", **info_user
+            )
     if not user:
         # Constant-time dummy check prevents email enumeration via response timing.
         # The hash is valid bcrypt format (60 chars); it never matches any real password.
         try:
-            verify_password(body.password, "$2b$12$eImiTXuWVxfM37uY4JANjuiGlLJCXMEuFSijlTEqvWwGY0e6Zg3E2")
+            verify_password(
+                body.password,
+                "$2b$12$eImiTXuWVxfM37uY4JANjuiGlLJCXMEuFSijlTEqvWwGY0e6Zg3E2",
+            )
         except Exception:
             pass
         allowed, info = RL.check("user", client_ip, "login_failed")
         if not allowed:
-            return rate_limited_response("RATE_LIMITED", "Too many failed login attempts", **info)
+            return rate_limited_response(
+                "RATE_LIMITED", "Too many failed login attempts", **info
+            )
         audit_service.write_event(
             actor_type="user",
             actor_id="unknown",
@@ -228,12 +253,20 @@ def login(body: LoginRequest, request: Request):
         allowed_ip, info_ip = RL.check("user", client_ip, "login_failed")
         allowed_user, info_user = RL.check("user", user["id"], "login_failed")
         if not allowed_ip:
-            return rate_limited_response("RATE_LIMITED", "Too many failed login attempts", **info_ip)
+            return rate_limited_response(
+                "RATE_LIMITED", "Too many failed login attempts", **info_ip
+            )
         if not allowed_user:
-            return rate_limited_response("RATE_LIMITED", "Too many failed login attempts", **info_user)
+            return rate_limited_response(
+                "RATE_LIMITED", "Too many failed login attempts", **info_user
+            )
         audit_service.write_event(
-            actor_type="user", actor_id=user["id"], action="session_login",
-            result="failure", details={"reason": "account_inactive"}, ip_address=client_ip,
+            actor_type="user",
+            actor_id=user["id"],
+            action="session_login",
+            result="failure",
+            details={"reason": "account_inactive"},
+            ip_address=client_ip,
         )
         return error_response("INVALID_CREDENTIALS", "Invalid credentials", 401)
 
@@ -241,9 +274,13 @@ def login(body: LoginRequest, request: Request):
         allowed_ip, info_ip = RL.check("user", client_ip, "login_failed")
         allowed_user, info_user = RL.check("user", user["id"], "login_failed")
         if not allowed_ip:
-            return rate_limited_response("RATE_LIMITED", "Too many failed login attempts", **info_ip)
+            return rate_limited_response(
+                "RATE_LIMITED", "Too many failed login attempts", **info_ip
+            )
         if not allowed_user:
-            return rate_limited_response("RATE_LIMITED", "Too many failed login attempts", **info_user)
+            return rate_limited_response(
+                "RATE_LIMITED", "Too many failed login attempts", **info_user
+            )
         audit_service.write_event(
             actor_type="user",
             actor_id=user["id"],
@@ -256,7 +293,9 @@ def login(body: LoginRequest, request: Request):
 
     otp_required = is_otp_enrolled(user["id"])
     channel = "pending_otp" if otp_required else "dashboard"
-    session = create_session(user["id"], channel=channel, expiry_hours=settings.SESSION_DURATION_HOURS)
+    session = create_session(
+        user["id"], channel=channel, expiry_hours=settings.SESSION_DURATION_HOURS
+    )
 
     audit_service.write_event(
         actor_type="user",
@@ -272,11 +311,13 @@ def login(body: LoginRequest, request: Request):
         ip_address=get_client_ip(request),
     )
 
-    response = success_response({
-        "session_id": session["session_id"],
-        "requires_otp": otp_required,
-        "user_id": user["id"],
-    })
+    response = success_response(
+        {
+            "session_id": session["session_id"],
+            "requires_otp": otp_required,
+            "user_id": user["id"],
+        }
+    )
 
     if not otp_required:
         set_session_cookie(response, session["session_id"], request)
@@ -299,17 +340,21 @@ def otp_enroll(
 
     if is_otp_enrolled(session["user_id"]):
         if not body.otp_code:
-            return error_response("OTP_REQUIRED", "Current OTP code is required to reset OTP", 400)
+            return error_response(
+                "OTP_REQUIRED", "Current OTP code is required to reset OTP", 400
+            )
         if not verify_otp(session["user_id"], body.otp_code):
             return error_response("INVALID_OTP", "Invalid OTP code", 403)
 
     otp_data = enroll_otp(session["user_id"])
 
-    return success_response({
-        "secret": otp_data["secret"],
-        "otp_uri": otp_data["otp_uri"],
-        "qr_svg": build_otp_qr_data_uri(otp_data["otp_uri"]),
-    })
+    return success_response(
+        {
+            "secret": otp_data["secret"],
+            "otp_uri": otp_data["otp_uri"],
+            "qr_svg": build_otp_qr_data_uri(otp_data["otp_uri"]),
+        }
+    )
 
 
 @router.post("/otp/confirm")
@@ -338,6 +383,7 @@ def otp_confirm(
 @router.post("/otp/verify")
 def otp_verify(body: OtpVerifyRequest, request: Request):
     from app.services.auth_service import decode_jwt
+
     db_session_id = decode_jwt(body.session_id)
     if not db_session_id:
         return error_response("INVALID_SESSION", "Invalid session", 401)
@@ -355,14 +401,18 @@ def otp_verify(body: OtpVerifyRequest, request: Request):
         return error_response("INVALID_SESSION", "Session expired", 401)
 
     last_activity = parse_utc_datetime(session["last_activity"])
-    if (utc_now() - last_activity).total_seconds() > (settings.INACTIVITY_TIMEOUT_MINUTES * 60):
+    if (utc_now() - last_activity).total_seconds() > (
+        settings.INACTIVITY_TIMEOUT_MINUTES * 60
+    ):
         delete_session(db_session_id)
         return error_response("INVALID_SESSION", "Session timed out", 401)
 
     if is_otp_enrolled(session["user_id"]):
         allowed, info = RL.check("user", session["user_id"], "otp_failed")
         if not allowed:
-            return rate_limited_response("RATE_LIMITED", "Too many failed OTP attempts", **info)
+            return rate_limited_response(
+                "RATE_LIMITED", "Too many failed OTP attempts", **info
+            )
 
         is_valid = verify_otp(session["user_id"], body.otp_code)
 
@@ -391,16 +441,21 @@ def otp_verify(body: OtpVerifyRequest, request: Request):
     )
 
     from app.database import get_db
+
     with get_db() as conn:
-        conn.execute("UPDATE sessions SET channel = 'dashboard' WHERE id = ?", (db_session_id,))
+        conn.execute(
+            "UPDATE sessions SET channel = 'dashboard' WHERE id = ?", (db_session_id,)
+        )
         conn.commit()
 
     update_session_activity(db_session_id)
 
-    response = success_response({
-        "session_token": body.session_id,
-        "user_id": session["user_id"],
-    })
+    response = success_response(
+        {
+            "session_token": body.session_id,
+            "user_id": session["user_id"],
+        }
+    )
     set_session_cookie(response, body.session_id, request)
     return response
 
@@ -455,6 +510,7 @@ def logout(request: Request, session_token: str = Depends(get_session_token)):
             ip_address=get_client_ip(request),
         )
         from app.services.auth_service import decode_jwt
+
         db_session_id = decode_jwt(session_token)
         if db_session_id:
             delete_session(db_session_id)
@@ -475,9 +531,13 @@ def change_user_password(
         return error_response("UNAUTHORIZED", "Invalid or expired session", 401)
 
     if len(body.new_password) < 8:
-        return error_response("INVALID_PASSWORD", "New password must be at least 8 characters", 400)
+        return error_response(
+            "INVALID_PASSWORD", "New password must be at least 8 characters", 400
+        )
 
-    ok, msg = change_password(session["user_id"], body.current_password, body.new_password)
+    ok, msg = change_password(
+        session["user_id"], body.current_password, body.new_password
+    )
     if not ok:
         return error_response("PASSWORD_CHANGE_FAILED", msg, 400)
 
@@ -503,7 +563,9 @@ def create_user_endpoint(
     if session.get("role") != "admin":
         return error_response("FORBIDDEN", "Admin access required", 403)
     if len(body.password) < 8:
-        return error_response("INVALID_PASSWORD", "Password must be at least 8 characters long", 400)
+        return error_response(
+            "INVALID_PASSWORD", "Password must be at least 8 characters long", 400
+        )
     if "@" not in body.email or "." not in body.email:
         return error_response("INVALID_EMAIL", "Invalid email format", 400)
     if body.role not in ("admin", "user"):
@@ -521,7 +583,9 @@ def create_user_endpoint(
         user_id = f"{base_user_id}_{suffix}"
 
     try:
-        user = create_user(user_id, body.email, body.password, body.display_name, body.role)
+        user = create_user(
+            user_id, body.email, body.password, body.display_name, body.role
+        )
     except Exception:
         return error_response("USER_EXISTS", "User could not be created", 400)
 
@@ -550,15 +614,21 @@ def update_user_endpoint(
     if session.get("role") != "admin":
         return error_response("FORBIDDEN", "Admin access required", 403)
     if body.password is not None and body.password != "" and len(body.password) < 8:
-        return error_response("INVALID_PASSWORD", "Password must be at least 8 characters long", 400)
+        return error_response(
+            "INVALID_PASSWORD", "Password must be at least 8 characters long", 400
+        )
     if body.email is not None and ("@" not in body.email or "." not in body.email):
         return error_response("INVALID_EMAIL", "Invalid email format", 400)
     if body.role is not None and body.role not in ("admin", "user"):
         return error_response("INVALID_ROLE", "Role must be admin or user", 400)
     if user_id == session["user_id"] and body.role is not None and body.role != "admin":
-        return error_response("FORBIDDEN", "You cannot remove admin from your current session", 400)
+        return error_response(
+            "FORBIDDEN", "You cannot remove admin from your current session", 400
+        )
     if user_id == session["user_id"] and body.is_active is False:
-        return error_response("FORBIDDEN", "You cannot disable your current session", 400)
+        return error_response(
+            "FORBIDDEN", "You cannot disable your current session", 400
+        )
 
     ok, reason = update_user(
         user_id,

@@ -178,6 +178,7 @@ def test_connectors_page_surfaces_credentials_workflow(authenticated_client):
     assert "/static/js/connectors.js" in html
     assert "Create new credential" in html
     assert "Use stored credential" in html
+    assert '<label for="binding-credential">Stored Credential</label>' in html
     assert "oauth-redirect-modal" in html
     assert "Copy URL" in html
     assert "import-spec-preview" in html
@@ -233,7 +234,7 @@ def test_dashboard_nav_order_and_admin_audit_placement(authenticated_client):
     assert r.status_code == 200
     html = r.text
     expected = [
-        '<a href="/" class="active"><span>Overview</span></a>',
+        '<a href="/" class="active" aria-current="page"><span>Overview</span></a>',
         '<a href="/users" class=""><span>Users</span></a>',
         '<a href="/agents" class=""><span>Agents</span></a>',
         '<a href="/workspaces" class=""><span>Workspaces</span></a>',
@@ -247,6 +248,29 @@ def test_dashboard_nav_order_and_admin_audit_placement(authenticated_client):
     positions = [html.index(item) for item in expected]
     assert positions == sorted(positions)
     assert '<a href="/audit"' in html.split("<nav>", 1)[1].split("</nav>", 1)[0]
+
+
+def test_dashboard_shared_accessibility_behaviour(authenticated_client):
+    html = authenticated_client.get("/users").text
+    dashboard_js = Path("app/dashboard/static/js/dashboard.js").read_text()
+
+    assert 'aria-current="page"' in html
+    assert "toast.setAttribute('role'" in dashboard_js
+    assert "toast.setAttribute('aria-atomic', 'true')" in dashboard_js
+    assert "dialog.setAttribute('role', 'dialog')" in dashboard_js
+    assert "dialog.setAttribute('aria-modal', 'true')" in dashboard_js
+    assert "visibleFocusableElements(activeModalOverlay)" in dashboard_js
+    assert "label.htmlFor = controlId" in dashboard_js
+    assert "control.setAttribute('aria-labelledby'" in dashboard_js
+    assert "enhanceDashboardAccessibility(document)" in dashboard_js
+
+
+def test_otp_input_has_a_visible_programmatic_label(test_client):
+    html = test_client.get("/otp").text
+
+    assert '<label for="otp-code">Authentication code</label>' in html
+    assert 'id="otp-code"' in html
+    assert 'inputmode="numeric"' in html
 
 
 def test_dashboard_no_inline_styles_in_render_page(authenticated_client):

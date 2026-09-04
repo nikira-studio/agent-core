@@ -38,14 +38,21 @@ def _session_enforcing_handler():
                 400,
                 json={
                     "jsonrpc": "2.0",
-                    "error": {"code": -32000, "message": "No valid session ID provided"},
+                    "error": {
+                        "code": -32000,
+                        "message": "No valid session ID provided",
+                    },
                     "id": None,
                 },
             )
         if method == "tools/list":
             return httpx.Response(
                 200,
-                json={"jsonrpc": "2.0", "id": body["id"], "result": {"tools": [{"name": "do_thing"}]}},
+                json={
+                    "jsonrpc": "2.0",
+                    "id": body["id"],
+                    "result": {"tools": [{"name": "do_thing"}]},
+                },
             )
         if method == "tools/call":
             return httpx.Response(
@@ -53,7 +60,10 @@ def _session_enforcing_handler():
                 json={
                     "jsonrpc": "2.0",
                     "id": body["id"],
-                    "result": {"content": [{"type": "text", "text": "ok"}], "isError": False},
+                    "result": {
+                        "content": [{"type": "text", "text": "ok"}],
+                        "isError": False,
+                    },
                 },
             )
         return httpx.Response(404)
@@ -71,6 +81,10 @@ def mock_mcp(monkeypatch):
         return original(*args, **kwargs)
 
     monkeypatch.setattr(m.httpx, "Client", factory)
+    monkeypatch.setattr(m, "validate_mcp_server_url", lambda url: url.rstrip("/"))
+    monkeypatch.setattr(
+        m, "safe_httpx_post", lambda client, url, **kwargs: client.post(url, **kwargs)
+    )
 
 
 URL = "https://mock.example.com/mcp"
@@ -92,6 +106,9 @@ def test_discover_mcp_server_maps_transport_error_to_valueerror(monkeypatch):
     # An unreachable target must surface as a ValueError (→ 4xx at the route),
     # not propagate as a raw httpx error that the API turns into a 500.
     monkeypatch.setattr(m, "validate_mcp_server_url", lambda u: u.rstrip("/"))
+    monkeypatch.setattr(
+        m, "safe_httpx_post", lambda client, url, **kwargs: client.post(url, **kwargs)
+    )
 
     def handler(request: httpx.Request) -> httpx.Response:
         raise httpx.ConnectError("connection refused")

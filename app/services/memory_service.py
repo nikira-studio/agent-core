@@ -487,25 +487,15 @@ def detect_expiring_episodic_shape(
 
 
 def _system_setting_int(key: str, default: int) -> int:
-    try:
-        with get_db() as conn:
-            row = conn.execute(
-                "SELECT value FROM system_settings WHERE key = ?", (key,)
-            ).fetchone()
-        return int(row["value"]) if row else default
-    except (ValueError, TypeError, sqlite3.Error):
-        return default
+    from app.services import system_settings_service
+
+    return system_settings_service.read_int(key, default)
 
 
 def _system_setting_float(key: str, default: float) -> float:
-    try:
-        with get_db() as conn:
-            row = conn.execute(
-                "SELECT value FROM system_settings WHERE key = ?", (key,)
-            ).fetchone()
-        return float(row["value"]) if row else default
-    except (ValueError, TypeError, sqlite3.Error):
-        return default
+    from app.services import system_settings_service
+
+    return system_settings_service.read_float(key, default)
 
 
 def episodic_ttl_days() -> int:

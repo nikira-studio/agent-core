@@ -99,7 +99,8 @@ def otp_page(request: Request):
       <p class="text-muted" style="margin-bottom:16px">Enter the 6-digit code from your authenticator app.</p>
       <form id="otp-form" onsubmit="submitOtp(event)">
         <div class="form-group">
-          <input type="text" name="otp_code" placeholder="123456" autocomplete="one-time-code" style="width:260px;font-size:1rem;text-align:center">
+          <label for="otp-code">Authentication code</label>
+          <input type="text" id="otp-code" name="otp_code" placeholder="123456" autocomplete="one-time-code" inputmode="numeric" style="width:260px;font-size:1rem;text-align:center">
         </div>
         <button type="submit" class="btn">Verify</button>
       </form>
@@ -126,5 +127,4 @@ def logout_page(request: Request):
     return HTMLResponse("""<html><body>
 <script>fetch('/api/auth/logout',{method:'POST'}).finally(()=>{window.location.href='/login'});</script>
 <p>Logging out...</p></body></html>""")
-
 

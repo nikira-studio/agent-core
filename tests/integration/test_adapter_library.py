@@ -55,6 +55,51 @@ def _write_adapter_manifest(root: Path, version: str, description: str) -> Path:
 
 
 class TestAdapterLibrary:
+    def test_connector_catalog_read_does_not_scan_adapter_manifests(
+        self, clean_db, monkeypatch
+    ):
+        def fail_if_scanned():
+            raise AssertionError("service catalog reads must not scan adapter files")
+
+        monkeypatch.setattr(adapter_loader, "list_available_adapters", fail_if_scanned)
+
+        types = connector_service.list_connector_types()
+
+        assert any(connector_type["id"] == "generic_http" for connector_type in types)
+
+    def test_adapter_manifest_scan_is_cached_until_a_manifest_changes(
+        self, clean_db, monkeypatch, tmp_path
+    ):
+        from app.config import settings
+
+        system_root = tmp_path / "system-adapters"
+        _write_adapter_manifest(system_root, "1.0.0", "Transmission v1")
+        monkeypatch.setattr(adapter_loader, "SYSTEM_ADAPTER_DIR", system_root)
+        monkeypatch.setattr(settings, "DATA_PATH", str(tmp_path))
+        adapter_loader.clear_adapter_source_cache()
+
+        original_scan = adapter_loader._scan_root
+        scan_calls = 0
+
+        def count_scans(*args, **kwargs):
+            nonlocal scan_calls
+            scan_calls += 1
+            return original_scan(*args, **kwargs)
+
+        monkeypatch.setattr(adapter_loader, "_scan_root", count_scans)
+
+        first = adapter_loader.list_available_adapters()
+        second = adapter_loader.list_available_adapters()
+
+        assert scan_calls == 2  # system root and user root, once each
+        assert first == second
+
+        _write_adapter_manifest(system_root, "1.1.0", "Transmission v2")
+        refreshed = adapter_loader.list_available_adapters()
+
+        assert scan_calls == 4
+        assert refreshed[0]["version"] == "1.1.0"
+
     def test_library_lists_built_in_templates(self, test_client, admin_token):
         r = test_client.get(
             "/api/connector-types/adapters",

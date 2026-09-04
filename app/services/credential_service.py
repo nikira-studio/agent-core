@@ -112,7 +112,10 @@ def get_credential_by_reference(reference_name: str) -> Optional[dict]:
 
 
 def list_credentials(
-    scope: Optional[str] = None, limit: int = 50, offset: int = 0
+    scope: Optional[str] = None,
+    limit: int = 50,
+    offset: int = 0,
+    scopes: Optional[list[str]] = None,
 ) -> list[dict]:
     with get_db() as conn:
         query = (
@@ -124,10 +127,30 @@ def list_credentials(
         if scope:
             query += " AND scope = ?"
             params.append(scope)
+        elif scopes is not None:
+            if not scopes:
+                return []
+            placeholders = ",".join("?" for _ in scopes)
+            query += f" AND scope IN ({placeholders})"
+            params.extend(scopes)
         query += " ORDER BY created_at DESC LIMIT ? OFFSET ?"
         params.extend([limit, offset])
         rows = conn.execute(query, params).fetchall()
         return [dict(row) for row in rows]
+
+
+def get_credentials_by_ids(entry_ids: list[str]) -> dict[str, dict]:
+    unique_ids = sorted(set(entry_ids))
+    if not unique_ids:
+        return {}
+    placeholders = ",".join("?" for _ in unique_ids)
+    with get_db() as conn:
+        rows = conn.execute(
+            "SELECT id, scope, expires_at FROM credentials "
+            f"WHERE id IN ({placeholders})",
+            unique_ids,
+        ).fetchall()
+    return {row["id"]: dict(row) for row in rows}
 
 
 def update_credential(entry_id: str, **fields) -> bool:

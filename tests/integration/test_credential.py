@@ -195,6 +195,40 @@ def test_credential_list_entries(test_client, agent_token):
     assert len(r.json()["data"]["entries"]) >= 1
 
 
+def test_credential_list_filters_authorization_before_pagination(
+    test_client, agent_token
+):
+    from app.database import get_db
+    from app.services import credential_service
+
+    visible = credential_service.create_credential(
+        scope="agent:testagent", name="visible-older", value_plaintext="visible"
+    )
+    hidden = credential_service.create_credential(
+        scope="workspace:hidden", name="hidden-newer", value_plaintext="hidden"
+    )
+    with get_db() as conn:
+        conn.execute(
+            "UPDATE credentials SET created_at = ? WHERE id = ?",
+            ("2026-01-01T00:00:00+00:00", visible["id"]),
+        )
+        conn.execute(
+            "UPDATE credentials SET created_at = ? WHERE id = ?",
+            ("2026-01-02T00:00:00+00:00", hidden["id"]),
+        )
+        conn.commit()
+
+    response = test_client.get(
+        "/api/credentials/entries?limit=1",
+        headers={"Authorization": f"Bearer {agent_token}"},
+    )
+
+    assert response.status_code == 200, response.json()
+    assert [entry["id"] for entry in response.json()["data"]["entries"]] == [
+        visible["id"]
+    ]
+
+
 def test_credential_reveal_for_agent_session_is_blocked(test_client, agent_token):
     create_r = test_client.post(
         "/api/credentials/entries",

@@ -6,7 +6,9 @@ import re
 import shutil
 import subprocess
 import tempfile
+import threading
 import uuid
+from copy import deepcopy
 from pathlib import Path
 
 from app.adapter_paths import SYSTEM_ADAPTER_DIR, get_user_adapter_dir
@@ -24,8 +26,55 @@ logger = logging.getLogger(__name__)
 GIT_SOURCE_RE = re.compile(r"^git:(?P<owner>[^/]+)/(?P<repo>[^@]+)@(?P<ref>.+)$")
 
 
+# Manifest validation is deliberately strict, but it is expensive enough that
+# repeating it for every page request turns the catalog into a CPU bottleneck.
+# Cache only immutable filesystem-derived entries. Installation state remains
+# live because list_available_adapters reads it from SQLite on every call.
+_source_cache_lock = threading.RLock()
+_source_cache_signature: tuple | None = None
+_source_cache_entries: tuple[list[dict], list[dict]] | None = None
+
+
 class AdapterInstallError(Exception):
     pass
+
+
+def _adapter_root_signature(adapter_root: Path) -> tuple:
+    if not adapter_root.is_dir():
+        return (str(adapter_root), ())
+    manifests = []
+    for manifest_path in sorted(adapter_root.glob("*/adapter.json")):
+        stat = manifest_path.stat()
+        manifests.append((str(manifest_path), stat.st_mtime_ns, stat.st_size))
+    return (str(adapter_root), tuple(manifests))
+
+
+def _source_entries() -> tuple[list[dict], list[dict]]:
+    """Return validated adapter metadata, rescanning only when a file changed."""
+    global _source_cache_signature, _source_cache_entries
+
+    signature = (
+        _adapter_root_signature(SYSTEM_ADAPTER_DIR),
+        _adapter_root_signature(get_user_adapter_dir()),
+    )
+    with _source_cache_lock:
+        if _source_cache_signature != signature or _source_cache_entries is None:
+            _source_cache_entries = (
+                _scan_root(SYSTEM_ADAPTER_DIR, "system"),
+                _scan_root(get_user_adapter_dir(), "user"),
+            )
+            _source_cache_signature = signature
+        # Callers add live installation fields, so never expose the cached
+        # dictionaries themselves.
+        return deepcopy(_source_cache_entries)
+
+
+def clear_adapter_source_cache() -> None:
+    """Forget cached manifest metadata after an adapter tree mutation."""
+    global _source_cache_signature, _source_cache_entries
+    with _source_cache_lock:
+        _source_cache_signature = None
+        _source_cache_entries = None
 
 
 def _load_manifest(path: Path) -> tuple[Manifest | None, str | None]:
@@ -301,8 +350,7 @@ def list_available_adapters() -> list[dict]:
     we show the bundled entry instead so the library stays de-duplicated.
     """
 
-    system_entries = _scan_root(SYSTEM_ADAPTER_DIR, "system")
-    user_entries = _scan_root(get_user_adapter_dir(), "user")
+    system_entries, user_entries = _source_entries()
     install_records = {
         row["adapter_id"]: dict(row)
         for row in _get_all_install_records()
@@ -449,7 +497,9 @@ def install_adapter(adapter_id: str, source_kind: str | None = None) -> dict:
                 connector_service.delete_connector_type(adapter_id)
         if staging or backup:
             _restore_tree(install_path, staging, backup)
+            clear_adapter_source_cache()
         raise
+    clear_adapter_source_cache()
     logger.info("Installed adapter %s from %s", adapter_id, source_kind)
     return {
         "adapter_id": adapter_id,
@@ -510,7 +560,9 @@ def update_adapter(adapter_id: str) -> dict:
             _upsert_connector_type(previous_manifest)
         if staging or backup:
             _restore_tree(install_path, staging, backup)
+            clear_adapter_source_cache()
         raise
+    clear_adapter_source_cache()
     logger.info(
         "Updated adapter %s from %s to %s",
         adapter_id,
@@ -544,6 +596,7 @@ def uninstall_adapter(adapter_id: str) -> bool:
 
     _clear_install_record(adapter_id)
     removed_any = connector_service.delete_connector_type(adapter_id) or removed_any
+    clear_adapter_source_cache()
     return removed_any
 
 
@@ -726,4 +779,5 @@ def install_from_git(source: str, adapters_dir: Path | None = None) -> str:
         shutil.copytree(tmp_path, adapter_target_dir, dirs_exist_ok=True)
 
     logger.info("Installed adapter %s from %s", adapter_id, source)
+    clear_adapter_source_cache()
     return adapter_id

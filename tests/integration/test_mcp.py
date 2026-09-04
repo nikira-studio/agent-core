@@ -273,6 +273,46 @@ def test_mcp_tool_activity_list(test_client, agent_token):
     assert data["data"]["count"] >= 1
 
 
+def test_mcp_activity_list_filters_authorization_before_pagination(
+    test_client, agent_token
+):
+    from app.database import get_db
+    from app.services import activity_service
+
+    visible = activity_service.create_activity(
+        agent_id="testagent",
+        user_id="admin",
+        task_description="Visible older activity",
+        memory_scope="agent:testagent",
+    )
+    hidden = activity_service.create_activity(
+        agent_id="otheragent",
+        user_id="admin",
+        task_description="Hidden newer activity",
+        memory_scope="workspace:hidden",
+    )
+    with get_db() as conn:
+        conn.execute(
+            "UPDATE agent_activity SET started_at = ? WHERE id = ?",
+            ("2026-01-01T00:00:00+00:00", visible["id"]),
+        )
+        conn.execute(
+            "UPDATE agent_activity SET started_at = ? WHERE id = ?",
+            ("2026-01-02T00:00:00+00:00", hidden["id"]),
+        )
+        conn.commit()
+
+    response = test_client.post(
+        "/mcp",
+        headers={"Authorization": f"Bearer {agent_token}"},
+        json={"tool": "activity_list", "params": {"limit": 1}},
+    )
+
+    assert response.status_code == 200, response.json()
+    activities = response.json()["data"]["activities"]
+    assert [activity["id"] for activity in activities] == [visible["id"]]
+
+
 def test_mcp_tool_unknown(test_client, agent_token):
     r = test_client.post(
         "/mcp",
@@ -562,6 +602,64 @@ def test_mcp_tool_briefing_list(test_client, agent_token):
     assert data["data"]["count"] >= 1
 
 
+def test_mcp_briefing_list_filters_authorization_before_pagination(
+    test_client, agent_token
+):
+    from app.database import get_db
+    from app.services import activity_service
+
+    visible = activity_service.create_activity(
+        agent_id="testagent",
+        user_id="admin",
+        task_description="Briefing visible older",
+        memory_scope="agent:testagent",
+        metadata_json=json.dumps({"briefing": {"summary": "visible"}}),
+    )
+    hidden = activity_service.create_activity(
+        agent_id="otheragent",
+        user_id="admin",
+        task_description="Briefing hidden newer",
+        memory_scope="workspace:hidden",
+        metadata_json=json.dumps({"briefing": {"summary": "hidden"}}),
+    )
+    with get_db() as conn:
+        conn.execute(
+            """
+            UPDATE agent_activity
+            SET status = 'completed', started_at = ?, ended_at = ?
+            WHERE id = ?
+            """,
+            (
+                "2026-01-01T00:00:00+00:00",
+                "2026-01-01T00:01:00+00:00",
+                visible["id"],
+            ),
+        )
+        conn.execute(
+            """
+            UPDATE agent_activity
+            SET status = 'completed', started_at = ?, ended_at = ?
+            WHERE id = ?
+            """,
+            (
+                "2026-01-02T00:00:00+00:00",
+                "2026-01-02T00:01:00+00:00",
+                hidden["id"],
+            ),
+        )
+        conn.commit()
+
+    response = test_client.post(
+        "/mcp",
+        headers={"Authorization": f"Bearer {agent_token}"},
+        json={"tool": "briefing_list", "params": {"limit": 1}},
+    )
+
+    assert response.status_code == 200, response.json()
+    briefings = response.json()["data"]["briefings"]
+    assert [briefing["id"] for briefing in briefings] == [visible["id"]]
+
+
 def test_mcp_memory_search_rejects_removed_classes(test_client, agent_token):
     r = test_client.post(
         "/mcp",
@@ -599,6 +697,35 @@ def test_mcp_tool_memory_write_supports_slot_key_and_freshness(
     assert record["slot_key"] == "style"
     assert record["valid_from"] == "2026-05-15T00:00:00+00:00"
     assert record["last_confirmed_at"] == "2026-05-15T01:00:00+00:00"
+
+
+def test_mcp_memory_write_preserves_audit_details(test_client, agent_token):
+    from app.services import audit_service
+
+    response = test_client.post(
+        "/mcp",
+        headers={"Authorization": f"Bearer {agent_token}"},
+        json={
+            "tool": "memory_write",
+            "params": {
+                "content": "Keep the audit record specific",
+                "memory_class": "preference",
+                "scope": "agent:testagent",
+                "topic": "audit-contract",
+                "slot_key": "audit-owner",
+            },
+        },
+    )
+    assert response.status_code == 201, response.json()
+    record = response.json()["data"]["record"]
+    event = audit_service.query_events(
+        action="memory_write", resource_type="memory_record", limit=1
+    )[0]
+    details = json.loads(event["details_json"])
+    assert event["resource_id"] == record["id"]
+    assert details["action"] == "create"
+    assert details["topic"] == "audit-contract"
+    assert "slot_key" in details
 
 
 def test_mcp_tool_memory_write_ignores_client_supplied_provenance(
@@ -797,6 +924,25 @@ def test_a_missing_required_param_is_a_clean_error_not_a_500(test_client, agent_
     error = r.json()["error"]
     assert error["code"] == "INVALID_PARAMS"
     assert "memory_class" in error["message"]
+
+
+def test_mcp_rejects_parameter_types_that_do_not_match_the_manifest(
+    test_client, agent_token
+):
+    invalid_calls = [
+        ("memory_search", {"query": ["not", "a", "string"]}),
+        ("activity_list", {"limit": "ten"}),
+        ("memory_get", {"offset": "zero"}),
+    ]
+
+    for tool, params in invalid_calls:
+        response = test_client.post(
+            "/mcp",
+            headers={"Authorization": f"Bearer {agent_token}"},
+            json={"tool": tool, "params": params},
+        )
+        assert response.status_code == 400, (tool, response.text)
+        assert response.json()["error"]["code"] == "INVALID_PARAMS", tool
 
 
 def test_every_declared_requirement_is_enforced(test_client, agent_token):

@@ -283,6 +283,8 @@ def get_briefing(briefing_id: str) -> Optional[dict]:
 def list_briefings(
     user_id: Optional[str] = None,
     agent_id: Optional[str] = None,
+    authorized_scopes: Optional[list[str]] = None,
+    authorized_resource_ids: Optional[list[str]] = None,
     limit: int = 50,
     offset: int = 0,
 ) -> list[dict]:
@@ -295,6 +297,21 @@ def list_briefings(
     if agent_id:
         conditions.append("(agent_id = ? OR assigned_agent_id = ?)")
         params.extend([agent_id, agent_id])
+    if authorized_scopes is not None:
+        if not authorized_scopes:
+            return []
+        placeholders = ",".join("?" for _ in authorized_scopes)
+        conditions.append(
+            f"(memory_scope IN ({placeholders}) OR "
+            f"(memory_scope IS NULL AND ('agent:' || agent_id) IN ({placeholders})))"
+        )
+        params.extend([*authorized_scopes, *authorized_scopes])
+    if authorized_resource_ids is not None:
+        if not authorized_resource_ids:
+            return []
+        placeholders = ",".join("?" for _ in authorized_resource_ids)
+        conditions.append(f"id IN ({placeholders})")
+        params.extend(authorized_resource_ids)
 
     conditions.append(
         "(task_description LIKE 'Briefing%' OR task_description LIKE 'PRD briefing%' OR task_description LIKE 'Handoff briefing%' OR task_description LIKE 'PRD handoff briefing%' OR metadata_json LIKE '%\"briefing\"%')"

@@ -5,20 +5,27 @@ Agent Core is early-stage software. External contributions are not currently acc
 For private development:
 
 1. Create a branch.
-2. Keep local runtime data in `data/` and private notes in `private/`.
-3. Run the test suite:
+2. Install development dependencies:
 
    ```bash
+   pip install -r requirements-dev.txt
+   ```
+
+3. Keep local runtime data in `data/` and private notes in `private/`.
+4. Run lint and the test suite:
+
+   ```bash
+   ruff check app tests
    pytest -q
    ```
 
-4. Run a secret scan before sharing code:
+5. Run a secret scan before sharing code:
 
    ```bash
    gitleaks detect --source . --verbose
    ```
 
-5. Do not commit `.env`, `data/`, `private/`, backup ZIPs, logs, or generated caches.
+6. Do not commit `.env`, `data/`, `private/`, backup ZIPs, logs, or generated caches.
 
 ---
 

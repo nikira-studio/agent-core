@@ -126,9 +126,18 @@ def get_connection() -> sqlite3.Connection:
     # busy_timeout is set before any other statement runs: journal_mode needs
     # locks, and until the pragma applies, the only busy handler is the connect
     # timeout — which at 30s stalled the whole app under write contention.
-    conn = sqlite3.connect(str(get_db_path()), timeout=5.0)
+    db_path = get_db_path()
+    db_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    db_path.parent.chmod(0o700)
+    db_path.touch(mode=0o600, exist_ok=True)
+    db_path.chmod(0o600)
+    conn = sqlite3.connect(str(db_path), timeout=5.0)
     conn.execute("PRAGMA busy_timeout=5000")
     conn.execute("PRAGMA journal_mode=WAL")
+    for sidecar_suffix in ("-wal", "-shm"):
+        sidecar = Path(f"{db_path}{sidecar_suffix}")
+        if sidecar.exists():
+            sidecar.chmod(0o600)
     conn.execute("PRAGMA synchronous=NORMAL")
     conn.execute("PRAGMA foreign_keys=ON")
     _load_sqlite_vec(conn)

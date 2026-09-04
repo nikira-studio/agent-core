@@ -56,26 +56,13 @@ MEMORY_CLASS_GUIDANCE = """Pick the class by asking what would settle it if some
 
 If it would be settled by checking, it is a `fact`. If it would be settled by someone deciding, it is a `decision`. Reporting what you just did is neither — that belongs in `activity_update`.
 
+A recommendation nobody has committed to yet — candidate next steps, options under consideration — is not a `decision`. Write it as `scratchpad` so it stays cheaply searchable, then promote it to a `decision` once someone actually picks one. Don't let it live only inside an activity's `task_result`: the activity trail is for what happened, and digging through it for "what should we do next" is far more expensive than a scoped memory lookup.
+
 On a `fact`, set `subject_anchor` to what a later session would check: `repo:<path>`, `host:<name-or-ip>`, or `service:<binding_id>`, with repo paths relative to the workspace root. Omit it when nothing could verify the record. Anchored facts are re-checked automatically; if a check reports the subject missing but it only moved, call `memory_reanchor` to repoint the record instead of letting it be proposed for removal.
 
 `valid_from` and `valid_to` say when the content was true in the world, separately from when you wrote it. Set them when a record covers a period other than "from now on", and pass `as_of` to `memory_search` to ask what was true at a past moment.
 
 `workspace_sync` returns pinned records for its workspace. Call `memory_pinned` once at session start only when you also need standing rules from other authorized scopes or no workspace sync applies. Treat pinned records as applying to everything you do, not just the current task. Search results carry `days_since_confirmed`. Treat a fact nobody has confirmed in months as a lead, not as current truth. Check it, then `memory_confirm` it with evidence naming what you checked, or supersede it if it has changed. Call `memory_feedback` when a recalled record clearly did or did not help. If something should apply to every session in the scope rather than only this task, call `memory_pin` to request it. An operator decides because standing context reaches every agent in the scope."""
-
-# The record-shaping rules every template teaches. These were paraphrased
-# separately in each generator, which meant a capability could land in the
-# system and reach only whichever template someone remembered to edit. They are
-# defined once and interpolated, so an agent learns the same contract whichever
-# file its host reads.
-MEMORY_RECORD_GUIDANCE = """Choosing between `fact` and `decision`: if the record would be settled by checking something, it is a `fact`; if it would be settled by someone deciding, it is a `decision`. "the build server is 192.0.2.10" is a fact; "do not edit vendored dependencies directly" is a decision. Reporting what you just did is neither — that belongs in `activity_update`.
-
-When a record is a `fact`, set `subject_anchor` to the thing a later session would look at to check it: `repo:<path>`, `host:<name-or-ip>`, or `service:<binding_id>`. Repo paths must be **relative to the workspace root**, not absolute — the same directory is mounted at a different path in every agent's container, so an absolute path is only resolvable by whoever wrote it. Name what you actually looked at, and omit it when nothing could verify the record — which is normal for a `decision`.
-
-Anchored facts get re-checked automatically. If a check reports the subject missing but you can see it only moved, call `memory_reanchor` to repoint the record rather than letting it be proposed for removal; use `memory_verify` to check a scope's anchored facts on demand before you rely on them. A check that fails to run leaves the record alone — "could not check" is never treated as "wrong".
-
-`valid_from` and `valid_to` say when the content was true in the world, which is a different timeline from when you wrote it. Set them when a record covers a period other than "from now on". Superseding closes the previous record's window for you, and `memory_search` with `as_of` answers what was true at a past moment.
-
-`workspace_sync` returns pinned records for its workspace. Call `memory_pinned` once at session start only when you also need standing rules from other authorized scopes or no workspace sync applies. Treat pinned records as applying to everything you do, not just the current task. Search results carry `days_since_confirmed`. Treat a fact nobody has confirmed in months as a lead rather than as current truth. Check it, then call `memory_confirm` with evidence naming what you checked, or supersede it if it has changed. Call `memory_feedback` when a recalled record clearly did or did not help. If something should apply to every session in the scope rather than only this task, call `memory_pin` to request it. An operator decides because standing context reaches every agent in the scope."""
 
 MEMORY_DISCIPLINE_GUIDANCE = """One memory per insight, not per occurrence: when a recurring task (heartbeat, monitor tick, scheduled review, watchdog retry) keeps producing the same finding, write ONE record the first time and supersede it if the situation changes — never a new record per tick, per fire, or per re-check. Per-occurrence status belongs in `activity_update` (`task_note`/`task_result`) or the source system, not in memory. To find what has already been done — "what did we do on X", "has this been tried" — search the activity trail with `activity_search` rather than memory; memory is for what stays true, the trail is for what happened. Before writing a `fact` or `decision`, search for an existing record on the same topic and supersede it (`supersedes_id`) instead of adding a near-duplicate. For notes that stop being true on their own (for example "service X is down right now"), use `scratchpad` or set `expires_at`."""
 
@@ -209,6 +196,14 @@ def _agent_context_user_id(agent):
 
 def _agent_user_matches(agent, user_id):
     return _agent_context_user_id(agent) == user_id
+
+
+def _label_sort_key(item, label_field):
+    """Sort selector entries by their visible label, with IDs breaking ties."""
+    return (
+        str(item.get(label_field) or item["id"]).casefold(),
+        str(item["id"]).casefold(),
+    )
 
 
 def _agent_setup_output_options(target=None):
@@ -603,12 +598,19 @@ def integrations_page(
         {"id": r["id"], "email": r["email"], "display_name": r["display_name"]}
         for r in rows
     ]
+    users.sort(
+        key=lambda user: (
+            user["id"] != current_user_id,
+            *_label_sort_key(user, "display_name"),
+        )
+    )
 
     workspaces = (
         workspace_service.list_workspaces()
         if is_admin
         else workspace_service.list_workspaces(owner_user_id=current_user_id)
     )
+    workspaces.sort(key=lambda workspace: _label_sort_key(workspace, "name"))
     project_options = "".join(
         f'<option value="{p["id"]}" {"selected" if p["id"] == workspace_id else ""}>{escape_html(p["name"])}</option>'
         for p in workspaces
@@ -618,7 +620,9 @@ def integrations_page(
     visible_agents = {a["id"]: a for a in agents if a.get("is_active")}
     agent_options = "".join(
         f'<option value="{a["id"]}" {"selected" if a["id"] == agent_id else ""}>{escape_html(a.get("display_name", a["id"]))}</option>'
-        for a in visible_agents.values()
+        for a in sorted(
+            visible_agents.values(), key=lambda agent: _label_sort_key(agent, "display_name")
+        )
     )
 
     user_options = "".join(
@@ -1213,7 +1217,7 @@ Write memory only when it will help a future session:
 - `preference` in the authenticated/default user scope only if your key has user-scope write; otherwise treat the user scope as read-only owner context and write the preference to `{default_scope}` instead.
 - `scratchpad` in `{agent_scope}` for temporary private notes, or in `{default_scope}` only for short-lived workspace handoff notes.
 
-{MEMORY_RECORD_GUIDANCE}
+{MEMORY_CLASS_GUIDANCE}
 
 Do not write memory for routine progress, command output, facts already obvious from files, secrets, raw credentials, or noisy transient debugging notes.
 {MEMORY_DISCIPLINE_GUIDANCE} Use concise content and add a short `topic` as a label. Ranking uses observed evidence — how often a record is recalled, whether it helped, and when it was last confirmed — not self-assessment, so do not spend effort tuning `confidence` or `importance`.
@@ -1269,7 +1273,7 @@ Write memory only when it will help a future session:
 - `preference` in the authenticated/default user scope only if your key has user-scope write; otherwise treat the user scope as read-only owner context and write the preference to `{default_scope}` instead.
 - `scratchpad` in the authenticated private agent scope for temporary private notes, or in `{default_scope}` only for short-lived workspace handoff notes.
 
-{MEMORY_RECORD_GUIDANCE}
+{MEMORY_CLASS_GUIDANCE}
 
 Do not write memory for routine progress, command output, facts already obvious from files, secrets, raw credentials, or noisy transient debugging notes.
 {MEMORY_DISCIPLINE_GUIDANCE}
@@ -1411,7 +1415,7 @@ Write memory only when it will help a future session:
 - `preference` in the authenticated/default user scope only if your key has user-scope write; otherwise treat the user scope as read-only owner context and write the preference to `{default_scope}` instead.
 - `scratchpad` in the authenticated private agent scope for temporary private notes, or in `{default_scope}` only for short-lived workspace handoff notes.
 
-{MEMORY_RECORD_GUIDANCE}
+{MEMORY_CLASS_GUIDANCE}
 
 Do not write memory for routine progress, command output, facts already obvious from files, secrets, raw credentials, or noisy transient debugging notes.
 {MEMORY_DISCIPLINE_GUIDANCE}
@@ -1611,23 +1615,7 @@ def _build_cursor_mcp_json(base_url, api_key=None):
 
 
 def _build_windsurf_mcp_json(base_url, api_key=None):
-    key = _connection_key_value(api_key)
-    _api_key_var = ENV_PREFIX + "API_KEY"
-    _url_var = ENV_PREFIX + "URL"
-    return f"""{{
-  "mcpServers": {{
-    "{APP_SLUG}": {{
-      "url": "{base_url}/mcp",
-      "headers": {{
-        "Authorization": "Bearer {key}"
-      }},
-      "env": {{
-        "{_api_key_var}": "{key}",
-        "{_url_var}": "{base_url}"
-      }}
-    }}
-  }}
-}}"""
+    return _build_cursor_mcp_json(base_url, api_key)
 
 
 def _build_env_vars(base_url, agent_id, user_scope, workspace_scope, api_key=None):

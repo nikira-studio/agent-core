@@ -13,6 +13,7 @@ from fastapi.responses import HTMLResponse
 from app.services.auth_service import validate_session
 from app.branding import APP_NAME, JS_WINDOW_EVENT
 from app.config import settings
+from app.security.session_token import get_session_token
 
 
 def _hf(s):
@@ -71,16 +72,6 @@ def local_dt(value, style: str = "datetime", empty: str = "—") -> str:
     )
 
 
-def get_session_token(request: Request) -> str:
-    auth_header = request.headers.get("Authorization", "")
-    if auth_header.startswith("Bearer "):
-        return auth_header[7:]
-    token = request.cookies.get("session_token")
-    if token:
-        return token
-    return ""
-
-
 def get_icon(name: str, size: int = 16, color: str = "currentColor") -> str:
     icons = {
         "delete": f'<svg width="{size}" height="{size}" viewBox="0 0 24 24" fill="none" stroke="{color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18m-2 0v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6m3 0V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2m-6 9l4 4m0-4l-4 4"/></svg>',
@@ -137,7 +128,11 @@ def render_page(
             if href not in {"/users", "/audit", "/webhooks"}
         ]
     nav_html = "\n".join(
-        f'<a href="{href}" class="{"active" if nav_active == href else ""}"><span>{label}</span></a>'
+        (
+            f'<a href="{href}" class="active" aria-current="page"><span>{label}</span></a>'
+            if nav_active == href
+            else f'<a href="{href}" class=""><span>{label}</span></a>'
+        )
         for href, label in nav_items
     )
 
@@ -199,7 +194,7 @@ def render_page(
 <script>window.AC_USER_TZ = {user_tz_js};</script>
 <script>window.AC_AUTHENTICATED = {json.dumps(bool(session))};</script>
 <script>window.AGENT_CORE_WINDOW_EVENT = {json.dumps(JS_WINDOW_EVENT)};</script>
-<script src="/static/js/dashboard.js?v=20260808a"></script>
+<script src="/static/js/dashboard.js?v=20260904"></script>
 {events_js}
 {extra_js}
 </body>

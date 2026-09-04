@@ -4,12 +4,13 @@ import urllib.parse
 import urllib.request
 from typing import Optional
 
-from app.connectors import register_connector
+from app.connectors import BaseConnector
+from app.connectors.value_utils import decode_json_body
 from app.security.url_validation import validate_public_url
 from app.security.safe_http import safe_urlopen
 
 
-class GenericHttpConnector:
+class GenericHttpConnector(BaseConnector):
     connector_type_id = "generic_http"
 
     def test_connection(self, credential, config_json: Optional[str]) -> dict:
@@ -151,12 +152,4 @@ class GenericHttpConnector:
         return f"{base_url.rstrip('/')}/{path.lstrip('/')}"
 
     def _decode_body(self, text: str):
-        if not text:
-            return None
-        try:
-            return json.loads(text)
-        except json.JSONDecodeError:
-            return text
-
-
-register_connector("generic_http", GenericHttpConnector)
+        return decode_json_body(text)

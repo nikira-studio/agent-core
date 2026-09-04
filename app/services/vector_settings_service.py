@@ -1,8 +1,6 @@
-import secrets
 from typing import Optional
-from app.database import get_db
 from app.security.encryption import encrypt_value, decrypt_value
-from app.time_utils import utc_now_iso
+from app.services import system_settings_service
 
 
 VECTOR_KEYS = (
@@ -25,18 +23,11 @@ VECTOR_DEFAULTS = {
 
 
 def get_vector_settings() -> dict:
-    with get_db() as conn:
-        rows = conn.execute(
-            "SELECT key, value FROM system_settings WHERE key IN (?, ?, ?, ?, ?, ?)",
-            list(VECTOR_KEYS),
-        ).fetchall()
-        result = dict(VECTOR_DEFAULTS)
-        for row in rows:
-            result[row["key"]] = row["value"]
-        api_key_plaintext = _get_stored_api_key_plaintext()
-        result["vector_api_key"] = api_key_plaintext if api_key_plaintext else ""
-        result["vector_has_api_key"] = bool(api_key_plaintext)
-        return result
+    result = system_settings_service.read_raw(VECTOR_DEFAULTS)
+    api_key_plaintext = _get_stored_api_key_plaintext()
+    result["vector_api_key"] = api_key_plaintext if api_key_plaintext else ""
+    result["vector_has_api_key"] = bool(api_key_plaintext)
+    return result
 
 
 def get_vector_setting(key: str) -> str:
@@ -44,11 +35,7 @@ def get_vector_setting(key: str) -> str:
         raise ValueError(f"Unknown vector setting: {key}")
     if key == "vector_api_key":
         return _get_stored_api_key_plaintext() or ""
-    with get_db() as conn:
-        row = conn.execute(
-            "SELECT value FROM system_settings WHERE key = ?", (key,)
-        ).fetchone()
-        return row["value"] if row else VECTOR_DEFAULTS.get(key, "")
+    return system_settings_service.read_string(key, VECTOR_DEFAULTS.get(key, ""))
 
 
 def is_vector_search_enabled() -> bool:
@@ -67,120 +54,33 @@ def get_vector_auth_type() -> str:
     return get_vector_setting("vector_auth_type")
 
 
-def _system_settings_columns() -> set[str]:
-    with get_db() as conn:
-        return {
-            row["name"]
-            for row in conn.execute("PRAGMA table_info(system_settings)").fetchall()
-        }
-
-
-def _get_vector_key_record_id() -> Optional[str]:
-    columns = _system_settings_columns()
-    with get_db() as conn:
-        if "id" in columns:
-            row = conn.execute(
-                "SELECT id FROM system_settings WHERE key = ?", ("vector_api_key",)
-            ).fetchone()
-            return row["id"] if row else None
-        row = conn.execute(
-            "SELECT key FROM system_settings WHERE key = ?", ("vector_api_key",)
-        ).fetchone()
-        return row["key"] if row else None
-
-
 def _get_stored_api_key_plaintext() -> Optional[str]:
-    record_id = _get_vector_key_record_id()
-    if not record_id:
+    encrypted = system_settings_service.read_string("vector_api_key")
+    if not encrypted:
         return None
-    columns = _system_settings_columns()
-    with get_db() as conn:
-        if "value_encrypted" in columns:
-            key_column = "id" if "id" in columns else "key"
-            row = conn.execute(
-                f"SELECT value_encrypted FROM system_settings WHERE {key_column} = ?",
-                (record_id,),
-            ).fetchone()
-            if not row or not row["value_encrypted"]:
-                return None
-            return decrypt_value(row["value_encrypted"])
-        row = conn.execute(
-            "SELECT value FROM system_settings WHERE key = ?", ("vector_api_key",)
-        ).fetchone()
-        if not row or not row["value"]:
-            return None
-        try:
-            return decrypt_value(row["value"])
-        except Exception:
-            return row["value"]
+    try:
+        return decrypt_value(encrypted)
+    except Exception:
+        return encrypted
 
 
 def save_vector_setting(key: str, value: str) -> bool:
     if key not in VECTOR_KEYS:
         raise ValueError(f"Unknown vector setting: {key}")
-    with get_db() as conn:
-        cursor = conn.execute(
-            """
-            INSERT INTO system_settings (key, value, updated_at)
-            VALUES (?, ?, CURRENT_TIMESTAMP)
-            ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP
-            """,
-            (key, value),
-        )
-        conn.commit()
-        return cursor.rowcount > 0
+    system_settings_service.write_raw({key: value})
+    return True
 
 
 def save_vector_api_key(api_key: str) -> bool:
     if not api_key.strip():
         return clear_vector_api_key()
     encrypted = encrypt_value(api_key.strip())
-    record_id = _get_vector_key_record_id()
-    now = utc_now_iso()
-    columns = _system_settings_columns()
-    with get_db() as conn:
-        if "value_encrypted" in columns:
-            if record_id:
-                key_column = "id" if "id" in columns else "key"
-                conn.execute(
-                    f"UPDATE system_settings SET value_encrypted = ?, updated_at = ? WHERE {key_column} = ?",
-                    (encrypted, now, record_id),
-                )
-            elif "id" in columns:
-                entry_id = secrets.token_urlsafe(16)
-                conn.execute(
-                    "INSERT INTO system_settings (id, key, value, value_encrypted, updated_at) VALUES (?, ?, ?, ?, ?)",
-                    (entry_id, "vector_api_key", "", encrypted, now),
-                )
-            else:
-                conn.execute(
-                    "INSERT INTO system_settings (key, value, value_encrypted, updated_at) VALUES (?, ?, ?, ?)",
-                    ("vector_api_key", "", encrypted, now),
-                )
-        else:
-            conn.execute(
-                """
-                INSERT INTO system_settings (key, value, updated_at)
-                VALUES (?, ?, ?)
-                ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
-                """,
-                ("vector_api_key", encrypted, now),
-            )
-        conn.commit()
+    system_settings_service.write_raw({"vector_api_key": encrypted})
     return True
 
 
 def clear_vector_api_key() -> bool:
-    record_id = _get_vector_key_record_id()
-    if not record_id:
-        return True
-    columns = _system_settings_columns()
-    key_column = "id" if "id" in columns else "key"
-    with get_db() as conn:
-        conn.execute(
-            f"DELETE FROM system_settings WHERE {key_column} = ?", (record_id,)
-        )
-        conn.commit()
+    system_settings_service.delete(["vector_api_key"])
     return True
 
 

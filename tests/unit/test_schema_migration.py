@@ -10,12 +10,15 @@ via the normal clean_db fixture (which can't represent the pre-upgrade state).
 
 import sqlite3
 
+import app.schema as schema_module
+
 from app.schema import (
     SCHEMA_SQL,
     _ensure_memory_metadata_columns,
     _ensure_user_active_column,
     create_schema,
 )
+from app.services import system_settings_service
 
 
 def _bare_connection() -> sqlite3.Connection:
@@ -136,3 +139,65 @@ def test_existing_binding_table_adds_resolution_columns_before_indexes():
     assert "is_preferred" in columns
     assert "idx_bindings_alias_unique" in indexes
     assert "idx_bindings_preferred_unique" in indexes
+
+
+def test_create_schema_records_and_skips_applied_revision(monkeypatch):
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    create_schema(conn)
+
+    revisions = [
+        dict(row)
+        for row in conn.execute(
+            "SELECT revision, name FROM schema_migrations ORDER BY revision"
+        )
+    ]
+    assert revisions == [
+        {"revision": 1, "name": "normalize-current-schema"},
+        {"revision": 2, "name": "canonical-system-settings"},
+    ]
+
+    def unexpected_rerun(_conn):
+        raise AssertionError("an applied migration ran again")
+
+    monkeypatch.setattr(schema_module, "_migrate_001_current_schema", unexpected_rerun)
+    create_schema(conn)
+
+
+def test_legacy_id_keyed_system_settings_are_rebuilt_for_current_writes(
+    monkeypatch,
+):
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    conn.execute(
+        """CREATE TABLE system_settings (
+            id TEXT PRIMARY KEY,
+            key TEXT NOT NULL,
+            value TEXT NOT NULL DEFAULT '',
+            value_encrypted TEXT,
+            updated_at TEXT
+        )"""
+    )
+    conn.execute(
+        "INSERT INTO system_settings (id, key, value, value_encrypted) "
+        "VALUES ('vector', 'vector_api_key', '', 'encrypted-legacy')"
+    )
+    conn.commit()
+
+    create_schema(conn)
+
+    columns = {
+        row["name"]: row
+        for row in conn.execute("PRAGMA table_info(system_settings)")
+    }
+    assert columns["key"]["pk"] == 1
+    assert "id" not in columns
+    assert conn.execute(
+        "SELECT value FROM system_settings WHERE key = 'vector_api_key'"
+    ).fetchone()["value"] == "encrypted-legacy"
+
+    monkeypatch.setattr(system_settings_service, "get_db", lambda: conn)
+    system_settings_service.write_raw({"vector_model": "test-model"})
+    assert conn.execute(
+        "SELECT value FROM system_settings WHERE key = 'vector_model'"
+    ).fetchone()["value"] == "test-model"

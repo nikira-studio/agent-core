@@ -555,12 +555,6 @@ async function viewExecutions(id) {
   openModal('executions-modal');
 }
 
-function escapeHtml(s) {
-  return String(s ?? '').replace(/[&<>"']/g, function(c) {
-    return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c];
-  });
-}
-
 function openNewBinding(typeId, defaultName) {
   resetCreateBindingForm();
   const el = document.getElementById('binding-connector-type');
@@ -811,59 +805,6 @@ async function addHttpConnector(e) {
   showToast('Created ' + (j.data.connector_type?.display_name || displayName), 'success');
   document.getElementById('add-http-form').reset();
   updateHttpAuthFields();
-  location.reload();
-}
-
-function setAdapterButtonState(btn, label) {
-  if (!btn) return;
-  if (!btn.dataset.originalLabel) {
-    btn.dataset.originalLabel = btn.textContent || '';
-  }
-  btn.disabled = label !== null;
-  btn.textContent = label === null ? (btn.dataset.originalLabel || btn.textContent || '') : label;
-}
-
-async function installAdapter(btn, adapterId) {
-  setAdapterButtonState(btn, 'Installing...');
-  const j = await apiFetch('/api/connector-types/adapters/' + adapterId + '/install', {
-    method: 'POST',
-    body: JSON.stringify({})
-  });
-  if (!j.ok) {
-    setAdapterButtonState(btn, null);
-    showToast(j.error?.message || 'Failed to install adapter', 'danger');
-    return;
-  }
-  showToast('Installed ' + (j.data.adapter?.connector_type?.display_name || adapterId), 'success');
-  location.reload();
-}
-
-async function updateAdapter(btn, adapterId) {
-  setAdapterButtonState(btn, 'Updating...');
-  const j = await apiFetch('/api/connector-types/adapters/' + adapterId + '/update', {
-    method: 'POST',
-    body: JSON.stringify({})
-  });
-  if (!j.ok) {
-    setAdapterButtonState(btn, null);
-    showToast(j.error?.message || 'Failed to update adapter', 'danger');
-    return;
-  }
-  showToast('Updated ' + (j.data.adapter?.connector_type?.display_name || adapterId), 'success');
-  location.reload();
-}
-
-async function uninstallAdapter(btn, adapterId) {
-  setAdapterButtonState(btn, 'Uninstalling...');
-  const j = await apiFetch('/api/connector-types/adapters/' + adapterId + '/install', {
-    method: 'DELETE'
-  });
-  if (!j.ok) {
-    setAdapterButtonState(btn, null);
-    showToast(j.error?.message || 'Failed to uninstall adapter', 'danger');
-    return;
-  }
-  showToast('Uninstalled ' + adapterId, 'success');
   location.reload();
 }
 

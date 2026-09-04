@@ -110,7 +110,8 @@ If your SQLite build doesn't include FTS5, the Docker image is the fix; it bundl
 
 Work through this checklist:
 
-- Is the broker credential current? If it was rotated, the file at `data/broker.credential` needs to be updated with the new value.
+- Is the broker credential current? Agent Core updates `data/broker.credential`
+  during rotation. Update brokers that use `--token` or a copied token file.
 - Is the `Authorization` header using `Broker <credential>` (not `Bearer`)? The broker uses a different auth scheme from agents.
 - Is the configured `agent_id` active and not deactivated?
 - Does that agent have read access to the credential entry's scope?

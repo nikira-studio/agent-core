@@ -66,6 +66,8 @@ function getToastContainer() {
   if (!toastContainer) {
     toastContainer = document.createElement('div');
     toastContainer.className = 'toast-container';
+    toastContainer.setAttribute('aria-live', 'polite');
+    toastContainer.setAttribute('aria-relevant', 'additions');
     document.body.appendChild(toastContainer);
   }
   return toastContainer;
@@ -76,6 +78,8 @@ function showToast(message, type) {
   const container = getToastContainer();
   const toast = document.createElement('div');
   toast.className = 'toast ' + type;
+  toast.setAttribute('role', type === 'danger' || type === 'error' ? 'alert' : 'status');
+  toast.setAttribute('aria-atomic', 'true');
   toast.textContent = message;
   container.appendChild(toast);
 
@@ -97,21 +101,106 @@ function showToast(message, type) {
 // Modal Management
 // ============================================================
 
+var activeModalOverlay = null;
+var modalReturnFocus = null;
+var generatedFieldId = 0;
+
+var FOCUSABLE_SELECTOR = [
+  'a[href]',
+  'button:not([disabled])',
+  'input:not([disabled]):not([type="hidden"])',
+  'select:not([disabled])',
+  'textarea:not([disabled])',
+  '[tabindex]:not([tabindex="-1"])'
+].join(',');
+
+function visibleFocusableElements(root) {
+  return Array.from(root.querySelectorAll(FOCUSABLE_SELECTOR)).filter(function(element) {
+    return element.getClientRects().length > 0;
+  });
+}
+
+function ensureElementId(element, prefix) {
+  if (element.id) return element.id;
+  do {
+    generatedFieldId += 1;
+    element.id = prefix + '-' + generatedFieldId;
+  } while (document.getElementById(element.id) !== element);
+  return element.id;
+}
+
+function elementsMatching(root, selector) {
+  var matches = [];
+  if (root.nodeType === Node.ELEMENT_NODE && root.matches(selector)) matches.push(root);
+  return matches.concat(Array.from(root.querySelectorAll(selector)));
+}
+
+function associateFormLabels(root) {
+  var container = root && root.querySelectorAll ? root : document;
+  elementsMatching(container, '.form-group').forEach(function(group) {
+    var label = Array.from(group.children).find(function(child) {
+      return child.tagName === 'LABEL' && !child.classList.contains('checkbox-label');
+    });
+    if (!label) return;
+
+    var controls = group.querySelectorAll('input:not([type="hidden"]), select, textarea');
+    controls.forEach(function(control, index) {
+      if ((control.labels && control.labels.length) ||
+          control.hasAttribute('aria-label') ||
+          control.hasAttribute('aria-labelledby')) return;
+
+      var controlId = ensureElementId(control, 'dashboard-field');
+      if (index === 0 && !label.htmlFor) {
+        label.htmlFor = controlId;
+      } else {
+        control.setAttribute('aria-labelledby', ensureElementId(label, 'dashboard-label'));
+      }
+    });
+  });
+}
+
+function prepareModal(overlay) {
+  var dialog = overlay.querySelector('.modal') || overlay;
+  dialog.setAttribute('role', 'dialog');
+  dialog.setAttribute('aria-modal', 'true');
+  if (!dialog.hasAttribute('aria-label') && !dialog.hasAttribute('aria-labelledby')) {
+    var heading = dialog.querySelector('h1, h2, h3, h4');
+    if (heading) {
+      dialog.setAttribute('aria-labelledby', ensureElementId(heading, 'modal-title'));
+    }
+  }
+  if (!dialog.hasAttribute('tabindex')) dialog.setAttribute('tabindex', '-1');
+  associateFormLabels(overlay);
+  return dialog;
+}
+
 function openModal(id) {
-  var modal = document.getElementById(id);
-  if (modal) {
-    modal.style.display = 'flex';
-    modal.classList.add('open');
+  var overlay = document.getElementById(id);
+  if (overlay) {
+    if (!activeModalOverlay) modalReturnFocus = document.activeElement;
+    activeModalOverlay = overlay;
+    var dialog = prepareModal(overlay);
+    overlay.style.display = 'flex';
+    overlay.classList.add('open');
+    overlay.setAttribute('aria-hidden', 'false');
     document.body.style.overflow = 'hidden';
+    var focusable = visibleFocusableElements(overlay);
+    (focusable[0] || dialog).focus();
   }
 }
 
 function closeModal(id) {
-  var modal = document.getElementById(id);
-  if (modal) {
-    modal.classList.remove('open');
-    modal.style.display = 'none';
+  var overlay = document.getElementById(id);
+  if (overlay) {
+    overlay.classList.remove('open');
+    overlay.style.display = 'none';
+    overlay.setAttribute('aria-hidden', 'true');
     document.body.style.overflow = '';
+    if (activeModalOverlay === overlay) {
+      activeModalOverlay = null;
+      if (modalReturnFocus && document.contains(modalReturnFocus)) modalReturnFocus.focus();
+      modalReturnFocus = null;
+    }
   }
 }
 
@@ -120,25 +209,67 @@ function closeAllModals() {
   modals.forEach(function(m) {
     m.classList.remove('open');
     m.style.display = 'none';
+    m.setAttribute('aria-hidden', 'true');
   });
   document.body.style.overflow = '';
+  activeModalOverlay = null;
+  if (modalReturnFocus && document.contains(modalReturnFocus)) modalReturnFocus.focus();
+  modalReturnFocus = null;
 }
 
 // Close modal when clicking overlay
 document.addEventListener('click', function(e) {
   if (e.target.classList.contains('modal-overlay')) {
-    e.target.classList.remove('open');
-    e.target.style.display = 'none';
-    document.body.style.overflow = '';
+    closeModal(e.target.id);
   }
 });
 
-// Close modal on Escape key
+// Keep keyboard focus inside the visible dialog and close it on Escape.
 document.addEventListener('keydown', function(e) {
   if (e.key === 'Escape') {
     closeAllModals();
+    return;
+  }
+  if (e.key !== 'Tab' || !activeModalOverlay) return;
+
+  var focusable = visibleFocusableElements(activeModalOverlay);
+  if (!focusable.length) {
+    e.preventDefault();
+    prepareModal(activeModalOverlay).focus();
+    return;
+  }
+
+  var first = focusable[0];
+  var last = focusable[focusable.length - 1];
+  if (!activeModalOverlay.contains(document.activeElement)) {
+    e.preventDefault();
+    first.focus();
+  } else if (e.shiftKey && document.activeElement === first) {
+    e.preventDefault();
+    last.focus();
+  } else if (!e.shiftKey && document.activeElement === last) {
+    e.preventDefault();
+    first.focus();
   }
 });
+
+function enhanceDashboardAccessibility(root) {
+  var container = root && root.querySelectorAll ? root : document;
+  associateFormLabels(container);
+  elementsMatching(container, '.modal-overlay').forEach(function(overlay) {
+    prepareModal(overlay);
+    if (!overlay.classList.contains('open')) overlay.setAttribute('aria-hidden', 'true');
+  });
+}
+
+enhanceDashboardAccessibility(document);
+new MutationObserver(function(mutations) {
+  mutations.forEach(function(mutation) {
+    mutation.addedNodes.forEach(function(node) {
+      if (node.nodeType === Node.ELEMENT_NODE) enhanceDashboardAccessibility(node);
+    });
+  });
+}).observe(document.body, {childList: true, subtree: true});
 
 
 // ============================================================

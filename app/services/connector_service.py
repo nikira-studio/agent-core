@@ -71,22 +71,14 @@ def _with_capability_policy(connector_type: dict, tool: dict) -> dict:
     return result
 
 
-def list_connector_types(
-    include_inactive: bool = False, available_adapters: dict | None = None
-) -> list[dict]:
-    # Scan the adapter library once and index by id. Previously this called
-    # adapter_loader.get_adapter_library_entry(id) per row, and each of those
-    # re-ran the full list_available_adapters() scan — O(N^2), ~2s on the
-    # connectors page. One scan + dict lookup makes it O(N). Callers that already
-    # hold a scanned map (e.g. the /connectors page) can pass it in to avoid a
-    # second scan entirely.
-    if available_adapters is None:
-        from app.services import adapter_loader
+def list_connector_types(include_inactive: bool = False) -> list[dict]:
+    """Return the installed service catalog from SQLite.
 
-        available_adapters = {
-            entry["id"]: entry for entry in adapter_loader.list_available_adapters()
-        }
-
+    Adapter templates are a separate filesystem-backed browse catalog.  A
+    connector type already represents an installed service, so checking every
+    adapter manifest here adds no information and makes ordinary catalog reads
+    CPU-bound.
+    """
     with get_db() as conn:
         query = """
             SELECT id, display_name, description, provider_type, auth_type,
@@ -101,14 +93,7 @@ def list_connector_types(
             query += " WHERE is_active = 1"
         query += " ORDER BY display_name"
         rows = conn.execute(query).fetchall()
-        connector_types = []
-        for row in rows:
-            ct = _row_to_connector_type(dict(row))
-            adapter_entry = available_adapters.get(ct["id"])
-            if adapter_entry and not adapter_entry.get("installed"):
-                continue
-            connector_types.append(ct)
-        return connector_types
+        return [_row_to_connector_type(dict(row)) for row in rows]
 
 
 def get_connector_type(connector_type_id: str) -> Optional[dict]:
@@ -703,47 +688,10 @@ def _check_rate_limit(binding: dict) -> Optional[str]:
     return None
 
 
-def _infer_backend_type(connector_type: dict) -> Optional[str]:
-    """Infer backend type from legacy fields for existing connector_types rows."""
-    if connector_type.get("provider_type") == "mcp":
-        return "mcp"
-    if connector_type.get("operations_json"):
-        return "openapi"
-    if connector_type.get("id") == "generic_http":
-        return "generic_http"
-    return None
-
-
 def _resolve_executor(connector_type: dict):
-    from app.connectors import get_connector
+    from app.connectors import resolve_connector
 
-    registered = get_connector(connector_type["id"])
-    if registered:
-        return registered
-
-    backend = connector_type.get("backend_type") or _infer_backend_type(connector_type)
-
-    if backend == "generic_http" or connector_type.get("provider_type") == "generic_http":
-        from app.connectors.generic_http import GenericHttpConnector
-
-        return GenericHttpConnector()
-
-    if backend == "http":
-        from app.connectors.http_engine import HttpEngine
-
-        return HttpEngine(connector_type)
-
-    if backend == "openapi" or connector_type.get("operations_json"):
-        from app.connectors.openapi_executor import OpenApiExecutor
-
-        return OpenApiExecutor()
-
-    if backend == "cli":
-        from app.connectors.cli_engine import CliEngine
-
-        return CliEngine(connector_type)
-
-    return None
+    return resolve_connector(connector_type)
 
 
 def _build_executor_config(binding: dict, connector_type: dict) -> str:
@@ -1073,6 +1021,13 @@ def build_capability_summary(
     # One pass over the execution log for the whole summary, rather than one
     # query per binding inside the loop below.
     failing_by_binding = failing_actions_by_binding()
+    credentials_by_id = credential_service.get_credentials_by_ids(
+        [
+            binding["credential_id"]
+            for binding in visible_bindings
+            if binding.get("credential_id")
+        ]
+    )
 
     summaries = []
     usable_total = 0
@@ -1105,7 +1060,7 @@ def build_capability_summary(
             credential_readable = False
             credential_scope = None
             if binding.get("credential_id"):
-                credential = credential_service.get_credential(binding["credential_id"])
+                credential = credentials_by_id.get(binding["credential_id"])
                 if credential:
                     credential_present = True
                     credential_scope = credential.get("scope")
@@ -1203,9 +1158,6 @@ def _validate_action_for_connector(connector_type: dict, action: str) -> Optiona
             connector_type.get("supported_actions")
         ):
             return "INVALID_ACTION"
-        return None
-
-    if connector_type.get("provider_type") == "generic_http":
         return None
 
     supported_actions = set(

@@ -114,6 +114,43 @@ def test_integrations_shows_selectors(integrations_client):
     assert 'value="claude-code"' in html
 
 
+def test_integrations_sorts_context_selectors_for_the_current_user(test_client, clean_db):
+    create_user("zoe", "zoe@test.local", "password123", "Zoe", "admin")
+    session = create_session("zoe", channel="dashboard")
+    create_user("adam", "adam@test.local", "password123", "Adam")
+    create_user("maya", "maya@test.local", "password123", "Maya")
+
+    create_workspace("zeta", owner_user_id="zoe", name="Zeta Workspace")
+    create_workspace("alpha", owner_user_id="zoe", name="Alpha Workspace")
+    create_agent(
+        agent_id="zeta-agent",
+        display_name="Zeta Agent",
+        owner_user_id="zoe",
+        read_scopes=["agent:zeta-agent"],
+        write_scopes=["agent:zeta-agent"],
+    )
+    create_agent(
+        agent_id="alpha-agent",
+        display_name="Alpha Agent",
+        owner_user_id="zoe",
+        read_scopes=["agent:alpha-agent"],
+        write_scopes=["agent:alpha-agent"],
+    )
+
+    test_client.cookies.set("session_token", session["session_id"])
+    html = test_client.get("/integrations").text
+
+    def selector_values(selector_id):
+        selector = re.search(
+            rf'<select id="{selector_id}".*?</select>', html, re.S
+        ).group(0)
+        return re.findall(r'<option value="([^"]*)"', selector)
+
+    assert selector_values("user_id") == ["zoe", "adam", "maya"]
+    assert selector_values("workspace_id") == ["", "alpha", "zeta"]
+    assert selector_values("agent_id") == ["", "alpha-agent", "zeta-agent"]
+
+
 def test_integrations_generates_claude_md(integrations_client):
     r = integrations_client.get(
         "/integrations?user_id=alex&workspace_id=agent-core&agent_id=claude-code&target=claude_code&output_type=claude_md"

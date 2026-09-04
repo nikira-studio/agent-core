@@ -5,7 +5,7 @@ from typing import Optional
 
 from app.config import settings
 from app.database import get_db
-from app.time_utils import parse_utc_datetime, utc_now, utc_now_iso
+from app.time_utils import utc_now, utc_now_iso
 
 
 def record_change(conn, *, memory_scope: str, change_type: str, resource_type: str,

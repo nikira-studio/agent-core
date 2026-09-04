@@ -32,6 +32,7 @@ from typing import Optional
 
 from app.database import get_db
 from app.services import memory_service
+from app.services import system_settings_service
 
 logger = logging.getLogger(__name__)
 
@@ -81,27 +82,22 @@ Reply with JSON only, no other text:
 {{"verdict": "keep" | "low_value", "reason": "<one sentence naming what it gives a future agent, or what is missing>"}}"""
 
 
-def _setting(key: str, default: str = "") -> str:
-    try:
-        with get_db() as conn:
-            row = conn.execute(
-                "SELECT value FROM system_settings WHERE key = ?", (key,)
-            ).fetchone()
-        return (row["value"] if row else default) or default
-    except Exception:
-        return default
-
-
 def review_config() -> dict:
     """Whether this feature can run: enabled by the operator, and a model reachable."""
     from app.services import model_service
 
-    enabled = _setting("usefulness_review_enabled", "0").lower() in ("1", "true", "yes")
+    values = system_settings_service.read_raw(
+        {
+            "usefulness_review_enabled": "0",
+            "usefulness_review_limit": str(DEFAULT_REVIEW_LIMIT),
+        }
+    )
+    enabled = values["usefulness_review_enabled"].lower() in ("1", "true", "yes")
     config = {
         "enabled": enabled,
         "model_available": model_service.is_available(),
         "limit": int(
-            _setting("usefulness_review_limit", str(DEFAULT_REVIEW_LIMIT))
+            values["usefulness_review_limit"]
             or DEFAULT_REVIEW_LIMIT
         ),
     }

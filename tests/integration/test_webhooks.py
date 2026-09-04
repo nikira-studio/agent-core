@@ -1,4 +1,5 @@
 """Integration tests for webhook registration and delivery."""
+
 import json
 import pytest
 from unittest.mock import patch, MagicMock
@@ -8,9 +9,11 @@ from unittest.mock import patch, MagicMock
 # Fixtures / helpers
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def admin_client(test_client, clean_db):
     from app.services.auth_service import create_user, create_session
+
     create_user("admin", "admin@test.local", "testpassword123", "Admin", "admin")
     session = create_session("admin", channel="dashboard")
     test_client.cookies.set("session_token", session["session_id"])
@@ -20,6 +23,7 @@ def admin_client(test_client, clean_db):
 @pytest.fixture
 def user_client(test_client, clean_db):
     from app.services.auth_service import create_user, create_session
+
     create_user("admin", "admin@test.local", "testpassword123", "Admin", "admin")
     create_user("user1", "user1@test.local", "testpassword123", "User One", "user")
     session = create_session("user1", channel="dashboard")
@@ -27,19 +31,30 @@ def user_client(test_client, clean_db):
     return test_client
 
 
-def _create_webhook(client, name="Test Hook", url="https://example.com/hook", secret="s3cr3t", event_types=None):
+def _create_webhook(
+    client,
+    name="Test Hook",
+    url="https://example.com/hook",
+    secret="s3cr3t",
+    event_types=None,
+):
     with patch("app.security.url_validation.validate_public_url"):
-        return client.post("/api/webhooks", json={
-            "name": name,
-            "url": url,
-            "secret": secret,
-            "event_types": event_types or ["activity_created", "activity_cancelled"],
-        })
+        return client.post(
+            "/api/webhooks",
+            json={
+                "name": name,
+                "url": url,
+                "secret": secret,
+                "event_types": event_types
+                or ["activity_created", "activity_cancelled"],
+            },
+        )
 
 
 # ---------------------------------------------------------------------------
 # Admin CRUD
 # ---------------------------------------------------------------------------
+
 
 class TestWebhookAdminCRUD:
     def test_admin_can_create_webhook(self, admin_client):
@@ -61,7 +76,9 @@ class TestWebhookAdminCRUD:
     def test_admin_can_update_webhook(self, admin_client):
         wh_id = _create_webhook(admin_client).json()["data"]["webhook"]["id"]
         with patch("app.security.url_validation.validate_public_url"):
-            r = admin_client.put(f"/api/webhooks/{wh_id}", json={"name": "Renamed", "enabled": False})
+            r = admin_client.put(
+                f"/api/webhooks/{wh_id}", json={"name": "Renamed", "enabled": False}
+            )
         assert r.status_code == 200
         updated = r.json()["data"]["webhook"]
         assert updated["name"] == "Renamed"
@@ -76,9 +93,15 @@ class TestWebhookAdminCRUD:
 
     def test_non_admin_cannot_create_webhook(self, user_client):
         with patch("app.security.url_validation.validate_public_url"):
-            r = user_client.post("/api/webhooks", json={
-                "name": "x", "url": "https://example.com", "secret": "x", "event_types": ["activity_created"]
-            })
+            r = user_client.post(
+                "/api/webhooks",
+                json={
+                    "name": "x",
+                    "url": "https://example.com",
+                    "secret": "x",
+                    "event_types": ["activity_created"],
+                },
+            )
         assert r.status_code == 403
 
     def test_non_admin_cannot_list_webhooks(self, user_client):
@@ -93,18 +116,28 @@ class TestWebhookAdminCRUD:
 
     def test_invalid_event_type_rejected(self, admin_client):
         with patch("app.security.url_validation.validate_public_url"):
-            r = admin_client.post("/api/webhooks", json={
-                "name": "x", "url": "https://example.com", "secret": "x",
-                "event_types": ["not_a_real_event"],
-            })
+            r = admin_client.post(
+                "/api/webhooks",
+                json={
+                    "name": "x",
+                    "url": "https://example.com",
+                    "secret": "x",
+                    "event_types": ["not_a_real_event"],
+                },
+            )
         assert r.status_code == 400
 
     def test_empty_event_types_rejected(self, admin_client):
         with patch("app.security.url_validation.validate_public_url"):
-            r = admin_client.post("/api/webhooks", json={
-                "name": "x", "url": "https://example.com", "secret": "x",
-                "event_types": [],
-            })
+            r = admin_client.post(
+                "/api/webhooks",
+                json={
+                    "name": "x",
+                    "url": "https://example.com",
+                    "secret": "x",
+                    "event_types": [],
+                },
+            )
         assert r.status_code == 400
 
 
@@ -112,19 +145,26 @@ class TestWebhookAdminCRUD:
 # Delivery tests
 # ---------------------------------------------------------------------------
 
+
 class TestWebhookDelivery:
     def test_delivery_logged_on_subscribed_event(self, admin_client):
         from app.services import webhook_service
-        wh_id = _create_webhook(admin_client, event_types=["activity_created"]).json()["data"]["webhook"]["id"]
+
+        wh_id = _create_webhook(admin_client, event_types=["activity_created"]).json()[
+            "data"
+        ]["webhook"]["id"]
 
         posted = []
-        def mock_post(url, *, content, headers, timeout):
+
+        def mock_post(_client, url, *, content, headers):
             posted.append(json.loads(content))
             resp = MagicMock()
             resp.status_code = 200
             return resp
 
-        with patch("httpx.post", side_effect=mock_post):
+        with patch(
+            "app.services.webhook_service.safe_httpx_post", side_effect=mock_post
+        ):
             webhook_service.dispatch_event(
                 "activity_created",
                 {
@@ -137,6 +177,7 @@ class TestWebhookDelivery:
                 },
             )
             import time
+
             time.sleep(0.1)
 
         assert len(posted) == 1
@@ -152,6 +193,7 @@ class TestWebhookDelivery:
 
     def test_unsubscribed_event_does_not_trigger_delivery(self, admin_client):
         from app.services import webhook_service
+
         _create_webhook(admin_client, event_types=["activity_cancelled"])
         wh_id = admin_client.get("/api/webhooks").json()["data"]["webhooks"][0]["id"]
 
@@ -164,16 +206,22 @@ class TestWebhookDelivery:
 
     def test_failed_delivery_is_recorded(self, admin_client):
         from app.services import webhook_service
-        wh_id = _create_webhook(admin_client, event_types=["activity_created"]).json()["data"]["webhook"]["id"]
 
-        def mock_post(url, *, content, headers, timeout):
+        wh_id = _create_webhook(admin_client, event_types=["activity_created"]).json()[
+            "data"
+        ]["webhook"]["id"]
+
+        def mock_post(_client, url, *, content, headers):
             resp = MagicMock()
             resp.status_code = 500
             return resp
 
-        with patch("httpx.post", side_effect=mock_post):
+        with patch(
+            "app.services.webhook_service.safe_httpx_post", side_effect=mock_post
+        ):
             webhook_service.dispatch_event("activity_created", {"activity_id": "abc"})
             import time
+
             time.sleep(0.1)
 
         r = admin_client.get(f"/api/webhooks/{wh_id}/deliveries")
@@ -183,18 +231,25 @@ class TestWebhookDelivery:
 
     def test_signed_payload_has_correct_header(self, admin_client):
         from app.services import webhook_service
-        _create_webhook(admin_client, event_types=["activity_created"], secret="mywebhooksecret")
+
+        _create_webhook(
+            admin_client, event_types=["activity_created"], secret="mywebhooksecret"
+        )
 
         sent_headers = []
-        def mock_post(url, *, content, headers, timeout):
+
+        def mock_post(_client, url, *, content, headers):
             sent_headers.append(dict(headers))
             resp = MagicMock()
             resp.status_code = 200
             return resp
 
-        with patch("httpx.post", side_effect=mock_post):
+        with patch(
+            "app.services.webhook_service.safe_httpx_post", side_effect=mock_post
+        ):
             webhook_service.dispatch_event("activity_created", {"activity_id": "test"})
             import time
+
             time.sleep(0.1)
 
         assert len(sent_headers) == 1
@@ -228,13 +283,15 @@ class TestWebhookDelivery:
 
         captured = []
 
-        def mock_post(url, *, content, headers, timeout):
+        def mock_post(_client, url, *, content, headers):
             captured.append(json.loads(content))
             resp = MagicMock()
             resp.status_code = 200
             return resp
 
-        with patch("httpx.post", side_effect=mock_post):
+        with patch(
+            "app.services.webhook_service.safe_httpx_post", side_effect=mock_post
+        ):
             webhook_service.dispatch_event(
                 "connector_executed",
                 {
@@ -250,6 +307,7 @@ class TestWebhookDelivery:
                 },
             )
             import time
+
             time.sleep(0.1)
 
         assert captured
@@ -263,7 +321,10 @@ class TestWebhookDelivery:
 
     def test_disabled_webhook_not_triggered(self, admin_client):
         from app.services import webhook_service
-        wh_id = _create_webhook(admin_client, event_types=["activity_created"]).json()["data"]["webhook"]["id"]
+
+        wh_id = _create_webhook(admin_client, event_types=["activity_created"]).json()[
+            "data"
+        ]["webhook"]["id"]
         with patch("app.security.url_validation.validate_public_url"):
             admin_client.put(f"/api/webhooks/{wh_id}", json={"enabled": False})
 
@@ -276,18 +337,21 @@ class TestWebhookDelivery:
 # Test delivery endpoint
 # ---------------------------------------------------------------------------
 
+
 class TestTestDelivery:
     def test_test_delivery_sends_synthetic_payload(self, admin_client):
         wh_id = _create_webhook(admin_client).json()["data"]["webhook"]["id"]
         posted = []
 
-        def mock_post(url, *, content, headers, timeout):
+        def mock_post(_client, url, *, content, headers):
             posted.append(json.loads(content))
             resp = MagicMock()
             resp.status_code = 200
             return resp
 
-        with patch("httpx.post", side_effect=mock_post):
+        with patch(
+            "app.services.webhook_service.safe_httpx_post", side_effect=mock_post
+        ):
             r = admin_client.post(f"/api/webhooks/{wh_id}/test")
 
         assert r.status_code == 200
@@ -298,31 +362,40 @@ class TestTestDelivery:
 
     def test_test_delivery_does_not_replay_real_delivery(self, admin_client):
         from app.services import webhook_service
+
         wh_id = _create_webhook(admin_client).json()["data"]["webhook"]["id"]
 
         # simulate a prior real delivery in the log
-        webhook_service._record_delivery(wh_id, "activity_created", '{"real":"data"}', "success", 200, None)
+        webhook_service._record_delivery(
+            wh_id, "activity_created", '{"real":"data"}', "success", 200, None
+        )
 
-        def mock_post(url, *, content, headers, timeout):
+        def mock_post(_client, url, *, content, headers):
             payload = json.loads(content)
-            assert payload["event_type"] == "test", "should use synthetic payload, not replay prior"
+            assert payload["event_type"] == "test", (
+                "should use synthetic payload, not replay prior"
+            )
             resp = MagicMock()
             resp.status_code = 200
             return resp
 
-        with patch("httpx.post", side_effect=mock_post):
+        with patch(
+            "app.services.webhook_service.safe_httpx_post", side_effect=mock_post
+        ):
             r = admin_client.post(f"/api/webhooks/{wh_id}/test")
         assert r.json()["data"]["ok"] is True
 
     def test_test_delivery_logged(self, admin_client):
         wh_id = _create_webhook(admin_client).json()["data"]["webhook"]["id"]
 
-        def mock_post(url, *, content, headers, timeout):
+        def mock_post(_client, url, *, content, headers):
             resp = MagicMock()
             resp.status_code = 200
             return resp
 
-        with patch("httpx.post", side_effect=mock_post):
+        with patch(
+            "app.services.webhook_service.safe_httpx_post", side_effect=mock_post
+        ):
             admin_client.post(f"/api/webhooks/{wh_id}/test")
 
         r = admin_client.get(f"/api/webhooks/{wh_id}/deliveries")
@@ -332,23 +405,28 @@ class TestTestDelivery:
     def test_test_delivery_failure_logged(self, admin_client):
         wh_id = _create_webhook(admin_client).json()["data"]["webhook"]["id"]
 
-        def mock_post(url, *, content, headers, timeout):
+        def mock_post(_client, url, *, content, headers):
             resp = MagicMock()
             resp.status_code = 503
             return resp
 
-        with patch("httpx.post", side_effect=mock_post):
+        with patch(
+            "app.services.webhook_service.safe_httpx_post", side_effect=mock_post
+        ):
             r = admin_client.post(f"/api/webhooks/{wh_id}/test")
 
         data = r.json()["data"]
         assert data["http_status"] == 503
-        deliveries = admin_client.get(f"/api/webhooks/{wh_id}/deliveries").json()["data"]["deliveries"]
+        deliveries = admin_client.get(f"/api/webhooks/{wh_id}/deliveries").json()[
+            "data"
+        ]["deliveries"]
         assert any(d["status"] == "failure" for d in deliveries)
 
 
 # ---------------------------------------------------------------------------
 # Dashboard page
 # ---------------------------------------------------------------------------
+
 
 class TestWebhooksDashboardPage:
     def test_webhooks_page_loads_for_admin(self, admin_client):
@@ -383,6 +461,7 @@ class TestWebhooksDashboardPage:
 
     def test_webhooks_page_shows_registered_webhooks(self, admin_client):
         from app.services import webhook_service
+
         webhook_service.create_webhook(
             name="My Integration",
             url="https://n8n.example.com/webhook/agent-core",

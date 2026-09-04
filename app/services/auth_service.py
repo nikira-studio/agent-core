@@ -20,6 +20,10 @@ logger = logging.getLogger(__name__)
 BCRYPT_COST = 12
 
 
+class RegistrationDisabledError(RuntimeError):
+    """Raised when the one-time bootstrap administrator already exists."""
+
+
 def create_jwt(session_id: str) -> str:
     from app.config import settings
 
@@ -83,6 +87,41 @@ def create_user(
             "email": email,
             "display_name": display_name,
             "role": role,
+            "is_active": True,
+        }
+
+
+def create_initial_admin(
+    user_id: str,
+    email: str,
+    password: str,
+    display_name: str,
+) -> dict:
+    """Create the installation's first user atomically.
+
+    Hashing happens before the write lock so bcrypt does not stall unrelated
+    database work. The user-count check and insert then share one immediate
+    transaction, so concurrent bootstrap requests cannot both become admins.
+    """
+    password_hash = hash_password(password)
+
+    with get_db() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        row = conn.execute("SELECT 1 FROM users LIMIT 1").fetchone()
+        if row:
+            raise RegistrationDisabledError("User registration is disabled")
+        conn.execute(
+            """
+            INSERT INTO users (id, email, password_hash, display_name, role, is_active)
+            VALUES (?, ?, ?, ?, 'admin', 1)
+            """,
+            (user_id, email, password_hash, display_name),
+        )
+        return {
+            "id": user_id,
+            "email": email,
+            "display_name": display_name,
+            "role": "admin",
             "is_active": True,
         }
 

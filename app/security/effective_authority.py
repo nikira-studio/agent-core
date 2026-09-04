@@ -51,9 +51,41 @@ class EffectiveAuthority:
         if self.principal_user_id is None:
             object.__setattr__(self, "principal_user_id", self.context.user_id)
 
-    def __getattr__(self, name):
-        """Compatibility bridge while routes migrate from RequestContext."""
-        return getattr(self.context, name)
+    @property
+    def actor_type(self) -> str:
+        return self.context.actor_type
+
+    @property
+    def actor_id(self) -> str:
+        return self.context.actor_id
+
+    @property
+    def user_id(self) -> Optional[str]:
+        return self.context.user_id
+
+    @property
+    def agent_id(self) -> Optional[str]:
+        return self.context.agent_id
+
+    @property
+    def read_scopes(self) -> list[str]:
+        return self.context.read_scopes
+
+    @property
+    def write_scopes(self) -> list[str]:
+        return self.context.write_scopes
+
+    @property
+    def default_recall_scopes(self) -> list[str]:
+        return self.context.default_recall_scopes
+
+    @property
+    def active_workspace_ids(self) -> frozenset[str]:
+        return self.context.active_workspace_ids
+
+    @property
+    def is_admin(self) -> bool:
+        return self.context.is_admin
 
     @property
     def is_delegated(self) -> bool:

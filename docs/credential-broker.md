@@ -59,11 +59,10 @@ curl -X POST http://localhost:3500/api/dashboard/broker/rotate \
   -H "Authorization: Bearer <admin-session>"
 ```
 
-The new credential comes back in the response **once**. Agent Core doesn't automatically update `data/broker.credential`; you need to write it there yourself:
-
-```bash
-echo "ac_broker_new_value_here" > data/broker.credential
-```
+Agent Core atomically updates `data/broker.credential` and returns the new
+credential once. A broker that reads this file needs no manual update. If a
+broker uses `--token` or a copied token file, update that value from the
+response.
 
 ---
 

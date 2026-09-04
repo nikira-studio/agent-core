@@ -13,6 +13,7 @@ from app.branding import APP_NAME
 
 from app.database import get_db
 from app.security.encryption import encrypt_value, decrypt_value
+from app.security.safe_http import safe_httpx_post
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +36,7 @@ DELIVERY_TIMEOUT_SECONDS = 5
 # CRUD helpers
 # ---------------------------------------------------------------------------
 
+
 def create_webhook(
     name: str,
     url: str,
@@ -53,7 +55,16 @@ def create_webhook(
             (id, name, url, secret_encrypted, event_types_json, enabled, created_by, created_at, updated_at)
             VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?)
             """,
-            (webhook_id, name, url, secret_encrypted, json.dumps(valid_events), created_by, now, now),
+            (
+                webhook_id,
+                name,
+                url,
+                secret_encrypted,
+                json.dumps(valid_events),
+                created_by,
+                now,
+                now,
+            ),
         )
     return get_webhook(webhook_id)
 
@@ -147,6 +158,7 @@ def list_deliveries(webhook_id: str, limit: int = 50) -> list[dict]:
 # Signing
 # ---------------------------------------------------------------------------
 
+
 def _sign_payload(secret_plaintext: str, body: bytes) -> str:
     mac = hmac.new(secret_plaintext.encode(), body, hashlib.sha256)
     return f"sha256={mac.hexdigest()}"
@@ -155,6 +167,7 @@ def _sign_payload(secret_plaintext: str, body: bytes) -> str:
 # ---------------------------------------------------------------------------
 # Delivery
 # ---------------------------------------------------------------------------
+
 
 def _record_delivery(
     webhook_id: str,
@@ -173,20 +186,37 @@ def _record_delivery(
                 (webhook_id, event_type, payload_json, status, http_status, error_message, delivered_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
-                (webhook_id, event_type, payload_json, status, http_status, error_message, now),
+                (
+                    webhook_id,
+                    event_type,
+                    payload_json,
+                    status,
+                    http_status,
+                    error_message,
+                    now,
+                ),
             )
     except Exception:
         logger.exception("Failed to record webhook delivery log for %s", webhook_id)
 
 
-def _deliver_one(webhook_id: str, url: str, secret_encrypted: str, event_type: str, payload: dict) -> None:
+def _deliver_one(
+    webhook_id: str, url: str, secret_encrypted: str, event_type: str, payload: dict
+) -> None:
     payload_json = json.dumps(payload, separators=(",", ":"))
     payload_bytes = payload_json.encode()
     try:
         secret_plaintext = decrypt_value(secret_encrypted)
     except Exception:
         logger.error("Failed to decrypt webhook secret for %s", webhook_id)
-        _record_delivery(webhook_id, event_type, payload_json, "failure", None, "Secret decryption failed")
+        _record_delivery(
+            webhook_id,
+            event_type,
+            payload_json,
+            "failure",
+            None,
+            "Secret decryption failed",
+        )
         return
 
     signature = _sign_payload(secret_plaintext, payload_bytes)
@@ -194,16 +224,17 @@ def _deliver_one(webhook_id: str, url: str, secret_encrypted: str, event_type: s
     error_message = None
     status = "failure"
     try:
-        response = httpx.post(
-            url,
-            content=payload_bytes,
-            headers={
-                "Content-Type": "application/json",
-                "X-Agent-Core-Signature": signature,
-                "X-Agent-Core-Event": event_type,
-            },
-            timeout=DELIVERY_TIMEOUT_SECONDS,
-        )
+        with httpx.Client(timeout=DELIVERY_TIMEOUT_SECONDS) as client:
+            response = safe_httpx_post(
+                client,
+                url,
+                content=payload_bytes,
+                headers={
+                    "Content-Type": "application/json",
+                    "X-Agent-Core-Signature": signature,
+                    "X-Agent-Core-Event": event_type,
+                },
+            )
         http_status = response.status_code
         if 200 <= response.status_code < 300:
             status = "success"
@@ -214,9 +245,16 @@ def _deliver_one(webhook_id: str, url: str, secret_encrypted: str, event_type: s
     except Exception as exc:
         error_message = str(exc)[:200]
 
-    _record_delivery(webhook_id, event_type, payload_json, status, http_status, error_message)
+    _record_delivery(
+        webhook_id, event_type, payload_json, status, http_status, error_message
+    )
     if status == "failure":
-        logger.warning("Webhook delivery failed for %s event=%s: %s", webhook_id, event_type, error_message)
+        logger.warning(
+            "Webhook delivery failed for %s event=%s: %s",
+            webhook_id,
+            event_type,
+            error_message,
+        )
 
 
 def dispatch_event(event_type: str, data: dict) -> None:
@@ -259,8 +297,13 @@ def _sample_payload(event_type: str) -> dict:
     """Return a realistic sample data payload for a given event type."""
     now = datetime.now(timezone.utc).isoformat()
     started = "2026-01-15T10:00:00+00:00"
-    if event_type in ("activity_created", "activity_updated", "activity_heartbeat",
-                       "activity_cancelled", "activity_recovered"):
+    if event_type in (
+        "activity_created",
+        "activity_updated",
+        "activity_heartbeat",
+        "activity_cancelled",
+        "activity_recovered",
+    ):
         status_map = {
             "activity_created": "active",
             "activity_updated": "active",
@@ -271,7 +314,9 @@ def _sample_payload(event_type: str) -> dict:
         data = {
             "activity_id": "sample-activity-id",
             "task_description": "Sample task: reviewing PR #42",
-            "task_note": "Applied a sample progress update" if event_type == "activity_updated" else None,
+            "task_note": "Applied a sample progress update"
+            if event_type == "activity_updated"
+            else None,
             "task_result": None,
             "agent_id": "my-agent",
             "assigned_agent_id": "my-agent",
@@ -297,8 +342,11 @@ def _sample_payload(event_type: str) -> dict:
             "status": "success",
             "error_message": None,
         }
-    elif event_type in ("delegation_request_created", "delegation_request_approved",
-                         "delegation_request_denied"):
+    elif event_type in (
+        "delegation_request_created",
+        "delegation_request_approved",
+        "delegation_request_denied",
+    ):
         status_map = {
             "delegation_request_created": "pending",
             "delegation_request_approved": "approved",
@@ -318,13 +366,20 @@ def _sample_payload(event_type: str) -> dict:
             "resource_permission_count": 0,
             "binding_action_count": 0,
             "decided_by_actor_id": "admin" if decided else None,
-            "decision_reason": "not needed" if event_type == "delegation_request_denied" else None,
-            "grant_id": "sample-grant-id" if event_type == "delegation_request_approved" else None,
+            "decision_reason": "not needed"
+            if event_type == "delegation_request_denied"
+            else None,
+            "grant_id": "sample-grant-id"
+            if event_type == "delegation_request_approved"
+            else None,
             "created_at": started,
             "decided_at": now if decided else None,
         }
     else:
-        data = {"message": f"{APP_NAME} webhook test delivery", "event_type": event_type}
+        data = {
+            "message": f"{APP_NAME} webhook test delivery",
+            "event_type": event_type,
+        }
     return data
 
 
@@ -362,22 +417,31 @@ def test_delivery(webhook_id: str, event_type: Optional[str] = None) -> dict:
 
     signature = _sign_payload(secret_plaintext, payload_bytes)
     try:
-        response = httpx.post(
-            row["url"],
-            content=payload_bytes,
-            headers={
-                "Content-Type": "application/json",
-                "X-Agent-Core-Signature": signature,
-                "X-Agent-Core-Event": event_type,
-            },
-            timeout=DELIVERY_TIMEOUT_SECONDS,
-        )
+        with httpx.Client(timeout=DELIVERY_TIMEOUT_SECONDS) as client:
+            response = safe_httpx_post(
+                client,
+                row["url"],
+                content=payload_bytes,
+                headers={
+                    "Content-Type": "application/json",
+                    "X-Agent-Core-Signature": signature,
+                    "X-Agent-Core-Event": event_type,
+                },
+            )
         status = "success" if 200 <= response.status_code < 300 else "failure"
         error = None if status == "success" else f"HTTP {response.status_code}"
-        _record_delivery(webhook_id, event_type, payload_json, status, response.status_code, error)
-        return {"ok": True, "http_status": response.status_code, "event_type": event_type}
+        _record_delivery(
+            webhook_id, event_type, payload_json, status, response.status_code, error
+        )
+        return {
+            "ok": True,
+            "http_status": response.status_code,
+            "event_type": event_type,
+        }
     except httpx.TimeoutException:
-        _record_delivery(webhook_id, event_type, payload_json, "failure", None, "Delivery timed out")
+        _record_delivery(
+            webhook_id, event_type, payload_json, "failure", None, "Delivery timed out"
+        )
         return {"ok": False, "error": "Delivery timed out"}
     except Exception as exc:
         msg = str(exc)[:200]
@@ -388,6 +452,7 @@ def test_delivery(webhook_id: str, event_type: Optional[str] = None) -> dict:
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
+
 
 def _row_to_webhook(row: dict) -> dict:
     return {

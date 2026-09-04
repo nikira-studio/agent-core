@@ -48,8 +48,7 @@ async def update_dashboard_user_settings(
 async def update_dashboard_system_settings(
     request: Request, session: dict = Depends(require_admin)
 ):
-    from app.database import get_db
-    from app.services import audit_service
+    from app.services import audit_service, system_settings_service
     from app.routes.auth import get_client_ip
 
     body = await request.json()
@@ -156,17 +155,7 @@ async def update_dashboard_system_settings(
                 400,
             )
         settings_to_save["memory_dedupe_similarity"] = str(dedupe_similarity)
-    with get_db() as conn:
-        for key, value in settings_to_save.items():
-            conn.execute(
-                """
-                INSERT INTO system_settings (key, value, updated_at)
-                VALUES (?, ?, CURRENT_TIMESTAMP)
-                ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP
-                """,
-                (key, value),
-            )
-        conn.commit()
+    system_settings_service.write_raw(settings_to_save)
 
     audit_service.write_event(
         actor_type="user",
@@ -493,35 +482,45 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
 
     user = get_user_by_id(session["user_id"])
     is_admin = session.get("role") == "admin"
+    defaults = {
+        "scratchpad_retention_days": "7",
+        "retracted_retention_days": "30",
+        "episodic_memory_ttl_days": "30",
+        "review_model_provider": "",
+        "review_model_url": "",
+        "review_model_name": "",
+        "review_model_binding_id": "",
+        "review_model_action": "POST /chat/completions",
+        "review_model_timeout_seconds": "60",
+        "usefulness_review_enabled": "0",
+        "execution_log_retention_days": "30",
+        "webhook_log_retention_days": "30",
+        "memory_dedupe_similarity": "0.92",
+    }
+    with get_db() as conn:
+        placeholders = ",".join("?" for _ in defaults)
+        rows = conn.execute(
+            f"SELECT key, value FROM system_settings WHERE key IN ({placeholders})",
+            tuple(defaults),
+        ).fetchall()
+        stored_settings = {row["key"]: row["value"] for row in rows}
+        count_row = conn.execute("SELECT COUNT(*) AS count FROM credentials").fetchone()
 
-    def get_system_setting(key, default):
-        with get_db() as conn:
-            row = conn.execute(
-                "SELECT value FROM system_settings WHERE key = ?", (key,)
-            ).fetchone()
-            return row["value"] if row else default
-
-    def count_rows(table: str, where: str = "1=1", params: tuple = ()) -> int:
-        with get_db() as conn:
-            row = conn.execute(
-                f"SELECT COUNT(*) AS count FROM {table} WHERE {where}", params
-            ).fetchone()
-            return int(row["count"] if row else 0)
-
-    scratchpad_retention_days = get_system_setting("scratchpad_retention_days", "7")
-    retracted_retention_days = get_system_setting("retracted_retention_days", "30")
-    episodic_memory_ttl_days = get_system_setting("episodic_memory_ttl_days", "30")
-    review_provider = get_system_setting("review_model_provider", "")
-    review_url = get_system_setting("review_model_url", "")
-    review_name = get_system_setting("review_model_name", "")
-    review_binding_id = get_system_setting("review_model_binding_id", "")
-    review_action = get_system_setting("review_model_action", "POST /chat/completions")
-    review_timeout = get_system_setting("review_model_timeout_seconds", "60")
-    usefulness_enabled = get_system_setting("usefulness_review_enabled", "0") in ("1", "true")
-    execution_log_retention_days = get_system_setting("execution_log_retention_days", "30")
-    webhook_log_retention_days = get_system_setting("webhook_log_retention_days", "30")
-    memory_dedupe_similarity = get_system_setting("memory_dedupe_similarity", "0.92")
-    credential_count = count_rows("credentials")
+    values = defaults | stored_settings
+    scratchpad_retention_days = values["scratchpad_retention_days"]
+    retracted_retention_days = values["retracted_retention_days"]
+    episodic_memory_ttl_days = values["episodic_memory_ttl_days"]
+    review_provider = values["review_model_provider"]
+    review_url = values["review_model_url"]
+    review_name = values["review_model_name"]
+    review_binding_id = values["review_model_binding_id"]
+    review_action = values["review_model_action"]
+    review_timeout = values["review_model_timeout_seconds"]
+    usefulness_enabled = values["usefulness_review_enabled"] in ("1", "true")
+    execution_log_retention_days = values["execution_log_retention_days"]
+    webhook_log_retention_days = values["webhook_log_retention_days"]
+    memory_dedupe_similarity = values["memory_dedupe_similarity"]
+    credential_count = int(count_row["count"] if count_row else 0)
 
     account_html = f"""
     <div class="two-col">
@@ -1442,4 +1441,3 @@ def settings_otp_page(request: Request, session: dict = Depends(require_auth)):
         js,
         session=session,
     )
-

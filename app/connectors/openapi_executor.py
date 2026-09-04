@@ -6,6 +6,7 @@ import urllib.request
 from typing import Optional
 
 from app.connectors import BaseConnector
+from app.connectors.value_utils import decode_json_body
 from app.security.url_validation import validate_public_url
 from app.security.safe_http import safe_urlopen
 
@@ -350,9 +351,4 @@ class OpenApiExecutor(BaseConnector):
         return url
 
     def _decode_body(self, text: str):
-        if not text:
-            return None
-        try:
-            return json.loads(text)
-        except json.JSONDecodeError:
-            return text
+        return decode_json_body(text)

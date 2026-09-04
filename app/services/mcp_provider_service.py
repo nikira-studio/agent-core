@@ -9,6 +9,7 @@ import httpx
 
 from app.branding import APP_SLUG, APP_VERSION
 from app.security.url_validation import validate_public_url
+from app.security.safe_http import safe_httpx_post
 
 
 DEFAULT_MCP_TIMEOUT_MS = 60000
@@ -76,7 +77,7 @@ def _jsonrpc_request(
         "method": method,
         "params": params or {},
     }
-    response = client.post(url, json=payload)
+    response = safe_httpx_post(client, url, json=payload)
     response.raise_for_status()
     # Streamable-HTTP servers issue a session id on initialize that must be sent
     # on every subsequent request. Capture it onto the shared client so following
@@ -112,10 +113,16 @@ def _mcp_initialize(client: httpx.Client, url: str) -> dict[str, Any]:
             request_id=1,
         )
     except Exception:
-        logger.warning("MCP initialize failed for %s; continuing without a session", url)
+        logger.warning(
+            "MCP initialize failed for %s; continuing without a session", url
+        )
         return {}
     try:
-        client.post(url, json={"jsonrpc": "2.0", "method": "notifications/initialized"})
+        safe_httpx_post(
+            client,
+            url,
+            json={"jsonrpc": "2.0", "method": "notifications/initialized"},
+        )
     except Exception:
         pass
     return init_result if isinstance(init_result, dict) else {}
@@ -133,7 +140,9 @@ def _parse_json_object(value: Optional[str]) -> dict[str, Any]:
     return parsed if isinstance(parsed, dict) else {}
 
 
-def _apply_auth(url: str, headers: dict[str, str], credential: Optional[str], config: dict[str, Any]) -> str:
+def _apply_auth(
+    url: str, headers: dict[str, str], credential: Optional[str], config: dict[str, Any]
+) -> str:
     if not credential:
         return url
     location = str(config.get("auth_location") or "header").lower()
@@ -156,7 +165,9 @@ def build_mcp_request_config(
     credential: Optional[str] = None,
 ) -> tuple[str, dict[str, str], int]:
     config = _parse_json_object(binding.get("config_json"))
-    timeout_ms = int(config.get("timeout_ms") or config.get("timeout") or DEFAULT_MCP_TIMEOUT_MS)
+    timeout_ms = int(
+        config.get("timeout_ms") or config.get("timeout") or DEFAULT_MCP_TIMEOUT_MS
+    )
     headers: dict[str, str] = {}
     for key, value in (config.get("headers") or {}).items():
         if key:
@@ -259,10 +270,9 @@ def discover_mcp_server(
         or urlparse(endpoint_url).hostname
         or "mcp-server"
     )
-    protocol_version = (
-        (init_result or {}).get("protocolVersion")
-        or DEFAULT_MCP_PROTOCOL_VERSION
-    )
+    protocol_version = (init_result or {}).get(
+        "protocolVersion"
+    ) or DEFAULT_MCP_PROTOCOL_VERSION
 
     capabilities = {}
     if isinstance(init_result, dict):
@@ -304,13 +314,25 @@ def execute_mcp_tool(
             transport=transport_type,
         )
 
+    try:
+        endpoint_url = validate_mcp_server_url(endpoint_url)
+    except ValueError as exc:
+        return MCPExecutionResult(
+            success=False,
+            error=str(exc),
+            error_code="INVALID_URL",
+            transport=transport_type,
+        )
+
     binding = {"endpoint_url": endpoint_url, "config_json": config_json}
     endpoint_url, headers, timeout_ms = build_mcp_request_config(
         binding, credential=credential
     )
     timeout_seconds = max(timeout_ms, 1000) / 1000.0
 
-    with httpx.Client(timeout=timeout_seconds, headers=headers, follow_redirects=False) as client:
+    with httpx.Client(
+        timeout=timeout_seconds, headers=headers, follow_redirects=False
+    ) as client:
         try:
             # Establish a session before invoking the tool; session-enforcing
             # servers reject tools/call otherwise.

@@ -19,10 +19,10 @@ from app.services import (
 )
 from app.branding import APP_USER_AGENT
 from app.security.dependencies import get_request_context
-from app.security.context import RequestContext
 from app.security.scope_enforcer import ScopeEnforcer
 from app.security.effective_authority import EffectiveAuthority
 from app.security.response_helpers import success_response, error_response
+from app.operations.connector_actions import run_connector_action
 
 
 router = APIRouter(prefix="/api/connector-bindings", tags=["connector_bindings"])
@@ -134,7 +134,7 @@ def list_bindings(
     scope: Optional[str] = None,
     connector_type_id: Optional[str] = None,
     enabled: Optional[bool] = None,
-    ctx: RequestContext = Depends(get_request_context),
+    ctx: EffectiveAuthority = Depends(get_request_context),
 ):
     enforcer = ScopeEnforcer(
         ctx.read_scopes,
@@ -169,7 +169,7 @@ def resolve_binding(
 @router.post("")
 def create_binding(
     body: CreateBindingRequest,
-    ctx: RequestContext = Depends(get_request_context),
+    ctx: EffectiveAuthority = Depends(get_request_context),
 ):
     enforcer = ScopeEnforcer(
         ctx.read_scopes,
@@ -224,7 +224,7 @@ def create_binding(
 async def start_binding_oauth(
     binding_id: str,
     request: Request,
-    ctx: RequestContext = Depends(get_request_context),
+    ctx: EffectiveAuthority = Depends(get_request_context),
 ):
     binding = connector_service.get_binding(binding_id)
     if not binding:
@@ -256,7 +256,7 @@ async def connector_oauth_callback(
     state: str,
     code: Optional[str] = None,
     error: Optional[str] = None,
-    ctx: RequestContext = Depends(get_request_context),
+    ctx: EffectiveAuthority = Depends(get_request_context),
 ):
     if error:
         return RedirectResponse(f"/connectors?oauth_error={urllib.parse.quote(error)}")
@@ -277,7 +277,7 @@ async def connector_oauth_callback(
 @router.get("/{binding_id}")
 def get_binding(
     binding_id: str,
-    ctx: RequestContext = Depends(get_request_context),
+    ctx: EffectiveAuthority = Depends(get_request_context),
 ):
     binding = connector_service.get_binding(binding_id)
     if not binding:
@@ -298,7 +298,7 @@ def get_binding(
 def update_binding(
     binding_id: str,
     body: UpdateBindingRequest,
-    ctx: RequestContext = Depends(get_request_context),
+    ctx: EffectiveAuthority = Depends(get_request_context),
 ):
     binding = connector_service.get_binding(binding_id)
     if not binding:
@@ -350,7 +350,7 @@ def update_binding(
 @router.delete("/{binding_id}")
 def delete_binding(
     binding_id: str,
-    ctx: RequestContext = Depends(get_request_context),
+    ctx: EffectiveAuthority = Depends(get_request_context),
 ):
     binding = connector_service.get_binding(binding_id)
     if not binding:
@@ -379,7 +379,7 @@ def delete_binding(
 @router.post("/{binding_id}/test")
 async def test_binding(
     binding_id: str,
-    ctx: RequestContext = Depends(get_request_context),
+    ctx: EffectiveAuthority = Depends(get_request_context),
 ):
     binding = connector_service.get_binding(binding_id)
     if not binding:
@@ -409,49 +409,20 @@ async def test_binding(
 async def run_binding(
     binding_id: str,
     body: dict,
-    ctx: RequestContext = Depends(get_request_context),
+    ctx: EffectiveAuthority = Depends(get_request_context),
 ):
-    binding = connector_service.get_binding(binding_id)
-    if not binding:
-        return error_response("NOT_FOUND", "Binding not found", 404)
-    enforcer = ScopeEnforcer(
-        ctx.read_scopes,
-        ctx.write_scopes,
-        ctx.agent_id,
-        is_admin=ctx.is_admin,
-        active_workspace_ids=ctx.active_workspace_ids,
-    )
     action = body.get("action")
     params = body.get("params") or {}
     if not action:
         return error_response("INVALID_REQUEST", "Missing action", 400)
-    if ctx.is_delegated:
-        if not ctx.can_binding_action(binding_id, action, scope=binding["scope"]):
-            connector_service.audit_delegated_execution_denial(ctx, binding_id, action)
-            return error_response("SCOPE_DENIED", "Access denied to this binding action", 403)
-    elif not enforcer.can_read(binding["scope"]):
-        return error_response("SCOPE_DENIED", "Access denied to this binding", 403)
-    result = await asyncio.to_thread(
-        connector_service.execute_authorized_binding_action_with_logging,
-        binding_id,
-        action,
-        params,
-        ctx,
+    outcome = await asyncio.to_thread(
+        run_connector_action, binding_id, action, params, ctx
     )
-    audit_service.write_event(
-        actor_type=ctx.actor_type,
-        actor_id=ctx.actor_id,
-        action="connector_action_executed",
-        resource_type="connector_binding",
-        resource_id=binding_id,
-        result=result.get("success") and "success" or "failure",
-        details={
-            "connector_type_id": binding["connector_type_id"],
-            "action": action,
-            "transport": result.get("transport"),
-        },
-    )
-    return success_response({"result": result})
+    if not outcome.ok:
+        return error_response(
+            outcome.error_code, outcome.error_message, outcome.status_code
+        )
+    return success_response({"result": outcome.result})
 
 
 # Intuitive-path alias for direct REST callers (plug-in scripts). The canonical
@@ -466,7 +437,7 @@ connector_compat_router = APIRouter(prefix="/api/connectors", tags=["connector_b
 async def run_binding_compat(
     binding_id: str,
     body: dict,
-    ctx: RequestContext = Depends(get_request_context),
+    ctx: EffectiveAuthority = Depends(get_request_context),
 ):
     return await run_binding(binding_id, body, ctx)
 
@@ -476,7 +447,7 @@ def list_binding_executions(
     binding_id: str,
     limit: int = 50,
     offset: int = 0,
-    ctx: RequestContext = Depends(get_request_context),
+    ctx: EffectiveAuthority = Depends(get_request_context),
 ):
     binding = connector_service.get_binding(binding_id)
     if not binding:
@@ -503,7 +474,7 @@ async def get_binding_tools(
     include_disabled: bool = False,
     limit: int = 20,
     offset: int = 0,
-    ctx: RequestContext = Depends(get_request_context),
+    ctx: EffectiveAuthority = Depends(get_request_context),
 ):
     binding = connector_service.get_binding(binding_id)
     if not binding:
@@ -540,7 +511,7 @@ connector_types_router = APIRouter(
 
 @connector_types_router.get("")
 def list_connector_types(
-    ctx: RequestContext = Depends(get_request_context),
+    ctx: EffectiveAuthority = Depends(get_request_context),
 ):
     types = connector_service.list_connector_types()
     return success_response({"connector_types": types, "total": len(types)})
@@ -551,7 +522,7 @@ def connector_summary(
     connector_type_id: Optional[str] = None,
     scope: Optional[str] = None,
     enabled_only: bool = True,
-    ctx: RequestContext = Depends(get_request_context),
+    ctx: EffectiveAuthority = Depends(get_request_context),
 ):
     enforcer = ScopeEnforcer(
         ctx.read_scopes,
@@ -574,7 +545,7 @@ def connector_summary(
 @connector_types_router.post("/health-check")
 async def connector_health_check(
     body: ConnectorHealthCheckRequest,
-    ctx: RequestContext = Depends(get_request_context),
+    ctx: EffectiveAuthority = Depends(get_request_context),
 ):
     enforcer = ScopeEnforcer(
         ctx.read_scopes,
@@ -636,7 +607,7 @@ async def get_connector_type_tools(
     include_disabled: bool = False,
     limit: int = 20,
     offset: int = 0,
-    ctx: RequestContext = Depends(get_request_context),
+    ctx: EffectiveAuthority = Depends(get_request_context),
 ):
     ct = connector_service.get_connector_type(connector_type_id)
     if not ct:
@@ -657,7 +628,7 @@ async def get_connector_type_tools(
 def update_connector_type_actions(
     connector_type_id: str,
     body: ActionSettingsRequest,
-    ctx: RequestContext = Depends(get_request_context),
+    ctx: EffectiveAuthority = Depends(get_request_context),
 ):
     if not ctx.is_admin:
         return error_response("FORBIDDEN", "Admin access required", 403)
@@ -819,7 +790,7 @@ async def get_directory(
     category: Optional[str] = None,
     page: int = 1,
     limit: int = 50,
-    ctx: RequestContext = Depends(get_request_context),
+    ctx: EffectiveAuthority = Depends(get_request_context),
 ):
     entries = await asyncio.to_thread(_fetch_directory)
     installed_ids = {t["id"] for t in connector_service.list_connector_types()}
@@ -865,7 +836,7 @@ async def get_directory(
 @connector_types_router.post("/import")
 async def import_spec(
     body: ImportSpecRequest,
-    ctx: RequestContext = Depends(get_request_context),
+    ctx: EffectiveAuthority = Depends(get_request_context),
 ):
     if not ctx.is_admin:
         return error_response("FORBIDDEN", "Admin access required to import specs", 403)
@@ -937,7 +908,7 @@ async def import_spec(
 
 @connector_types_router.get("/adapters")
 async def list_adapter_library(
-    ctx: RequestContext = Depends(get_request_context),
+    ctx: EffectiveAuthority = Depends(get_request_context),
 ):
     entries = await asyncio.to_thread(adapter_loader.list_available_adapters)
     return success_response({"adapters": entries, "total": len(entries)})
@@ -947,7 +918,7 @@ async def list_adapter_library(
 async def install_adapter(
     adapter_id: str,
     body: AdapterInstallRequest | None = None,
-    ctx: RequestContext = Depends(get_request_context),
+    ctx: EffectiveAuthority = Depends(get_request_context),
 ):
     if not ctx.is_admin:
         return error_response("FORBIDDEN", "Admin access required to install adapters", 403)
@@ -981,7 +952,7 @@ async def install_adapter(
 @connector_types_router.post("/adapters/{adapter_id}/update")
 async def update_adapter(
     adapter_id: str,
-    ctx: RequestContext = Depends(get_request_context),
+    ctx: EffectiveAuthority = Depends(get_request_context),
 ):
     if not ctx.is_admin:
         return error_response("FORBIDDEN", "Admin access required to update adapters", 403)
@@ -1016,7 +987,7 @@ async def update_adapter(
 @connector_types_router.delete("/adapters/{adapter_id}/install")
 async def uninstall_adapter(
     adapter_id: str,
-    ctx: RequestContext = Depends(get_request_context),
+    ctx: EffectiveAuthority = Depends(get_request_context),
 ):
     if not ctx.is_admin:
         return error_response("FORBIDDEN", "Admin access required to uninstall adapters", 403)
@@ -1045,7 +1016,7 @@ async def uninstall_adapter(
 @connector_types_router.post("/preview")
 async def preview_spec(
     body: ImportSpecRequest,
-    ctx: RequestContext = Depends(get_request_context),
+    ctx: EffectiveAuthority = Depends(get_request_context),
 ):
     if not ctx.is_admin:
         return error_response("FORBIDDEN", "Admin access required to preview specs", 403)
@@ -1087,7 +1058,7 @@ async def preview_spec(
 @connector_types_router.post("/create-http")
 def create_http_connector(
     body: CreateHttpConnectorRequest,
-    ctx: RequestContext = Depends(get_request_context),
+    ctx: EffectiveAuthority = Depends(get_request_context),
 ):
     if not ctx.is_admin:
         return error_response("FORBIDDEN", "Admin access required to create connectors", 403)
@@ -1160,7 +1131,7 @@ def create_http_connector(
 @connector_types_router.post("/import-mcp")
 async def import_mcp_server(
     body: ImportMcpServerRequest,
-    ctx: RequestContext = Depends(get_request_context),
+    ctx: EffectiveAuthority = Depends(get_request_context),
 ):
     if not ctx.is_admin:
         return error_response(
@@ -1274,7 +1245,7 @@ async def import_mcp_server(
 async def refresh_mcp_connector_type(
     connector_type_id: str,
     body: RefreshMcpServerRequest,
-    ctx: RequestContext = Depends(get_request_context),
+    ctx: EffectiveAuthority = Depends(get_request_context),
 ):
     if not ctx.is_admin:
         return error_response("FORBIDDEN", "Admin access required", 403)
@@ -1371,7 +1342,7 @@ async def refresh_mcp_connector_type(
 @connector_types_router.delete("/{connector_type_id}")
 async def delete_connector_type(
     connector_type_id: str,
-    ctx: RequestContext = Depends(get_request_context),
+    ctx: EffectiveAuthority = Depends(get_request_context),
 ):
     if not ctx.is_admin:
         return error_response("FORBIDDEN", "Admin access required", 403)

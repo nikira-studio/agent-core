@@ -232,3 +232,29 @@ def test_a_slow_connector_does_not_block_other_requests(test_client, admin_token
     finally:
         release.set()
         connector_service.execute_binding_action_with_logging = original
+
+
+def test_catalog_endpoints_do_not_scan_adapter_manifests(
+    test_client, admin_token, agent_token, monkeypatch
+):
+    """A service-catalog read must not hide filesystem validation in async routes."""
+    from app.services import adapter_loader
+
+    def fail_if_scanned():
+        raise AssertionError("catalog endpoint scanned adapter manifests")
+
+    monkeypatch.setattr(adapter_loader, "list_available_adapters", fail_if_scanned)
+
+    dashboard = test_client.post(
+        "/api/dashboard/search",
+        headers={"Authorization": f"Bearer {admin_token}"},
+        json={"query": "generic", "limit": 5},
+    )
+    mcp = test_client.post(
+        "/mcp",
+        headers={"Authorization": f"Bearer {agent_token}"},
+        json={"tool": "connectors_list", "params": {"limit": 20}},
+    )
+
+    assert dashboard.status_code == 200, dashboard.text
+    assert mcp.status_code == 200, mcp.text

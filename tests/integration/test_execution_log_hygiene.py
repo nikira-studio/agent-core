@@ -208,6 +208,47 @@ def test_occasional_failures_are_not_reported_as_broken(clean_db):
     assert target["health"]["failing_actions"] == []
 
 
+def test_capability_summary_loads_credential_metadata_once(clean_db, monkeypatch):
+    from app.security.scope_enforcer import ScopeEnforcer
+    from app.services import credential_service
+
+    credential = credential_service.create_credential(
+        scope="user:admin", name="summary-bulk-load", value_plaintext="secret"
+    )
+    connector_type = connector_service.list_connector_types()[0]
+    for suffix in ("one", "two"):
+        connector_service.create_binding(
+            connector_type_id=connector_type["id"],
+            scope="user:admin",
+            name=f"summary-{suffix}",
+            credential_id=credential["id"],
+            config_json="{}",
+            created_by="admin",
+        )
+
+    original = credential_service.get_credentials_by_ids
+    calls = []
+
+    def counting_bulk_load(entry_ids):
+        calls.append(list(entry_ids))
+        return original(entry_ids)
+
+    monkeypatch.setattr(credential_service, "get_credentials_by_ids", counting_bulk_load)
+    monkeypatch.setattr(
+        credential_service,
+        "get_credential",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("summary performed an N+1 credential lookup")
+        ),
+    )
+
+    enforcer = ScopeEnforcer(["user:admin"], ["user:admin"], "admin", is_admin=True)
+    connector_service.build_capability_summary(enforcer, enabled_only=False)
+
+    assert len(calls) == 1
+    assert calls[0].count(credential["id"]) == 2
+
+
 # --- settings --------------------------------------------------------------
 
 

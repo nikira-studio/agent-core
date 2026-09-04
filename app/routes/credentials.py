@@ -8,7 +8,7 @@ from typing import Optional
 from app.services import credential_service
 from app.services import audit_service
 from app.security.dependencies import get_request_context
-from app.security.context import RequestContext
+from app.security.effective_authority import EffectiveAuthority
 from app.security.scope_enforcer import ScopeEnforcer
 from app.security.rate_limiter import RL
 from app.security.response_helpers import (
@@ -76,7 +76,7 @@ def list_entries(
     scope: Optional[str] = None,
     limit: int = 50,
     offset: int = 0,
-    ctx: RequestContext = Depends(get_request_context),
+    ctx: EffectiveAuthority = Depends(get_request_context),
 ):
     enforcer = ScopeEnforcer(
         ctx.read_scopes,
@@ -88,8 +88,9 @@ def list_entries(
     if scope and not enforcer.can_read(scope):
         return error_response("SCOPE_DENIED", "Access denied to this scope", 403)
 
+    readable_scopes = None if ctx.is_admin or scope else enforcer.filter_readable_scopes(ctx.read_scopes)
     entries = credential_service.list_credentials(
-        scope=scope, limit=limit, offset=offset
+        scope=scope, scopes=readable_scopes, limit=limit, offset=offset
     )
     masked = []
     for entry in entries:
@@ -114,7 +115,7 @@ def list_entries(
 @router.post("/entries")
 def create_entry(
     body: CreateCredentialRequest,
-    ctx: RequestContext = Depends(get_request_context),
+    ctx: EffectiveAuthority = Depends(get_request_context),
 ):
     allowed, info = RL.check("user", ctx.user_id, "credential_create")
     if not allowed:
@@ -180,7 +181,7 @@ def create_entry(
 @router.get("/entries/{entry_id}")
 def get_entry(
     entry_id: str,
-    ctx: RequestContext = Depends(get_request_context),
+    ctx: EffectiveAuthority = Depends(get_request_context),
 ):
     entry = credential_service.get_credential(entry_id)
     if not entry:
@@ -217,7 +218,7 @@ def get_entry(
 def update_entry(
     entry_id: str,
     body: UpdateCredentialRequest,
-    ctx: RequestContext = Depends(get_request_context),
+    ctx: EffectiveAuthority = Depends(get_request_context),
 ):
     entry = credential_service.get_credential(entry_id)
     if not entry:
@@ -302,7 +303,7 @@ def update_entry(
 @router.delete("/entries/{entry_id}")
 def delete_entry(
     entry_id: str,
-    ctx: RequestContext = Depends(get_request_context),
+    ctx: EffectiveAuthority = Depends(get_request_context),
 ):
     entry = credential_service.get_credential(entry_id)
     if not entry:
@@ -334,7 +335,7 @@ def delete_entry(
 @router.post("/entries/{entry_id}/reference")
 def get_reference(
     entry_id: str,
-    ctx: RequestContext = Depends(get_request_context),
+    ctx: EffectiveAuthority = Depends(get_request_context),
 ):
     entry = credential_service.get_credential(entry_id)
     if not entry:
@@ -365,7 +366,7 @@ def get_reference(
 @router.post("/entries/{entry_id}/reveal")
 def reveal_entry(
     entry_id: str,
-    ctx: RequestContext = Depends(get_request_context),
+    ctx: EffectiveAuthority = Depends(get_request_context),
 ):
     entry = credential_service.get_credential(entry_id)
     if not entry:
@@ -409,7 +410,7 @@ def reveal_entry(
 
 
 @router.get("/scopes")
-def list_scopes(ctx: RequestContext = Depends(get_request_context)):
+def list_scopes(ctx: EffectiveAuthority = Depends(get_request_context)):
     enforcer = ScopeEnforcer(
         ctx.read_scopes,
         ctx.write_scopes,
@@ -424,7 +425,7 @@ def list_scopes(ctx: RequestContext = Depends(get_request_context)):
 
 @router.post("/rotate")
 async def rotate_key(
-    ctx: RequestContext = Depends(get_request_context),
+    ctx: EffectiveAuthority = Depends(get_request_context),
 ):
     if not ctx.is_admin:
         return error_response(
@@ -451,7 +452,7 @@ async def rotate_key(
 
 @router.get("/rotate/status")
 def get_key_rotation_status(
-    ctx: RequestContext = Depends(get_request_context),
+    ctx: EffectiveAuthority = Depends(get_request_context),
 ):
     if not ctx.is_admin:
         return error_response("FORBIDDEN", "Admin access required", 403)
@@ -469,7 +470,7 @@ class RestoreKeyRequest(BaseModel):
 @router.post("/restore-key")
 async def restore_key(
     body: RestoreKeyRequest,
-    ctx: RequestContext = Depends(get_request_context),
+    ctx: EffectiveAuthority = Depends(get_request_context),
 ):
     if not ctx.is_admin:
         return error_response("FORBIDDEN", "Admin access required", 403)

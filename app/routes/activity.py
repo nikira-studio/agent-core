@@ -182,30 +182,32 @@ def search_activities(
 
     capped_limit = min(max(limit, 0), 100)
     safe_offset = max(offset, 0)
-    fetch_limit = min(max((capped_limit + safe_offset) * 3, 50), 300)
-
-    raw_activities = activity_service.search_activities(
+    authorized_scopes = (
+        None
+        if ctx.is_admin or ctx.is_delegated
+        else enforcer.filter_readable_scopes(ctx.read_scopes)
+    )
+    authorized_ids = (
+        [
+            resource_id
+            for resource, operation, resource_id in ctx.resource_permissions
+            if resource == "activity" and operation == "read"
+        ]
+        if ctx.is_delegated
+        else None
+    )
+    activities = activity_service.search_activities(
         query,
         user_id=ctx.user_id if ctx.actor_type == "user" and not ctx.is_admin else None,
         agent_id=agent_id,
         status=status,
         memory_scope=memory_scope,
         since=since,
-        limit=fetch_limit,
-        offset=0,
+        authorized_scopes=authorized_scopes,
+        authorized_resource_ids=authorized_ids,
+        limit=capped_limit,
+        offset=safe_offset,
     )
-
-    activities = []
-    for activity in raw_activities:
-        scope = activity.get("memory_scope") or f"agent:{activity['agent_id']}"
-        if ctx.is_delegated:
-            if not ctx.can_resource("activity", "read", activity["id"]):
-                continue
-        elif not ctx.is_admin and not enforcer.can_read(scope):
-            continue
-        activities.append(activity)
-
-    activities = activities[safe_offset : safe_offset + capped_limit]
 
     return success_response({"activities": activities, "total": len(activities)})
 
@@ -365,14 +367,18 @@ def list_activities(
         user_id=ctx.user_id if ctx.actor_type == "user" else None,
         agent_id=filter_agent_id,
         status=status,
+        authorized_resource_ids=(
+            [
+                resource_id
+                for resource_type, action, resource_id in ctx.resource_permissions
+                if resource_type == "activity" and action == "read"
+            ]
+            if ctx.is_delegated
+            else None
+        ),
         limit=min(limit, 100),
         offset=offset,
     )
-    if ctx.is_delegated:
-        activities = [
-            activity for activity in activities
-            if ctx.can_resource("activity", "read", activity["id"])
-        ]
 
     return success_response(
         {

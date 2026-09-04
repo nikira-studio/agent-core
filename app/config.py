@@ -54,7 +54,8 @@ class Settings(BaseSettings):
         path = Path(self.DATA_PATH)
         if not path.is_absolute():
             path = (Path(__file__).parent.parent / path).resolve()
-        path.mkdir(parents=True, exist_ok=True)
+        path.mkdir(parents=True, exist_ok=True, mode=0o700)
+        path.chmod(0o700)
         return path
 
     @property

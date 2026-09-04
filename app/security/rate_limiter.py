@@ -92,6 +92,38 @@ class RateLimiter:
             }
 
     @classmethod
+    def peek(
+        cls,
+        key_type: str,
+        key_id: str,
+        limit_name: str,
+    ) -> tuple[bool, dict]:
+        """Inspect a bucket without consuming a token.
+
+        Authentication uses this before expensive password hashing so an
+        already-exhausted caller cannot keep spending bcrypt CPU.
+        """
+        bucket_key = f"{limit_name}:{key_type}:{key_id}"
+        with cls._lock:
+            bucket = cls._buckets.get(bucket_key)
+            template = cls._limits.get((limit_name, key_type))
+            if bucket is None:
+                if template is None:
+                    return True, {"limit": -1, "remaining": -1, "reset": 0}
+                return True, {
+                    "limit": int(template.max_tokens),
+                    "remaining": int(template.max_tokens),
+                    "reset": int(time.time()),
+                }
+            cls._buckets.move_to_end(bucket_key)
+            remaining = bucket.remaining
+            return remaining >= 1, {
+                "limit": int(bucket.max_tokens),
+                "remaining": remaining,
+                "reset": bucket.reset_at,
+            }
+
+    @classmethod
     def reset(cls) -> None:
         with cls._lock:
             cls._buckets.clear()

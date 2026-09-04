@@ -32,14 +32,9 @@ def _system_setting_int(key: str, default: int) -> int:
     Maintenance must never fail because a setting row is missing or malformed —
     a sweep that refuses to run is how the logs grew to 142 MB in the first place.
     """
-    try:
-        with get_db() as conn:
-            row = conn.execute(
-                "SELECT value FROM system_settings WHERE key = ?", (key,)
-            ).fetchone()
-        return int(row["value"]) if row else default
-    except (ValueError, TypeError, sqlite3.Error):
-        return default
+    from app.services import system_settings_service
+
+    return system_settings_service.read_int(key, default)
 
 
 

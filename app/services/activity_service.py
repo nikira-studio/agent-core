@@ -133,6 +133,8 @@ def list_activities(
     agent_id: Optional[str] = None,
     status: Optional[str] = None,
     assigned_agent_id: Optional[str] = None,
+    authorized_scopes: Optional[list[str]] = None,
+    authorized_resource_ids: Optional[list[str]] = None,
     limit: int = 50,
     offset: int = 0,
 ) -> list[dict]:
@@ -151,6 +153,21 @@ def list_activities(
     if assigned_agent_id:
         conditions.append("assigned_agent_id = ?")
         params.append(assigned_agent_id)
+    if authorized_scopes is not None:
+        if not authorized_scopes:
+            return []
+        placeholders = ",".join("?" for _ in authorized_scopes)
+        conditions.append(
+            f"(memory_scope IN ({placeholders}) OR "
+            f"(memory_scope IS NULL AND ('agent:' || agent_id) IN ({placeholders})))"
+        )
+        params.extend([*authorized_scopes, *authorized_scopes])
+    if authorized_resource_ids is not None:
+        if not authorized_resource_ids:
+            return []
+        placeholders = ",".join("?" for _ in authorized_resource_ids)
+        conditions.append(f"id IN ({placeholders})")
+        params.extend(authorized_resource_ids)
 
     where = " AND ".join(conditions)
     params.extend([limit, offset])
@@ -244,6 +261,8 @@ def search_activities(
     status: Optional[str] = None,
     memory_scope: Optional[str] = None,
     since: Optional[str] = None,
+    authorized_scopes: Optional[list[str]] = None,
+    authorized_resource_ids: Optional[list[str]] = None,
     limit: int = 20,
     offset: int = 0,
 ) -> list[dict]:
@@ -279,6 +298,21 @@ def search_activities(
     if since:
         conditions.append("datetime(a.started_at) >= datetime(?)")
         params.append(since)
+    if authorized_scopes is not None:
+        if not authorized_scopes:
+            return []
+        placeholders = ",".join("?" for _ in authorized_scopes)
+        conditions.append(
+            f"(a.memory_scope IN ({placeholders}) OR "
+            f"(a.memory_scope IS NULL AND ('agent:' || a.agent_id) IN ({placeholders})))"
+        )
+        params.extend([*authorized_scopes, *authorized_scopes])
+    if authorized_resource_ids is not None:
+        if not authorized_resource_ids:
+            return []
+        placeholders = ",".join("?" for _ in authorized_resource_ids)
+        conditions.append(f"a.id IN ({placeholders})")
+        params.extend(authorized_resource_ids)
 
     where = " AND ".join(conditions)
     params.extend([max(limit, 0), max(offset, 0)])

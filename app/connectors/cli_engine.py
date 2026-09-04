@@ -7,6 +7,7 @@ from typing import Any, Optional
 
 from app.connectors import BaseConnector
 from app.connectors.base import Credential
+from app.connectors.value_utils import extract_jsonpath, parse_json_object
 
 _RE_TEMPLATE = re.compile(
     r"\{\{\s*(params|cred|config)(?:\.(\w+?))?\s*(?:\s+\|\s*(\w+)(?:\(([^)]*)\))?)?\s*\}\}"
@@ -52,7 +53,7 @@ class CliEngine(BaseConnector):
         if not ok:
             return {"success": False, "error_code": "BLOCKED_BIN", "error": reason}
 
-        config = _parse_json(config_json)
+        config = parse_json_object(config_json)
 
         env = self._build_env(params, config, credential)
         argv = self._build_argv(cmd_def, params, config, credential)
@@ -160,11 +161,11 @@ class CliEngine(BaseConnector):
                 if src == "cred":
                     if key:
                         return self._cred_get(key, params, config, cred)
-                    return params
+                    return None
                 if src == "config":
                     if key:
                         return config.get(key, m.group(0))
-                    return params
+                    return config
                 return m.group(0)
 
             val = _get_value()
@@ -264,23 +265,4 @@ class CliEngine(BaseConnector):
         return {"success": True, "output": stdout}
 
     def _extract_jsonpath(self, path: str, body: Any) -> Any:
-        if path.startswith("$."):
-            parts = path[2:].split(".")
-            current = body
-            for part in parts:
-                if isinstance(current, dict):
-                    current = current.get(part)
-                else:
-                    return None
-            return current
-        return body
-
-
-def _parse_json(config_json: Optional[str]) -> dict:
-    if not config_json:
-        return {}
-    try:
-        val = json.loads(config_json)
-        return val if isinstance(val, dict) else {}
-    except json.JSONDecodeError:
-        return {}
+        return extract_jsonpath(path, body)
