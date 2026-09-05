@@ -464,7 +464,7 @@ async def get_binding_tools(
     binding_id: str,
     query: Optional[str] = None,
     include_disabled: bool = False,
-    limit: int = 20,
+    limit: int = 100,
     offset: int = 0,
     ctx: EffectiveAuthority = Depends(get_request_context),
 ):
@@ -490,8 +490,8 @@ async def get_binding_tools(
         disabled_actions=connector_type.get("disabled_actions") or [],
         include_disabled=include_disabled,
         query=query,
-        limit=limit,
-        offset=offset,
+        limit=min(max(int(limit or 100), 1), 200),
+        offset=max(int(offset or 0), 0),
     )
     return success_response(result)
 
@@ -597,7 +597,7 @@ async def get_connector_type_tools(
     connector_type_id: str,
     query: Optional[str] = None,
     include_disabled: bool = False,
-    limit: int = 20,
+    limit: int = 100,
     offset: int = 0,
     ctx: EffectiveAuthority = Depends(get_request_context),
 ):
@@ -610,8 +610,8 @@ async def get_connector_type_tools(
         disabled_actions=ct.get("disabled_actions") or [],
         include_disabled=include_disabled,
         query=query,
-        limit=limit,
-        offset=offset,
+        limit=min(max(int(limit or 100), 1), 200),
+        offset=max(int(offset or 0), 0),
     )
     return success_response(result)
 
