@@ -4,6 +4,7 @@ from fastapi import APIRouter, Request, Depends
 
 from app.branding import APP_NAME
 from app.routes.dashboard_shared import render_page, require_auth, escape_html, get_icon
+from app.security.public_url import public_base_url
 
 router = APIRouter()
 
@@ -29,7 +30,7 @@ def webhooks_page(request: Request, session: dict = Depends(require_auth)):
     webhooks = wh_svc.list_webhooks()
     event_types = wh_svc.WEBHOOK_EVENT_TYPES
 
-    base_url = str(request.base_url).rstrip("/")
+    base_url = public_base_url(request)
     inbound_url = f"{base_url}/api/webhooks/inbound"
     inbound_key_row = inbound_svc.get_active_key_row()
     inbound_has_key = inbound_key_row is not None

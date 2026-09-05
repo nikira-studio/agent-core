@@ -46,6 +46,7 @@ CREATE TABLE IF NOT EXISTS agents (
     write_scopes_json TEXT NOT NULL DEFAULT '[]',
     default_recall_scopes_json TEXT,
     can_delegate INTEGER NOT NULL DEFAULT 0 CHECK (can_delegate IN (0, 1)),
+    capabilities_json TEXT NOT NULL DEFAULT '["memory","coordination","credentials","connectors_read","connectors_execute"]',
     api_key_hash TEXT NOT NULL,
     is_active INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0, 1)),
     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
@@ -309,6 +310,10 @@ INSERT OR IGNORE INTO system_settings (key, value) VALUES ('vector_model', 'nomi
 INSERT OR IGNORE INTO system_settings (key, value) VALUES ('vector_url', 'http://localhost:11434');
 INSERT OR IGNORE INTO system_settings (key, value) VALUES ('vector_dimension', '768');
 INSERT OR IGNORE INTO system_settings (key, value) VALUES ('vector_auth_type', 'none');
+INSERT OR IGNORE INTO system_settings (key, value) VALUES ('webhook_retry_max_attempts', '5');
+INSERT OR IGNORE INTO system_settings (key, value) VALUES ('webhook_retry_initial_seconds', '1');
+INSERT OR IGNORE INTO system_settings (key, value) VALUES ('webhook_retry_max_seconds', '300');
+INSERT OR IGNORE INTO system_settings (key, value) VALUES ('webhook_retry_jitter_seconds', '1');
 
 -- Connector types table
 CREATE TABLE IF NOT EXISTS connector_types (
@@ -439,16 +444,22 @@ CREATE INDEX IF NOT EXISTS idx_webhook_registrations_enabled ON webhook_registra
 CREATE TABLE IF NOT EXISTS webhook_delivery_log (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     webhook_id TEXT NOT NULL,
+    event_id TEXT NOT NULL,
     event_type TEXT NOT NULL,
     payload_json TEXT NOT NULL,
-    status TEXT NOT NULL CHECK (status IN ('success', 'failure')),
+    status TEXT NOT NULL CHECK (status IN ('pending', 'delivering', 'retry_wait', 'success', 'dead', 'cancelled')),
+    attempt_count INTEGER NOT NULL DEFAULT 0,
+    next_attempt_at TEXT,
+    last_attempt_at TEXT,
+    lease_expires_at TEXT,
     http_status INTEGER,
     error_message TEXT,
-    delivered_at TEXT DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (webhook_id) REFERENCES webhook_registrations(id) ON DELETE CASCADE
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    delivered_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE INDEX IF NOT EXISTS idx_webhook_delivery_webhook ON webhook_delivery_log(webhook_id, delivered_at DESC);
+CREATE INDEX IF NOT EXISTS idx_webhook_delivery_webhook ON webhook_delivery_log(webhook_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_webhook_delivery_due ON webhook_delivery_log(status, next_attempt_at);
 
 -- Inbound webhook keys table (installation-wide, one active key at a time)
 CREATE TABLE IF NOT EXISTS inbound_webhook_keys (
@@ -525,6 +536,7 @@ def _apply_schema_migrations(conn) -> None:
     migrations = (
         (1, "normalize-current-schema", _migrate_001_current_schema),
         (2, "canonical-system-settings", _migrate_002_canonical_system_settings),
+        (3, "agent-capabilities-and-webhook-queue", _migrate_003_agent_capabilities_and_webhook_queue),
     )
     applied = {
         row["revision"]
@@ -549,6 +561,7 @@ def _migrate_001_current_schema(conn) -> None:
     _widen_proposal_actions(conn)
     _ensure_agents_default_recall_column(conn)
     _ensure_agents_delegation_column(conn)
+    _ensure_agents_capabilities_column(conn)
     _ensure_connector_execution_authority_columns(conn)
     _ensure_connector_execution_failure_columns(conn)
     _ensure_binding_resolution_columns(conn)
@@ -589,6 +602,12 @@ def _normalize_vector_api_key_storage(conn) -> None:
         "WHERE key = 'vector_api_key' AND value_encrypted IS NOT NULL "
         "AND value_encrypted != ''"
     )
+
+
+def _migrate_003_agent_capabilities_and_webhook_queue(conn) -> None:
+    _ensure_agents_capabilities_column(conn)
+    _ensure_webhook_tables(conn)
+    conn.commit()
 
 
 def _migrate_002_canonical_system_settings(conn) -> None:
@@ -680,6 +699,16 @@ def _ensure_agents_delegation_column(conn) -> None:
     columns = {row["name"] for row in conn.execute("PRAGMA table_info(agents)").fetchall()}
     if "can_delegate" not in columns:
         conn.execute("ALTER TABLE agents ADD COLUMN can_delegate INTEGER NOT NULL DEFAULT 0")
+        conn.commit()
+
+
+def _ensure_agents_capabilities_column(conn) -> None:
+    columns = {row["name"] for row in conn.execute("PRAGMA table_info(agents)").fetchall()}
+    if "capabilities_json" not in columns:
+        conn.execute(
+            "ALTER TABLE agents ADD COLUMN capabilities_json TEXT NOT NULL "
+            "DEFAULT '[\"memory\",\"coordination\",\"credentials\",\"connectors_read\",\"connectors_execute\"]'"
+        )
         conn.commit()
 
 
@@ -1339,21 +1368,64 @@ def _ensure_webhook_tables(conn) -> None:
             CREATE INDEX IF NOT EXISTS idx_webhook_registrations_enabled ON webhook_registrations(enabled);
             """
         )
+    delivery_columns = {
+        row["name"] for row in conn.execute("PRAGMA table_info(webhook_delivery_log)").fetchall()
+    } if "webhook_delivery_log" in tables else set()
     if "webhook_delivery_log" not in tables:
         conn.executescript(
             """
             CREATE TABLE IF NOT EXISTS webhook_delivery_log (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 webhook_id TEXT NOT NULL,
+                event_id TEXT NOT NULL,
                 event_type TEXT NOT NULL,
                 payload_json TEXT NOT NULL,
-                status TEXT NOT NULL CHECK (status IN ('success', 'failure')),
+                status TEXT NOT NULL CHECK (status IN ('pending', 'delivering', 'retry_wait', 'success', 'dead', 'cancelled')),
+                attempt_count INTEGER NOT NULL DEFAULT 0,
+                next_attempt_at TEXT,
+                last_attempt_at TEXT,
+                lease_expires_at TEXT,
                 http_status INTEGER,
                 error_message TEXT,
-                delivered_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (webhook_id) REFERENCES webhook_registrations(id) ON DELETE CASCADE
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                delivered_at TEXT DEFAULT CURRENT_TIMESTAMP
             );
-            CREATE INDEX IF NOT EXISTS idx_webhook_delivery_webhook ON webhook_delivery_log(webhook_id, delivered_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_webhook_delivery_webhook ON webhook_delivery_log(webhook_id, created_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_webhook_delivery_due ON webhook_delivery_log(status, next_attempt_at);
+            """
+        )
+    elif "event_id" not in delivery_columns:
+        # SQLite cannot widen the old status CHECK. Rebuild once, retaining
+        # history while mapping old one-shot failures to terminal dead rows.
+        conn.executescript(
+            """
+            CREATE TABLE webhook_delivery_log_new (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                webhook_id TEXT NOT NULL,
+                event_id TEXT NOT NULL,
+                event_type TEXT NOT NULL,
+                payload_json TEXT NOT NULL,
+                status TEXT NOT NULL CHECK (status IN ('pending', 'delivering', 'retry_wait', 'success', 'dead', 'cancelled')),
+                attempt_count INTEGER NOT NULL DEFAULT 0,
+                next_attempt_at TEXT,
+                last_attempt_at TEXT,
+                lease_expires_at TEXT,
+                http_status INTEGER,
+                error_message TEXT,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                delivered_at TEXT DEFAULT CURRENT_TIMESTAMP
+            );
+            INSERT INTO webhook_delivery_log_new
+            (id, webhook_id, event_id, event_type, payload_json, status, attempt_count,
+             last_attempt_at, http_status, error_message, created_at, delivered_at)
+            SELECT id, webhook_id, lower(hex(randomblob(16))), event_type, payload_json,
+                   CASE WHEN status = 'success' THEN 'success' ELSE 'dead' END,
+                   1, delivered_at, http_status, error_message, delivered_at, delivered_at
+            FROM webhook_delivery_log;
+            DROP TABLE webhook_delivery_log;
+            ALTER TABLE webhook_delivery_log_new RENAME TO webhook_delivery_log;
+            CREATE INDEX IF NOT EXISTS idx_webhook_delivery_webhook ON webhook_delivery_log(webhook_id, created_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_webhook_delivery_due ON webhook_delivery_log(status, next_attempt_at);
             """
         )
     conn.commit()

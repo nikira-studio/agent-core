@@ -94,7 +94,10 @@ def test_oauth_start_endpoint_returns_callback_url(test_client, admin_token):
     )
 
 
-def test_oauth_start_endpoint_uses_forwarded_public_url(test_client, admin_token):
+def test_oauth_start_endpoint_uses_forwarded_public_url(test_client, admin_token, monkeypatch):
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "TRUSTED_PROXIES", "testclient")
     _install_gmail_connector()
     binding = _create_gmail_binding()
 

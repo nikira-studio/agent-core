@@ -30,6 +30,27 @@ def _with_own_scope(agent_id: str, scopes: list[str]) -> list[str]:
 # Sentinel distinguishing "leave default_recall_scopes unchanged" (default) from
 # "clear it back to NULL / Option A" (explicit None) in update_agent.
 _UNSET = object()
+ALL_CAPABILITIES = ["memory", "coordination", "credentials", "connectors_read", "connectors_execute"]
+
+
+def parse_capabilities(value: Optional[str]) -> list[str]:
+    try:
+        parsed = json.loads(value or "[]")
+    except (TypeError, json.JSONDecodeError):
+        parsed = []
+    return [capability for capability in ALL_CAPABILITIES if capability in parsed]
+
+
+def normalize_capabilities(capabilities: Optional[list[str]]) -> list[str]:
+    if capabilities is None:
+        return list(ALL_CAPABILITIES)
+    invalid = set(capabilities) - set(ALL_CAPABILITIES)
+    if invalid:
+        raise ValueError(f"Unknown capabilities: {', '.join(sorted(invalid))}")
+    normalized = [capability for capability in ALL_CAPABILITIES if capability in capabilities]
+    if "connectors_execute" in normalized and "connectors_read" not in normalized:
+        normalized.insert(normalized.index("connectors_execute"), "connectors_read")
+    return normalized
 
 
 def _constrain_recall(
@@ -64,6 +85,7 @@ def create_agent(
     write_scopes: Optional[list[str]] = None,
     default_recall_scopes: Optional[list[str]] = None,
     can_delegate: bool = False,
+    capabilities: Optional[list[str]] = None,
 ) -> tuple[dict, str]:
     normalized_id = normalize_id(agent_id)
     api_key_plaintext, api_key_hash = generate_api_key()
@@ -99,12 +121,12 @@ def create_agent(
             """
             INSERT INTO agents (id, display_name, description, owner_user_id, default_user_id,
                                read_scopes_json, write_scopes_json, default_recall_scopes_json,
-                               can_delegate, api_key_hash)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                               can_delegate, capabilities_json, api_key_hash)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (normalized_id, display_name, description, owner_user_id, default_user_id,
              read_scopes_json, write_scopes_json, default_recall_scopes_json,
-             int(can_delegate), api_key_hash),
+             int(can_delegate), json.dumps(normalize_capabilities(capabilities)), api_key_hash),
         )
         conn.commit()
 
@@ -118,6 +140,7 @@ def create_agent(
             "write_scopes_json": write_scopes_json,
             "default_recall_scopes_json": default_recall_scopes_json,
             "can_delegate": can_delegate,
+            "capabilities_json": json.dumps(normalize_capabilities(capabilities)),
             "is_active": True,
         }
 
@@ -129,7 +152,7 @@ def get_agent_by_id(agent_id: str) -> Optional[dict]:
         cursor = conn.execute(
             """
             SELECT id, display_name, description, owner_user_id, default_user_id,
-                   read_scopes_json, write_scopes_json, default_recall_scopes_json, can_delegate, api_key_hash, is_active, created_at
+                   read_scopes_json, write_scopes_json, default_recall_scopes_json, can_delegate, capabilities_json, api_key_hash, is_active, created_at
             FROM agents WHERE id = ?
             """,
             (agent_id,),
@@ -144,7 +167,7 @@ def get_agent_by_api_key(plaintext_key: str) -> Optional[dict]:
         cursor = conn.execute(
             """
             SELECT id, display_name, description, owner_user_id, default_user_id,
-                   read_scopes_json, write_scopes_json, default_recall_scopes_json, can_delegate, api_key_hash, is_active, created_at
+                   read_scopes_json, write_scopes_json, default_recall_scopes_json, can_delegate, capabilities_json, api_key_hash, is_active, created_at
             FROM agents WHERE api_key_hash = ?
             """,
             (key_hash,),
@@ -161,7 +184,7 @@ def is_agent_shared(agent: dict) -> bool:
 
 def list_agents(owner_user_id: Optional[str] = None, is_active: Optional[bool] = None) -> list[dict]:
     with get_db() as conn:
-        query = "SELECT id, display_name, description, owner_user_id, default_user_id, read_scopes_json, write_scopes_json, default_recall_scopes_json, can_delegate, is_active, created_at FROM agents WHERE 1=1"
+        query = "SELECT id, display_name, description, owner_user_id, default_user_id, read_scopes_json, write_scopes_json, default_recall_scopes_json, can_delegate, capabilities_json, is_active, created_at FROM agents WHERE 1=1"
         params = []
 
         if owner_user_id:
@@ -196,6 +219,7 @@ def update_agent(
     write_scopes: Optional[list[str]] = None,
     default_recall_scopes=_UNSET,
     can_delegate: Optional[bool] = None,
+    capabilities: Optional[list[str]] = None,
 ) -> bool:
     current = get_agent_by_id(agent_id)
     if current is None:
@@ -213,6 +237,9 @@ def update_agent(
     if can_delegate is not None:
         updates.append("can_delegate = ?")
         params.append(int(can_delegate))
+    if capabilities is not None:
+        updates.append("capabilities_json = ?")
+        params.append(json.dumps(normalize_capabilities(capabilities)))
 
     new_read = _with_own_scope(agent_id, read_scopes) if read_scopes is not None else None
     if new_read is not None:

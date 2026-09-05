@@ -2,9 +2,11 @@ import hashlib
 import hmac
 import json
 import logging
+import random
 import secrets
 import threading
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from email.utils import parsedate_to_datetime
 from typing import Optional
 
 import httpx
@@ -14,6 +16,7 @@ from app.branding import APP_NAME
 from app.database import get_db
 from app.security.encryption import encrypt_value, decrypt_value
 from app.security.safe_http import safe_httpx_post
+from app.services import webhook_settings_service
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +33,10 @@ WEBHOOK_EVENT_TYPES = (
 )
 
 DELIVERY_TIMEOUT_SECONDS = 5
+LEASE_SECONDS = 30
+POLL_SECONDS = 0.5
+_worker_stop = threading.Event()
+_worker: threading.Thread | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -128,11 +135,22 @@ def update_webhook(
             f"UPDATE webhook_registrations SET {', '.join(updates)} WHERE id = ?",
             params,
         )
+        if enabled is False:
+            conn.execute(
+                "UPDATE webhook_delivery_log SET status = 'cancelled', error_message = 'Webhook disabled' "
+                "WHERE webhook_id = ? AND status IN ('pending', 'retry_wait')",
+                (webhook_id,),
+            )
     return cursor.rowcount > 0
 
 
 def delete_webhook(webhook_id: str) -> bool:
     with get_db() as conn:
+        conn.execute(
+            "UPDATE webhook_delivery_log SET status = 'cancelled', error_message = 'Webhook deleted' "
+            "WHERE webhook_id = ? AND status IN ('pending', 'retry_wait')",
+            (webhook_id,),
+        )
         cursor = conn.execute(
             "DELETE FROM webhook_registrations WHERE id = ?", (webhook_id,)
         )
@@ -143,10 +161,11 @@ def list_deliveries(webhook_id: str, limit: int = 50) -> list[dict]:
     with get_db() as conn:
         rows = conn.execute(
             """
-            SELECT id, webhook_id, event_type, status, http_status, error_message, delivered_at
+            SELECT id, webhook_id, event_id, event_type, status, attempt_count, next_attempt_at,
+                   last_attempt_at, http_status, error_message, created_at, delivered_at
             FROM webhook_delivery_log
             WHERE webhook_id = ?
-            ORDER BY delivered_at DESC
+            ORDER BY created_at DESC
             LIMIT ?
             """,
             (webhook_id, limit),
@@ -165,96 +184,203 @@ def _sign_payload(secret_plaintext: str, body: bytes) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Delivery
+# Delivery queue
 # ---------------------------------------------------------------------------
 
 
-def _record_delivery(
-    webhook_id: str,
-    event_type: str,
-    payload_json: str,
-    status: str,
-    http_status: Optional[int],
-    error_message: Optional[str],
-) -> None:
+def _now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _iso(value: datetime | None = None) -> str:
+    return (value or _now()).isoformat()
+
+
+def _enqueue_delivery(webhook_id: str, event_id: str, event_type: str, payload: dict) -> None:
+    payload_json = json.dumps(payload, separators=(",", ":"))
     now = datetime.now(timezone.utc).isoformat()
     try:
         with get_db() as conn:
             conn.execute(
                 """
                 INSERT INTO webhook_delivery_log
-                (webhook_id, event_type, payload_json, status, http_status, error_message, delivered_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                (webhook_id, event_id, event_type, payload_json, status, attempt_count, next_attempt_at, created_at)
+                VALUES (?, ?, ?, ?, 'pending', 0, ?, ?)
                 """,
-                (
-                    webhook_id,
-                    event_type,
-                    payload_json,
-                    status,
-                    http_status,
-                    error_message,
-                    now,
-                ),
+                (webhook_id, event_id, event_type, payload_json, now, now),
             )
     except Exception:
-        logger.exception("Failed to record webhook delivery log for %s", webhook_id)
+        logger.exception("Failed to enqueue webhook delivery for %s", webhook_id)
 
 
-def _deliver_one(
-    webhook_id: str, url: str, secret_encrypted: str, event_type: str, payload: dict
-) -> None:
-    payload_json = json.dumps(payload, separators=(",", ":"))
-    payload_bytes = payload_json.encode()
-    try:
-        secret_plaintext = decrypt_value(secret_encrypted)
-    except Exception:
-        logger.error("Failed to decrypt webhook secret for %s", webhook_id)
-        _record_delivery(
-            webhook_id,
-            event_type,
-            payload_json,
-            "failure",
-            None,
-            "Secret decryption failed",
+def _claim_due_delivery() -> Optional[dict]:
+    now = _iso()
+    lease_expires = _iso(_now() + timedelta(seconds=LEASE_SECONDS))
+    with get_db() as conn:
+        conn.execute(
+            "UPDATE webhook_delivery_log SET status = 'retry_wait', lease_expires_at = NULL "
+            "WHERE status = 'delivering' AND lease_expires_at < ?",
+            (now,),
         )
+        row = conn.execute(
+            "SELECT * FROM webhook_delivery_log WHERE status IN ('pending', 'retry_wait') "
+            "AND (next_attempt_at IS NULL OR next_attempt_at <= ?) ORDER BY id LIMIT 1",
+            (now,),
+        ).fetchone()
+        if not row:
+            return None
+        claimed = conn.execute(
+            "UPDATE webhook_delivery_log SET status = 'delivering', attempt_count = attempt_count + 1, "
+            "last_attempt_at = ?, lease_expires_at = ? WHERE id = ? AND status IN ('pending', 'retry_wait')",
+            (now, lease_expires, row["id"]),
+        )
+        if not claimed.rowcount:
+            return None
+        return dict(conn.execute("SELECT * FROM webhook_delivery_log WHERE id = ?", (row["id"],)).fetchone())
+
+
+def _retry_after_seconds(value: str | None, maximum: int) -> int | None:
+    if not value:
+        return None
+    try:
+        return min(max(int(value), 0), maximum)
+    except ValueError:
+        try:
+            retry_at = parsedate_to_datetime(value)
+        except (TypeError, ValueError):
+            return None
+        if retry_at.tzinfo is None:
+            retry_at = retry_at.replace(tzinfo=timezone.utc)
+        return min(max(int((retry_at - _now()).total_seconds()), 0), maximum)
+
+
+def _finish_delivery(delivery: dict) -> None:
+    webhook_id = delivery["webhook_id"]
+    payload_bytes = delivery["payload_json"].encode()
+    event_type = delivery["event_type"]
+    event_id = delivery["event_id"]
+    with get_db() as conn:
+        webhook = conn.execute(
+            "SELECT url, secret_encrypted, enabled FROM webhook_registrations WHERE id = ?",
+            (webhook_id,),
+        ).fetchone()
+    if not webhook or not webhook["enabled"]:
+        _set_delivery(delivery["id"], "cancelled", error_message="Webhook disabled or deleted")
+        return
+    try:
+        secret_plaintext = decrypt_value(webhook["secret_encrypted"])
+    except Exception:
+        _retry_or_dead(delivery, None, "Secret decryption failed")
         return
 
     signature = _sign_payload(secret_plaintext, payload_bytes)
     http_status = None
     error_message = None
-    status = "failure"
     try:
         with httpx.Client(timeout=DELIVERY_TIMEOUT_SECONDS) as client:
             response = safe_httpx_post(
                 client,
-                url,
+                webhook["url"],
                 content=payload_bytes,
                 headers={
                     "Content-Type": "application/json",
                     "X-Agent-Core-Signature": signature,
                     "X-Agent-Core-Event": event_type,
+                    "X-Agent-Core-Event-Id": event_id,
                 },
             )
         http_status = response.status_code
         if 200 <= response.status_code < 300:
-            status = "success"
-        else:
-            error_message = f"HTTP {response.status_code}"
+            _set_delivery(delivery["id"], "success", http_status=response.status_code, delivered_at=_iso())
+            return
+        error_message = f"HTTP {response.status_code}"
+        _retry_or_dead(
+            delivery,
+            http_status,
+            error_message,
+            retry_after=response.headers.get("retry-after") if response.status_code == 429 else None,
+        )
+        return
     except httpx.TimeoutException:
         error_message = "Delivery timed out"
     except Exception as exc:
         error_message = str(exc)[:200]
 
-    _record_delivery(
-        webhook_id, event_type, payload_json, status, http_status, error_message
-    )
-    if status == "failure":
-        logger.warning(
-            "Webhook delivery failed for %s event=%s: %s",
-            webhook_id,
-            event_type,
-            error_message,
+    _retry_or_dead(delivery, http_status, error_message)
+
+
+def _set_delivery(delivery_id: int, status: str, *, http_status: Optional[int] = None,
+                  error_message: Optional[str] = None, next_attempt_at: Optional[str] = None,
+                  delivered_at: Optional[str] = None) -> None:
+    with get_db() as conn:
+        conn.execute(
+            "UPDATE webhook_delivery_log SET status = ?, http_status = ?, error_message = ?, "
+            "next_attempt_at = ?, lease_expires_at = NULL, delivered_at = ? WHERE id = ?",
+            (status, http_status, error_message, next_attempt_at, delivered_at, delivery_id),
         )
+
+
+def _retry_or_dead(
+    delivery: dict,
+    http_status: Optional[int],
+    error_message: str,
+    *,
+    retry_after: str | None = None,
+) -> None:
+    retryable = http_status is None or http_status in {408, 429} or 500 <= http_status < 600
+    policy = webhook_settings_service.retry_policy()
+    if not retryable or delivery["attempt_count"] >= policy["webhook_retry_max_attempts"]:
+        _set_delivery(delivery["id"], "dead", http_status=http_status, error_message=error_message, delivered_at=_iso())
+        return
+    delay = _retry_after_seconds(retry_after, policy["webhook_retry_max_seconds"])
+    if delay is None:
+        delay = min(
+            policy["webhook_retry_max_seconds"],
+            policy["webhook_retry_initial_seconds"] * 2 ** max(0, delivery["attempt_count"] - 1),
+        )
+    if policy["webhook_retry_jitter_seconds"]:
+        delay = min(
+            policy["webhook_retry_max_seconds"],
+            delay + random.uniform(0, policy["webhook_retry_jitter_seconds"]),
+        )
+    _set_delivery(
+        delivery["id"], "retry_wait", http_status=http_status, error_message=error_message,
+        next_attempt_at=_iso(_now() + timedelta(seconds=delay)),
+    )
+
+
+def run_delivery_cycle() -> bool:
+    delivery = _claim_due_delivery()
+    if not delivery:
+        return False
+    _finish_delivery(delivery)
+    return True
+
+
+def _delivery_loop() -> None:
+    while not _worker_stop.is_set():
+        try:
+            while run_delivery_cycle():
+                pass
+        except Exception:
+            logger.exception("Webhook delivery worker failed")
+        _worker_stop.wait(POLL_SECONDS)
+
+
+def start_delivery_worker() -> threading.Thread:
+    global _worker
+    if _worker and _worker.is_alive():
+        return _worker
+    _worker_stop.clear()
+    _worker = threading.Thread(target=_delivery_loop, name="webhook-delivery", daemon=True)
+    _worker.start()
+    return _worker
+
+
+def stop_delivery_worker() -> None:
+    _worker_stop.set()
+    if _worker and _worker.is_alive():
+        _worker.join(timeout=LEASE_SECONDS)
 
 
 def dispatch_event(event_type: str, data: dict) -> None:
@@ -272,8 +398,9 @@ def dispatch_event(event_type: str, data: dict) -> None:
         logger.exception("Failed to query webhooks for dispatch")
         return
 
-    timestamp = datetime.now(timezone.utc).isoformat()
-    payload = {"event_type": event_type, "timestamp": timestamp, "data": data}
+    timestamp = _iso()
+    event_id = secrets.token_urlsafe(18)
+    payload = {"event_id": event_id, "event_type": event_type, "timestamp": timestamp, "data": data}
 
     for row in rows:
         try:
@@ -283,14 +410,7 @@ def dispatch_event(event_type: str, data: dict) -> None:
         if event_type not in subscribed:
             continue
         webhook_id = row["id"]
-        url = row["url"]
-        secret_encrypted = row["secret_encrypted"]
-        t = threading.Thread(
-            target=_deliver_one,
-            args=(webhook_id, url, secret_encrypted, event_type, payload),
-            daemon=True,
-        )
-        t.start()
+        _enqueue_delivery(webhook_id, event_id, event_type, payload)
 
 
 def _sample_payload(event_type: str) -> dict:
@@ -402,51 +522,34 @@ def test_delivery(webhook_id: str, event_type: Optional[str] = None) -> dict:
         return {"ok": False, "error": f"Unknown event type: {event_type}"}
 
     timestamp = datetime.now(timezone.utc).isoformat()
+    event_id = secrets.token_urlsafe(18)
     payload = {
+        "event_id": event_id,
         "event_type": event_type,
         "timestamp": timestamp,
         "data": _sample_payload(event_type),
     }
-    payload_json = json.dumps(payload, separators=(",", ":"))
-    payload_bytes = payload_json.encode()
-
-    try:
-        secret_plaintext = decrypt_value(row["secret_encrypted"])
-    except Exception:
-        return {"ok": False, "error": "Secret decryption failed"}
-
-    signature = _sign_payload(secret_plaintext, payload_bytes)
-    try:
-        with httpx.Client(timeout=DELIVERY_TIMEOUT_SECONDS) as client:
-            response = safe_httpx_post(
-                client,
-                row["url"],
-                content=payload_bytes,
-                headers={
-                    "Content-Type": "application/json",
-                    "X-Agent-Core-Signature": signature,
-                    "X-Agent-Core-Event": event_type,
-                },
-            )
-        status = "success" if 200 <= response.status_code < 300 else "failure"
-        error = None if status == "success" else f"HTTP {response.status_code}"
-        _record_delivery(
-            webhook_id, event_type, payload_json, status, response.status_code, error
-        )
-        return {
-            "ok": True,
-            "http_status": response.status_code,
-            "event_type": event_type,
-        }
-    except httpx.TimeoutException:
-        _record_delivery(
-            webhook_id, event_type, payload_json, "failure", None, "Delivery timed out"
-        )
-        return {"ok": False, "error": "Delivery timed out"}
-    except Exception as exc:
-        msg = str(exc)[:200]
-        _record_delivery(webhook_id, event_type, payload_json, "failure", None, msg)
-        return {"ok": False, "error": msg}
+    _enqueue_delivery(webhook_id, event_id, event_type, payload)
+    with get_db() as conn:
+        delivery = conn.execute(
+            "SELECT * FROM webhook_delivery_log WHERE webhook_id = ? AND event_id = ?",
+            (webhook_id, event_id),
+        ).fetchone()
+    if not delivery:
+        return {"ok": False, "error": "Could not create delivery"}
+    _finish_delivery(dict(delivery))
+    with get_db() as conn:
+        finished = conn.execute(
+            "SELECT status, http_status, error_message FROM webhook_delivery_log WHERE id = ?",
+            (delivery["id"],),
+        ).fetchone()
+    if finished and finished["status"] == "success":
+        return {"ok": True, "http_status": finished["http_status"], "event_type": event_type}
+    return {
+        "ok": False,
+        "http_status": finished["http_status"] if finished else None,
+        "error": finished["error_message"] if finished else "Delivery failed",
+    }
 
 
 # ---------------------------------------------------------------------------

@@ -7,7 +7,7 @@ from typing import Optional
 
 from app.services import credential_service
 from app.services import audit_service
-from app.security.dependencies import get_request_context
+from app.security.dependencies import get_request_context, require_capability
 from app.security.effective_authority import EffectiveAuthority
 from app.security.scope_enforcer import ScopeEnforcer
 from app.security.rate_limiter import RL
@@ -20,7 +20,7 @@ from app.security.response_helpers import (
 )
 
 
-router = APIRouter(prefix="/api/credentials", tags=["credentials"])
+router = APIRouter(prefix="/api/credentials", tags=["credentials"], dependencies=[Depends(require_capability("credentials"))])
 
 
 def _normalise_expiry(value: Optional[str]) -> Optional[str]:

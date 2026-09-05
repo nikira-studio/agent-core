@@ -34,6 +34,27 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="", tags=["mcp"])
 
+# Keep tool discovery and execution on one closed policy table. A tool omitted
+# here is a release error, not an implicitly public endpoint.
+_TOOL_CAPABILITIES = {
+    **{name: "memory" for name in (
+        "memory_search", "memory_get", "memory_write", "memory_pin", "memory_confirm",
+        "memory_reanchor", "memory_verify", "memory_feedback", "memory_retract", "memory_move",
+    )},
+    **{name: "coordination" for name in (
+        "memory_pinned", "activity_update", "activity_get", "activity_list", "activity_search",
+        "activity_pickup", "workspace_sync", "workspace_sync_ack", "get_briefing", "briefing_list",
+        "delegation_request", "delegations_list", "delegation_requests_list",
+        "delegation_request_approve", "delegation_request_deny", "delegation_revoke",
+    )},
+    **{name: "credentials" for name in ("credential_get", "credential_list")},
+    **{name: "connectors_read" for name in (
+        "connectors_list", "connectors_resolve", "connectors_bindings_list",
+        "connectors_bindings_test", "connectors_actions_list", "connectors_summary",
+    )},
+    "connectors_run": "connectors_execute",
+}
+
 
 MANIFEST = {
     "schema_version": "1.0",
@@ -852,7 +873,17 @@ def _compact_memory_record(record: dict) -> dict:
 
 @router.get("/mcp")
 def get_mcp_manifest(ctx: EffectiveAuthority = Depends(get_mcp_request_context)):
-    return JSONResponse(content=MANIFEST)
+    return JSONResponse(content=_manifest_for(ctx))
+
+
+def _manifest_for(ctx: EffectiveAuthority) -> dict:
+    return {
+        **MANIFEST,
+        "tools": [
+            tool for tool in MANIFEST["tools"]
+            if (required := _TOOL_CAPABILITIES.get(tool["name"])) is None or ctx.has_capability(required)
+        ],
+    }
 
 
 @router.post("/mcp")
@@ -905,7 +936,7 @@ async def _handle_mcp_jsonrpc(body: dict, request: Request, ctx: EffectiveAuthor
         return _jsonrpc_response(request_id, {})
 
     if method == "tools/list":
-        return _jsonrpc_response(request_id, {"tools": MANIFEST["tools"]})
+        return _jsonrpc_response(request_id, {"tools": _manifest_for(ctx)["tools"]})
 
     if method == "tools/call":
         params = body.get("params") or {}
@@ -950,6 +981,14 @@ async def _handle_custom_mcp_tool(body: dict, ctx: EffectiveAuthority):
 
     if not tool:
         return _mcp_error("TOOL_REQUIRED", "tool name is required", 400)
+
+    required_capability = _TOOL_CAPABILITIES.get(tool)
+    if required_capability and not ctx.has_capability(required_capability):
+        return _mcp_error(
+            "CAPABILITY_DENIED",
+            f"This operation requires the {required_capability} capability",
+            403,
+        )
 
     invalid = _invalid_params_message(tool, params)
     if invalid:

@@ -176,9 +176,7 @@ class TestWebhookDelivery:
                     "status": "active",
                 },
             )
-            import time
-
-            time.sleep(0.1)
+            assert webhook_service.run_delivery_cycle() is True
 
         assert len(posted) == 1
         assert posted[0]["event_type"] == "activity_created"
@@ -220,14 +218,13 @@ class TestWebhookDelivery:
             "app.services.webhook_service.safe_httpx_post", side_effect=mock_post
         ):
             webhook_service.dispatch_event("activity_created", {"activity_id": "abc"})
-            import time
-
-            time.sleep(0.1)
+            assert webhook_service.run_delivery_cycle() is True
 
         r = admin_client.get(f"/api/webhooks/{wh_id}/deliveries")
         deliveries = r.json()["data"]["deliveries"]
         assert len(deliveries) == 1
-        assert deliveries[0]["status"] == "failure"
+        assert deliveries[0]["status"] == "retry_wait"
+        assert deliveries[0]["http_status"] == 500
 
     def test_signed_payload_has_correct_header(self, admin_client):
         from app.services import webhook_service
@@ -248,9 +245,7 @@ class TestWebhookDelivery:
             "app.services.webhook_service.safe_httpx_post", side_effect=mock_post
         ):
             webhook_service.dispatch_event("activity_created", {"activity_id": "test"})
-            import time
-
-            time.sleep(0.1)
+            assert webhook_service.run_delivery_cycle() is True
 
         assert len(sent_headers) == 1
         sig = sent_headers[0].get("X-Agent-Core-Signature", "")
@@ -306,9 +301,7 @@ class TestWebhookDelivery:
                     "status": "success",
                 },
             )
-            import time
-
-            time.sleep(0.1)
+            assert webhook_service.run_delivery_cycle() is True
 
         assert captured
         payload = captured[0]["data"]
@@ -366,8 +359,8 @@ class TestTestDelivery:
         wh_id = _create_webhook(admin_client).json()["data"]["webhook"]["id"]
 
         # simulate a prior real delivery in the log
-        webhook_service._record_delivery(
-            wh_id, "activity_created", '{"real":"data"}', "success", 200, None
+        webhook_service._enqueue_delivery(
+            wh_id, "prior-event", "activity_created", {"real": "data"}
         )
 
         def mock_post(_client, url, *, content, headers):
@@ -420,7 +413,7 @@ class TestTestDelivery:
         deliveries = admin_client.get(f"/api/webhooks/{wh_id}/deliveries").json()[
             "data"
         ]["deliveries"]
-        assert any(d["status"] == "failure" for d in deliveries)
+        assert any(d["status"] == "retry_wait" for d in deliveries)
 
 
 # ---------------------------------------------------------------------------

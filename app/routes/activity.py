@@ -4,14 +4,14 @@ from pydantic import BaseModel
 from typing import Optional
 
 from app.services import activity_service, audit_service, briefing_service
-from app.security.dependencies import get_request_context
+from app.security.dependencies import get_request_context, require_capability
 from app.security.effective_authority import EffectiveAuthority
 from app.security.scope_enforcer import ScopeEnforcer
 from app.security.response_helpers import success_response, error_response
 from app.models.enums import ACTIVITY_STATUSES
 
 
-router = APIRouter(prefix="/api/activity", tags=["activity"])
+router = APIRouter(prefix="/api/activity", tags=["activity"], dependencies=[Depends(require_capability("coordination"))])
 
 
 class CreateActivityRequest(BaseModel):

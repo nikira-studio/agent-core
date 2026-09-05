@@ -3,6 +3,7 @@
 import hashlib
 import hmac
 import json
+from datetime import datetime, timezone
 from unittest.mock import patch, MagicMock
 
 
@@ -133,65 +134,46 @@ class TestSigning:
 
 
 class TestDispatch:
-    def test_dispatch_calls_subscribed_webhook(self, clean_db):
-        _make_webhook(clean_db, event_types=["activity_cancelled"])
-        with patch("app.services.webhook_service._deliver_one") as mock_deliver:
-            from app.services.webhook_service import dispatch_event
+    def test_dispatch_enqueues_subscribed_webhook(self, clean_db):
+        from app.services.webhook_service import dispatch_event, list_deliveries
 
-            dispatch_event("activity_cancelled", {"activity_id": "abc"})
-            import time
-
-            time.sleep(0.05)
-            mock_deliver.assert_called_once()
-            args = mock_deliver.call_args[0]
-            assert args[3] == "activity_cancelled"
+        webhook = _make_webhook(clean_db, event_types=["activity_cancelled"])
+        dispatch_event("activity_cancelled", {"activity_id": "abc"})
+        deliveries = list_deliveries(webhook["id"])
+        assert len(deliveries) == 1
+        assert deliveries[0]["event_type"] == "activity_cancelled"
+        assert deliveries[0]["status"] == "pending"
+        assert deliveries[0]["event_id"]
 
     def test_dispatch_preserves_task_result(self, clean_db):
-        _make_webhook(clean_db, event_types=["activity_updated"])
-        captured = []
+        from app.database import get_db
+        from app.services.webhook_service import dispatch_event, list_deliveries
 
-        def fake_deliver(webhook_id, url, secret_encrypted, event_type, payload):
-            captured.append(payload)
-
-        with patch(
-            "app.services.webhook_service._deliver_one", side_effect=fake_deliver
-        ):
-            from app.services.webhook_service import dispatch_event
-
-            dispatch_event(
-                "activity_updated",
-                {
-                    "activity_id": "abc",
-                    "task_note": "Progress note",
-                    "task_result": "Completed the task",
-                },
-            )
-            import time
-
-            time.sleep(0.05)
-
-        assert captured
-        assert captured[0]["data"]["task_note"] == "Progress note"
-        assert captured[0]["data"]["task_result"] == "Completed the task"
+        webhook = _make_webhook(clean_db, event_types=["activity_updated"])
+        dispatch_event("activity_updated", {"activity_id": "abc", "task_note": "Progress note", "task_result": "Completed the task"})
+        delivery_id = list_deliveries(webhook["id"])[0]["id"]
+        with get_db() as conn:
+            payload = json.loads(conn.execute("SELECT payload_json FROM webhook_delivery_log WHERE id = ?", (delivery_id,)).fetchone()["payload_json"])
+        assert payload["data"]["task_note"] == "Progress note"
+        assert payload["data"]["task_result"] == "Completed the task"
 
     def test_dispatch_skips_unsubscribed_event(self, clean_db):
         _make_webhook(clean_db, event_types=["activity_cancelled"])
-        with patch("threading.Thread") as mock_thread:
-            from app.services.webhook_service import dispatch_event
+        from app.services.webhook_service import dispatch_event, list_deliveries
 
-            dispatch_event("connector_executed", {"binding_id": "x"})
-            mock_thread.assert_not_called()
+        webhook = _make_webhook(clean_db, event_types=["activity_cancelled"])
+        dispatch_event("connector_executed", {"binding_id": "x"})
+        assert list_deliveries(webhook["id"]) == []
 
     def test_dispatch_skips_disabled_webhook(self, clean_db):
         from app.services.webhook_service import update_webhook
 
         wh = _make_webhook(clean_db, event_types=["activity_created"])
         update_webhook(wh["id"], enabled=False)
-        with patch("threading.Thread") as mock_thread:
-            from app.services.webhook_service import dispatch_event
+        from app.services.webhook_service import dispatch_event, list_deliveries
 
-            dispatch_event("activity_created", {"activity_id": "abc"})
-            mock_thread.assert_not_called()
+        dispatch_event("activity_created", {"activity_id": "abc"})
+        assert list_deliveries(wh["id"]) == []
 
 
 # ---------------------------------------------------------------------------
@@ -201,30 +183,88 @@ class TestDispatch:
 
 class TestDeliveryLog:
     def test_delivery_logged_on_success(self, clean_db):
-        from app.services.webhook_service import list_deliveries, _record_delivery
+        from app.services.webhook_service import _enqueue_delivery, _set_delivery, list_deliveries
 
         wh = _make_webhook(clean_db)
-        _record_delivery(
-            wh["id"],
-            "activity_created",
-            '{"event_type":"activity_created"}',
-            "success",
-            200,
-            None,
-        )
+        _enqueue_delivery(wh["id"], "event-success", "activity_created", {"event_type": "activity_created"})
+        delivery = list_deliveries(wh["id"])[0]
+        _set_delivery(delivery["id"], "success", http_status=200)
         deliveries = list_deliveries(wh["id"])
         assert len(deliveries) == 1
         assert deliveries[0]["status"] == "success"
         assert deliveries[0]["http_status"] == 200
 
     def test_delivery_logged_on_failure(self, clean_db):
-        from app.services.webhook_service import list_deliveries, _record_delivery
+        from app.services.webhook_service import _enqueue_delivery, _set_delivery, list_deliveries
 
         wh = _make_webhook(clean_db)
-        _record_delivery(wh["id"], "activity_created", "{}", "failure", 500, "HTTP 500")
+        _enqueue_delivery(wh["id"], "event-dead", "activity_created", {})
+        delivery = list_deliveries(wh["id"])[0]
+        _set_delivery(delivery["id"], "dead", http_status=500, error_message="HTTP 500")
         deliveries = list_deliveries(wh["id"])
-        assert deliveries[0]["status"] == "failure"
+        assert deliveries[0]["status"] == "dead"
         assert deliveries[0]["error_message"] == "HTTP 500"
+
+    def test_disabled_webhook_cancels_queued_deliveries(self, clean_db):
+        from app.services.webhook_service import dispatch_event, list_deliveries, update_webhook
+
+        webhook = _make_webhook(clean_db, event_types=["activity_created"])
+        dispatch_event("activity_created", {"activity_id": "queued"})
+        update_webhook(webhook["id"], enabled=False)
+        assert list_deliveries(webhook["id"])[0]["status"] == "cancelled"
+
+    def test_deleted_webhook_retains_cancelled_delivery_history(self, clean_db):
+        from app.services.webhook_service import delete_webhook, dispatch_event, list_deliveries
+
+        webhook = _make_webhook(clean_db, event_types=["activity_created"])
+        dispatch_event("activity_created", {"activity_id": "queued"})
+        assert delete_webhook(webhook["id"])
+        assert list_deliveries(webhook["id"])[0]["status"] == "cancelled"
+
+    def test_failed_delivery_waits_for_retry_with_stable_event_id(self, clean_db):
+        from app.services.webhook_service import dispatch_event, list_deliveries, run_delivery_cycle
+
+        webhook = _make_webhook(clean_db, event_types=["activity_created"])
+        dispatch_event("activity_created", {"activity_id": "retry"})
+        before = list_deliveries(webhook["id"])[0]
+
+        response = MagicMock()
+        response.status_code = 500
+        with patch("app.services.webhook_service.safe_httpx_post", return_value=response) as post:
+            assert run_delivery_cycle() is True
+
+        after = list_deliveries(webhook["id"])[0]
+        assert after["status"] == "retry_wait"
+        assert after["attempt_count"] == 1
+        assert after["event_id"] == before["event_id"]
+        assert post.call_args.kwargs["headers"]["X-Agent-Core-Event-Id"] == before["event_id"]
+
+    def test_client_error_becomes_dead_without_retry(self, clean_db):
+        from app.services.webhook_service import dispatch_event, list_deliveries, run_delivery_cycle
+
+        webhook = _make_webhook(clean_db, event_types=["activity_created"])
+        dispatch_event("activity_created", {"activity_id": "bad-request"})
+        response = MagicMock(status_code=400, headers={})
+        with patch("app.services.webhook_service.safe_httpx_post", return_value=response):
+            assert run_delivery_cycle() is True
+        delivery = list_deliveries(webhook["id"])[0]
+        assert delivery["status"] == "dead"
+        assert delivery["attempt_count"] == 1
+
+    def test_rate_limit_uses_bounded_retry_after(self, clean_db):
+        from app.services.webhook_service import dispatch_event, list_deliveries, run_delivery_cycle
+
+        webhook = _make_webhook(clean_db, event_types=["activity_created"])
+        dispatch_event("activity_created", {"activity_id": "rate-limited"})
+        response = MagicMock(status_code=429, headers={"retry-after": "99999"})
+        with patch("app.services.webhook_service.safe_httpx_post", return_value=response), patch(
+            "app.services.webhook_service.webhook_settings_service.retry_policy",
+            return_value={"webhook_retry_max_attempts": 5, "webhook_retry_initial_seconds": 1, "webhook_retry_max_seconds": 10, "webhook_retry_jitter_seconds": 0},
+        ):
+            assert run_delivery_cycle() is True
+        delivery = list_deliveries(webhook["id"])[0]
+        assert delivery["status"] == "retry_wait"
+        assert 0 <= (datetime.fromisoformat(delivery["next_attempt_at"]) - datetime.now(timezone.utc)).total_seconds() <= 10
 
 
 # ---------------------------------------------------------------------------
@@ -286,12 +326,10 @@ class TestTestDelivery:
         assert payload["data"]["task_result"] is None
 
     def test_test_delivery_does_not_replay_prior_delivery(self, clean_db):
-        from app.services.webhook_service import _record_delivery, test_delivery
+        from app.services.webhook_service import _enqueue_delivery, test_delivery
 
         wh = _make_webhook(clean_db)
-        _record_delivery(
-            wh["id"], "activity_created", '{"real":"payload"}', "success", 200, None
-        )
+        _enqueue_delivery(wh["id"], "event-prior", "activity_created", {"real": "payload"})
 
         def mock_post(_client, url, *, content, headers):
             payload = json.loads(content)

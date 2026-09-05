@@ -140,10 +140,24 @@ async def get_mcp_request_context(
 
         authority = permanent_authority(build_agent_context(agent))
         return _with_delegation(request, authority)
-    else:
-        session = await get_current_session(request, credentials)
-        authority = permanent_authority(build_user_context_for_connectors(session))
-        return _with_delegation(request, authority)
+    session = await get_current_session(request, credentials)
+    authority = permanent_authority(build_user_context_for_connectors(session))
+    return _with_delegation(request, authority)
+
+
+def require_capability(capability: str):
+    """FastAPI dependency for REST route families with one capability owner."""
+    async def dependency(
+        authority: EffectiveAuthority = Depends(get_request_context),
+    ) -> EffectiveAuthority:
+        if not authority.has_capability(capability):
+            raise APIError(
+                "CAPABILITY_DENIED",
+                f"This operation requires the {capability} capability",
+                403,
+            )
+        return authority
+    return dependency
 
 
 def _with_delegation(request: Request, authority: EffectiveAuthority) -> EffectiveAuthority:

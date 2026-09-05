@@ -86,6 +86,27 @@ def agents_page(request: Request, session: dict = Depends(require_auth)):
         if is_admin else ""
     )
 
+    def capability_controls(prefix):
+        labels = [
+            ("memory", "Memory"),
+            ("coordination", "Coordination"),
+            ("credentials", "Credential references"),
+            ("connectors_read", "Connector discovery"),
+            ("connectors_execute", "Run connector actions"),
+        ]
+        controls = "".join(
+            f'<label class="checkbox-label"><input type="checkbox" data-capability="{key}" '
+            f'id="{prefix}-capability-{key}" checked> <span>{label}</span></label>'
+            for key, label in labels
+        )
+        return (
+            '<div class="form-group"><label>Capabilities</label>' + controls +
+            '<p class="form-hint">Scopes decide which data an agent can reach. Capabilities decide which classes of operations it may attempt. Changes apply to the next request. Reconnect an MCP client to refresh its cached tool list.</p></div>'
+        )
+
+    capability_create_html = capability_controls("ca")
+    capability_edit_html = capability_controls("edit")
+
     def agent_row(a):
         active = a.get("is_active")
         status_badge = f"<span class='badge badge-{'active' if active else 'inactive'}'>{'active' if active else 'inactive'}</span>"
@@ -154,13 +175,15 @@ def agents_page(request: Request, session: dict = Depends(require_auth)):
       const recallAll = document.getElementById('ca-recall-all')?.checked;
       const recall = recallAll ? read : [ownScope].concat(getSelectedScopes('ca-recall-scopes'));
       const delegate = document.getElementById('ca-can-delegate')?.checked;
+      const capabilities = getSelectedCapabilities('ca');
       const preview = document.getElementById('ca-authority-preview');
       if (!preview) return;
       preview.innerHTML = '<strong>Permanent authority after creation</strong><br>' +
         'Read: <code>' + escapeHtml(read.join(', ')) + '</code><br>' +
         'Write: <code>' + escapeHtml(write.join(', ')) + '</code><br>' +
         'Default recall: <code>' + escapeHtml(recall.join(', ')) + '</code><br>' +
-        'Can delegate: <code>' + (delegate ? 'yes' : 'no') + '</code>';
+        'Can delegate: <code>' + (delegate ? 'yes' : 'no') + '</code><br>' +
+        'Capabilities: <code>' + escapeHtml(capabilities.join(', ')) + '</code>';
     }
     function applyLeastPrivilegedPreset() {
       ['ca-read-scopes', 'ca-write-scopes', 'ca-recall-scopes'].forEach(function(containerId) {
@@ -172,6 +195,7 @@ def agents_page(request: Request, session: dict = Depends(require_auth)):
       if (recallAll) recallAll.checked = false;
       const canDelegate = document.getElementById('ca-can-delegate');
       if (canDelegate) canDelegate.checked = false;
+      document.querySelectorAll('#create-agent-form [data-capability]').forEach(input => input.checked = input.dataset.capability === 'memory' || input.dataset.capability === 'coordination');
       toggleRecallPicker('ca');
       createAuthorityPreview();
     }
@@ -244,7 +268,7 @@ def agents_page(request: Request, session: dict = Depends(require_auth)):
         form.querySelectorAll('input, select, textarea').forEach(input => {
           if (input.type === 'hidden') return;
           if (input.id === 'edit-agent-id') return;
-          if (input.id === 'edit-display-name' || input.id === 'edit-description') {
+          if (input.id === 'edit-display-name' || input.id === 'edit-description' || input.dataset.capability) {
             input.disabled = readOnly;
           }
         });
@@ -270,6 +294,7 @@ def agents_page(request: Request, session: dict = Depends(require_auth)):
         delegation.checked = Boolean(a.can_delegate);
         delegation.disabled = Boolean(readOnly);
       }
+      setSelectedCapabilities('edit', a.capabilities || []);
       const readScopes = JSON.parse(a.read_scopes_json || '[]');
       const writeScopes = JSON.parse(a.write_scopes_json || '[]');
       setSelectedScopes('edit-read-scopes', readScopes);
@@ -322,6 +347,12 @@ def agents_page(request: Request, session: dict = Depends(require_auth)):
       function getSelectedScopes(containerId) {
         return Array.from(document.querySelectorAll('#' + containerId + ' input:checked')).map(i => i.dataset.scope);
       }
+      function getSelectedCapabilities(prefix) {
+        return Array.from(document.querySelectorAll('#' + prefix + '-capability-controls [data-capability]:checked')).map(i => i.dataset.capability);
+      }
+      function setSelectedCapabilities(prefix, capabilities) {
+        document.querySelectorAll('#' + prefix + '-capability-controls [data-capability]').forEach(i => { i.checked = capabilities.includes(i.dataset.capability); });
+      }
       function setSelectedScopes(containerId, scopes) {
         document.querySelectorAll('#' + containerId + ' input').forEach(i => {
           i.checked = scopes.includes(i.dataset.scope);
@@ -346,6 +377,7 @@ def agents_page(request: Request, session: dict = Depends(require_auth)):
           description: document.getElementById('edit-description').value,
           read_scopes: getSelectedScopes('edit-read-scopes'),
           write_scopes: getSelectedScopes('edit-write-scopes'),
+          capabilities: getSelectedCapabilities('edit'),
         };
         body.read_scopes.push(ownScope);
         body.write_scopes.push(ownScope);
@@ -378,6 +410,7 @@ def agents_page(request: Request, session: dict = Depends(require_auth)):
           description: document.getElementById('ca-description').value.trim(),
           read_scopes: getSelectedScopes('ca-read-scopes'),
           write_scopes: getSelectedScopes('ca-write-scopes'),
+          capabilities: getSelectedCapabilities('ca'),
         };
         // Ensure private scope is added if not present (it's implicit in backend but good to show)
         const privateScope = 'agent:' + agentId;
@@ -458,6 +491,7 @@ def agents_page(request: Request, session: dict = Depends(require_auth)):
             <label>Description</label>
             <input type="text" id="ca-description">
           </div>
+          <div id="ca-capability-controls">{capability_create_html}</div>
           <div class="form-group">
             <button type="button" class="btn btn-sm btn-secondary" onclick="applyLeastPrivilegedPreset()">Use least-privileged service-agent preset</button>
             <p class="form-hint">Private agent read/write scope, inherited owner user read scope, no workspace or shared scopes, and delegation disabled. You can add explicit authority afterward.</p>
@@ -504,6 +538,7 @@ def agents_page(request: Request, session: dict = Depends(require_auth)):
             <label>Description</label>
             <input type="text" id="edit-description">
           </div>
+          <div id="edit-capability-controls">{capability_edit_html}</div>
           <div class="form-row">
             <div class="form-group">
               <label>Owner</label>

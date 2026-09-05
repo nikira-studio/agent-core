@@ -4,13 +4,13 @@ from pydantic import BaseModel
 
 from app.services import briefing_service, audit_service, agent_service
 from app.services.auth_service import get_user_by_id
-from app.security.dependencies import get_request_context
+from app.security.dependencies import get_request_context, require_capability
 from app.security.effective_authority import EffectiveAuthority
 from app.security.scope_enforcer import ScopeEnforcer
 from app.security.response_helpers import success_response, error_response
 
 
-router = APIRouter(prefix="/api/briefings", tags=["briefings"])
+router = APIRouter(prefix="/api/briefings", tags=["briefings"], dependencies=[Depends(require_capability("coordination"))])
 
 
 class HandoffBriefingRequest(BaseModel):

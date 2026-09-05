@@ -147,4 +147,5 @@ def build_agent_context(agent: dict) -> "RequestContext":
         default_recall_scopes=default_recall_scopes,
         active_workspace_ids=active_workspace_ids,
         is_admin=False,
+        capabilities=frozenset(agent_service.parse_capabilities(agent.get("capabilities_json"))),
     )

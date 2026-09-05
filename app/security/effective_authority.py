@@ -24,6 +24,17 @@ RESOURCE_OPERATIONS: dict[str, frozenset[str]] = {
     "credential": frozenset({"read", "write", "reference", "reveal"}),
 }
 
+ALL_CAPABILITIES = frozenset({"memory", "coordination", "credentials", "connectors_read", "connectors_execute"})
+RESOURCE_CAPABILITIES: dict[tuple[str, str], str] = {
+    ("memory", "read"): "memory", ("memory", "write"): "memory",
+    ("activity", "read"): "coordination", ("activity", "create"): "coordination",
+    ("activity", "update"): "coordination", ("activity", "cancel"): "coordination",
+    ("briefing", "read"): "coordination", ("briefing", "create"): "coordination",
+    ("credential", "read"): "credentials", ("credential", "write"): "credentials",
+    ("credential", "reference"): "credentials", ("credential", "reveal"): "credentials",
+    ("connector", "read"): "connectors_read", ("connector", "execute"): "connectors_execute",
+}
+
 WRITE_OPERATIONS = frozenset({"write", "create", "update", "cancel", "execute", "reveal"})
 
 
@@ -91,6 +102,21 @@ class EffectiveAuthority:
     def is_delegated(self) -> bool:
         return self.grant_id is not None
 
+    @property
+    def capabilities(self) -> frozenset[str]:
+        # Older RequestContext construction in integrations did not include
+        # capabilities. Preserve its full-authority behavior. An explicit empty
+        # list on an agent remains an empty capability set.
+        return ALL_CAPABILITIES if self.context.capabilities is None else self.context.capabilities
+
+    def has_capability(self, capability: str) -> bool:
+        return capability in self.capabilities or (
+            capability == "connectors_read" and "connectors_execute" in self.capabilities
+        )
+
+    def required_capability(self, resource_type: str, operation: str) -> Optional[str]:
+        return RESOURCE_CAPABILITIES.get((resource_type, operation))
+
     def can(self, resource_type: str, operation: str, *, scope: Optional[str] = None) -> bool:
         """Test a closed resource operation against the effective authority.
 
@@ -100,6 +126,9 @@ class EffectiveAuthority:
         closed rather than falling back to permanent agent scopes.
         """
         if operation not in RESOURCE_OPERATIONS.get(resource_type, frozenset()):
+            return False
+        required = self.required_capability(resource_type, operation)
+        if required and not self.has_capability(required):
             return False
         if self.is_delegated:
             if scope is None:
@@ -121,6 +150,9 @@ class EffectiveAuthority:
     def can_resource(self, resource_type: str, operation: str, resource_id: str) -> bool:
         if operation not in RESOURCE_OPERATIONS.get(resource_type, frozenset()):
             return False
+        required = self.required_capability(resource_type, operation)
+        if required and not self.has_capability(required):
+            return False
         if self.is_delegated:
             return (resource_type, operation, resource_id) in self.resource_permissions
         return True
@@ -129,6 +161,8 @@ class EffectiveAuthority:
         return [scope for scope in scopes if self.can(resource_type, operation, scope=scope)]
 
     def can_binding_action(self, binding_id: str, action: str, *, scope: str) -> bool:
+        if not self.has_capability("connectors_execute"):
+            return False
         if self.is_delegated:
             return (binding_id, action) in self.binding_actions
         return self.can("connector", "read", scope=scope)
@@ -145,6 +179,7 @@ class EffectiveAuthority:
             "effective_read_scopes": self.context.read_scopes,
             "effective_write_scopes": self.context.write_scopes,
             "active_workspace_ids": sorted(self.context.active_workspace_ids),
+            "capabilities": sorted(self.capabilities),
             "resource_permissions": [
                 {"resource_type": resource, "operation": operation, "scope": scope}
                 for resource, operation, scope in sorted(self.scope_permissions)

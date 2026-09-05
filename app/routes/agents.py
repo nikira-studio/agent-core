@@ -24,6 +24,7 @@ class CreateAgentRequest(BaseModel):
     # default (fan all read_scopes).
     default_recall_scopes: Optional[list[str]] = None
     can_delegate: bool = False
+    capabilities: Optional[list[str]] = None
 
 
 class UpdateAgentRequest(BaseModel):
@@ -36,6 +37,7 @@ class UpdateAgentRequest(BaseModel):
     default_recall_scopes: Optional[list[str]] = None
     reset_default_recall_scopes: bool = False
     can_delegate: Optional[bool] = None
+    capabilities: Optional[list[str]] = None
 
 
 def _is_admin(session: dict) -> bool:
@@ -111,6 +113,7 @@ def _authority_audit_details(agent: dict) -> dict:
             else None
         ),
         "can_delegate": bool(agent.get("can_delegate")),
+        "capabilities": agent_service.parse_capabilities(agent.get("capabilities_json")),
     }
 
 
@@ -132,6 +135,7 @@ def list_agents(session: dict = Depends(get_current_session)):
             "write_scopes_json": agent["write_scopes_json"],
             "default_recall_scopes_json": agent.get("default_recall_scopes_json"),
             "can_delegate": bool(agent.get("can_delegate")),
+            "capabilities": agent_service.parse_capabilities(agent.get("capabilities_json")),
             "is_active": agent["is_active"],
             "is_shared": agent_service.is_agent_shared(agent),
             "created_at": agent["created_at"],
@@ -169,17 +173,21 @@ def create_agent(
     if scope_error:
         return scope_error
 
-    agent, _api_key_plaintext = agent_service.create_agent(
-        agent_id=body.id,
-        display_name=body.display_name,
-        owner_user_id=session["user_id"],
-        description=body.description or "",
-        default_user_id=body.default_user_id,
-        read_scopes=body.read_scopes,
-        write_scopes=body.write_scopes,
-        default_recall_scopes=body.default_recall_scopes,
-        can_delegate=body.can_delegate,
-    )
+    try:
+        agent, _api_key_plaintext = agent_service.create_agent(
+            agent_id=body.id,
+            display_name=body.display_name,
+            owner_user_id=session["user_id"],
+            description=body.description or "",
+            default_user_id=body.default_user_id,
+            read_scopes=body.read_scopes,
+            write_scopes=body.write_scopes,
+            default_recall_scopes=body.default_recall_scopes,
+            can_delegate=body.can_delegate,
+            capabilities=body.capabilities,
+        )
+    except ValueError as exc:
+        return error_response("INVALID_CAPABILITIES", str(exc), 400)
 
     audit_service.write_event(
         actor_type="user",
@@ -202,6 +210,7 @@ def create_agent(
             "write_scopes_json": agent["write_scopes_json"],
             "default_recall_scopes_json": agent.get("default_recall_scopes_json"),
             "can_delegate": bool(agent.get("can_delegate")),
+            "capabilities": agent_service.parse_capabilities(agent.get("capabilities_json")),
             "is_active": agent["is_active"],
         },
         "next_step": "Generate a one-time connection key and config from Integrations.",
@@ -228,6 +237,7 @@ def get_agent(agent_id: str, session: dict = Depends(get_current_session)):
             "write_scopes_json": agent["write_scopes_json"],
             "default_recall_scopes_json": agent.get("default_recall_scopes_json"),
             "can_delegate": bool(agent.get("can_delegate")),
+            "capabilities": agent_service.parse_capabilities(agent.get("capabilities_json")),
             "is_active": agent["is_active"],
             "created_at": agent["created_at"],
             "is_shared": agent_service.is_agent_shared(agent),
@@ -267,6 +277,7 @@ def update_agent(
         read_scopes=body.read_scopes,
         write_scopes=body.write_scopes,
         can_delegate=body.can_delegate,
+        capabilities=body.capabilities,
     )
     # reset flag clears back to default (fan all read_scopes); otherwise a
     # provided list narrows, and absence leaves it unchanged.
@@ -274,7 +285,10 @@ def update_agent(
         update_kwargs["default_recall_scopes"] = None
     elif body.default_recall_scopes is not None:
         update_kwargs["default_recall_scopes"] = body.default_recall_scopes
-    agent_service.update_agent(agent_id, **update_kwargs)
+    try:
+        agent_service.update_agent(agent_id, **update_kwargs)
+    except ValueError as exc:
+        return error_response("INVALID_CAPABILITIES", str(exc), 400)
     updated_agent = agent_service.get_agent_by_id(agent_id)
 
     audit_service.write_event(

@@ -16,6 +16,9 @@ class RequestContext:
     default_recall_scopes: list[str] = field(default_factory=list)
     active_workspace_ids: frozenset[str] = field(default_factory=frozenset)
     is_admin: bool = False
+    # A coarse, standing ceiling over operation classes. Scopes still decide
+    # which records a capability can reach.
+    capabilities: Optional[frozenset[str]] = None
 
 
 def build_user_context(session: dict) -> RequestContext:
@@ -43,6 +46,7 @@ def build_user_context(session: dict) -> RequestContext:
         write_scopes=[f"user:{user_id}"] + writable_workspace_scopes,
         default_recall_scopes=[f"user:{user_id}"] + readable_workspace_scopes,
         active_workspace_ids=active_workspace_ids,
+        capabilities=frozenset({"memory", "coordination", "credentials", "connectors_read", "connectors_execute"}),
     )
 
 

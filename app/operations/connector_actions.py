@@ -32,6 +32,13 @@ def run_connector_action(
             error_message="Binding not found",
             status_code=404,
         )
+    if not authority.has_capability("connectors_execute"):
+        return ConnectorActionOutcome(
+            binding=binding,
+            error_code="CAPABILITY_DENIED",
+            error_message="This operation requires the connectors_execute capability",
+            status_code=403,
+        )
     if not authority.can_binding_action(binding_id, action, scope=binding["scope"]):
         connector_service.audit_delegated_execution_denial(
             authority, binding_id, action

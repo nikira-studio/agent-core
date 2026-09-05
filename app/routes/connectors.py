@@ -18,23 +18,15 @@ from app.services import (
     connector_oauth_service,
 )
 from app.branding import APP_USER_AGENT
-from app.security.dependencies import get_request_context
+from app.security.dependencies import get_request_context, require_capability
 from app.security.scope_enforcer import ScopeEnforcer
 from app.security.effective_authority import EffectiveAuthority
+from app.security.public_url import public_base_url
 from app.security.response_helpers import success_response, error_response
 from app.operations.connector_actions import run_connector_action
 
 
-router = APIRouter(prefix="/api/connector-bindings", tags=["connector_bindings"])
-
-
-def _public_base_url(request: Request) -> str:
-    forwarded_proto = (request.headers.get("x-forwarded-proto") or "").split(",")[0].strip()
-    forwarded_host = (request.headers.get("x-forwarded-host") or "").split(",")[0].strip()
-    host = forwarded_host or request.headers.get("host") or ""
-    if forwarded_proto and host:
-        return f"{forwarded_proto}://{host}".rstrip("/")
-    return str(request.base_url).rstrip("/")
+router = APIRouter(prefix="/api/connector-bindings", tags=["connector_bindings"], dependencies=[Depends(require_capability("connectors_read"))])
 
 
 class ImportSpecRequest(BaseModel):
@@ -238,7 +230,7 @@ async def start_binding_oauth(
     )
     if not enforcer.can_write(binding["scope"]):
         return error_response("SCOPE_DENIED", "Access denied to this binding", 403)
-    redirect_uri = f"{_public_base_url(request)}/api/connector-bindings/oauth/callback"
+    redirect_uri = f"{public_base_url(request)}/api/connector-bindings/oauth/callback"
     try:
         authorization_url = await asyncio.to_thread(
             connector_oauth_service.build_authorization_url,
@@ -430,7 +422,7 @@ async def run_binding(
 # reach for /api/connectors/{id}/run; without this alias that path 404s while
 # dry-runs and the MCP connectors_run tool (which dispatches server-side) both
 # work — the exact footgun that broke the watchlist cron on its first live tick.
-connector_compat_router = APIRouter(prefix="/api/connectors", tags=["connector_bindings"])
+connector_compat_router = APIRouter(prefix="/api/connectors", tags=["connector_bindings"], dependencies=[Depends(require_capability("connectors_read"))])
 
 
 @connector_compat_router.post("/{binding_id}/run")
@@ -505,7 +497,7 @@ async def get_binding_tools(
 
 
 connector_types_router = APIRouter(
-    prefix="/api/connector-types", tags=["connector_types"]
+    prefix="/api/connector-types", tags=["connector_types"], dependencies=[Depends(require_capability("connectors_read"))]
 )
 
 

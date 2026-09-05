@@ -155,6 +155,29 @@ async def update_dashboard_system_settings(
                 400,
             )
         settings_to_save["memory_dedupe_similarity"] = str(dedupe_similarity)
+
+    for key, label, minimum, maximum in (
+        ("webhook_retry_max_attempts", "Webhook retry attempts", 1, 100),
+        ("webhook_retry_initial_seconds", "Webhook initial retry delay", 1, 3600),
+        ("webhook_retry_max_seconds", "Webhook maximum retry delay", 1, 86400),
+        ("webhook_retry_jitter_seconds", "Webhook retry jitter", 0, 86400),
+    ):
+        if key not in body:
+            continue
+        try:
+            value = int(str(body[key]).strip())
+        except ValueError:
+            return error_response("INVALID_WEBHOOK_RETRY", f"{label} must be a whole number", 400)
+        if not minimum <= value <= maximum:
+            return error_response("INVALID_WEBHOOK_RETRY", f"{label} must be between {minimum} and {maximum}", 400)
+        settings_to_save[key] = str(value)
+
+    if (
+        "webhook_retry_initial_seconds" in settings_to_save
+        and "webhook_retry_max_seconds" in settings_to_save
+        and int(settings_to_save["webhook_retry_max_seconds"]) < int(settings_to_save["webhook_retry_initial_seconds"])
+    ):
+        return error_response("INVALID_WEBHOOK_RETRY", "Webhook maximum retry delay must not be lower than the initial delay", 400)
     system_settings_service.write_raw(settings_to_save)
 
     audit_service.write_event(
@@ -495,6 +518,10 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
         "usefulness_review_enabled": "0",
         "execution_log_retention_days": "30",
         "webhook_log_retention_days": "30",
+        "webhook_retry_max_attempts": "5",
+        "webhook_retry_initial_seconds": "1",
+        "webhook_retry_max_seconds": "300",
+        "webhook_retry_jitter_seconds": "1",
         "memory_dedupe_similarity": "0.92",
     }
     with get_db() as conn:
@@ -519,6 +546,10 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
     usefulness_enabled = values["usefulness_review_enabled"] in ("1", "true")
     execution_log_retention_days = values["execution_log_retention_days"]
     webhook_log_retention_days = values["webhook_log_retention_days"]
+    webhook_retry_max_attempts = values["webhook_retry_max_attempts"]
+    webhook_retry_initial_seconds = values["webhook_retry_initial_seconds"]
+    webhook_retry_max_seconds = values["webhook_retry_max_seconds"]
+    webhook_retry_jitter_seconds = values["webhook_retry_jitter_seconds"]
     memory_dedupe_similarity = values["memory_dedupe_similarity"]
     credential_count = int(count_row["count"] if count_row else 0)
 
@@ -697,6 +728,16 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
           <label>Webhook Delivery Log Retention</label>
           <input type="number" id="webhook-log-retention-days" min="0" max="365" value="{escape_html(webhook_log_retention_days)}" style="width:120px">
           <p class="form-hint">Used by Run Maintenance. Webhook delivery attempts older than this are deleted. Set to 0 to keep them forever.</p>
+        </div>
+        <div class="form-group">
+          <label>Webhook retry policy</label>
+          <div class="form-row">
+            <label>Attempts <input type="number" id="webhook-retry-max-attempts" min="1" max="100" value="{escape_html(webhook_retry_max_attempts)}" style="width:80px"></label>
+            <label>Initial delay (s) <input type="number" id="webhook-retry-initial-seconds" min="1" max="3600" value="{escape_html(webhook_retry_initial_seconds)}" style="width:80px"></label>
+            <label>Maximum delay (s) <input type="number" id="webhook-retry-max-seconds" min="1" max="86400" value="{escape_html(webhook_retry_max_seconds)}" style="width:80px"></label>
+            <label>Jitter (s) <input type="number" id="webhook-retry-jitter-seconds" min="0" max="86400" value="{escape_html(webhook_retry_jitter_seconds)}" style="width:80px"></label>
+          </div>
+          <p class="form-hint">Retries network failures, timeouts, 408, 429, and 5xx responses. Other 4xx responses become dead immediately. Retry-After is honored up to the maximum delay.</p>
         </div>
         <button type="submit" class="btn">Save Behavior Settings</button>
       </form>
@@ -1035,6 +1076,10 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
         memory_dedupe_similarity: document.getElementById('memory-dedupe-similarity').value,
         execution_log_retention_days: document.getElementById('execution-log-retention-days').value,
         webhook_log_retention_days: document.getElementById('webhook-log-retention-days').value,
+        webhook_retry_max_attempts: document.getElementById('webhook-retry-max-attempts').value,
+        webhook_retry_initial_seconds: document.getElementById('webhook-retry-initial-seconds').value,
+        webhook_retry_max_seconds: document.getElementById('webhook-retry-max-seconds').value,
+        webhook_retry_jitter_seconds: document.getElementById('webhook-retry-jitter-seconds').value,
       }};
       const j = await apiFetch('/api/dashboard/system-settings', {{
         method: 'POST',

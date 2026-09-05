@@ -155,6 +155,7 @@ def test_create_schema_records_and_skips_applied_revision(monkeypatch):
     assert revisions == [
         {"revision": 1, "name": "normalize-current-schema"},
         {"revision": 2, "name": "canonical-system-settings"},
+        {"revision": 3, "name": "agent-capabilities-and-webhook-queue"},
     ]
 
     def unexpected_rerun(_conn):

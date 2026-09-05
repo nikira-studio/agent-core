@@ -3,12 +3,12 @@ from typing import Optional
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
-from app.security.dependencies import get_request_context
+from app.security.dependencies import get_request_context, require_capability
 from app.security.effective_authority import EffectiveAuthority
 from app.security.response_helpers import error_response, success_response
 from app.services import audit_service, workspace_sync_service
 
-router = APIRouter(prefix="/api/workspace-sync", tags=["workspace_sync"])
+router = APIRouter(prefix="/api/workspace-sync", tags=["workspace_sync"], dependencies=[Depends(require_capability("coordination"))])
 
 
 class SyncRequest(BaseModel):

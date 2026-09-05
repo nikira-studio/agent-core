@@ -16,6 +16,7 @@ from app.routes.dashboard_shared import (
     require_auth,
     render_page,
 )
+from app.security.public_url import public_base_url
 
 
 router = APIRouter()
@@ -424,7 +425,7 @@ async def preview_agent_setup(
         user_id=body.user_id,
         is_admin=is_admin,
     )
-    base_url = str(request.base_url).rstrip("/")
+    base_url = public_base_url(request)
     outputs = {}
     for output_type, _label, _filename in _agent_setup_output_options(body.target):
         _out_label, output = _build_agent_setup_output(
@@ -524,7 +525,7 @@ async def generate_agent_connection(
         agent=agent,
         target=body.target,
         output_type=body.output_type,
-        base_url=str(request.base_url).rstrip("/"),
+        base_url=public_base_url(request),
         api_key=api_key,
     )
 
@@ -633,7 +634,7 @@ def integrations_page(
     access_checks = []
     generated_output = ""
     output_label = ""
-    base_url = str(request.base_url).rstrip("/")
+    base_url = public_base_url(request)
     page_path = request.url.path
     recommended_scopes = None
 

@@ -25,6 +25,7 @@ from app.routes import (
     briefings_router,
     workspace_sync_router,
     discovery_router,
+    guidance_router,
     mcp_router,
     integrations_page_router,
     dashboard_api_router,
@@ -78,11 +79,14 @@ async def _lifespan(app: FastAPI):
         start_maintenance_scheduler,
         stop_maintenance_scheduler,
     )
+    from app.services.webhook_service import start_delivery_worker, stop_delivery_worker
 
     app.state.maintenance_task = start_maintenance_scheduler()
+    start_delivery_worker()
     try:
         yield
     finally:
+        stop_delivery_worker()
         await stop_maintenance_scheduler(app.state.maintenance_task)
 
 
@@ -254,6 +258,7 @@ def create_app() -> FastAPI:
     app.include_router(briefings_router, tags=["briefings"])
     app.include_router(workspace_sync_router, tags=["workspace_sync"])
     app.include_router(discovery_router, tags=["discovery"])
+    app.include_router(guidance_router, tags=["guidance"])
     app.include_router(mcp_router, tags=["mcp"])
     app.include_router(connector_router, tags=["connector_bindings"])
     app.include_router(connector_compat_router, tags=["connector_bindings"])

@@ -4,6 +4,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
 from app.branding import APP_NAME
+from app.security.public_url import public_base_url
 
 router = APIRouter(tags=["discovery"])
 
@@ -17,7 +18,7 @@ def agent_core_discovery(request: Request):
     """Describe the public MCP connection without disclosing installation state."""
     from app.routes.mcp import MANIFEST
 
-    base_url = str(request.base_url).rstrip("/")
+    base_url = public_base_url(request)
     return JSONResponse(
         content={
             "name": APP_NAME,
@@ -26,5 +27,8 @@ def agent_core_discovery(request: Request):
             "transport": "streamable-http",
             "authentication": {"type": "bearer"},
             "documentation_url": DOCUMENTATION_URL,
+            "setup_url": f"{base_url}/setup.md",
+            "llms_url": f"{base_url}/llms.txt",
+            "skills_url": f"{base_url}/skills",
         }
     )

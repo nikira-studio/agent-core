@@ -5,7 +5,7 @@ from pydantic import BaseModel
 from typing import Optional
 
 from app.services import memory_service, audit_service, embedding_service
-from app.security.dependencies import get_request_context
+from app.security.dependencies import get_request_context, require_capability
 from app.security.effective_authority import EffectiveAuthority
 from app.security.rate_limiter import RL, CSG
 from app.security.response_helpers import (
@@ -20,7 +20,7 @@ from app.operations.memory import (
 )
 
 
-router = APIRouter(prefix="/api/memory", tags=["memory"])
+router = APIRouter(prefix="/api/memory", tags=["memory"], dependencies=[Depends(require_capability("memory"))])
 
 
 
