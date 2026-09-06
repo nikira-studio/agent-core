@@ -458,9 +458,6 @@ CREATE TABLE IF NOT EXISTS webhook_delivery_log (
     delivered_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE INDEX IF NOT EXISTS idx_webhook_delivery_webhook ON webhook_delivery_log(webhook_id, created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_webhook_delivery_due ON webhook_delivery_log(status, next_attempt_at);
-
 -- Inbound webhook keys table (installation-wide, one active key at a time)
 CREATE TABLE IF NOT EXISTS inbound_webhook_keys (
     id TEXT PRIMARY KEY,
@@ -650,6 +647,14 @@ def _migrate_002_canonical_system_settings(conn) -> None:
 
 
 def _create_current_indexes(conn) -> None:
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_webhook_delivery_webhook "
+        "ON webhook_delivery_log(webhook_id, created_at DESC)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_webhook_delivery_due "
+        "ON webhook_delivery_log(status, next_attempt_at)"
+    )
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_memory_slot ON memory_records(scope, memory_class, slot_key, record_status)"
     )
@@ -1390,8 +1395,6 @@ def _ensure_webhook_tables(conn) -> None:
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP,
                 delivered_at TEXT DEFAULT CURRENT_TIMESTAMP
             );
-            CREATE INDEX IF NOT EXISTS idx_webhook_delivery_webhook ON webhook_delivery_log(webhook_id, created_at DESC);
-            CREATE INDEX IF NOT EXISTS idx_webhook_delivery_due ON webhook_delivery_log(status, next_attempt_at);
             """
         )
     elif "event_id" not in delivery_columns:
@@ -1424,8 +1427,6 @@ def _ensure_webhook_tables(conn) -> None:
             FROM webhook_delivery_log;
             DROP TABLE webhook_delivery_log;
             ALTER TABLE webhook_delivery_log_new RENAME TO webhook_delivery_log;
-            CREATE INDEX IF NOT EXISTS idx_webhook_delivery_webhook ON webhook_delivery_log(webhook_id, created_at DESC);
-            CREATE INDEX IF NOT EXISTS idx_webhook_delivery_due ON webhook_delivery_log(status, next_attempt_at);
             """
         )
     conn.commit()

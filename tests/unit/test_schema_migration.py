@@ -141,6 +141,53 @@ def test_existing_binding_table_adds_resolution_columns_before_indexes():
     assert "idx_bindings_preferred_unique" in indexes
 
 
+def test_existing_webhook_delivery_table_is_migrated_before_current_indexes():
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    conn.executescript(
+        """
+        CREATE TABLE webhook_delivery_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            webhook_id TEXT NOT NULL,
+            event_type TEXT NOT NULL,
+            payload_json TEXT NOT NULL,
+            status TEXT NOT NULL CHECK (status IN ('success', 'failure')),
+            http_status INTEGER,
+            error_message TEXT,
+            delivered_at TEXT DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE INDEX idx_webhook_delivery_webhook
+            ON webhook_delivery_log(webhook_id, delivered_at DESC);
+        INSERT INTO webhook_delivery_log
+            (webhook_id, event_type, payload_json, status, http_status, error_message,
+             delivered_at)
+        VALUES
+            ('webhook-1', 'activity_updated', '{}', 'failure', 503, 'unavailable',
+             '2026-09-05T00:00:00+00:00');
+        """
+    )
+
+    create_schema(conn)
+
+    columns = {
+        row["name"] for row in conn.execute("PRAGMA table_info(webhook_delivery_log)")
+    }
+    indexes = {
+        row["name"] for row in conn.execute("PRAGMA index_list(webhook_delivery_log)")
+    }
+    delivery = conn.execute(
+        "SELECT event_id, status, attempt_count, created_at, delivered_at "
+        "FROM webhook_delivery_log WHERE webhook_id = 'webhook-1'"
+    ).fetchone()
+
+    assert {"event_id", "next_attempt_at", "lease_expires_at", "created_at"} <= columns
+    assert {"idx_webhook_delivery_webhook", "idx_webhook_delivery_due"} <= indexes
+    assert delivery["event_id"]
+    assert delivery["status"] == "dead"
+    assert delivery["attempt_count"] == 1
+    assert delivery["created_at"] == delivery["delivered_at"]
+
+
 def test_create_schema_records_and_skips_applied_revision(monkeypatch):
     conn = sqlite3.connect(":memory:")
     conn.row_factory = sqlite3.Row
