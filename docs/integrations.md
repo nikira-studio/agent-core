@@ -505,6 +505,7 @@ You are connected to Agent Core at http://localhost:3500.
 - Store decisions, preferences, and facts: `memory_write`
 - For credentials: use `credential_get` to retrieve an AC_SECRET_* reference; never ask the user for raw API keys
 - Send `activity_update` heartbeats every 1–2 minutes while working on a task, always including the activity's explicit `memory_scope`
+- When a fresh `activity_update` returns `since_last_active`, treat it as a bounded fallback digest, not complete history. A caught-up `workspace_sync` execution suppresses it.
 - Use `task_note` for short in-flight progress updates with that same `memory_scope`; Core updates only the activity in that scope and never moves one across scopes
 - If the session reloads, a handoff begins, or no active activity exists yet, open a fresh activity first with `status: active` before attempting to close it
 - When finishing a task, include `status: completed` and a short `task_result` summary of what changed
@@ -592,9 +593,10 @@ Write durable shared memory to the selected workspace. Read the user scope for s
 
 1. At session start, call `workspace_sync` and acknowledge all returned pages.
 2. Start meaningful tasks with `activity_update` in the selected workspace.
-3. Search relevant memory before acting. Review activities and briefings before a handoff, review, or resume.
-4. Store durable facts and decisions in the workspace. Keep routine progress in activity records.
-5. Check credential references and connector bindings before asking for manual setup or a raw secret.
+3. If a fresh activity returns `since_last_active`, process the bounded digest without treating it as complete history.
+4. Search relevant memory before acting. Review activities and briefings before a handoff, review, or resume.
+5. Store durable facts and decisions in the workspace. Keep routine progress in activity records.
+6. Check credential references and connector bindings before asking for manual setup or a raw secret.
 ```
 
 ---

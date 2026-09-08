@@ -27,8 +27,18 @@ def create_activity(
              started_at, heartbeat_at, metadata_json, source_execution_id)
             VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?)
             """,
-            (activity_id, agent_id, agent_id, user_id, task_description, memory_scope,
-             now, now, metadata_json, source_execution_id),
+            (
+                activity_id,
+                agent_id,
+                agent_id,
+                user_id,
+                task_description,
+                memory_scope,
+                now,
+                now,
+                metadata_json,
+                source_execution_id,
+            ),
         )
         conn.commit()
 
@@ -224,9 +234,9 @@ def list_attention_activities(
     with get_db() as conn:
         rows = conn.execute(
             f"""
-            SELECT a.{ACTIVITY_COLUMNS.replace(', ', ', a.')}
+            SELECT a.{ACTIVITY_COLUMNS.replace(", ", ", a.")}
             FROM agent_activity a
-            WHERE {' AND '.join(conditions)}
+            WHERE {" AND ".join(conditions)}
             ORDER BY datetime(a.updated_at) DESC
             LIMIT ?
             """,
@@ -320,7 +330,7 @@ def search_activities(
     with get_db() as conn:
         rows = conn.execute(
             f"""
-            SELECT a.{ACTIVITY_COLUMNS.replace(', ', ', a.')}
+            SELECT a.{ACTIVITY_COLUMNS.replace(", ", ", a.")}
             FROM agent_activity a
             JOIN agent_activity_fts fts ON fts.rowid = a.rowid
             WHERE {where}
@@ -483,13 +493,144 @@ def get_active_activity_for_agent(
                    task_description, task_note, task_result, status, memory_scope, started_at, updated_at,
                    heartbeat_at, ended_at, metadata_json
             FROM agent_activity
-            WHERE {' AND '.join(conditions)}
+            WHERE {" AND ".join(conditions)}
             ORDER BY updated_at DESC
             LIMIT 1
             """,
             params,
         ).fetchone()
         return dict(row) if row else None
+
+
+def get_last_activity_in_scope(
+    agent_id: str,
+    memory_scope: str,
+    exclude_id: Optional[str] = None,
+) -> Optional[dict]:
+    """Return the agent's most recent *real* activity in `memory_scope`.
+
+    A "real" activity is one whose `metadata_json` is NOT shaped like a
+    handoff briefing — `generate_handoff_briefing` (briefing_service.py:69)
+    inserts a briefing row as a regular `agent_activity` row, and its
+    `workspace_changes` entry is stamped `resource_type='briefing'`, not
+    `'activity'` (schema.py:876-878). Selecting a briefing as the prior
+    activity would make the cutoff lookup (which searches for
+    `resource_type='activity'`) find nothing and silently fall back to
+    `retained_tail` even when a real prior activity exists further back.
+
+    This filter mirrors the same shape check the `workspace_activity_ai`
+    trigger already uses (schema.py:871-872): exclude rows whose
+    `metadata_json.type == "handoff_briefing"` AND whose `metadata_json`
+    does NOT carry a `briefing` key. The first clause matches the
+    pre-update state (briefing metadata has been written but the briefing
+    payload has not yet been attached); the second is the broader catch-all
+    for any row shaped like a briefing.
+
+    Briefing-shaped changes are NOT excluded from the digest *content* —
+    only from the prior-activity *selection*. See planb.md Workstream 1.
+    """
+    conditions = ["agent_id = ?", "memory_scope = ?"]
+    params: list = [agent_id, memory_scope]
+    if exclude_id:
+        conditions.append("id != ?")
+        params.append(exclude_id)
+
+    # The trigger's gating differs from prior-activity selection. The
+    # trigger skips writing `resource_type='activity'` change rows for the
+    # *in-between* state where `type=='handoff_briefing'` but the payload
+    # hasn't been attached yet (so its change row is stamped 'briefing').
+    # For prior-activity *selection*, we want to exclude the briefing
+    # itself in either state — i.e. a row is a briefing if its metadata
+    # has either `type == "handoff_briefing"` OR a `briefing` key, which
+    # mirrors the trigger's combined shape check. See planb.md Workstream 1.
+    not_briefing_filter = (
+        "NOT ("
+        "COALESCE(json_extract(CASE WHEN json_valid(metadata_json) "
+        "  THEN metadata_json ELSE '{}' END, '$.type'), '') = 'handoff_briefing' "
+        "OR json_extract(CASE WHEN json_valid(metadata_json) "
+        "  THEN metadata_json ELSE '{}' END, '$.briefing') IS NOT NULL"
+        ")"
+    )
+    conditions.append(not_briefing_filter)
+
+    with get_db() as conn:
+        row = conn.execute(
+            f"""
+            SELECT id, agent_id, user_id, assigned_agent_id, reassigned_from_agent_id,
+                   task_description, task_note, task_result, status, memory_scope, started_at, updated_at,
+                   heartbeat_at, ended_at, metadata_json
+            FROM agent_activity
+            WHERE {" AND ".join(conditions)}
+            ORDER BY started_at DESC
+            LIMIT 1
+            """,
+            params,
+        ).fetchone()
+        return dict(row) if row else None
+
+
+def execution_linked_workspace_stats() -> dict:
+    """Read-only stat: workspace-scope activities that are linked to an execution.
+
+    Scoped to `memory_scope LIKE 'workspace:%'` — `agent:*`-scoped activities
+    are structurally incapable of using `workspace_sync` and must not appear
+    in either the numerator or the denominator. Returns both a lifetime and
+    a normalized 30-day window, since production shows these tell
+    meaningfully different stories and a single blended number would hide
+    the trend.
+
+    The 30-day comparison goes through SQLite's `datetime()` on both sides
+    (`started_at` is ISO-with-`T` from application code, not the plain
+    `CURRENT_TIMESTAMP` format that `datetime('now', '-30 days')` returns,
+    so a bare string compare gives a measurably different, wrong count —
+    verified directly against production. See planb.md Workstream 2.
+
+    Returns 0/0 on a fresh installation rather than raising on divide-by-zero;
+    callers render the fraction.
+    """
+    with get_db() as conn:
+        total_lifetime = int(
+            conn.execute(
+                "SELECT COUNT(*) AS n FROM agent_activity "
+                "WHERE memory_scope LIKE 'workspace:%'"
+            ).fetchone()["n"]
+        )
+        linked_lifetime = int(
+            conn.execute(
+                "SELECT COUNT(*) AS n FROM agent_activity "
+                "WHERE memory_scope LIKE 'workspace:%' "
+                "AND source_execution_id IS NOT NULL "
+                "AND source_execution_id != ''"
+            ).fetchone()["n"]
+        )
+        total_30d = int(
+            conn.execute(
+                "SELECT COUNT(*) AS n FROM agent_activity "
+                "WHERE memory_scope LIKE 'workspace:%' "
+                "AND datetime(started_at) >= datetime('now', '-30 days')"
+            ).fetchone()["n"]
+        )
+        linked_30d = int(
+            conn.execute(
+                "SELECT COUNT(*) AS n FROM agent_activity "
+                "WHERE memory_scope LIKE 'workspace:%' "
+                "AND source_execution_id IS NOT NULL "
+                "AND source_execution_id != '' "
+                "AND datetime(started_at) >= datetime('now', '-30 days')"
+            ).fetchone()["n"]
+        )
+
+    def pct(num, den):
+        return round((num / den) * 100, 1) if den else 0.0
+
+    return {
+        "workspace_activities_total": total_lifetime,
+        "workspace_activities_execution_linked": linked_lifetime,
+        "workspace_activities_pct_lifetime": pct(linked_lifetime, total_lifetime),
+        "workspace_activities_total_30d": total_30d,
+        "workspace_activities_execution_linked_30d": linked_30d,
+        "workspace_activities_pct_30d": pct(linked_30d, total_30d),
+    }
 
 
 def event_data(activity: dict, **extra) -> dict:

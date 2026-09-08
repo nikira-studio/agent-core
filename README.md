@@ -113,11 +113,11 @@ Memory is scoped. Agents only see what they're allowed to: their own private age
 
 Memory records are one of two kinds, and the difference decides what the system can do with them. A **fact** is settled by checking: someone could verify it against the code, a host, or a service. A **decision** is settled by someone deciding, and nothing can verify it. That split is what lets Agent Core re-check facts on a schedule while leaving your decisions alone.
 
-Facts can name what would confirm them (`repo:<path>`, `host:<name>`, `service:<binding>`), and the maintenance sweep checks them, recording what it found. Search results say how long it has been since anyone confirmed a record, so an agent can tell a fact verified today from one nobody has checked in months. Ranking follows the same principle: how often a record actually gets recalled and whether callers said it helped, rather than a score its author gave itself.
+Facts can name what would confirm them (`repo:<path>`, `host:<name>`, `service:<binding>`), and the maintenance sweep checks them, recording what it found. Search results say how long it has been since anyone confirmed a record, so an agent can tell a fact verified today from one nobody has checked in months. Unconfirmed, non-human facts receive a small ranking penalty until someone confirms them with evidence. Ranking follows the same principle: observed provenance, recall, and usefulness rather than a score the author gave itself.
 
 A few records can be **pinned** as standing context, the rules that apply whatever the task is. Those are loaded at the start of a session rather than retrieved, because a constraint that has to win a search can be missed. The list is capped so it stays short enough to actually read.
 
-There is also a **clean-up review** in the dashboard. Rules look for records that no longer earn their place and propose them: one-off job logs, repeats, claims whose subject has vanished. Nothing is applied until you answer, retracting is reversible, and each kind of suggestion keeps a record of how often you agreed with it.
+There is also a **clean-up review** in the dashboard. Rules look for records that no longer earn their place and propose them: one-off job logs, repeats, unconfirmed inferred facts, and claims whose subject has vanished. The configured maintenance run fills the queue within operator-set caps, and **Check for more** runs the same scan on demand. Nothing is applied until you answer, retracting is reversible, and each kind of suggestion keeps a record of how often you agreed with it.
 
 > Without semantic search configured, exact keywords matter more than fuzzy phrasing. `memory_search("authentication")` won't match a record that says "login logic", so use terms that match what was actually written. See [Requirements](#requirements) for how to enable semantic search.
 
@@ -153,7 +153,7 @@ At runtime:  Broker injects the token locally, or the connector executor uses it
 
 Working with a team, or switching between Claude Code and Cursor on the same project? Create a workspace and grant each agent access to it. At session startup, an agent calls `workspace_sync` to receive pinned context, assigned activities, new briefings, and workspace changes since that execution's last acknowledged cursor. Targeted `memory_search` calls still fill gaps when the agent needs older context.
 
-Sync is an explicit pull, not a background process. Each session has its own execution ID, even when two sessions use the same agent identity. That lets one Codex session see work recorded by another Codex session without confusing the two sessions.
+Sync is an explicit pull, not a background process. Each session has its own execution ID, even when two sessions use the same agent identity. That lets one Codex session see work recorded by another Codex session without confusing the two sessions. As a fallback, starting a new workspace activity can return a bounded `since_last_active` digest. Agent Core omits that digest when the supplied execution is already caught up through `workspace_sync`.
 
 ![Agent Core agents](docs/images/agent-workspace.png)
 
@@ -169,7 +169,7 @@ This is what lets any framework that coordinates worker agents sit on top of Age
 
 ## Activity and handoffs
 
-The activity dashboard lists active agent tasks, flags sessions that have gone stale (no heartbeat for more than the configured threshold), and surfaces pending handoffs with options to reassign or generate a briefing. When an agent picks up stale work, it can pull a briefing that includes the prior task description, recent decisions, and relevant memory from the workspace scope.
+The activity dashboard lists active agent tasks, flags sessions that have gone stale (no heartbeat for more than the configured threshold), and surfaces pending handoffs with options to reassign or generate a briefing. It also reports what share of workspace activities were linked to a workspace-sync execution, for both the installation lifetime and the last 30 days. When an agent picks up stale work, it can pull a briefing that includes the prior task description, recent decisions, and relevant memory from the workspace scope.
 
 Activity tracking is self-reported. There is no automatic detection of agent work: a working agent must call `activity_update` at the start of a task and periodically as a heartbeat. Without that, nothing appears in the dashboard and no briefing can be generated.
 

@@ -1,4 +1,3 @@
-
 import json
 
 
@@ -50,6 +49,7 @@ def test_mcp_jsonrpc_initialize(test_client, agent_token):
     assert data["jsonrpc"] == "2.0"
     assert data["id"] == 1
     from app.branding import APP_NAME
+
     assert data["result"]["serverInfo"]["name"] == APP_NAME
     assert "tools" in data["result"]["capabilities"]
 
@@ -126,7 +126,10 @@ def test_mcp_connectors_summary_respects_scope_and_hides_secret_values(
     r = test_client.post(
         "/mcp",
         headers={"Authorization": f"Bearer {agent_token}"},
-        json={"tool": "connectors_summary", "params": {"connector_type_id": "generic_http"}},
+        json={
+            "tool": "connectors_summary",
+            "params": {"connector_type_id": "generic_http"},
+        },
     )
     assert r.status_code == 200, r.json()
     data = r.json()["data"]
@@ -449,7 +452,9 @@ def _multi_workspace_agent_token(admin_token):
     return api_key
 
 
-def test_mcp_activity_update_isolated_by_requested_memory_scope(test_client, admin_token):
+def test_mcp_activity_update_isolated_by_requested_memory_scope(
+    test_client, admin_token
+):
     """A shared agent identity must never move one workspace's activity into another."""
     api_key = _multi_workspace_agent_token(admin_token)
     headers = {"Authorization": f"Bearer {api_key}"}
@@ -688,7 +693,6 @@ def test_mcp_tool_memory_write_supports_slot_key_and_freshness(
                 "scope": "agent:testagent",
                 "slot_key": "style",
                 "valid_from": "2026-05-15T00:00:00Z",
-                "last_confirmed_at": "2026-05-15T01:00:00Z",
             },
         },
     )
@@ -696,7 +700,71 @@ def test_mcp_tool_memory_write_supports_slot_key_and_freshness(
     record = r.json()["data"]["record"]
     assert record["slot_key"] == "style"
     assert record["valid_from"] == "2026-05-15T00:00:00+00:00"
-    assert record["last_confirmed_at"] == "2026-05-15T01:00:00+00:00"
+    # last_confirmed_at is fully server-owned: only memory_confirm, with evidence,
+    # sets it. A fresh write leaves it null. See plan.md Workstream 1.
+    assert record["last_confirmed_at"] is None
+
+
+def test_mcp_memory_write_rejects_client_supplied_last_confirmed_at(
+    test_client, agent_token
+):
+    """last_confirmed_at cannot be set through the ordinary write path."""
+    r = test_client.post(
+        "/mcp",
+        headers={"Authorization": f"Bearer {agent_token}"},
+        json={
+            "tool": "memory_write",
+            "params": {
+                "content": "An attempt to sneak in confirmation",
+                "memory_class": "fact",
+                "scope": "agent:testagent",
+                "last_confirmed_at": "2026-05-15T01:00:00Z",
+            },
+        },
+    )
+    assert r.status_code == 400, r.json()
+    assert r.json()["error"]["code"] == "LAST_CONFIRMED_AT_READ_ONLY"
+
+
+def test_mcp_memory_write_rejects_human_source_kind_from_agent(
+    test_client, agent_token
+):
+    """An agent may not claim operator_authored or human_direct."""
+    for tier in ("operator_authored", "human_direct"):
+        r = test_client.post(
+            "/mcp",
+            headers={"Authorization": f"Bearer {agent_token}"},
+            json={
+                "tool": "memory_write",
+                "params": {
+                    "content": "Pretending to be human",
+                    "memory_class": "fact",
+                    "scope": "agent:testagent",
+                    "source_kind": tier,
+                },
+            },
+        )
+        assert r.status_code == 403, (tier, r.json())
+        assert r.json()["error"]["code"] == "SOURCE_KIND_DENIED"
+
+
+def test_mcp_memory_write_rejects_external_import_from_agent(test_client, agent_token):
+    """external_import is reserved for the import path and merge-restore."""
+    r = test_client.post(
+        "/mcp",
+        headers={"Authorization": f"Bearer {agent_token}"},
+        json={
+            "tool": "memory_write",
+            "params": {
+                "content": "Pretending to be imported",
+                "memory_class": "fact",
+                "scope": "agent:testagent",
+                "source_kind": "external_import",
+            },
+        },
+    )
+    assert r.status_code == 403, r.json()
+    assert r.json()["error"]["code"] == "SOURCE_KIND_DENIED"
 
 
 def test_mcp_memory_write_preserves_audit_details(test_client, agent_token):
@@ -812,12 +880,17 @@ def test_mcp_connectors_list_is_lean_and_paginated(test_client, agent_token):
     assert d1["limit"] == 1
 
 
-def test_mcp_connectors_actions_list_still_returns_full_detail(test_client, agent_token):
+def test_mcp_connectors_actions_list_still_returns_full_detail(
+    test_client, agent_token
+):
     """Phase 1 regression: the detail path (connectors_actions_list) is unaffected."""
     r = test_client.post(
         "/mcp",
         headers={"Authorization": f"Bearer {agent_token}"},
-        json={"tool": "connectors_actions_list", "params": {"connector_type_id": "generic_http"}},
+        json={
+            "tool": "connectors_actions_list",
+            "params": {"connector_type_id": "generic_http"},
+        },
     )
     assert r.status_code in (200, 404), r.json()
 
@@ -901,7 +974,10 @@ def test_mcp_memory_get_rejects_bad_view(test_client, agent_token):
     r = test_client.post(
         "/mcp",
         headers={"Authorization": f"Bearer {agent_token}"},
-        json={"tool": "memory_get", "params": {"scope": "agent:testagent", "view": "tiny"}},
+        json={
+            "tool": "memory_get",
+            "params": {"scope": "agent:testagent", "view": "tiny"},
+        },
     )
     body = r.json()
     assert body["ok"] is False
@@ -917,7 +993,10 @@ def test_a_missing_required_param_is_a_clean_error_not_a_500(test_client, agent_
         headers={"Authorization": f"Bearer {agent_token}"},
         json={
             "tool": "memory_write",
-            "params": {"content": "A record with no class.", "scope": "agent:testagent"},
+            "params": {
+                "content": "A record with no class.",
+                "scope": "agent:testagent",
+            },
         },
     )
     assert r.status_code == 400, r.text[:200]

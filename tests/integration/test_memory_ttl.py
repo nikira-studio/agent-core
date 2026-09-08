@@ -1,4 +1,5 @@
 from app.services.memory_service import write_memory, search_memory
+from app.services import system_settings_service
 from app.services.backup_service import (
     run_scheduled_maintenance,
     get_maintenance_status,
@@ -10,11 +11,13 @@ from app.time_utils import utc_now
 
 def _future_iso():
     from datetime import datetime, timezone, timedelta
+
     return (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
 
 
 def _past_iso():
     from datetime import datetime, timezone, timedelta
+
     return (datetime.now(timezone.utc) - timedelta(seconds=1)).isoformat()
 
 
@@ -25,7 +28,9 @@ def test_expired_record_excluded_from_search(clean_db):
         scope="agent:testagent",
         expires_at=_past_iso(),
     )
-    results, _ = search_memory("expired should not appear", authorized_scopes=["agent:testagent"])
+    results, _ = search_memory(
+        "expired should not appear", authorized_scopes=["agent:testagent"]
+    )
     assert not any("expired" in r["content"] for r in results)
 
 
@@ -36,7 +41,9 @@ def test_non_expired_record_appears_in_search(clean_db):
         scope="agent:testagent",
         expires_at=_future_iso(),
     )
-    results, _ = search_memory("future expiry should appear", authorized_scopes=["agent:testagent"])
+    results, _ = search_memory(
+        "future expiry should appear", authorized_scopes=["agent:testagent"]
+    )
     assert any("future expiry" in r["content"] for r in results)
 
 
@@ -267,10 +274,8 @@ def test_maintenance_respects_configured_retracted_retention_days(clean_db):
             "UPDATE memory_records SET status_changed_at = ? WHERE id = ?",
             (ten_days_ago, record_id),
         )
-        conn.execute(
-            "INSERT INTO system_settings (key, value) VALUES ('retracted_retention_days', '5')"
-        )
         conn.commit()
+    system_settings_service.write_raw({"retracted_retention_days": "5"})
 
     result = run_scheduled_maintenance()
     assert result["retracted_purged"] >= 1

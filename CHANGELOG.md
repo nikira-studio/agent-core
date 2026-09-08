@@ -4,6 +4,12 @@ Notable changes to Agent Core are documented here. The format follows [Keep a Ch
 
 ## [Unreleased]
 
+### Added
+
+- Memory writes now report advisory warnings for likely active duplicates and matches to previously retracted records. Evidence-based confirmation is available through MCP, REST, and the dashboard.
+- Memory consolidation can run on the configured maintenance interval, with an unconfirmed-inference rule, per-scope and installation-wide pending caps, a per-run budget, and fair rotation across rule/scope groups.
+- Fresh MCP activity creation can return a bounded `since_last_active` workspace digest when its execution is not caught up. The Activity dashboard now shows execution-linked workspace activity rates for the installation lifetime and the last 30 days.
+
 ### Fixed
 
 - Paperclip `list_issues` now accepts and forwards `limit`. If an upstream Paperclip server ignores the parameter, Agent Core trims the list locally and marks the result with `limit_applied_locally`.
@@ -14,6 +20,8 @@ Notable changes to Agent Core are documented here. The format follows [Keep a Ch
 ### Changed
 
 - Generated assistant onboarding is now a concise setup guide. It includes the Hermes MCP configuration location and directs agents to repository `AGENTS.md` or `CLAUDE.md` files for the complete operating contract.
+- Memory provenance fields are now authority-controlled: agents cannot claim human-authored source kinds, and `last_confirmed_at` can only be set by confirmation with evidence or verification.
+- Merge restore now treats imported memory as `external_import`, clears confirmation from the source installation while retaining it in audit provenance, and leaves review proposals behind for the destination installation to regenerate.
 
 ## [1.0.0] - 2026-08-16
 

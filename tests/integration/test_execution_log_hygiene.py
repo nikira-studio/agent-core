@@ -1,5 +1,5 @@
 from app.database import get_db
-from app.services import backup_service, connector_service
+from app.services import backup_service, connector_service, system_settings_service
 
 
 def _binding(name="Test Binding"):
@@ -89,26 +89,28 @@ def test_retention_window_is_configurable(clean_db):
     binding = _binding()
     _log(binding["id"], "get_me", age_days=10)
 
-    with get_db() as conn:
-        conn.execute(
-            "INSERT INTO system_settings (key, value) VALUES ('execution_log_retention_days', '5')"
-        )
-        conn.commit()
+    system_settings_service.write_raw({"execution_log_retention_days": "5"})
 
-    assert backup_service.run_scheduled_maintenance(triggered_by="test")["executions_pruned"] == 1
+    assert (
+        backup_service.run_scheduled_maintenance(triggered_by="test")[
+            "executions_pruned"
+        ]
+        == 1
+    )
 
 
 def test_retention_of_zero_keeps_everything(clean_db):
     binding = _binding()
     _log(binding["id"], "get_me", age_days=400)
 
-    with get_db() as conn:
-        conn.execute(
-            "INSERT INTO system_settings (key, value) VALUES ('execution_log_retention_days', '0')"
-        )
-        conn.commit()
+    system_settings_service.write_raw({"execution_log_retention_days": "0"})
 
-    assert backup_service.run_scheduled_maintenance(triggered_by="test")["executions_pruned"] == 0
+    assert (
+        backup_service.run_scheduled_maintenance(triggered_by="test")[
+            "executions_pruned"
+        ]
+        == 0
+    )
 
 
 def test_pruning_is_audited(clean_db):
@@ -139,7 +141,9 @@ def test_action_health_reports_failure_rates(clean_db):
     for _ in range(4):
         _log(binding["id"], "get_me", status="success")
 
-    health = {stat["action"]: stat for stat in connector_service.action_health(binding["id"])}
+    health = {
+        stat["action"]: stat for stat in connector_service.action_health(binding["id"])
+    }
     assert health["list_issues"]["calls"] == 10
     assert health["list_issues"]["failures"] == 7
     assert health["list_issues"]["failure_rate"] == 0.7
@@ -151,10 +155,15 @@ def test_action_health_reports_caller_validation_separately(clean_db):
     message = "Invalid parameters: '3' is not of type 'integer'"
     for _ in range(5):
         connector_service.log_execution(
-            binding_id=binding["id"], action="list_issues", params_json="{}",
-            result_status="failure", error_message=message,
+            binding_id=binding["id"],
+            action="list_issues",
+            params_json="{}",
+            result_status="failure",
+            error_message=message,
             error_code="INVALID_REQUEST",
-            failure_category=connector_service.classify_failure("INVALID_REQUEST", message),
+            failure_category=connector_service.classify_failure(
+                "INVALID_REQUEST", message
+            ),
         )
 
     health = connector_service.action_health(binding["id"])
@@ -233,7 +242,9 @@ def test_capability_summary_loads_credential_metadata_once(clean_db, monkeypatch
         calls.append(list(entry_ids))
         return original(entry_ids)
 
-    monkeypatch.setattr(credential_service, "get_credentials_by_ids", counting_bulk_load)
+    monkeypatch.setattr(
+        credential_service, "get_credentials_by_ids", counting_bulk_load
+    )
     monkeypatch.setattr(
         credential_service,
         "get_credential",

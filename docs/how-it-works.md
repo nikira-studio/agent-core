@@ -153,6 +153,7 @@ Full-text search over FTS5 is always available. If an embedding backend is confi
 
 Ranking is adjusted by **what the system observed**, never by what the record claimed about itself:
 
+- whether a never-confirmed fact has human-authenticated provenance; other source kinds receive a small penalty until evidence-based confirmation
 - how often the record has actually been recalled (small, saturating)
 - whether callers said it helped, via `memory_feedback` (worth more than a recall; being returned is the retriever's opinion, feedback is the caller's)
 - how long since anyone confirmed it, for facts only
@@ -193,15 +194,16 @@ Only `missing` is evidence. An outage is not a false memory, and a system that f
 | `ticket_closeout` | A record about work that has since closed | You generate proposals |
 | `duplicate_cluster` | Near-identical records | You generate proposals |
 | `stale_volatile` | Facts nobody has confirmed in a long time | You generate proposals |
+| `unconfirmed_inference` | Never-confirmed, non-human facts older than the configured cutoff | Maintenance or you generate proposals |
 | `anchor_missing` | The file or service it describes is gone | The verification pass finds it missing |
 | `pin_request` | An agent asked for standing context | An agent calls `memory_pin` |
 | `low_value` | A model found nothing a future session could act on | You run the usefulness review |
 
-The first four are a pass you trigger, from the review page or `POST /api/memory/proposals/generate`. The last three are queued as things happen. Neither kind runs on the maintenance schedule: proposals are for a human to read, and generating them while nobody is looking only builds a backlog.
+The first five share one capped generation pass. The maintenance schedule runs it when `consolidation_scan_enabled` is on, and the review page or `POST /api/memory/proposals/generate` runs the same pass on demand. Per-rule-and-scope, installation-wide, and per-run caps keep unattended generation bounded; fair rotation prevents one noisy scope from owning every run. The last three rules are queued as their triggering events happen.
 
 Every one of them **proposes; none of them act**. Nothing is applied until an operator answers, and each rule keeps a record of how often its suggestions were accepted, so a rule that keeps being wrong is visible as a number instead of as a vague sense that the queue is noisy. `low_value` can never be automated regardless of its record, because it is a judgement about worth rather than a measurement, and the cost of a wrong call is deleting a constraint someone depended on.
 
-Confirming a record requires **evidence** naming what was checked. Reading a record is not checking it, and a corpus where "confirmed" sometimes means "someone glanced at it" is worse than one with no confirmations at all.
+Confirming a record requires **evidence** naming what was checked. Reading a record is not checking it, and choosing `still_current` on a proposal does not set `last_confirmed_at`. Use the separate **Confirm with evidence** action when the record was actually verified.
 
 ---
 
@@ -227,6 +229,10 @@ Because every memory write cites the activity that was open at the time, the tra
 Work assigned from the dashboard is **pulled, not pushed**: `activity_pickup` returns the next assigned task or `null`. Agents check when they start or when idle. Nothing arrives unbidden, which is what keeps the handoff trail auditable.
 
 Workspace changes use the same pull model. `workspace_sync` creates an execution ID for one host session and returns changes after that execution's acknowledged cursor. The response separates memory, activity, and briefing changes. `other_session_changes` repeats changes written by another execution as a convenience, so clients process each stable change ID only once. After processing a page, the client advances its cursor with `workspace_sync_ack`.
+
+Starting a new workspace activity through the MCP `activity_update` tool also has a bounded safety net. If the supplied execution is not already caught up, Agent Core can return `since_last_active`: a change-sequence-based digest since that agent's previous non-briefing activity. It includes baseline and truncation metadata because the change feed has finite retention. The digest is best-effort and additive; activity creation still succeeds when it cannot be computed. It is omitted for write-only callers and for executions that already received the current change feed.
+
+The Activity dashboard reports execution linkage for workspace activities over the installation lifetime and the last 30 days. Linkage means the activity carried an execution ID; it does not prove that the agent read or acted on every delivered change.
 
 The durable change log does not replace memory, activities, or briefings. It tells a session which source records changed. Agent Core retains change rows for a bounded period, so an expired cursor returns `cursor_reset: true` and a recent bootstrap instead of pretending that no changes occurred.
 

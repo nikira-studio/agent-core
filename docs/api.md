@@ -180,6 +180,7 @@ Agent or session authentication accepted, with scope enforcement on every operat
 | `POST` | `/api/memory/import` | Import curated notes into memory records |
 | `POST` | `/api/memory/search` | Search memory (FTS5 + optional semantic hybrid search) |
 | `POST` | `/api/memory/get` | List records by scope |
+| `POST` | `/api/memory/confirm` | Confirm a record with evidence |
 | `POST` | `/api/memory/retract` | Soft-delete a record |
 | `POST` | `/api/memory/move` | Atomically relocate an active record to a new scope (write access to both scopes required) |
 | `POST` | `/api/memory/restore` | Restore a retracted record (retraction is reversible) |
@@ -196,12 +197,11 @@ Write:
   "topic": "style",
   "confidence": 0.9,
   "importance": 0.6,
-  "source_kind": "operator_authored",
+  "source_kind": "agent_inference",
   "slot_key": "style",
   "valid_from": null,
   "valid_to": null,
   "subject_anchor": "repo:docs/style-guide.md",
-  "last_confirmed_at": null,
   "expires_at": null,
   "supersedes_id": null
 }
@@ -273,6 +273,10 @@ Get (list by scope):
 
 **Valid source kinds:** `operator_authored`, `human_direct`, `tool_output`, `agent_inference`, `episodic_inference`, `semantic_inference`, `external_import`
 
+`last_confirmed_at` is read-only on ordinary writes. Confirm after writing by calling `memory_confirm` or `POST /api/memory/confirm` with `{"record_id": "...", "evidence": "what was checked"}`. Agent-authenticated callers cannot claim `operator_authored` or `human_direct`, and `external_import` is reserved for the import and merge paths.
+
+A successful write can include advisory `warnings`. `POSSIBLE_DUPLICATE` identifies similar active records, while `PREVIOUSLY_RETRACTED` identifies similar retracted records so the caller can decide whether the new assertion is intentional. These warnings never block the write. Semantic candidates are evaluated independently for active and retracted records; when embeddings are unavailable, normalized prefix matching still supplies retraction awareness.
+
 Writes and imports to `shared` are rejected if the content looks like PII or credentials. Very short, noisy, or credential-like search queries are also rejected.
 
 ---
@@ -290,7 +294,7 @@ Admin only. These endpoints suggest and record decisions about what to retract o
 | `POST` | `/api/memory/proposals/review-usefulness` | Ask the configured review model which records are not actionable |
 | `GET` | `/api/memory/proposals/stats` | Per-rule verdict history: how often each rule has been right |
 
-Proposals come from two places. **Generation rules** are mechanical and run when you ask for them: from the dashboard's review page or `POST /api/memory/proposals/generate`:
+Proposals come from two places. **Generation rules** are mechanical. They run during the configured maintenance interval when `consolidation_scan_enabled` is on, and on demand from the dashboard's review page or `POST /api/memory/proposals/generate`:
 
 | Rule | Finds |
 | --- | --- |
@@ -298,6 +302,7 @@ Proposals come from two places. **Generation rules** are mechanical and run when
 | `ticket_closeout` | A record about work that has since closed |
 | `duplicate_cluster` | Near-identical records |
 | `stale_volatile` | Facts nobody has confirmed in a long time (facts only, a decision does not go stale because time passed) |
+| `unconfirmed_inference` | Non-human facts that have never been confirmed and are older than `unconfirmed_inference_days` |
 
 **Event-driven proposals** are queued as things happen: `anchor_missing` when verification finds the subject gone, `pin_request` when an agent calls `memory_pin`, and `low_value` when the usefulness review finds nothing a future session could act on.
 
@@ -305,13 +310,13 @@ Generate:
 ```json
 { "scope": "workspace:example", "rules": ["duplicate_cluster"] }
 ```
-`rules` is optional; omitting it runs all of them. An unknown rule name is rejected with `UNKNOWN_RULE`. Proposals already queued for the same records are skipped rather than duplicated, so the queue converges instead of re-asking.
+`rules` is optional; omitting it runs all of them. An unknown rule name is rejected with `UNKNOWN_RULE`. Proposals already pending or decided for the same rule and targets are skipped rather than duplicated, so the queue converges instead of re-asking. Generation respects a per-rule-and-scope pending cap, an installation-wide pending cap, and a per-run creation budget. Groups are rotated fairly so a busy scope cannot consume every run.
 
 Decide:
 ```json
 { "verdict": "accepted", "outcome": "no_longer_current" }
 ```
-`verdict` is `accepted` or `rejected`. `outcome` applies to confirm-style proposals, where both answers are accepts because the rule was right to ask either way: `still_current` refreshes the record's confirmation, `no_longer_current` retracts it.
+`verdict` is `accepted` or `rejected`. `outcome` applies to confirm-style proposals, where both answers are accepts because the rule was right to ask either way: `still_current` resolves the question without claiming the record was independently verified, while `no_longer_current` retracts it. Use **Confirm with evidence** in the dashboard, `memory_confirm`, or `POST /api/memory/confirm` to set `last_confirmed_at`. Confirming from a proposal card confirms the record first and then resolves that proposal as `still_current`.
 
 Accepting a retraction is reversible with `POST /api/memory/restore`. That is deliberate, a review that cannot be wrong cheaply is a review nobody will run.
 
@@ -589,6 +594,8 @@ Create:
 **Valid statuses:** `active`, `stale`, `completed`, `blocked`, `cancelled`
 
 Only the owning agent or an admin can update, heartbeat, cancel, or reassign an activity.
+
+For the MCP `activity_update` tool, creating a fresh activity in a readable `workspace:*` scope can add a best-effort `since_last_active` object beside `activity`. It summarizes changes since that agent's prior non-briefing activity using workspace change-sequence boundaries. A first activity uses `baseline: "retained_tail"`; the response also reports `total_available`, `truncated`, and `oldest_available_at` so clients do not infer completeness beyond retained history. The key is omitted when the feature is disabled, the caller cannot read the scope, digest computation fails, or the supplied `execution_id` is already caught up. REST activity creation is unchanged.
 
 ### Activity pickup
 

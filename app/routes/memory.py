@@ -9,21 +9,28 @@ from app.security.dependencies import get_request_context, require_capability
 from app.security.effective_authority import EffectiveAuthority
 from app.security.rate_limiter import RL, CSG
 from app.security.response_helpers import (
-    success_response, success_response_with_headers, error_response, rate_limited_response, rate_limit_headers,
+    success_response,
+    success_response_with_headers,
+    error_response,
+    rate_limited_response,
+    rate_limit_headers,
 )
 from app.models.enums import MEMORY_CLASSES, SOURCE_KINDS
 from app.security.pii_detector import contains_pii
 from app.operations.memory import (
     MemoryOperationError,
+    confirm_memory as run_memory_confirm,
     validate_search_query,
+    validate_source_kind_authority,
     write_memory as run_memory_write,
 )
 
 
-router = APIRouter(prefix="/api/memory", tags=["memory"], dependencies=[Depends(require_capability("memory"))])
-
-
-
+router = APIRouter(
+    prefix="/api/memory",
+    tags=["memory"],
+    dependencies=[Depends(require_capability("memory"))],
+)
 
 
 def _memory_import_provenance(
@@ -113,7 +120,9 @@ async def write_memory(
 ):
     allowed, info = RL.check("agent", ctx.agent_id, "memory_write")
     if not allowed:
-        return rate_limited_response("RATE_LIMITED", "memory_write rate limit exceeded", **info)
+        return rate_limited_response(
+            "RATE_LIMITED", "memory_write rate limit exceeded", **info
+        )
 
     rate_headers = rate_limit_headers(**info)
     try:
@@ -133,22 +142,34 @@ async def import_memory(
 ):
     allowed, info = RL.check("agent", ctx.agent_id, "memory_write")
     if not allowed:
-        return rate_limited_response("RATE_LIMITED", "memory_write rate limit exceeded", **info)
+        return rate_limited_response(
+            "RATE_LIMITED", "memory_write rate limit exceeded", **info
+        )
 
     rate_headers = rate_limit_headers(**info)
     if not ctx.can("memory", "write", scope=body.scope):
         return error_response("SCOPE_DENIED", "Access denied to this scope", 403)
 
     if body.memory_class not in MEMORY_CLASSES:
-        return error_response("INVALID_CLASS", f"memory_class must be one of {MEMORY_CLASSES}", 400)
+        return error_response(
+            "INVALID_CLASS", f"memory_class must be one of {MEMORY_CLASSES}", 400
+        )
     if not 0.0 <= body.confidence <= 1.0:
-        return error_response("INVALID_CONFIDENCE", "confidence must be between 0.0 and 1.0", 400)
+        return error_response(
+            "INVALID_CONFIDENCE", "confidence must be between 0.0 and 1.0", 400
+        )
     if not 0.0 <= body.importance <= 1.0:
-        return error_response("INVALID_IMPORTANCE", "importance must be between 0.0 and 1.0", 400)
+        return error_response(
+            "INVALID_IMPORTANCE", "importance must be between 0.0 and 1.0", 400
+        )
     if not body.sources:
-        return error_response("NO_SOURCES", "At least one import source is required", 400)
+        return error_response(
+            "NO_SOURCES", "At least one import source is required", 400
+        )
     if len(body.sources) > 20:
-        return error_response("TOO_MANY_SOURCES", "At most 20 sources can be imported at once", 400)
+        return error_response(
+            "TOO_MANY_SOURCES", "At most 20 sources can be imported at once", 400
+        )
 
     parsed_sources = []
     total_chars = 0
@@ -156,7 +177,9 @@ async def import_memory(
     for source in body.sources:
         total_chars += len(source.content)
         if total_chars > 500_000:
-            return error_response("IMPORT_TOO_LARGE", "Combined import content is too large", 413)
+            return error_response(
+                "IMPORT_TOO_LARGE", "Combined import content is too large", 413
+            )
         filename = memory_service.sanitize_import_filename(source.filename)
         chunks = memory_service.parse_import_text(source.content, filename)
         if not chunks:
@@ -167,7 +190,9 @@ async def import_memory(
     if not parsed_sources:
         return error_response("EMPTY_IMPORT", "No importable text was found", 400)
     if total_chunks > 250:
-        return error_response("TOO_MANY_RECORDS", "Import would create too many memory records", 400)
+        return error_response(
+            "TOO_MANY_RECORDS", "Import would create too many memory records", 400
+        )
 
     if body.scope == "shared":
         for parsed in parsed_sources:
@@ -196,7 +221,7 @@ async def import_memory(
                     importance=body.importance,
                     source_kind="external_import",
                     provenance_json=_memory_import_provenance(
-                    ctx, body.scope, parsed["filename"], index, len(chunks)
+                        ctx, body.scope, parsed["filename"], index, len(chunks)
                     ),
                 )
                 if pii_flag == "PII_DETECTED":
@@ -245,7 +270,9 @@ async def search_memory(
 ):
     allowed, info = RL.check("agent", ctx.agent_id, "memory_search")
     if not allowed:
-        return rate_limited_response("RATE_LIMITED", "memory_search rate limit exceeded", **info)
+        return rate_limited_response(
+            "RATE_LIMITED", "memory_search rate limit exceeded", **info
+        )
 
     rate_headers = rate_limit_headers(**info)
 
@@ -259,28 +286,45 @@ async def search_memory(
             return error_response(exc.code, exc.message, exc.status_code)
 
         if body.memory_class and body.memory_class not in MEMORY_CLASSES:
-            return error_response("INVALID_CLASS", f"memory_class must be one of {MEMORY_CLASSES}", 400)
+            return error_response(
+                "INVALID_CLASS", f"memory_class must be one of {MEMORY_CLASSES}", 400
+            )
 
         if not 0.0 <= body.min_confidence <= 1.0:
-            return error_response("INVALID_CONFIDENCE", "min_confidence must be between 0.0 and 1.0", 400)
+            return error_response(
+                "INVALID_CONFIDENCE", "min_confidence must be between 0.0 and 1.0", 400
+            )
 
         if body.scope:
             if not ctx.can("memory", "read", scope=body.scope):
-                return error_response("SCOPE_DENIED", "Access denied to this scope", 403)
+                return error_response(
+                    "SCOPE_DENIED", "Access denied to this scope", 403
+                )
             allowed_scopes = [body.scope]
         else:
             candidates = ctx.default_recall_scopes or ctx.read_scopes
             if ctx.is_delegated:
-                candidates = [scope for resource, operation, scope in ctx.scope_permissions if resource == "memory" and operation == "read"]
+                candidates = [
+                    scope
+                    for resource, operation, scope in ctx.scope_permissions
+                    if resource == "memory" and operation == "read"
+                ]
             allowed_scopes = ctx.filter_scopes("memory", "read", candidates)
         if not allowed_scopes:
-            embedding_status = await asyncio.to_thread(embedding_service.safe_backend_status)
-            return success_response_with_headers({
-                "records": [],
-                "retrieval_mode": "fts_only",
-                "embedding_backend_status": embedding_service.backend_label(embedding_status),
-                "total": 0,
-            }, rate_headers)
+            embedding_status = await asyncio.to_thread(
+                embedding_service.safe_backend_status
+            )
+            return success_response_with_headers(
+                {
+                    "records": [],
+                    "retrieval_mode": "fts_only",
+                    "embedding_backend_status": embedding_service.backend_label(
+                        embedding_status
+                    ),
+                    "total": 0,
+                },
+                rate_headers,
+            )
 
         try:
             records, retrieval_mode = await asyncio.to_thread(
@@ -305,7 +349,9 @@ async def search_memory(
         if body.view != "full":
             records = [memory_service.lean_record(r) for r in records]
 
-        embedding_status = await asyncio.to_thread(embedding_service.safe_backend_status)
+        embedding_status = await asyncio.to_thread(
+            embedding_service.safe_backend_status
+        )
 
         audit_service.write_event(
             actor_type=ctx.actor_type,
@@ -318,11 +364,15 @@ async def search_memory(
                 "query": body.query,
                 "results": len(records),
                 "retrieval_mode": retrieval_mode,
-                "embedding_backend_status": embedding_service.backend_label(embedding_status),
+                "embedding_backend_status": embedding_service.backend_label(
+                    embedding_status
+                ),
             },
         )
 
-        if retrieval_mode == "fts_only" and embedding_service.retrieval_is_degraded(embedding_status):
+        if retrieval_mode == "fts_only" and embedding_service.retrieval_is_degraded(
+            embedding_status
+        ):
             audit_service.write_event(
                 actor_type=ctx.actor_type,
                 actor_id=ctx.actor_id,
@@ -332,17 +382,26 @@ async def search_memory(
                 result="success",
                 details={
                     "retrieval_mode": retrieval_mode,
-                    "embedding_backend_status": embedding_service.backend_label(embedding_status),
-                    "model_configured": bool(embedding_status.get("model_configured", False)),
+                    "embedding_backend_status": embedding_service.backend_label(
+                        embedding_status
+                    ),
+                    "model_configured": bool(
+                        embedding_status.get("model_configured", False)
+                    ),
                 },
             )
 
-        return success_response_with_headers({
-            "records": records,
-            "retrieval_mode": retrieval_mode,
-            "embedding_backend_status": embedding_service.backend_label(embedding_status),
-            "total": len(records),
-        }, rate_headers)
+        return success_response_with_headers(
+            {
+                "records": records,
+                "retrieval_mode": retrieval_mode,
+                "embedding_backend_status": embedding_service.backend_label(
+                    embedding_status
+                ),
+                "total": len(records),
+            },
+            rate_headers,
+        )
     finally:
         CSG.release(ctx.agent_id)
 
@@ -357,19 +416,23 @@ def get_memory(
             return error_response("SCOPE_DENIED", "Access denied to this scope", 403)
         records = memory_service.get_memory_by_scope(
             scope=body.scope,
-                limit=min(body.limit, 100),
-                offset=body.offset,
+            limit=min(body.limit, 100),
+            offset=body.offset,
             record_status=body.record_status,
         )
     else:
         candidates = ctx.default_recall_scopes or ctx.read_scopes
         if ctx.is_delegated:
-            candidates = [scope for resource, operation, scope in ctx.scope_permissions if resource == "memory" and operation == "read"]
+            candidates = [
+                scope
+                for resource, operation, scope in ctx.scope_permissions
+                if resource == "memory" and operation == "read"
+            ]
         allowed_scopes = ctx.filter_scopes("memory", "read", candidates)
         records = memory_service.get_memory_by_scopes(
             scopes=allowed_scopes,
-                limit=min(body.limit, 100),
-                offset=body.offset,
+            limit=min(body.limit, 100),
+            offset=body.offset,
         )
 
     return success_response({"records": records, "total": len(records)})
@@ -439,7 +502,9 @@ async def retract_memory(
 
     success = memory_service.retract_memory(record_id)
     if not success:
-        return error_response("ALREADY_RETRACTED", "Record already retracted or not found", 400)
+        return error_response(
+            "ALREADY_RETRACTED", "Record already retracted or not found", 400
+        )
 
     audit_service.write_event(
         actor_type=ctx.actor_type,
@@ -451,6 +516,47 @@ async def retract_memory(
     )
 
     return success_response({"message": "Memory record retracted"})
+
+
+@router.post("/confirm")
+async def confirm_memory(
+    request: Request,
+    ctx: EffectiveAuthority = Depends(get_request_context),
+):
+    """Mark a record as confirmed against the world, with evidence.
+
+    Mirrors the request shape of `/retract`: the record id can come from a
+    query param or from a JSON body, and evidence is read from the JSON body
+    only. The shared ``app.operations.memory.confirm_memory`` operation owns
+    the evidence-required check, the authorization check, the call into
+    ``memory_service.confirm_memory``, and the audit event — this route is
+    just a transport.
+    """
+    record_id = request.query_params.get("record_id")
+    evidence: Optional[str] = None
+    try:
+        body = await request.json()
+        if isinstance(body, dict):
+            if not record_id:
+                record_id = body.get("record_id")
+            evidence = body.get("evidence")
+    except Exception:
+        pass
+    if not record_id:
+        return error_response("MISSING_RECORD_ID", "record_id is required", 400)
+
+    try:
+        payload = await run_memory_confirm(
+            record_id,
+            evidence=evidence or "",
+            authority=ctx,
+            channel="api",
+            route="/api/memory/confirm",
+        )
+    except MemoryOperationError as exc:
+        return error_response(exc.code, exc.message, exc.status_code)
+
+    return success_response(payload)
 
 
 @router.post("/move")
@@ -485,6 +591,15 @@ async def move_memory(
     if not ctx.can("memory", "write", scope=new_scope):
         return error_response("SCOPE_DENIED", "Access denied to destination scope", 403)
 
+    # Caller-supplied source_kind on a move goes into the audit provenance for
+    # the move itself, not into the moved record's stored tier (which is
+    # always preserved server-side from the original). It is still the same
+    # claim of authorship and has the same restriction — a genuine human
+    # session is the only actor that may assert human provenance.
+    denied = validate_source_kind_authority(source_kind, ctx)
+    if denied is not None:
+        return error_response(denied[0], denied[1], 403)
+
     new_record, err = memory_service.move_memory(
         record_id=record_id,
         new_scope=new_scope,
@@ -502,7 +617,9 @@ async def move_memory(
     if err == "NOT_FOUND":
         return error_response("NOT_FOUND", "Memory record not found", 404)
     if err == "NOT_ACTIVE":
-        return error_response("INVALID_STATE", "Only an active record can be moved", 400)
+        return error_response(
+            "INVALID_STATE", "Only an active record can be moved", 400
+        )
     if err == "SAME_SCOPE":
         return error_response("INVALID_INPUT", "Record is already in that scope", 400)
     if err == "PII_DETECTED":
@@ -543,7 +660,9 @@ def delete_memory_record(
     try:
         success = memory_service.delete_memory_hard(record_id)
     except Exception as exc:
-        return error_response("DELETE_FAILED", f"Unable to delete memory record: {exc}", 500)
+        return error_response(
+            "DELETE_FAILED", f"Unable to delete memory record: {exc}", 500
+        )
 
     if not success:
         return error_response("NOT_FOUND", "Memory record not found", 404)

@@ -533,7 +533,17 @@ def _apply_schema_migrations(conn) -> None:
     migrations = (
         (1, "normalize-current-schema", _migrate_001_current_schema),
         (2, "canonical-system-settings", _migrate_002_canonical_system_settings),
-        (3, "agent-capabilities-and-webhook-queue", _migrate_003_agent_capabilities_and_webhook_queue),
+        (
+            3,
+            "agent-capabilities-and-webhook-queue",
+            _migrate_003_agent_capabilities_and_webhook_queue,
+        ),
+        (4, "system-settings-default-rows", _migrate_004_system_settings_default_rows),
+        (
+            5,
+            "unconfirmed-inference-importance-gate",
+            _migrate_005_unconfirmed_inference_importance_gate,
+        ),
     )
     applied = {
         row["revision"]
@@ -548,6 +558,74 @@ def _apply_schema_migrations(conn) -> None:
             (revision, name),
         )
         conn.commit()
+
+
+# System settings whose default value is read by application code at
+# runtime when no operator override exists. Declared here so the value
+# the application falls back to is also visible in the database; an
+# operator inspecting `system_settings` sees the same default a fresh
+# install would compute, instead of "the application uses X but the
+# table has nothing, and on a backup restore the absence of a row
+# would change behavior". Each row uses `INSERT OR IGNORE` so an
+# operator's explicit override survives migration.
+_SYSTEM_SETTINGS_DEFAULTS = (
+    ("scratchpad_retention_days", "7"),
+    ("retracted_retention_days", "30"),
+    ("episodic_memory_ttl_days", "30"),
+    ("execution_log_retention_days", "30"),
+    ("webhook_log_retention_days", "30"),
+    ("webhook_retry_max_attempts", "5"),
+    ("webhook_retry_initial_seconds", "1"),
+    ("webhook_retry_max_seconds", "300"),
+    ("webhook_retry_jitter_seconds", "1"),
+    ("memory_dedupe_similarity", "0.92"),
+    ("unconfirmed_inference_days", "90"),
+    ("unconfirmed_inference_min_importance", "0.7"),
+    ("proposal_pending_cap_per_rule", "20"),
+    ("proposal_pending_cap_total", "50"),
+    ("proposal_generation_budget_per_run", "20"),
+    ("consolidation_scan_enabled", "1"),
+    ("workspace_awareness_digest_enabled", "1"),
+    ("workspace_awareness_digest_limit", "10"),
+)
+
+
+def _migrate_004_system_settings_default_rows(conn) -> None:
+    """Seed the runtime default rows into system_settings so a fresh
+    installation has them visible in the database.
+
+    See plan.md and planb.md for the runtime-default rationale. This is
+    purely a hygiene migration — the runtime fallbacks (`_system_setting_int`
+    et al.) continue to handle the absence of any of these rows
+    gracefully, so an existing installation is not affected.
+    """
+    conn.executemany(
+        "INSERT OR IGNORE INTO system_settings (key, value, updated_at) "
+        "VALUES (?, ?, CURRENT_TIMESTAMP)",
+        _SYSTEM_SETTINGS_DEFAULTS,
+    )
+
+
+def _migrate_005_unconfirmed_inference_importance_gate(conn) -> None:
+    """Seed the importance gate and widen the default confirmation window.
+
+    An installation that migrated before this revision already has an
+    explicit `unconfirmed_inference_days` row (from migration 4, value
+    "7"). `INSERT OR IGNORE` alone would never update it, so the old
+    7-day default would stay in force forever even though the runtime
+    fallback and fresh installs now use 90. Bump it explicitly, but only
+    when it still holds the original seeded value — an operator who
+    already changed it made a deliberate choice this migration must not
+    override.
+    """
+    conn.execute(
+        "INSERT OR IGNORE INTO system_settings (key, value, updated_at) "
+        "VALUES ('unconfirmed_inference_min_importance', '0.7', CURRENT_TIMESTAMP)"
+    )
+    conn.execute(
+        "UPDATE system_settings SET value = '90', updated_at = CURRENT_TIMESTAMP "
+        "WHERE key = 'unconfirmed_inference_days' AND value = '7'"
+    )
 
 
 def _migrate_001_current_schema(conn) -> None:
@@ -641,9 +719,7 @@ def _migrate_002_canonical_system_settings(conn) -> None:
         """
     )
     conn.execute("DROP TABLE system_settings")
-    conn.execute(
-        "ALTER TABLE system_settings_canonical RENAME TO system_settings"
-    )
+    conn.execute("ALTER TABLE system_settings_canonical RENAME TO system_settings")
 
 
 def _create_current_indexes(conn) -> None:
@@ -701,27 +777,42 @@ def _ensure_agents_default_recall_column(conn) -> None:
 
 
 def _ensure_agents_delegation_column(conn) -> None:
-    columns = {row["name"] for row in conn.execute("PRAGMA table_info(agents)").fetchall()}
+    columns = {
+        row["name"] for row in conn.execute("PRAGMA table_info(agents)").fetchall()
+    }
     if "can_delegate" not in columns:
-        conn.execute("ALTER TABLE agents ADD COLUMN can_delegate INTEGER NOT NULL DEFAULT 0")
+        conn.execute(
+            "ALTER TABLE agents ADD COLUMN can_delegate INTEGER NOT NULL DEFAULT 0"
+        )
         conn.commit()
 
 
 def _ensure_agents_capabilities_column(conn) -> None:
-    columns = {row["name"] for row in conn.execute("PRAGMA table_info(agents)").fetchall()}
+    columns = {
+        row["name"] for row in conn.execute("PRAGMA table_info(agents)").fetchall()
+    }
     if "capabilities_json" not in columns:
         conn.execute(
             "ALTER TABLE agents ADD COLUMN capabilities_json TEXT NOT NULL "
-            "DEFAULT '[\"memory\",\"coordination\",\"credentials\",\"connectors_read\",\"connectors_execute\"]'"
+            'DEFAULT \'["memory","coordination","credentials","connectors_read","connectors_execute"]\''
         )
         conn.commit()
 
 
 def _ensure_connector_execution_authority_columns(conn) -> None:
-    columns = {row["name"] for row in conn.execute("PRAGMA table_info(connector_executions)").fetchall()}
+    columns = {
+        row["name"]
+        for row in conn.execute("PRAGMA table_info(connector_executions)").fetchall()
+    }
     wanted = (
-        "actor_type", "actor_id", "principal_user_id", "executor_agent_id",
-        "issuer_actor_id", "coordinator_agent_id", "grant_id", "correlation_id",
+        "actor_type",
+        "actor_id",
+        "principal_user_id",
+        "executor_agent_id",
+        "issuer_actor_id",
+        "coordinator_agent_id",
+        "grant_id",
+        "correlation_id",
         "authorization_mode",
     )
     for column in wanted:
@@ -731,7 +822,10 @@ def _ensure_connector_execution_authority_columns(conn) -> None:
 
 
 def _ensure_connector_execution_failure_columns(conn) -> None:
-    columns = {row["name"] for row in conn.execute("PRAGMA table_info(connector_executions)").fetchall()}
+    columns = {
+        row["name"]
+        for row in conn.execute("PRAGMA table_info(connector_executions)").fetchall()
+    }
     for column in ("error_code", "failure_category"):
         if column not in columns:
             conn.execute(f"ALTER TABLE connector_executions ADD COLUMN {column} TEXT")
@@ -739,17 +833,29 @@ def _ensure_connector_execution_failure_columns(conn) -> None:
 
 
 def _ensure_binding_resolution_columns(conn) -> None:
-    columns = {row["name"] for row in conn.execute("PRAGMA table_info(connector_bindings)").fetchall()}
+    columns = {
+        row["name"]
+        for row in conn.execute("PRAGMA table_info(connector_bindings)").fetchall()
+    }
     definitions = {
-        "logical_alias": "TEXT", "is_preferred": "INTEGER NOT NULL DEFAULT 0",
-        "priority": "INTEGER NOT NULL DEFAULT 0", "description": "TEXT",
-        "metadata_json": "TEXT", "endpoint_url_override": "TEXT",
+        "logical_alias": "TEXT",
+        "is_preferred": "INTEGER NOT NULL DEFAULT 0",
+        "priority": "INTEGER NOT NULL DEFAULT 0",
+        "description": "TEXT",
+        "metadata_json": "TEXT",
+        "endpoint_url_override": "TEXT",
     }
     for column, definition in definitions.items():
         if column not in columns:
-            conn.execute(f"ALTER TABLE connector_bindings ADD COLUMN {column} {definition}")
-    conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_bindings_alias_unique ON connector_bindings(scope, connector_type_id, logical_alias) WHERE logical_alias IS NOT NULL")
-    conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_bindings_preferred_unique ON connector_bindings(scope, connector_type_id) WHERE is_preferred = 1")
+            conn.execute(
+                f"ALTER TABLE connector_bindings ADD COLUMN {column} {definition}"
+            )
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_bindings_alias_unique ON connector_bindings(scope, connector_type_id, logical_alias) WHERE logical_alias IS NOT NULL"
+    )
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_bindings_preferred_unique ON connector_bindings(scope, connector_type_id) WHERE is_preferred = 1"
+    )
     conn.commit()
 
 
@@ -768,7 +874,10 @@ def _ensure_activity_columns(conn) -> None:
 
 
 def _ensure_workspace_sync_schema(conn) -> None:
-    memory_columns = {row["name"] for row in conn.execute("PRAGMA table_info(memory_records)").fetchall()}
+    memory_columns = {
+        row["name"]
+        for row in conn.execute("PRAGMA table_info(memory_records)").fetchall()
+    }
     if "source_execution_id" not in memory_columns:
         conn.execute("ALTER TABLE memory_records ADD COLUMN source_execution_id TEXT")
 
@@ -1099,7 +1208,9 @@ def _drop_retired_memory_columns(conn) -> None:
         conn.execute("ALTER TABLE memory_records DROP COLUMN domain")
         conn.commit()
         conn.executescript(SCHEMA_SQL_MEMORY_FTS)
-        conn.execute("INSERT INTO memory_records_fts(memory_records_fts) VALUES('rebuild')")
+        conn.execute(
+            "INSERT INTO memory_records_fts(memory_records_fts) VALUES('rebuild')"
+        )
         conn.commit()
 
 
@@ -1188,7 +1299,9 @@ def _ensure_user_active_column(conn) -> None:
         # SQLite cannot add the CHECK constraint after the fact. The service
         # writes this as a boolean and old accounts deliberately become active
         # on upgrade, preserving their existing login behavior.
-        conn.execute("ALTER TABLE users ADD COLUMN is_active INTEGER NOT NULL DEFAULT 1")
+        conn.execute(
+            "ALTER TABLE users ADD COLUMN is_active INTEGER NOT NULL DEFAULT 1"
+        )
         conn.commit()
 
 
@@ -1209,7 +1322,8 @@ def _ensure_connector_type_action_state_column(conn) -> None:
 
 def _ensure_connector_type_capability_policy_column(conn) -> None:
     columns = {
-        row["name"] for row in conn.execute("PRAGMA table_info(connector_types)").fetchall()
+        row["name"]
+        for row in conn.execute("PRAGMA table_info(connector_types)").fetchall()
     }
     if "capability_policy_overrides_json" not in columns:
         conn.execute(
@@ -1373,9 +1487,16 @@ def _ensure_webhook_tables(conn) -> None:
             CREATE INDEX IF NOT EXISTS idx_webhook_registrations_enabled ON webhook_registrations(enabled);
             """
         )
-    delivery_columns = {
-        row["name"] for row in conn.execute("PRAGMA table_info(webhook_delivery_log)").fetchall()
-    } if "webhook_delivery_log" in tables else set()
+    delivery_columns = (
+        {
+            row["name"]
+            for row in conn.execute(
+                "PRAGMA table_info(webhook_delivery_log)"
+            ).fetchall()
+        }
+        if "webhook_delivery_log" in tables
+        else set()
+    )
     if "webhook_delivery_log" not in tables:
         conn.executescript(
             """

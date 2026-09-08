@@ -1,5 +1,7 @@
 """Memory dashboard page."""
 
+from collections import defaultdict
+
 from fastapi import APIRouter, Request, Depends
 
 from app.security.scope_enforcer import ScopeEnforcer
@@ -105,7 +107,9 @@ def memory_page(request: Request, session: dict = Depends(require_auth)):
         session["user_id"],
         is_admin=is_admin,
         active_workspace_ids=frozenset(
-            p["id"] for p in workspaces if workspace_service.can_user_read_workspace(session["user_id"], p["id"])
+            p["id"]
+            for p in workspaces
+            if workspace_service.can_user_read_workspace(session["user_id"], p["id"])
         ),
     )
 
@@ -210,8 +214,8 @@ def memory_page(request: Request, session: dict = Depends(require_auth)):
                 f'<blockquote style="margin:8px 0;padding:8px 12px;border-left:3px solid var(--border);'
                 f'background:var(--bg-subtle)">{escape_html(r.get("content_preview") or "")}'
                 f'<br><span class="text-muted" style="font-size:0.8rem">'
-                f'{escape_html(r.get("topic") or "no topic")} · {escape_html(r.get("scope") or "")}'
-                f' · <code>{escape_html(r.get("id") or "")}</code></span></blockquote>'
+                f"{escape_html(r.get('topic') or 'no topic')} · {escape_html(r.get('scope') or '')}"
+                f" · <code>{escape_html(r.get('id') or '')}</code></span></blockquote>"
                 for r in records
             )
             keep_line = (
@@ -236,7 +240,9 @@ def memory_page(request: Request, session: dict = Depends(require_auth)):
         </div>"""
 
             keep_label = (
-                "Yes, keep it" if p["rule"] == "anchor_missing" else "Yes, still current"
+                "Yes, keep it"
+                if p["rule"] == "anchor_missing"
+                else "Yes, still current"
             )
             if p["action"] == "pin":
                 wants_pin = (p.get("evidence") or {}).get("pin", True)
@@ -250,12 +256,16 @@ def memory_page(request: Request, session: dict = Depends(require_auth)):
                 )
             elif p["action"] == "confirm":
                 buttons = f"""
+            <button class="btn btn-sm" data-proposal-id="{pid}" data-proposal-confirm-with-evidence="{pid}" data-confirm-targets="{escape_html(",".join(p.get("target_ids") or []))}">Confirm with evidence</button>
             <button class="btn btn-sm" data-proposal-id="{pid}" data-proposal-verdict="accepted" data-proposal-outcome="still_current">{keep_label}</button>
             <button class="btn btn-sm btn-warning" data-proposal-id="{pid}" data-proposal-verdict="accepted" data-proposal-outcome="no_longer_current">Retract — out of date</button>
             <button class="btn btn-sm btn-warning" data-proposal-id="{pid}" data-proposal-verdict="accepted" data-proposal-outcome="not_useful">Retract — not worth keeping</button>
             <button class="btn btn-sm btn-secondary" data-proposal-id="{pid}" data-proposal-verdict="rejected">Leave it, don't ask again</button>"""
                 consequences = (
-                    "<strong>Yes, still current</strong> marks it as checked today. "
+                    "<strong>Yes, still current</strong> stops the queue from asking "
+                    "again. Reading a record on screen is not checking it against the "
+                    "world, so the ranking penalty stays until a follow-up "
+                    "<strong>Confirm with evidence</strong> clears it. "
                     "Either <strong>Retract</strong> hides it from agents — it moves to "
                     "Retracted Records below, where you can restore it. Pick <strong>out of "
                     "date</strong> if the world moved on, or <strong>not worth keeping</strong> "
@@ -274,10 +284,10 @@ def memory_page(request: Request, session: dict = Depends(require_auth)):
 
             return f"""
       <div class="card" style="border-left:4px solid var(--text-muted);margin-bottom:12px" id="proposal-{pid}">
-        <h4 style="margin:0 0 4px">{escape_html(p.get('prompt') or 'Review this memory')}</h4>
-        <p class="text-muted" style="font-size:0.85rem;margin:0">{escape_html(p.get('rule_description') or '')}</p>
+        <h4 style="margin:0 0 4px">{escape_html(p.get("prompt") or "Review this memory")}</h4>
+        <p class="text-muted" style="font-size:0.85rem;margin:0">{escape_html(p.get("rule_description") or "")}</p>
         {memory_blocks}
-        <p style="margin:8px 0 4px">{escape_html(p['rationale'])}</p>
+        <p style="margin:8px 0 4px">{escape_html(p["rationale"])}</p>
         {keep_line}
         <div class="actions-cell" style="margin-top:10px">{buttons}</div>
         <p class="form-hint" style="margin-top:6px">{consequences}</p>
@@ -295,8 +305,31 @@ def memory_page(request: Request, session: dict = Depends(require_auth)):
 
         stat_rows = "".join(stat_row(s) for s in stats)
 
+        # Grouped by scope and collapsed by default: a flat list of dozens of
+        # cards across unrelated projects is what makes this queue feel like
+        # a chore. Opening one workspace at a time keeps the reviewer's
+        # context loaded to one project instead of jumping between them
+        # card-by-card. Nothing is hidden — every group is one click away —
+        # it is just not all open at once.
+        groups: dict[str, list[dict]] = defaultdict(list)
+        for p in pending:
+            groups[p.get("scope") or ""].append(p)
+
+        def scope_group(scope: str, items: list[dict]) -> str:
+            count = len(items)
+            noun = "memory" if count == 1 else "memories"
+            cards = "".join(proposal_card(p) for p in items)
+            return f"""
+      <details class="card" style="margin-bottom:12px" data-proposal-scope="{escape_html(scope)}">
+        <summary style="cursor:pointer;font-weight:600">{escape_html(scope)} <span class="text-muted" style="font-weight:normal">({count} {noun})</span></summary>
+        <div style="margin-top:10px">{cards}</div>
+      </details>"""
+
         proposals_html = (
-            "".join(proposal_card(p) for p in pending)
+            "".join(
+                scope_group(scope, items)
+                for scope, items in sorted(groups.items())
+            )
             or '<p class="text-muted">Nothing to look at right now.</p>'
         )
 
@@ -386,6 +419,15 @@ def memory_page(request: Request, session: dict = Depends(require_auth)):
         supersedeEl.style.display = 'none';
       }
       document.getElementById('mem-detail-id').value = id;
+      // The Confirm-with-evidence button's data attribute is filled here so the
+      // click handler can read the current record id without a hidden-input
+      // dance. Only meaningful for active records — retracted/superseded
+      // records' last_confirmed_at is irrelevant, so hide the button for them.
+      const confirmBtn = document.getElementById('mem-detail-confirm');
+      if (confirmBtn) {
+        confirmBtn.dataset.memoryConfirm = id;
+        confirmBtn.style.display = (r.record_status === 'active') ? '' : 'none';
+      }
       // Reset history before loading fresh chain for this record
       const chainEl = document.getElementById('mem-chain-content');
       chainEl.innerHTML = '<span class="text-muted">Loading...</span>';
@@ -452,7 +494,6 @@ def memory_page(request: Request, session: dict = Depends(require_auth)):
 	          slot_key: document.getElementById('mem-slot-key').value.trim() || null,
 	          valid_from: document.getElementById('mem-valid-from').value || null,
 	          valid_to: document.getElementById('mem-valid-to').value || null,
-	          last_confirmed_at: document.getElementById('mem-last-confirmed').value || null,
 	        };
         const j = await apiFetch('/api/memory/write', { method: 'POST', body: JSON.stringify(body) });
         if (j.ok) { showToast('Written'); closeModal('write-memory-modal'); refreshMemory(); }
@@ -561,6 +602,24 @@ def memory_page(request: Request, session: dict = Depends(require_auth)):
       if (restore) { ev.preventDefault(); restoreRecord(restore.dataset.memoryRestore); return; }
       const reanchor = ev.target.closest('[data-proposal-reanchor]');
       if (reanchor) { ev.preventDefault(); reanchorProposal(reanchor.dataset.proposalReanchor); }
+      const confirmEv = ev.target.closest('[data-proposal-confirm-with-evidence]');
+      if (confirmEv) {
+        ev.preventDefault();
+        const proposalId = confirmEv.dataset.proposalConfirmWithEvidence;
+        const targets = (confirmEv.dataset.confirmTargets || '').split(',').filter(Boolean);
+        if (targets.length !== 1) {
+          showToast('Confirm with evidence only supports single-record proposals', 'warning');
+          return;
+        }
+        confirmRecordWithEvidence(targets[0], proposalId);
+        return;
+      }
+      const detailConfirm = ev.target.closest('[data-memory-confirm]');
+      if (detailConfirm) {
+        ev.preventDefault();
+        confirmRecordWithEvidence(detailConfirm.dataset.memoryConfirm, null);
+        return;
+      }
     });
 
     async function generateProposals() {
@@ -590,9 +649,45 @@ def memory_page(request: Request, session: dict = Depends(require_auth)):
       });
       if (!j.ok) { showToast(j.error?.message || 'Failed', 'danger'); return; }
       // Say what happened to the memory, not what happened to the suggestion.
+      // 'still_current' deliberately does NOT clear last_confirmed_at — that
+      // requires confirm_with_evidence. See plan.md Workstream 2.
       if (verdict !== 'accepted') { showToast('Left alone — it will not be flagged again'); }
-      else if (outcome === 'still_current') { showToast('Marked as checked today'); }
+      else if (outcome === 'still_current') { showToast('Marked as still current — it will not be flagged again'); }
       else { showToast('Retracted — find it under Retracted Records to restore'); }
+      refreshMemory();
+    }
+    async function confirmRecordWithEvidence(recordId, proposalId) {
+      const evidence = window.prompt(
+        'What did you check? Say what you actually looked at, e.g. "read app/foo.py" or "ssh router: /etc/version = v3.0.1".'
+      );
+      if (!evidence || !evidence.trim()) {
+        if (evidence !== null) showToast('Evidence is required to confirm', 'warning');
+        return;
+      }
+      const confirmJ = await apiFetch('/api/memory/confirm', {
+        method: 'POST', body: JSON.stringify({ record_id: recordId, evidence: evidence.trim() })
+      });
+      if (!confirmJ.ok) {
+        showToast(confirmJ.error?.message || 'Confirm failed', 'danger');
+        return;
+      }
+      showToast('Confirmed — ranking penalty cleared');
+      if (proposalId) {
+        // Resolve the proposal so the queue does not nag about a record that
+        // has just been genuinely checked. Order matters: confirm first (it
+        // has already succeeded), then resolve — if the second fails the
+        // record is confirmed with a stale pending proposal, not the
+        // reverse. See plan.md Workstream 2.
+        const decideJ = await apiFetch('/api/memory/proposals/' + proposalId + '/decide', {
+          method: 'POST', body: JSON.stringify({ verdict: 'accepted', outcome: 'still_current' })
+        });
+        if (!decideJ.ok) {
+          showToast('Confirmed but proposal still pending: ' + (decideJ.error?.message || ''), 'warning');
+        }
+      }
+      // Close the detail modal if open, then reload.
+      const detailModal = document.getElementById('memory-detail-modal');
+      if (detailModal) closeModal('memory-detail-modal');
       refreshMemory();
     }
     function toggleFilters() {
@@ -733,11 +828,6 @@ def memory_page(request: Request, session: dict = Depends(require_auth)):
                 <label>Preference Slot Key</label>
                 <input type="text" id="mem-slot-key" placeholder="e.g. style" autocomplete="off">
                 <p class="form-hint">Optional. Use for preferences when you want one active value per slot.</p>
-              </div>
-              <div class="form-group">
-                <label>Last Confirmed At</label>
-                <input type="datetime-local" id="mem-last-confirmed">
-                <p class="form-hint">Optional freshness hint for the latest confirmation time.</p>
               </div>
             </div>
             <div class="form-row">
@@ -882,6 +972,7 @@ def memory_page(request: Request, session: dict = Depends(require_auth)):
           <div id="mem-chain-content" style="font-size:0.85rem;max-height:220px;overflow:auto"></div>
         </div>
         <div class="modal-footer">
+          <button class="btn" data-memory-confirm="" id="mem-detail-confirm">Confirm with evidence</button>
           <button class="btn btn-secondary" onclick="closeModal('memory-detail-modal')">Close</button>
         </div>
       </div>
@@ -892,5 +983,3 @@ def memory_page(request: Request, session: dict = Depends(require_auth)):
         js,
         session=session,
     )
-
-

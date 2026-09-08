@@ -27,11 +27,13 @@ def activity_page(request: Request, session: dict = Depends(require_auth)):
     executions = workspace_sync_service.list_executions(
         limit=25, user_id=None if is_admin else session["user_id"]
     )
+    exec_stats = activity_service.execution_linked_workspace_stats()
     execution_rows = "".join(
         f"<tr><td>{escape_html(e['agent_id'])}</td><td><code>{escape_html(e['memory_scope'])}</code></td>"
         f"<td><span class='badge badge-{escape_html(e['status'])}'>{escape_html(e['status'])}</span></td>"
         f"<td>{local_dt(e.get('last_seen_at'))}</td><td>{e.get('acknowledged_sequence') or 0}</td>"
-        f"<td>{e.get('unacknowledged') or 0}</td></tr>" for e in executions
+        f"<td>{e.get('unacknowledged') or 0}</td></tr>"
+        for e in executions
     )
 
     page = max(1, int(request.query_params.get("page", 1)))
@@ -59,9 +61,7 @@ def activity_page(request: Request, session: dict = Depends(require_auth)):
     all_agents = (
         list_agents() if is_admin else list_agents(owner_user_id=session["user_id"])
     )
-    agent_labels = {
-        a["id"]: a.get("display_name") or a["id"] for a in all_agents
-    }
+    agent_labels = {a["id"]: a.get("display_name") or a["id"] for a in all_agents}
     agent_options = "".join(
         f'<option value="{a["id"]}">{a.get("display_name", a["id"])}</option>'
         for a in all_agents
@@ -127,7 +127,7 @@ def activity_page(request: Request, session: dict = Depends(require_auth)):
     page_end_act = offset + len(activities)
     activity_page_info = f"Page {page} of {total_pages} &nbsp;·&nbsp; Showing {page_start_act}–{page_end_act} of {total_activities}"
     activity_prune_button = (
-        '<button class="btn btn-secondary" onclick="openPruneModal(\'activity\', \'Prune Activity History\')">Prune History</button>'
+        "<button class=\"btn btn-secondary\" onclick=\"openPruneModal('activity', 'Prune Activity History')\">Prune History</button>"
         if is_admin
         else ""
     )
@@ -316,6 +316,22 @@ def activity_page(request: Request, session: dict = Depends(require_auth)):
           <div class="stat-card"><div class="value">{active_owner_count}</div><div class="label">Assigned Agents</div></div>
           <div class="stat-card"><div class="value">{handoff_count}</div><div class="label">Recent Handoffs</div></div>
           <div class="stat-card"><div class="value">{len(attention_activities)}</div><div class="label">Needs Attention</div></div>
+        </div>
+        <div class="stat-grid" style="margin-bottom:10px">
+          <div class="stat-card" title="Workspace-scoped activities with an associated execution_id, over the lifetime of the installation. A linked execution proves association with an execution, not that the returned changes were read or acted on.">
+            <div class="value">{exec_stats["workspace_activities_pct_lifetime"]}%</div>
+            <div class="label">Execution-linked workspace activities (lifetime)</div>
+            <div class="text-muted" style="font-size:0.78rem;margin-top:2px">
+              <code>{exec_stats["workspace_activities_execution_linked"]}</code> of <code>{exec_stats["workspace_activities_total"]}</code>
+            </div>
+          </div>
+          <div class="stat-card" title="Same as the lifetime figure but limited to the last 30 days. Production shows these two windows diverge meaningfully — a single blended number would hide that trend.">
+            <div class="value">{exec_stats["workspace_activities_pct_30d"]}%</div>
+            <div class="label">Execution-linked workspace activities (30 days)</div>
+            <div class="text-muted" style="font-size:0.78rem;margin-top:2px">
+              <code>{exec_stats["workspace_activities_execution_linked_30d"]}</code> of <code>{exec_stats["workspace_activities_total_30d"]}</code>
+            </div>
+          </div>
         </div>
         <div class="text-muted" style="font-size:0.85rem;margin-bottom:8px">Current ownership:</div>
         <div>{coordination_summary or "<span class='text-muted'>No open work items yet.</span>"}</div>

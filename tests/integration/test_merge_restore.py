@@ -7,6 +7,7 @@ raised was swallowed the same way, and the counts never reached the operator.
 """
 
 import io
+import json
 import sqlite3
 
 from app.database import get_db
@@ -68,14 +69,19 @@ def _wipe(table, where="1=1"):
 
 def _count(table, where="1=1"):
     with get_db() as conn:
-        return conn.execute(f"SELECT COUNT(*) AS n FROM {table} WHERE {where}").fetchone()["n"]
+        return conn.execute(
+            f"SELECT COUNT(*) AS n FROM {table} WHERE {where}"
+        ).fetchone()["n"]
 
 
 def test_the_declared_table_set_is_what_gets_merged(clean_db):
     """The set is declared in one place so it can be reviewed as a decision."""
     assert "workspace_collaborators" in backup_service.MERGED_TABLES
     assert "system_settings" in backup_service.MERGED_TABLES
-    assert "memory_proposals" in backup_service.MERGED_TABLES
+    # memory_proposals is deliberately not merged: an already-decided
+    # consolidation verdict from the exporting installation would suppress this
+    # installation's own review of the same record. See plan.md Workstream 3.
+    assert "memory_proposals" not in backup_service.MERGED_TABLES
     # Logs, caches and this machine's own identity stay out.
     for excluded in ("audit_log", "sessions", "otp_secrets", "broker_credentials"):
         assert excluded not in backup_service.MERGED_TABLES
@@ -147,7 +153,9 @@ def test_a_table_that_fails_is_reported_not_swallowed(clean_db, monkeypatch):
     def explode(current_con, backup_con, table, transform=None, conflicts=None):
         if table == "memory_records":
             raise sqlite3.OperationalError("disk went away")
-        return real(current_con, backup_con, table, transform=transform, conflicts=conflicts)
+        return real(
+            current_con, backup_con, table, transform=transform, conflicts=conflicts
+        )
 
     monkeypatch.setattr(backup_service, "_insert_missing_rows", explode)
 
@@ -160,7 +168,9 @@ def test_a_table_that_fails_is_reported_not_swallowed(clean_db, monkeypatch):
     assert list(manifest["merge"]["failed_tables"]) == ["memory_records"], (
         "only the table that actually failed should be reported"
     )
-    assert manifest["merge"]["inserted_counts"], "the tables that did merge are still reported"
+    assert manifest["merge"]["inserted_counts"], (
+        "the tables that did merge are still reported"
+    )
 
 
 # --- related records must not be re-pointed --------------------------------
@@ -171,7 +181,13 @@ def _credential(credential_id, value):
         conn.execute(
             "INSERT OR REPLACE INTO credentials (id, scope, name, reference_name,"
             " value_encrypted) VALUES (?,?,?,?,?)",
-            (credential_id, "workspace:proj", "tok", f"AC_SECRET_TOK_{credential_id}", value),
+            (
+                credential_id,
+                "workspace:proj",
+                "tok",
+                f"AC_SECRET_TOK_{credential_id}",
+                value,
+            ),
         )
         conn.commit()
 
@@ -286,7 +302,13 @@ def _memory(record_id, scope, content):
         conn.execute(
             "INSERT OR REPLACE INTO memory_records (id, scope, memory_class, content,"
             " created_at, status_changed_at) VALUES (?,?,'fact',?,?,?)",
-            (record_id, scope, content, "2026-01-01T00:00:00+00:00", "2026-01-01T00:00:00+00:00"),
+            (
+                record_id,
+                scope,
+                content,
+                "2026-01-01T00:00:00+00:00",
+                "2026-01-01T00:00:00+00:00",
+            ),
         )
         conn.commit()
 
@@ -317,7 +339,14 @@ def test_a_memory_is_not_filed_into_a_workspace_of_the_same_name(clean_db):
 
 
 def test_a_proposal_does_not_end_up_pointing_at_our_memory(clean_db):
-    """The target ids live inside JSON, which is still a relationship."""
+    """`memory_proposals` is not merged at all — see Workstream 3.
+
+    An already-decided consolidation verdict from the exporting installation
+    would suppress this installation's own review of the same record, so the
+    simplest correct behavior is to skip the table. The originating record
+    may still merge as a freshly-imported fact, and our own review queue will
+    raise the question against it independently.
+    """
     _workspace("proj", "same on both sides")
     _memory("mem-1", "workspace:proj", "Their record.")
     with get_db() as conn:
@@ -341,7 +370,11 @@ def test_a_proposal_does_not_end_up_pointing_at_our_memory(clean_db):
     assert _count("memory_proposals", "id = 'prop-1'") == 0, (
         "a proposal to retract our record was imported from their database"
     )
-    assert manifest["merge"]["skipped_conflicts"].get("memory_proposals") == 1
+    # No skipped_conflicts entry either: the table was never scanned, so the
+    # proposal's JSON-targets relationship to a memory record never entered
+    # the conflict tracker.
+    assert "memory_proposals" not in manifest["merge"]["skipped_conflicts"]
+    assert "memory_proposals" not in manifest["merge"]["inserted_counts"]
 
 
 def _agent(agent_id, read_scopes, owner="carol"):
@@ -505,3 +538,209 @@ def test_the_endpoint_surfaces_the_merge_detail(test_client, admin_token, clean_
     merge = r.json()["data"]["merge"]
     assert "inserted_counts" in merge, "the operator could not see what came across"
     assert merge["failed_tables"] == {}
+
+
+# --- Workstream 3: transform_memory_record --------------------------------
+#
+# Merged-in records must be downgraded: source_kind -> "external_import",
+# last_confirmed_at -> NULL, original values preserved in
+# provenance_json.import_original for audit. A malformed provenance_json must
+# not fail the whole memory_records merge (one bad row != whole-table failure).
+
+
+def _seed_memory_with_provenance(
+    record_id, scope, content, *, source_kind, last_confirmed_at, provenance_json
+):
+    """Insert a memory row directly with the field under test."""
+    with get_db() as conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO memory_records (id, scope, memory_class, content,"
+            " source_kind, last_confirmed_at, provenance_json, created_at,"
+            " record_status) VALUES (?, ?, 'fact', ?, ?, ?, ?, ?, 'active')",
+            (
+                record_id,
+                scope,
+                content,
+                source_kind,
+                last_confirmed_at,
+                provenance_json,
+                "2026-01-01T00:00:00+00:00",
+            ),
+        )
+        conn.commit()
+
+
+def test_transform_memory_record_downgrades_source_kind_and_clears_confirmation():
+    """Direct call into the transform — the merging installation's exported
+    provenance must not be mistaken for this installation's confirmation."""
+    row = {
+        "id": "mem-1",
+        "source_kind": "human_direct",
+        "last_confirmed_at": "2026-04-15T12:00:00+00:00",
+        "provenance_json": json.dumps(
+            {"actor_type": "user", "actor_id": "carol", "channel": "api"}
+        ),
+    }
+    out = backup_service.transform_memory_record(dict(row))
+    assert out["source_kind"] == "external_import", (
+        "an imported record cannot inherit the exporting installation's source_kind"
+    )
+    assert out["last_confirmed_at"] is None, (
+        "an imported record cannot inherit the exporting installation's confirmation"
+    )
+    provenance = json.loads(out["provenance_json"])
+    assert provenance["import_original"]["source_kind"] == "human_direct"
+    assert (
+        provenance["import_original"]["last_confirmed_at"]
+        == "2026-04-15T12:00:00+00:00"
+    )
+    # Prior fields the transform was not asked about survive untouched.
+    assert provenance["actor_type"] == "user"
+
+
+def test_transform_memory_record_records_null_original_values():
+    """A source_kind that happens to be external_import on the source side, or
+    a record that was never confirmed, must still produce a complete
+    import_original entry. None is the right answer, not 'absent'."""
+    row = {
+        "id": "mem-2",
+        "source_kind": "external_import",
+        "last_confirmed_at": None,
+        "provenance_json": None,
+    }
+    out = backup_service.transform_memory_record(dict(row))
+    assert out["source_kind"] == "external_import"
+    assert out["last_confirmed_at"] is None
+    provenance = json.loads(out["provenance_json"])
+    assert provenance["import_original"]["source_kind"] == "external_import"
+    assert provenance["import_original"]["last_confirmed_at"] is None
+
+
+def test_transform_memory_record_tolerates_malformed_provenance():
+    """Bad provenance_json is not a reason to fail the whole table merge."""
+    # Not a JSON object — the tolerant path should treat this as absent.
+    for bad in (None, "", "not-json", "[1,2,3]", "null"):
+        out = backup_service.transform_memory_record(
+            {
+                "id": "mem-bad",
+                "source_kind": "human_direct",
+                "last_confirmed_at": "2026-04-15T12:00:00+00:00",
+                "provenance_json": bad,
+            }
+        )
+        assert out["source_kind"] == "external_import"
+        assert out["last_confirmed_at"] is None
+        provenance = json.loads(out["provenance_json"])
+        # import_original is always populated; everything else is dropped.
+        assert provenance == {
+            "import_original": {
+                "source_kind": "human_direct",
+                "last_confirmed_at": "2026-04-15T12:00:00+00:00",
+            }
+        }
+
+
+def test_merge_restored_memory_record_carries_downgraded_tier_and_audit_blob(clean_db):
+    """Full backup -> merge roundtrip: source_kind/last_confirmed_at must be
+    downgraded and the original values must land in provenance_json."""
+    _workspace("shared", "same on both sides")
+    _memory_with_status(
+        "mem-1",
+        "workspace:shared",
+        "A fact someone carefully checked.",
+        source_kind="human_direct",
+        last_confirmed_at="2026-04-15T12:00:00+00:00",
+    )
+    archive = _backup_bytes(clean_db)
+    _wipe("memory_records")
+
+    ok, msg, manifest = backup_service.merge_restore_from_zip(
+        io.BytesIO(archive.getvalue()), str(clean_db), str(_key_path())
+    )
+    assert ok, msg
+
+    with get_db() as conn:
+        row = conn.execute(
+            "SELECT source_kind, last_confirmed_at, provenance_json "
+            "FROM memory_records WHERE id = 'mem-1'"
+        ).fetchone()
+
+    assert row["source_kind"] == "external_import"
+    assert row["last_confirmed_at"] is None
+    provenance = json.loads(row["provenance_json"])
+    assert provenance["import_original"] == {
+        "source_kind": "human_direct",
+        "last_confirmed_at": "2026-04-15T12:00:00+00:00",
+    }
+
+
+def test_merge_emits_one_memory_import_downgraded_event_per_merge(clean_db):
+    """One audit event for the whole merge operation, not one per row."""
+    _workspace("shared", "same on both sides")
+    for i in range(3):
+        _memory_with_status(
+            f"mem-{i}",
+            "workspace:shared",
+            f"Merged-in fact number {i}.",
+            source_kind="human_direct",
+            last_confirmed_at="2026-04-15T12:00:00+00:00",
+        )
+    archive = _backup_bytes(clean_db)
+    _wipe("memory_records")
+
+    ok, msg, manifest = backup_service.merge_restore_from_zip(
+        io.BytesIO(archive.getvalue()), str(clean_db), str(_key_path())
+    )
+    assert ok, msg
+
+    with get_db() as conn:
+        rows = conn.execute(
+            "SELECT details_json FROM audit_log "
+            "WHERE action = 'memory_import_downgraded'"
+        ).fetchall()
+    assert len(rows) == 1, (
+        f"expected exactly one merge-level audit event, got {len(rows)}"
+    )
+    details = json.loads(rows[0]["details_json"])
+    assert details["affected_records"] == 3
+    assert details["backup_exported_at"] == manifest["exported_at"]
+
+
+def test_merge_with_zero_new_memory_records_emits_no_audit_event(clean_db):
+    """No memory merged in -> no audit event. A zero-imports merge isn't a
+    downgrade that anyone needs to see in the audit log."""
+    # Build a backup from an installation with no memory_records, then merge
+    # into the same installation: zero inserted, no event.
+    archive = _backup_bytes(clean_db)
+
+    ok, msg, manifest = backup_service.merge_restore_from_zip(
+        io.BytesIO(archive.getvalue()), str(clean_db), str(_key_path())
+    )
+    assert ok, msg
+
+    with get_db() as conn:
+        count = conn.execute(
+            "SELECT COUNT(*) AS n FROM audit_log "
+            "WHERE action = 'memory_import_downgraded'"
+        ).fetchone()["n"]
+    assert count == 0
+
+
+def _memory_with_status(
+    record_id, scope, content, *, source_kind="agent_inference", last_confirmed_at=None
+):
+    with get_db() as conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO memory_records (id, scope, memory_class, content,"
+            " source_kind, last_confirmed_at, created_at, record_status)"
+            " VALUES (?, ?, 'fact', ?, ?, ?, ?, 'active')",
+            (
+                record_id,
+                scope,
+                content,
+                source_kind,
+                last_confirmed_at,
+                "2026-01-01T00:00:00+00:00",
+            ),
+        )
+        conn.commit()

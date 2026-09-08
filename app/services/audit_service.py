@@ -77,6 +77,8 @@ AUDIT_ACTIONS = (
     "audit_pruned",
     "scratchpad_pruned",
     "memory_ttl_swept",
+    "memory_import_downgraded",
+    "memory_proposals_generated",
     "retracted_records_purged",
     "operational_logs_pruned",
     "password_change",

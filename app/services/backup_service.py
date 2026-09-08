@@ -17,6 +17,7 @@ from cryptography.fernet import Fernet
 from app.branding import APP_VERSION, DB_FILENAME, MANIFEST_VERSION_KEY
 from app.config import settings
 from app.database import DatabaseUnavailable, exclusive_access, get_db
+
 # Shared with credential key rotation and restoration; see the definition for
 # why these four operations cannot interleave.
 from app.security.encryption import KEY_OPERATION_LOCK
@@ -35,7 +36,6 @@ def _system_setting_int(key: str, default: int) -> int:
     from app.services import system_settings_service
 
     return system_settings_service.read_int(key, default)
-
 
 
 def _configured_env_key_bytes() -> bytes | None:
@@ -220,7 +220,9 @@ def decrypt_backup_package(backup_bytes: bytes, backup_key: bytes) -> io.BytesIO
 
 
 def parse_manifest(data: dict) -> tuple[bool, str]:
-    version_key = MANIFEST_VERSION_KEY if MANIFEST_VERSION_KEY in data else "agent_core_version"
+    version_key = (
+        MANIFEST_VERSION_KEY if MANIFEST_VERSION_KEY in data else "agent_core_version"
+    )
     required = [version_key, "exported_at", "exported_by", "files"]
     for field in required:
         if field not in data:
@@ -418,7 +420,6 @@ MERGED_TABLES = (
     "agents",
     "memory_records",
     "memory_embeddings",
-    "memory_proposals",
     "credentials",
     "agent_activity",
     "connector_types",
@@ -457,7 +458,9 @@ FOREIGN_REFERENCES = {
     ),
     "connector_executions": (("id", "binding_id", "connector_bindings"),),
     "memory_embeddings": (("id", "record_id", "memory_records"),),
-    "adapter_installations": (("id", "installed_connector_type_id", "connector_types"),),
+    "adapter_installations": (
+        ("id", "installed_connector_type_id", "connector_types"),
+    ),
     "workspace_collaborators": (
         ("id", "workspace_id", "workspaces"),
         ("id", "user_id", "users"),
@@ -608,9 +611,7 @@ def _blocked_keys(current_con, backup_con) -> dict[str, set]:
             if len(key_cols) != 1 or key_cols[0] not in backup_cols:
                 continue
             key = key_cols[0]
-            rows = backup_con.execute(
-                f"SELECT * FROM {table}"
-            ).fetchall()
+            rows = backup_con.execute(f"SELECT * FROM {table}").fetchall()
             for row in rows:
                 row_dict = _row_dict(row)
                 if row_dict[key] in blocked[table]:
@@ -631,10 +632,51 @@ def _primary_key_columns(con, table: str) -> list[str]:
     skip as "0 rows inserted", which is indistinguishable from "nothing to do".
     """
     rows = con.execute(f"PRAGMA table_info({table})").fetchall()
-    keyed = sorted(
-        (r for r in rows if r["pk"]), key=lambda r: r["pk"]
-    )
+    keyed = sorted((r for r in rows if r["pk"]), key=lambda r: r["pk"])
     return [r["name"] for r in keyed]
+
+
+def transform_memory_record(row: dict) -> dict:
+    """Downgrade a memory_records row being merged in from another installation.
+
+    Plan.md Workstream 3:
+    * `source_kind` -> `"external_import"`, because the exporting installation's
+      tier (e.g. `human_direct`) is not this installation's trust boundary.
+    * `last_confirmed_at` -> `None`, because nobody has checked this record
+      against THIS installation's world.
+    * Original `source_kind` and `last_confirmed_at` stashed in
+      `provenance_json.import_original` for audit.
+
+    Tolerant on purpose: `_insert_missing_rows` runs the whole
+    `memory_records` table's merge inside one transaction, and a single
+    malformed `provenance_json` must not fail the rest of the rows. We follow
+    `_annotate_provenance`'s rule (memory_service.py:309-325): missing,
+    malformed, or non-object JSON is treated as absent, and we always produce
+    a well-formed JSON object at the end.
+
+    Module-level (not a closure inside `merge_restore_from_zip`) so tests can
+    exercise the per-row behavior directly without driving a full backup
+    roundtrip.
+    """
+    original_source_kind = row.get("source_kind")
+    original_last_confirmed_at = row.get("last_confirmed_at")
+    row["source_kind"] = "external_import"
+    row["last_confirmed_at"] = None
+    existing_provenance = row.get("provenance_json")
+    parsed: dict = {}
+    if existing_provenance:
+        try:
+            decoded = json.loads(existing_provenance)
+            if isinstance(decoded, dict):
+                parsed = decoded
+        except (TypeError, ValueError):
+            parsed = {}
+    parsed["import_original"] = {
+        "source_kind": original_source_kind,
+        "last_confirmed_at": original_last_confirmed_at,
+    }
+    row["provenance_json"] = json.dumps(parsed, separators=(",", ":"), sort_keys=True)
+    return row
 
 
 def _insert_missing_rows(
@@ -662,7 +704,6 @@ def _insert_missing_rows(
     key_cols = [c for c in _primary_key_columns(current_con, table) if c in insert_cols]
     if not key_cols:
         raise ValueError(f"{table} has no usable primary key to merge on")
-
 
     inserted = 0
     skipped = 0
@@ -734,6 +775,12 @@ def merge_restore_from_zip(
                 row["value_encrypted"] = current_fernet.encrypt(plaintext).decode()
             return row
 
+        # Memory-record transform is module-level (transform_memory_record) so
+        # the per-row downgrade behavior is independently testable. See
+        # plan.md Workstream 3.
+
+        merged_memory_count = 0
+
         inserted_counts = {}
         failures: dict[str, str] = {}
         backup_dir_str = str(backup_dir)
@@ -754,18 +801,24 @@ def merge_restore_from_zip(
 
             for table in MERGED_TABLES:
                 try:
+                    if table == "credentials":
+                        transform = transform_credential
+                    elif table == "memory_records":
+                        transform = transform_memory_record
+                    else:
+                        transform = None
                     inserted, skipped = _insert_missing_rows(
                         current_con,
                         backup_con,
                         table,
-                        transform=transform_credential
-                        if table == "credentials"
-                        else None,
+                        transform=transform,
                         conflicts=conflicts,
                     )
                     inserted_counts[table] = inserted
                     if skipped:
                         skipped_conflicts[table] = skipped
+                    if table == "memory_records":
+                        merged_memory_count = inserted
                 except Exception as exc:
                     # A table that could not be merged is a partial restore, and
                     # the operator has to know which one. Recording it as "0
@@ -796,6 +849,29 @@ def merge_restore_from_zip(
         "failed_tables": failures,
         "skipped_conflicts": skipped_conflicts,
     }
+
+    # One audit event for the merge's memory downgrade — not one per record.
+    # Per-record before-state lives in each row's own provenance_json.import_original,
+    # so the audit volume stays proportional to the operation, not to the
+    # corpus. See plan.md Workstream 3.
+    if merged_memory_count > 0:
+        try:
+            from app.services import audit_service
+
+            audit_service.write_event(
+                actor_type="user",
+                actor_id=manifest_data.get("exported_by") or "merge_restore",
+                action="memory_import_downgraded",
+                resource_type="memory_record",
+                result="success",
+                details={
+                    "backup_exported_at": manifest_data.get("exported_at"),
+                    "backup_exported_by": manifest_data.get("exported_by"),
+                    "affected_records": merged_memory_count,
+                },
+            )
+        except Exception:
+            logger.exception("Failed to write memory_import_downgraded audit event")
     if skipped_conflicts:
         manifest_data["merge"]["conflict_note"] = (
             "Rows referencing a record whose id already means something different "
@@ -853,7 +929,6 @@ def _restore_extracted(
     db_path: str,
     credential_key_path: str,
 ) -> tuple[bool, str, dict]:
-
     backup_dir = settings.data_dir / "backups"
     os.makedirs(backup_dir, exist_ok=True)
     timestamp = utc_now().strftime("%Y%m%d_%H%M%S")
@@ -1201,7 +1276,9 @@ def try_acquire_maintenance_lock(lease_seconds: int = 120) -> bool:
 
 def run_scheduled_maintenance(triggered_by: str = "manual") -> dict:
     from app.services.activity_service import mark_stale_activities
-    from app.services.workspace_sync_service import run_maintenance as run_sync_maintenance
+    from app.services.workspace_sync_service import (
+        run_maintenance as run_sync_maintenance,
+    )
 
     stale_count = mark_stale_activities()
     sync_maintenance = run_sync_maintenance()
@@ -1391,10 +1468,45 @@ def run_scheduled_maintenance(triggered_by: str = "manual") -> dict:
                     actor_id="maintenance",
                     action="memory_verified",
                     result="success",
-                    details={**verification, "proposals_queued": outcome["proposals_queued"]},
+                    details={
+                        **verification,
+                        "proposals_queued": outcome["proposals_queued"],
+                    },
                 )
         except Exception:
             logger.exception("Verification pass failed; continuing with maintenance")
+
+    # Consolidation: scan the active corpus and queue pending proposals for a
+    # human reviewer, capped by the rules in Workstream 5 so unattended
+    # generation cannot flood the queue. Independently toggleable so an
+    # operator who wants verification alone can leave this off. Manual
+    # generation through `/api/memory/proposals/generate` shares the same
+    # transactional, capped, rotated path — neither caller is special-cased.
+    proposals_generated = 0
+    proposals_skipped_at_cap = 0
+    if _system_setting_int("consolidation_scan_enabled", 1):
+        try:
+            from app.services import memory_proposal_service
+
+            proposal_outcome = memory_proposal_service.generate_proposals()
+            proposals_generated = int(proposal_outcome.get("created", 0))
+            proposals_skipped_at_cap = int(proposal_outcome.get("skipped_at_cap", 0))
+            if proposals_generated > 0:
+                audit_service.write_event(
+                    actor_type="system",
+                    actor_id="maintenance",
+                    action="memory_proposals_generated",
+                    result="success",
+                    details={
+                        "created": proposals_generated,
+                        "skipped_already_known": int(
+                            proposal_outcome.get("skipped_already_known", 0)
+                        ),
+                        "skipped_at_cap": proposals_skipped_at_cap,
+                    },
+                )
+        except Exception:
+            logger.exception("Consolidation scan failed; continuing with maintenance")
 
     result = {
         "stale_activities_marked": stale_count,
@@ -1407,6 +1519,8 @@ def run_scheduled_maintenance(triggered_by: str = "manual") -> dict:
         "records_verified": verification["verified"],
         "records_unverifiable": verification["checked"] - verification["verified"],
         "anchors_missing": verification["missing"],
+        "proposals_generated": proposals_generated,
+        "proposals_skipped_at_cap": proposals_skipped_at_cap,
     }
 
     # Record last-run status so it's visible (Settings page, status endpoint)

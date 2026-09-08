@@ -66,17 +66,18 @@ A merge restore is more surgical:
 - Credential entries from the backup are automatically re-encrypted with your current key if the backup key differs, so they remain readable
 - The merge does not adopt the backup's encryption key; your current key stays in place
 
-**What comes across.** Users, workspaces and their collaborator grants, agents, memory records and their embeddings, review proposals, credential entries, activity, connector types, bindings and execution history, adapter installations, webhook registrations, and system settings.
+**What comes across.** Users, workspaces and their collaborator grants, agents, memory records and their embeddings, credential entries, activity, connector types, bindings and execution history, adapter installations, webhook registrations, and system settings. Merged memory records are marked `external_import`, their `last_confirmed_at` is cleared, and their original source and confirmation values are retained under `provenance_json.import_original` for audit. Confirmation from another installation is not evidence about this installation.
 
-**What does not, and why.** Audit and webhook delivery logs are a record of what happened on the *other* installation, not state. Sessions, OTP secrets, and the broker credential are this machine's login and identity; importing them would hand out access. OAuth state, session caches, and spilled tool results regenerate on their own.
+**What does not, and why.** Review proposals are installation-local judgments and are regenerated here rather than imported. Audit and webhook delivery logs are a record of what happened on the *other* installation, not state. Sessions, OTP secrets, and the broker credential are this machine's login and identity; importing them would hand out access. OAuth state, session caches, and spilled tool results regenerate on their own.
 
 **Related records are not re-pointed.** Tables merge independently and the current version wins, so a record whose id already exists here is skipped. Anything that referenced it is skipped too, and counted in `merge.skipped_conflicts`. Otherwise a connector binding from the backup would keep its own id, find its credential's id already taken, and quietly authenticate with *this* installation's unrelated secret. Same id with identical content is a genuine match, not a conflict, and merges normally.
 
-Relationships here are not all foreign keys, and all three forms are covered:
+Relationships here are not all foreign keys. The merge checks both direct references and scope ownership before inserting related rows:
 
 - **direct references**: a binding's `credential_id`, an embedding's `record_id`
 - **scopes**: `workspace:proj` names a workspace, so a memory record or credential from a backup is not filed into a same-named workspace of yours that is a different project
-- **ids inside JSON**: a review proposal's `target_ids_json` names the records it would retract
+
+Review proposals also contain record IDs inside `target_ids_json`. Excluding the proposal table entirely avoids importing those installation-local verdicts or pointing one installation's proposed action at another installation's memory.
 
 Skipping also cascades: if a binding is not imported because its credential conflicts, an execution belonging to that binding is not imported either. Without that, the execution would be inserted with no binding to attach to and the database constraint would fail the whole merge instead of declining one row.
 
@@ -157,5 +158,7 @@ What it does:
 - Hard-deletes `scratchpad` memory records older than `scratchpad_retention_days` in system settings (default: 7 days)
 - Hard-deletes any memory record whose `expires_at` TTL has passed
 - Hard-deletes retracted and superseded memory records `retracted_retention_days` after they stopped being active (default: 30 days), measured from retraction/supersession time, not creation time, so a fresh retraction always gets its full grace window to be restored first
+- Verifies anchored facts when verification is enabled
+- Generates bounded clean-up proposals when `consolidation_scan_enabled` is on
 
-Deleted records can't be recovered. Active `fact`, `preference`, and `decision` records without an `expires_at` are never touched. The last run's time, trigger, and per-step counts are shown on the Settings page and at `GET /api/backup/maintenance/status`.
+Deleted records can't be recovered. Active `fact`, `preference`, and `decision` records without an `expires_at` are never deleted by maintenance; consolidation only queues proposals for human review. The last run's time, trigger, and per-step counts—including proposals generated and skipped at cap—are shown on the Settings page and at `GET /api/backup/maintenance/status`.

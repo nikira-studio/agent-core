@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+from typing import Optional
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse, Response
@@ -26,7 +27,9 @@ from app.models.enums import MEMORY_CLASSES, SOURCE_KINDS
 from app.operations.connector_actions import run_connector_action
 from app.operations.memory import (
     MemoryOperationError,
+    confirm_memory as run_memory_confirm,
     validate_search_query,
+    validate_source_kind_authority,
     write_memory as run_memory_write,
 )
 
@@ -37,21 +40,54 @@ router = APIRouter(prefix="", tags=["mcp"])
 # Keep tool discovery and execution on one closed policy table. A tool omitted
 # here is a release error, not an implicitly public endpoint.
 _TOOL_CAPABILITIES = {
-    **{name: "memory" for name in (
-        "memory_search", "memory_get", "memory_write", "memory_pin", "memory_confirm",
-        "memory_reanchor", "memory_verify", "memory_feedback", "memory_retract", "memory_move",
-    )},
-    **{name: "coordination" for name in (
-        "memory_pinned", "activity_update", "activity_get", "activity_list", "activity_search",
-        "activity_pickup", "workspace_sync", "workspace_sync_ack", "get_briefing", "briefing_list",
-        "delegation_request", "delegations_list", "delegation_requests_list",
-        "delegation_request_approve", "delegation_request_deny", "delegation_revoke",
-    )},
+    **{
+        name: "memory"
+        for name in (
+            "memory_search",
+            "memory_get",
+            "memory_write",
+            "memory_pin",
+            "memory_confirm",
+            "memory_reanchor",
+            "memory_verify",
+            "memory_feedback",
+            "memory_retract",
+            "memory_move",
+        )
+    },
+    **{
+        name: "coordination"
+        for name in (
+            "memory_pinned",
+            "activity_update",
+            "activity_get",
+            "activity_list",
+            "activity_search",
+            "activity_pickup",
+            "workspace_sync",
+            "workspace_sync_ack",
+            "get_briefing",
+            "briefing_list",
+            "delegation_request",
+            "delegations_list",
+            "delegation_requests_list",
+            "delegation_request_approve",
+            "delegation_request_deny",
+            "delegation_revoke",
+        )
+    },
     **{name: "credentials" for name in ("credential_get", "credential_list")},
-    **{name: "connectors_read" for name in (
-        "connectors_list", "connectors_resolve", "connectors_bindings_list",
-        "connectors_bindings_test", "connectors_actions_list", "connectors_summary",
-    )},
+    **{
+        name: "connectors_read"
+        for name in (
+            "connectors_list",
+            "connectors_resolve",
+            "connectors_bindings_list",
+            "connectors_bindings_test",
+            "connectors_actions_list",
+            "connectors_summary",
+        )
+    },
     "connectors_run": "connectors_execute",
 }
 
@@ -187,8 +223,14 @@ MANIFEST = {
                     "valid_from": {"type": "string"},
                     "valid_to": {"type": "string"},
                     "last_confirmed_at": {"type": "string"},
-                    "expires_at": {"type": "string", "description": "ISO datetime after which this record is excluded from search results and swept on next maintenance run"},
-                    "execution_id": {"type": "string", "description": "Execution returned by workspace_sync for source attribution"},
+                    "expires_at": {
+                        "type": "string",
+                        "description": "ISO datetime after which this record is excluded from search results and swept on next maintenance run",
+                    },
+                    "execution_id": {
+                        "type": "string",
+                        "description": "Execution returned by workspace_sync for source attribution",
+                    },
                 },
                 "required": ["content", "memory_class", "scope"],
             },
@@ -476,12 +518,17 @@ MANIFEST = {
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "recipient_agent_id": {"type": "string"}, "purpose": {"type": "string"},
+                    "recipient_agent_id": {"type": "string"},
+                    "purpose": {"type": "string"},
                     "ttl_seconds": {"type": "integer", "maximum": 3600},
                     "scope_permissions": {"type": "array", "items": {"type": "object"}},
-                    "resource_permissions": {"type": "array", "items": {"type": "object"}},
+                    "resource_permissions": {
+                        "type": "array",
+                        "items": {"type": "object"},
+                    },
                     "binding_actions": {"type": "array", "items": {"type": "object"}},
-                    "activity_id": {"type": "string"}, "correlation_id": {"type": "string"},
+                    "activity_id": {"type": "string"},
+                    "correlation_id": {"type": "string"},
                 },
                 "required": ["recipient_agent_id", "purpose", "ttl_seconds"],
             },
@@ -509,7 +556,10 @@ MANIFEST = {
                 "properties": {
                     "request_id": {"type": "string"},
                     "scope_permissions": {"type": "array", "items": {"type": "object"}},
-                    "resource_permissions": {"type": "array", "items": {"type": "object"}},
+                    "resource_permissions": {
+                        "type": "array",
+                        "items": {"type": "object"},
+                    },
                     "binding_actions": {"type": "array", "items": {"type": "object"}},
                 },
                 "required": ["request_id"],
@@ -518,12 +568,26 @@ MANIFEST = {
         {
             "name": "delegation_request_deny",
             "description": "Deny a visible pending delegation request",
-            "inputSchema": {"type": "object", "properties": {"request_id": {"type": "string"}, "reason": {"type": "string"}}, "required": ["request_id"]},
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "request_id": {"type": "string"},
+                    "reason": {"type": "string"},
+                },
+                "required": ["request_id"],
+            },
         },
         {
             "name": "delegation_revoke",
             "description": "Immediately revoke a grant the actor issued or received",
-            "inputSchema": {"type": "object", "properties": {"grant_id": {"type": "string"}, "reason": {"type": "string"}}, "required": ["grant_id"]},
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "grant_id": {"type": "string"},
+                    "reason": {"type": "string"},
+                },
+                "required": ["grant_id"],
+            },
         },
         {
             "name": "connectors_list",
@@ -547,8 +611,10 @@ MANIFEST = {
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "connector_type_id": {"type": "string"}, "logical_alias": {"type": "string"},
-                    "scope": {"type": "string"}, "action": {"type": "string"},
+                    "connector_type_id": {"type": "string"},
+                    "logical_alias": {"type": "string"},
+                    "scope": {"type": "string"},
+                    "action": {"type": "string"},
                 },
                 "required": ["connector_type_id"],
             },
@@ -775,9 +841,6 @@ def _maybe_offload_tool_result(
     return json.dumps(spill, indent=2, default=str)
 
 
-
-
-
 def _memory_provenance(ctx: EffectiveAuthority, source_kind: str, scope: str) -> str:
     return memory_service.provenance_for_write(
         actor_type=ctx.actor_type,
@@ -804,7 +867,6 @@ def _memory_audit_details(record: dict, **extra) -> dict:
         details["slot_key"] = record.get("slot_key")
     details.update({k: v for k, v in extra.items() if v is not None})
     return details
-
 
 
 def _connector_action_count(ct: dict) -> int:
@@ -871,6 +933,91 @@ def _compact_memory_record(record: dict) -> dict:
     }
 
 
+def _maybe_attach_digest(
+    ctx: EffectiveAuthority,
+    memory_scope: str,
+    new_activity_id: str,
+    execution_id: Optional[str] = None,
+) -> Optional[dict]:
+    """Best-effort "since you were last active" digest for a fresh activity.
+
+    Returns the digest dict on success, or None on any failure path (so the
+    caller omits the `since_last_active` key entirely, never an empty
+    placeholder). The caller is responsible for the read-authority gate;
+    this helper is only ever called after `enforcer.can_read(memory_scope)`
+    has returned True.
+
+    `execution_id` is threaded in from the MCP params, NOT read off `ctx` —
+    `EffectiveAuthority` has no `execution_id` field (it's the request
+    context for the MCP call, distinct from a workspace-sync execution
+    identity). Reading it off `ctx` silently raised AttributeError on
+    every real call, which the helper's own try/except then swallowed,
+    silently disabling the digest feature in production. See planb.md
+    Workstream 1 and the code-review follow-up.
+
+    Order of operations:
+    1. If `execution_id` is provided, run `execution_is_caught_up`. A
+       genuine caught-up execution means the caller has the fuller picture
+       through `workspace_sync` already — the digest would be redundant
+       noise. The check excludes the new activity's own change row, which
+       was stamped at activity creation and is not something any execution
+       could have delivered before this very call.
+    2. Otherwise, look up the prior (non-briefing) activity for this agent
+       in this scope, then call `digest_for_new_arrival`.
+    3. Any failure in either step is logged and swallowed — the digest is
+       strictly best-effort, the activity itself is already persisted.
+    """
+    from app.services import system_settings_service, workspace_sync_service
+
+    logger = logging.getLogger(__name__)
+
+    # Feature flag — default on, opt-out per installation.
+    try:
+        enabled = system_settings_service.read_bool(
+            "workspace_awareness_digest_enabled", True
+        )
+    except Exception:
+        enabled = True
+    if not enabled:
+        return None
+
+    try:
+        limit = int(
+            system_settings_service.read_int("workspace_awareness_digest_limit", 10)
+        )
+        limit = max(1, min(limit, 50))
+    except Exception:
+        limit = 10
+
+    try:
+        if execution_id and workspace_sync_service.execution_is_caught_up(
+            execution_id,
+            memory_scope,
+            exclude_activity_id=new_activity_id,
+        ):
+            return None  # Caller already has the picture via workspace_sync.
+
+        prior = activity_service.get_last_activity_in_scope(
+            ctx.agent_id, memory_scope, exclude_id=new_activity_id
+        )
+        prior_id = prior["id"] if prior else None
+
+        digest = workspace_sync_service.digest_for_new_arrival(
+            memory_scope=memory_scope,
+            prior_activity_id=prior_id,
+            new_activity_id=new_activity_id,
+            limit=limit,
+        )
+        return digest
+    except Exception:
+        logger.exception(
+            "workspace-awareness digest failed for activity %s in %s; omitting",
+            new_activity_id,
+            memory_scope,
+        )
+        return None
+
+
 @router.get("/mcp")
 def get_mcp_manifest(ctx: EffectiveAuthority = Depends(get_mcp_request_context)):
     return JSONResponse(content=_manifest_for(ctx))
@@ -880,8 +1027,10 @@ def _manifest_for(ctx: EffectiveAuthority) -> dict:
     return {
         **MANIFEST,
         "tools": [
-            tool for tool in MANIFEST["tools"]
-            if (required := _TOOL_CAPABILITIES.get(tool["name"])) is None or ctx.has_capability(required)
+            tool
+            for tool in MANIFEST["tools"]
+            if (required := _TOOL_CAPABILITIES.get(tool["name"])) is None
+            or ctx.has_capability(required)
         ],
     }
 
@@ -1004,44 +1153,99 @@ async def _handle_custom_mcp_tool(body: dict, ctx: EffectiveAuthority):
 
     if tool == "delegation_request":
         request = delegation_service.create_request(
-            ctx, recipient_agent_id=params["recipient_agent_id"], purpose=params["purpose"],
+            ctx,
+            recipient_agent_id=params["recipient_agent_id"],
+            purpose=params["purpose"],
             ttl_seconds=int(params["ttl_seconds"]),
             scope_permissions=params.get("scope_permissions") or [],
             resource_permissions=params.get("resource_permissions") or [],
             binding_actions=params.get("binding_actions") or [],
-            activity_id=params.get("activity_id"), correlation_id=params.get("correlation_id"),
+            activity_id=params.get("activity_id"),
+            correlation_id=params.get("correlation_id"),
         )
-        audit_service.write_event(ctx.actor_type, ctx.actor_id, "delegation_request_created", "delegation_request", request["id"])
-        return JSONResponse(content={"ok": True, "data": {"request": request}}, status_code=201)
+        audit_service.write_event(
+            ctx.actor_type,
+            ctx.actor_id,
+            "delegation_request_created",
+            "delegation_request",
+            request["id"],
+        )
+        return JSONResponse(
+            content={"ok": True, "data": {"request": request}}, status_code=201
+        )
     if tool == "effective_authority":
-        return JSONResponse(content={"ok": True, "data": {"authority": ctx.safe_summary()}})
+        return JSONResponse(
+            content={"ok": True, "data": {"authority": ctx.safe_summary()}}
+        )
     if tool == "delegations_list":
-        return JSONResponse(content={"ok": True, "data": {"grants": delegation_service.list_grants(ctx)}})
+        return JSONResponse(
+            content={
+                "ok": True,
+                "data": {"grants": delegation_service.list_grants(ctx)},
+            }
+        )
     if tool == "delegation_requests_list":
-        return JSONResponse(content={"ok": True, "data": {"requests": delegation_service.list_requests(ctx)}})
+        return JSONResponse(
+            content={
+                "ok": True,
+                "data": {"requests": delegation_service.list_requests(ctx)},
+            }
+        )
     if tool == "delegation_request_approve":
         result = delegation_service.approve_request(
-            params["request_id"], ctx,
-            scope_permissions=params.get("scope_permissions") if "scope_permissions" in params else None,
-            resource_permissions=params.get("resource_permissions") if "resource_permissions" in params else None,
-            binding_actions=params.get("binding_actions") if "binding_actions" in params else None,
+            params["request_id"],
+            ctx,
+            scope_permissions=params.get("scope_permissions")
+            if "scope_permissions" in params
+            else None,
+            resource_permissions=params.get("resource_permissions")
+            if "resource_permissions" in params
+            else None,
+            binding_actions=params.get("binding_actions")
+            if "binding_actions" in params
+            else None,
         )
-        audit_service.write_event(ctx.actor_type, ctx.actor_id, "delegation_request_approved", "delegation_request", params["request_id"], details={"grant_id": result["grant"]["id"]})
+        audit_service.write_event(
+            ctx.actor_type,
+            ctx.actor_id,
+            "delegation_request_approved",
+            "delegation_request",
+            params["request_id"],
+            details={"grant_id": result["grant"]["id"]},
+        )
         return JSONResponse(content={"ok": True, "data": result})
     if tool == "delegation_request_deny":
-        request = delegation_service.deny_request(params["request_id"], ctx, params.get("reason"))
-        audit_service.write_event(ctx.actor_type, ctx.actor_id, "delegation_request_denied", "delegation_request", params["request_id"])
+        request = delegation_service.deny_request(
+            params["request_id"], ctx, params.get("reason")
+        )
+        audit_service.write_event(
+            ctx.actor_type,
+            ctx.actor_id,
+            "delegation_request_denied",
+            "delegation_request",
+            params["request_id"],
+        )
         return JSONResponse(content={"ok": True, "data": {"request": request}})
     if tool == "delegation_revoke":
-        grant = delegation_service.revoke_grant(params["grant_id"], ctx, params.get("reason"))
-        audit_service.write_event(ctx.actor_type, ctx.actor_id, "delegation_grant_revoked", "delegated_grant", params["grant_id"])
+        grant = delegation_service.revoke_grant(
+            params["grant_id"], ctx, params.get("reason")
+        )
+        audit_service.write_event(
+            ctx.actor_type,
+            ctx.actor_id,
+            "delegation_grant_revoked",
+            "delegated_grant",
+            params["grant_id"],
+        )
         return JSONResponse(content={"ok": True, "data": {"grant": grant}})
     if tool == "connectors_resolve":
         from app.services import connector_service
 
         binding = connector_service.resolve_authorized_binding(
-            ctx, connector_type_id=params["connector_type_id"],
-            logical_alias=params.get("logical_alias"), scope=params.get("scope"),
+            ctx,
+            connector_type_id=params["connector_type_id"],
+            logical_alias=params.get("logical_alias"),
+            scope=params.get("scope"),
             action=params.get("action"),
         )
         return JSONResponse(content={"ok": True, "data": {"binding": binding}})
@@ -1052,7 +1256,7 @@ async def _handle_custom_mcp_tool(body: dict, ctx: EffectiveAuthority):
             return _mcp_error("INVALID_PARAMS", "handle is required", 400)
         result = tool_spill_service.fetch(
             handle=handle,
-                offset=params.get("offset", 0),
+            offset=params.get("offset", 0),
             limit=min(max(params.get("limit", 4000), 1), 50000),
             agent_id=ctx.agent_id,
         )
@@ -1090,10 +1294,16 @@ async def _handle_custom_mcp_tool(body: dict, ctx: EffectiveAuthority):
         else:
             candidates = ctx.default_recall_scopes or ctx.read_scopes
             if ctx.is_delegated:
-                candidates = [scope for resource, operation, scope in ctx.scope_permissions if resource == "memory" and operation == "read"]
+                candidates = [
+                    scope
+                    for resource, operation, scope in ctx.scope_permissions
+                    if resource == "memory" and operation == "read"
+                ]
             allowed = ctx.filter_scopes("memory", "read", candidates)
         if not allowed:
-            embedding_status = await asyncio.to_thread(embedding_service.safe_backend_status)
+            embedding_status = await asyncio.to_thread(
+                embedding_service.safe_backend_status
+            )
             return JSONResponse(
                 content={
                     "ok": True,
@@ -1130,7 +1340,9 @@ async def _handle_custom_mcp_tool(body: dict, ctx: EffectiveAuthority):
         # is there for a caller that genuinely needs the lifecycle fields.
         if params.get("view") != "full":
             records = [memory_service.lean_record(r) for r in records]
-        embedding_status = await asyncio.to_thread(embedding_service.safe_backend_status)
+        embedding_status = await asyncio.to_thread(
+            embedding_service.safe_backend_status
+        )
         audit_service.write_event(
             actor_type="agent",
             actor_id=ctx.agent_id,
@@ -1142,10 +1354,14 @@ async def _handle_custom_mcp_tool(body: dict, ctx: EffectiveAuthority):
                 "query": query_text,
                 "results": len(records),
                 "retrieval_mode": mode,
-                "embedding_backend_status": embedding_service.backend_label(embedding_status),
+                "embedding_backend_status": embedding_service.backend_label(
+                    embedding_status
+                ),
             },
         )
-        if mode == "fts_only" and embedding_service.retrieval_is_degraded(embedding_status):
+        if mode == "fts_only" and embedding_service.retrieval_is_degraded(
+            embedding_status
+        ):
             audit_service.write_event(
                 actor_type="agent",
                 actor_id=ctx.agent_id,
@@ -1183,9 +1399,7 @@ async def _handle_custom_mcp_tool(body: dict, ctx: EffectiveAuthority):
         # rows are tiny, so allow a higher cap.
         view = params.get("view")
         if view not in (None, "full", "compact"):
-            return _mcp_error(
-                "INVALID_PARAMS", "view must be 'full' or 'compact'", 400
-            )
+            return _mcp_error("INVALID_PARAMS", "view must be 'full' or 'compact'", 400)
         if params.get("scope"):
             if not ctx.can("memory", "read", scope=params["scope"]):
                 return _mcp_error("SCOPE_DENIED", "Access denied to this scope", 403)
@@ -1198,7 +1412,11 @@ async def _handle_custom_mcp_tool(body: dict, ctx: EffectiveAuthority):
         else:
             candidates = ctx.default_recall_scopes or ctx.read_scopes
             if ctx.is_delegated:
-                candidates = [scope for resource, operation, scope in ctx.scope_permissions if resource == "memory" and operation == "read"]
+                candidates = [
+                    scope
+                    for resource, operation, scope in ctx.scope_permissions
+                    if resource == "memory" and operation == "read"
+                ]
             allowed = ctx.filter_scopes("memory", "read", candidates)
             records = memory_service.get_memory_by_scopes(
                 scopes=allowed,
@@ -1209,9 +1427,7 @@ async def _handle_custom_mcp_tool(body: dict, ctx: EffectiveAuthority):
         if view is None:
             # Auto: compact for large pages, full for small (back-compat for
             # callers reading a handful of records).
-            view = (
-                "compact" if len(records) > _MEMORY_COMPACT_THRESHOLD else "full"
-            )
+            view = "compact" if len(records) > _MEMORY_COMPACT_THRESHOLD else "full"
         out = (
             [_compact_memory_record(r) for r in records]
             if view == "compact"
@@ -1226,9 +1442,7 @@ async def _handle_custom_mcp_tool(body: dict, ctx: EffectiveAuthority):
 
     elif tool == "memory_write":
         try:
-            payload = await run_memory_write(
-                params, ctx, channel="mcp", route="/mcp"
-            )
+            payload = await run_memory_write(params, ctx, channel="mcp", route="/mcp")
         except MemoryOperationError as exc:
             return _mcp_error(exc.code, exc.message, exc.status_code)
         return JSONResponse(content={"ok": True, "data": payload}, status_code=201)
@@ -1236,7 +1450,11 @@ async def _handle_custom_mcp_tool(body: dict, ctx: EffectiveAuthority):
     elif tool == "memory_pinned":
         candidates = ctx.default_recall_scopes or ctx.read_scopes
         if ctx.is_delegated:
-            candidates = [scope for resource, operation, scope in ctx.scope_permissions if resource == "memory" and operation == "read"]
+            candidates = [
+                scope
+                for resource, operation, scope in ctx.scope_permissions
+                if resource == "memory" and operation == "read"
+            ]
         scopes = ctx.filter_scopes("memory", "read", candidates)
         records = memory_service.pinned_records(scopes)
         return JSONResponse(
@@ -1285,7 +1503,11 @@ async def _handle_custom_mcp_tool(body: dict, ctx: EffectiveAuthority):
             resource_type="memory_record",
             resource_id=params["record_id"],
             result="success",
-            details={"pin": desired, "scope": record["scope"], "proposal_id": proposal_id},
+            details={
+                "pin": desired,
+                "scope": record["scope"],
+                "proposal_id": proposal_id,
+            },
         )
         return JSONResponse(
             content={
@@ -1304,35 +1526,17 @@ async def _handle_custom_mcp_tool(body: dict, ctx: EffectiveAuthority):
         )
 
     elif tool == "memory_confirm":
-        record = memory_service.get_memory_record(params["record_id"])
-        if not record:
-            return _mcp_error("NOT_FOUND", "Record not found", 404)
-        if not ctx.can("memory", "write", scope=record["scope"]):
-            return _mcp_error("SCOPE_DENIED", "Access denied to this scope", 403)
         try:
-            confirmed = memory_service.confirm_memory(
+            payload = await run_memory_confirm(
                 params["record_id"],
                 evidence=params.get("evidence") or "",
-                verified_by=ctx.agent_id or ctx.actor_id,
+                authority=ctx,
+                channel="mcp",
+                route="/mcp memory_confirm",
             )
-        except ValueError as e:
-            return _mcp_error("EVIDENCE_REQUIRED", str(e), 400)
-        if not confirmed:
-            return _mcp_error(
-                "NOT_ACTIVE", "Only an active record can be confirmed", 400
-            )
-        audit_service.write_event(
-            actor_type="agent",
-            actor_id=ctx.agent_id,
-            action="memory_confirmed",
-            resource_type="memory_record",
-            resource_id=params["record_id"],
-            result="success",
-            details={"scope": record["scope"], "evidence": params.get("evidence")},
-        )
-        return JSONResponse(
-            content={"ok": True, "data": {"record": memory_service.lean_record(confirmed)}}
-        )
+        except MemoryOperationError as exc:
+            return _mcp_error(exc.code, exc.message, exc.status_code)
+        return JSONResponse(content={"ok": True, "data": payload})
 
     elif tool == "memory_reanchor":
         record = memory_service.get_memory_record(params["record_id"])
@@ -1349,7 +1553,9 @@ async def _handle_custom_mcp_tool(body: dict, ctx: EffectiveAuthority):
         except ValueError as e:
             return _mcp_error("INVALID_ANCHOR", str(e), 400)
         if not updated:
-            return _mcp_error("NOT_ACTIVE", "Only an active record can be re-anchored", 400)
+            return _mcp_error(
+                "NOT_ACTIVE", "Only an active record can be re-anchored", 400
+            )
         audit_service.write_event(
             actor_type="agent",
             actor_id=ctx.agent_id,
@@ -1363,7 +1569,10 @@ async def _handle_custom_mcp_tool(body: dict, ctx: EffectiveAuthority):
             },
         )
         return JSONResponse(
-            content={"ok": True, "data": {"record": memory_service.lean_record(updated)}}
+            content={
+                "ok": True,
+                "data": {"record": memory_service.lean_record(updated)},
+            }
         )
 
     elif tool == "memory_verify":
@@ -1377,7 +1586,11 @@ async def _handle_custom_mcp_tool(body: dict, ctx: EffectiveAuthority):
         if not verify_scope:
             candidates = list(ctx.write_scopes)
             if ctx.is_delegated:
-                candidates = [scope for resource, operation, scope in ctx.scope_permissions if resource == "memory" and operation == "write"]
+                candidates = [
+                    scope
+                    for resource, operation, scope in ctx.scope_permissions
+                    if resource == "memory" and operation == "write"
+                ]
             writable = ctx.filter_scopes("memory", "write", candidates)
             if not writable:
                 return _mcp_error("SCOPE_DENIED", "No writable scope to verify", 403)
@@ -1469,14 +1682,15 @@ async def _handle_custom_mcp_tool(body: dict, ctx: EffectiveAuthority):
         if not ctx.can("memory", "write", scope=record["scope"]):
             return _mcp_error("SCOPE_DENIED", "Access denied to source scope", 403)
         if not ctx.can("memory", "write", scope=new_scope):
-            return _mcp_error(
-                "SCOPE_DENIED", "Access denied to destination scope", 403
-            )
+            return _mcp_error("SCOPE_DENIED", "Access denied to destination scope", 403)
         source_kind = params.get("source_kind", "agent_inference")
         if source_kind not in SOURCE_KINDS:
             return _mcp_error(
                 "INVALID_SOURCE_KIND", f"source_kind must be one of {SOURCE_KINDS}", 400
             )
+        denied = validate_source_kind_authority(source_kind, ctx)
+        if denied is not None:
+            return _mcp_error(denied[0], denied[1], 403)
         new_record, err = memory_service.move_memory(
             record_id=params["record_id"],
             new_scope=new_scope,
@@ -1485,7 +1699,9 @@ async def _handle_custom_mcp_tool(body: dict, ctx: EffectiveAuthority):
         if err == "NOT_FOUND":
             return _mcp_error("NOT_FOUND", "Memory record not found", 404)
         if err == "NOT_ACTIVE":
-            return _mcp_error("INVALID_STATE", "Only an active record can be moved", 400)
+            return _mcp_error(
+                "INVALID_STATE", "Only an active record can be moved", 400
+            )
         if err == "SAME_SCOPE":
             return _mcp_error("INVALID_INPUT", "Record is already in that scope", 400)
         if err == "PII_DETECTED":
@@ -1559,20 +1775,27 @@ async def _handle_custom_mcp_tool(body: dict, ctx: EffectiveAuthority):
             return _mcp_error("SCOPE_DENIED", "Access denied to memory_scope", 403)
         if params.get("execution_id"):
             from app.services import workspace_sync_service
+
             try:
                 workspace_sync_service.validate_execution(
-                    execution_id=params["execution_id"], agent_id=ctx.agent_id,
-                    user_id=ctx.user_id or "", memory_scope=memory_scope,
+                    execution_id=params["execution_id"],
+                    agent_id=ctx.agent_id,
+                    user_id=ctx.user_id or "",
+                    memory_scope=memory_scope,
                 )
             except PermissionError:
-                return _mcp_error("EXECUTION_OWNERSHIP", "Execution belongs to another agent", 403)
+                return _mcp_error(
+                    "EXECUTION_OWNERSHIP", "Execution belongs to another agent", 403
+                )
             except ValueError as exc:
                 return _mcp_error(str(exc), "Invalid execution", 400)
         existing = activity_service.get_active_activity_for_agent(
             ctx.agent_id, ctx.user_id, memory_scope=memory_scope
         )
         if existing:
-            if ctx.is_delegated and not ctx.can_resource("activity", "update", existing["id"]):
+            if ctx.is_delegated and not ctx.can_resource(
+                "activity", "update", existing["id"]
+            ):
                 return _mcp_error("FORBIDDEN", "Access denied", 403)
             if params.get("status"):
                 if params["status"] in (
@@ -1591,7 +1814,11 @@ async def _handle_custom_mcp_tool(body: dict, ctx: EffectiveAuthority):
                     status=params["status"],
                     source_execution_id=params.get("execution_id"),
                 )
-            elif params.get("task_description") or params.get("task_note") or params.get("task_result"):
+            elif (
+                params.get("task_description")
+                or params.get("task_note")
+                or params.get("task_result")
+            ):
                 activity_service.update_activity(
                     existing["id"],
                     task_description=params.get("task_description"),
@@ -1642,7 +1869,9 @@ async def _handle_custom_mcp_tool(body: dict, ctx: EffectiveAuthority):
             )
         else:
             if ctx.is_delegated:
-                return _mcp_error("FORBIDDEN", "Delegated activity creation is unsupported", 403)
+                return _mcp_error(
+                    "FORBIDDEN", "Delegated activity creation is unsupported", 403
+                )
             if not params.get("task_description"):
                 return _mcp_error(
                     "TASK_REQUIRED", "task_description required to create activity", 400
@@ -1668,9 +1897,33 @@ async def _handle_custom_mcp_tool(body: dict, ctx: EffectiveAuthority):
                 ),
             )
             activity_service.notify("activity_created", act)
-            return JSONResponse(
-                content={"ok": True, "data": {"activity": act}}, status_code=201
-            )
+
+            # Best-effort "since you were last active" digest for the new
+            # activity. Only ever attaches to a freshly created activity in a
+            # `workspace:*` scope, never to heartbeats/updates, and never to a
+            # caller that lacks read authority on the scope. Activity creation
+            # is already complete at this point — a digest failure cannot
+            # prevent the activity from existing. See planb.md Workstream 1.
+            payload: dict = {"activity": act}
+            if (
+                memory_scope
+                and memory_scope.startswith("workspace:")
+                and not ctx.is_delegated
+                and enforcer.can_read(memory_scope)
+            ):
+                digest = _maybe_attach_digest(
+                    ctx,
+                    memory_scope,
+                    act["id"],
+                    execution_id=params.get("execution_id"),
+                )
+                # `_maybe_attach_digest` swallows its own errors and returns
+                # None. The outer try/except below is a belt-and-braces for
+                # anything that escapes it — `since_last_active` is purely
+                # additive, and a failure here must never fail the create.
+                if digest is not None:
+                    payload["since_last_active"] = digest
+            return JSONResponse(content={"ok": True, "data": payload}, status_code=201)
 
     elif tool == "activity_get":
         activity = activity_service.get_activity(params["activity_id"])
@@ -1690,9 +1943,15 @@ async def _handle_custom_mcp_tool(body: dict, ctx: EffectiveAuthority):
         produced = memory_service.records_for_activity(
             params["activity_id"],
             authorized_scopes=(
-                None if ctx.is_admin else
-                [scope for resource, operation, scope in ctx.scope_permissions if resource == "memory" and operation == "read"]
-                if ctx.is_delegated else enforcer.filter_readable_scopes(ctx.read_scopes)
+                None
+                if ctx.is_admin
+                else [
+                    scope
+                    for resource, operation, scope in ctx.scope_permissions
+                    if resource == "memory" and operation == "read"
+                ]
+                if ctx.is_delegated
+                else enforcer.filter_readable_scopes(ctx.read_scopes)
             ),
         )
         return JSONResponse(
@@ -1788,7 +2047,9 @@ async def _handle_custom_mcp_tool(body: dict, ctx: EffectiveAuthority):
 
     elif tool == "activity_pickup":
         if ctx.is_delegated:
-            return _mcp_error("FORBIDDEN", "Delegated activity pickup is unsupported", 403)
+            return _mcp_error(
+                "FORBIDDEN", "Delegated activity pickup is unsupported", 403
+            )
         authorized_scopes = enforcer.filter_readable_scopes(ctx.read_scopes)
         activity = activity_service.claim_next_activity(ctx.agent_id, authorized_scopes)
         if activity:
@@ -1806,7 +2067,9 @@ async def _handle_custom_mcp_tool(body: dict, ctx: EffectiveAuthority):
                 "ok": True,
                 "data": {
                     "activity": activity,
-                    "message": None if activity else "No assigned work found for this agent in authorized scopes",
+                    "message": None
+                    if activity
+                    else "No assigned work found for this agent in authorized scopes",
                 },
             }
         )
@@ -1818,7 +2081,12 @@ async def _handle_custom_mcp_tool(body: dict, ctx: EffectiveAuthority):
         act = activity_service.get_activity(params["briefing_id"])
         if ctx.is_delegated:
             scope = (act or {}).get("memory_scope")
-            if not act or not ctx.can_resource("activity", "read", act["id"]) or not scope or not ctx.can("briefing", "read", scope=scope):
+            if (
+                not act
+                or not ctx.can_resource("activity", "read", act["id"])
+                or not scope
+                or not ctx.can("briefing", "read", scope=scope)
+            ):
                 return _mcp_error("FORBIDDEN", "Access denied", 403)
         elif (
             act
@@ -1865,7 +2133,9 @@ async def _handle_custom_mcp_tool(body: dict, ctx: EffectiveAuthority):
         from app.services import workspace_sync_service
 
         if ctx.is_delegated:
-            return _mcp_error("FORBIDDEN", "Delegated workspace sync is unsupported", 403)
+            return _mcp_error(
+                "FORBIDDEN", "Delegated workspace sync is unsupported", 403
+            )
         memory_scope = params["memory_scope"]
         if not enforcer.can_read(memory_scope):
             return _mcp_error("SCOPE_DENIED", "Access denied to this workspace", 403)
@@ -1889,7 +2159,9 @@ async def _handle_custom_mcp_tool(body: dict, ctx: EffectiveAuthority):
                     cursor=params["cursor"],
                 )
         except PermissionError:
-            return _mcp_error("EXECUTION_OWNERSHIP", "Execution belongs to another agent", 403)
+            return _mcp_error(
+                "EXECUTION_OWNERSHIP", "Execution belongs to another agent", 403
+            )
         except ValueError as exc:
             return _mcp_error(str(exc), "Invalid execution or cursor", 400)
         return JSONResponse(content={"ok": True, "data": result})

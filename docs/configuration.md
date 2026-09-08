@@ -66,7 +66,21 @@ These control how long dashboard logins stay active.
 
 The scratchpad and retracted/superseded retention windows themselves (7 and 30 days by default) are configured from **Settings → System Behavior** in the dashboard. The last run's time, trigger, and results are shown in **Settings → Backup & Restore** and available from `GET /api/backup/maintenance/status`.
 
-The maintenance sweep also prunes the connector execution and webhook delivery logs (30 days by default, `0` keeps them forever) and runs the memory verification pass described below. All of these windows are set from **Settings → System Behavior**.
+The maintenance sweep also prunes the connector execution and webhook delivery logs (30 days by default, `0` keeps them forever), runs the memory verification pass, and can generate capped memory-review proposals. These controls are set from **Settings → System Behavior**.
+
+### Memory consolidation and workspace awareness
+
+| Setting (in `system_settings`) | Default | What it does |
+| --- | --- | --- |
+| `unconfirmed_inference_days` | `7` | Minimum age before a never-confirmed, non-human fact can become an `unconfirmed_inference` proposal; bounds 1–90 |
+| `proposal_pending_cap_per_rule` | `20` | Maximum pending proposals for one `(rule, scope)` pair |
+| `proposal_pending_cap_total` | `50` | Installation-wide maximum pending proposals, even when generation targets one scope |
+| `proposal_generation_budget_per_run` | `20` | Maximum proposals created by one manual or scheduled generation pass |
+| `consolidation_scan_enabled` | `1` | Run mechanical proposal generation during scheduled maintenance. Turning it off does not disable the manual **Check for more** action |
+| `workspace_awareness_digest_enabled` | `1` | Allow a fresh MCP `activity_update` to return a best-effort `since_last_active` digest |
+| `workspace_awareness_digest_limit` | `10` | Maximum digest change entries; runtime bounds are 1–50 |
+
+The first five settings are editable in **Settings → System Behavior**. The workspace-awareness settings are installation-wide database settings. Proposal generation rechecks all caps and candidate eligibility inside its short write transaction, so simultaneous manual and scheduled runs cannot overfill the queue.
 
 The embedding provider, endpoint URL, model, and auth type for **vector search** are configured from **Settings → Vector Search** in the dashboard, not through environment variables. Semantic search is off by default. When it's disabled or the embedding backend is unreachable, Agent Core falls back to full-text search automatically.
 

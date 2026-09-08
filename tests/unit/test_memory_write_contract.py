@@ -95,7 +95,8 @@ def test_expiry_rule_requires_the_marker_up_front():
     from app.services.memory_service import detect_expiring_episodic_shape
 
     buried = (
-        "Design note on the routine scheduler as of 2026-06-07. " + ("x " * 200)
+        "Design note on the routine scheduler as of 2026-06-07. "
+        + ("x " * 200)
         + "Each continuation tick re-reads the registry."
     )
     assert detect_expiring_episodic_shape(buried) is None
@@ -111,7 +112,8 @@ def test_episodic_write_gets_an_expiry():
     )
     assert record["expires_at"] is not None
     days = (
-        parse_utc_datetime(record["expires_at"]) - parse_utc_datetime(record["created_at"])
+        parse_utc_datetime(record["expires_at"])
+        - parse_utc_datetime(record["created_at"])
     ).days
     assert 29 <= days <= 30
 
@@ -151,14 +153,10 @@ def test_preferences_are_never_treated_as_episodic():
 
 
 def test_ttl_setting_of_zero_disables_auto_expiry():
-    from app.database import get_db
+    from app.services import system_settings_service
     from app.services.memory_service import write_memory
 
-    with get_db() as conn:
-        conn.execute(
-            "INSERT INTO system_settings (key, value) VALUES ('episodic_memory_ttl_days', '0')"
-        )
-        conn.commit()
+    system_settings_service.write_raw({"episodic_memory_ttl_days": "0"})
 
     record, _ = write_memory(
         content=EPISODIC_SAMPLES[0],
@@ -169,14 +167,10 @@ def test_ttl_setting_of_zero_disables_auto_expiry():
 
 
 def test_ttl_setting_is_honoured():
-    from app.database import get_db
+    from app.services import system_settings_service
     from app.services.memory_service import write_memory
 
-    with get_db() as conn:
-        conn.execute(
-            "INSERT INTO system_settings (key, value) VALUES ('episodic_memory_ttl_days', '5')"
-        )
-        conn.commit()
+    system_settings_service.write_raw({"episodic_memory_ttl_days": "5"})
 
     record, _ = write_memory(
         content=EPISODIC_SAMPLES[1],
@@ -184,7 +178,8 @@ def test_ttl_setting_is_honoured():
         scope="workspace:proj",
     )
     days = (
-        parse_utc_datetime(record["expires_at"]) - parse_utc_datetime(record["created_at"])
+        parse_utc_datetime(record["expires_at"])
+        - parse_utc_datetime(record["created_at"])
     ).days
     assert 4 <= days <= 5
 

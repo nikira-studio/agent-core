@@ -114,6 +114,73 @@ async def update_dashboard_system_settings(
             )
         settings_to_save["episodic_memory_ttl_days"] = str(episodic_ttl)
 
+    if "unconfirmed_inference_days" in body:
+        try:
+            ui_days = int(str(body.get("unconfirmed_inference_days", "")).strip())
+        except ValueError:
+            return error_response(
+                "INVALID_UNCONFIRMED_INFERENCE_DAYS",
+                "Unconfirmed inference cutoff must be a whole number of days",
+                400,
+            )
+        if ui_days < 1 or ui_days > 90:
+            return error_response(
+                "INVALID_UNCONFIRMED_INFERENCE_DAYS",
+                "Unconfirmed inference cutoff must be between 1 and 90 days",
+                400,
+            )
+        settings_to_save["unconfirmed_inference_days"] = str(ui_days)
+
+    if "unconfirmed_inference_min_importance" in body:
+        try:
+            ui_min_importance = float(
+                str(body.get("unconfirmed_inference_min_importance", "")).strip()
+            )
+        except ValueError:
+            return error_response(
+                "INVALID_UNCONFIRMED_INFERENCE_MIN_IMPORTANCE",
+                "Unconfirmed inference minimum importance must be a number",
+                400,
+            )
+        if not 0.0 <= ui_min_importance <= 1.0:
+            return error_response(
+                "INVALID_UNCONFIRMED_INFERENCE_MIN_IMPORTANCE",
+                "Unconfirmed inference minimum importance must be between 0.0 and 1.0",
+                400,
+            )
+        settings_to_save["unconfirmed_inference_min_importance"] = str(
+            ui_min_importance
+        )
+
+    for key, minimum, maximum in (
+        ("proposal_pending_cap_per_rule", 1, 1000),
+        ("proposal_pending_cap_total", 1, 2000),
+        ("proposal_generation_budget_per_run", 1, 500),
+    ):
+        if key not in body:
+            continue
+        try:
+            value = int(str(body[key]).strip())
+        except ValueError:
+            return error_response(
+                "INVALID_PROPOSAL_CAP",
+                f"{key} must be a whole number",
+                400,
+            )
+        if not minimum <= value <= maximum:
+            return error_response(
+                "INVALID_PROPOSAL_CAP",
+                f"{key} must be between {minimum} and {maximum}",
+                400,
+            )
+        settings_to_save[key] = str(value)
+
+    if "consolidation_scan_enabled" in body:
+        raw = str(body.get("consolidation_scan_enabled", "")).strip().lower()
+        settings_to_save["consolidation_scan_enabled"] = (
+            "1" if raw in ("true", "1") else "0"
+        )
+
     for key, label in (
         ("execution_log_retention_days", "Connector execution log retention"),
         ("webhook_log_retention_days", "Webhook delivery log retention"),
@@ -167,17 +234,28 @@ async def update_dashboard_system_settings(
         try:
             value = int(str(body[key]).strip())
         except ValueError:
-            return error_response("INVALID_WEBHOOK_RETRY", f"{label} must be a whole number", 400)
+            return error_response(
+                "INVALID_WEBHOOK_RETRY", f"{label} must be a whole number", 400
+            )
         if not minimum <= value <= maximum:
-            return error_response("INVALID_WEBHOOK_RETRY", f"{label} must be between {minimum} and {maximum}", 400)
+            return error_response(
+                "INVALID_WEBHOOK_RETRY",
+                f"{label} must be between {minimum} and {maximum}",
+                400,
+            )
         settings_to_save[key] = str(value)
 
     if (
         "webhook_retry_initial_seconds" in settings_to_save
         and "webhook_retry_max_seconds" in settings_to_save
-        and int(settings_to_save["webhook_retry_max_seconds"]) < int(settings_to_save["webhook_retry_initial_seconds"])
+        and int(settings_to_save["webhook_retry_max_seconds"])
+        < int(settings_to_save["webhook_retry_initial_seconds"])
     ):
-        return error_response("INVALID_WEBHOOK_RETRY", "Webhook maximum retry delay must not be lower than the initial delay", 400)
+        return error_response(
+            "INVALID_WEBHOOK_RETRY",
+            "Webhook maximum retry delay must not be lower than the initial delay",
+            400,
+        )
     system_settings_service.write_raw(settings_to_save)
 
     audit_service.write_event(
@@ -366,7 +444,9 @@ async def update_review_model_settings(
     url = str(body.get("review_model_url", "")).strip()
     name = str(body.get("review_model_name", "")).strip()
     binding_id = str(body.get("review_model_binding_id", "")).strip()
-    action = str(body.get("review_model_action", "")).strip() or "POST /chat/completions"
+    action = (
+        str(body.get("review_model_action", "")).strip() or "POST /chat/completions"
+    )
 
     # Refuse a half-configuration rather than storing something that can only
     # fail later: an operator who picks a provider means to switch it on.
@@ -378,15 +458,24 @@ async def update_review_model_settings(
         )
     if provider == "binding" and not binding_id:
         return error_response(
-            "INCOMPLETE_CONFIG", "Using a connector binding needs a binding selected.", 400
+            "INCOMPLETE_CONFIG",
+            "Using a connector binding needs a binding selected.",
+            400,
         )
 
     try:
-        timeout_seconds = int(body.get("review_model_timeout_seconds") or model_service.DEFAULT_TIMEOUT_SECONDS)
+        timeout_seconds = int(
+            body.get("review_model_timeout_seconds")
+            or model_service.DEFAULT_TIMEOUT_SECONDS
+        )
     except (TypeError, ValueError):
-        return error_response("INVALID_TIMEOUT", "Timeout must be a whole number of seconds", 400)
+        return error_response(
+            "INVALID_TIMEOUT", "Timeout must be a whole number of seconds", 400
+        )
     if not 5 <= timeout_seconds <= 600:
-        return error_response("INVALID_TIMEOUT", "Timeout must be between 5 and 600 seconds", 400)
+        return error_response(
+            "INVALID_TIMEOUT", "Timeout must be between 5 and 600 seconds", 400
+        )
 
     usefulness_raw = str(body.get("usefulness_review_enabled", "")).strip().lower()
     settings_to_save = {
@@ -398,7 +487,9 @@ async def update_review_model_settings(
         "review_model_timeout_seconds": str(timeout_seconds),
     }
     if usefulness_raw in ("true", "false"):
-        settings_to_save["usefulness_review_enabled"] = "1" if usefulness_raw == "true" else "0"
+        settings_to_save["usefulness_review_enabled"] = (
+            "1" if usefulness_raw == "true" else "0"
+        )
 
     with get_db() as conn:
         for key, value in settings_to_save.items():
@@ -421,7 +512,9 @@ async def update_review_model_settings(
         details=settings_to_save,
         ip_address=get_client_ip(request),
     )
-    return success_response({"settings": settings_to_save, "available": model_service.is_available()})
+    return success_response(
+        {"settings": settings_to_save, "available": model_service.is_available()}
+    )
 
 
 @router.post("/api/dashboard/review-model/test")
@@ -523,6 +616,12 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
         "webhook_retry_max_seconds": "300",
         "webhook_retry_jitter_seconds": "1",
         "memory_dedupe_similarity": "0.92",
+        "unconfirmed_inference_days": "90",
+        "unconfirmed_inference_min_importance": "0.7",
+        "proposal_pending_cap_per_rule": "20",
+        "proposal_pending_cap_total": "50",
+        "proposal_generation_budget_per_run": "20",
+        "consolidation_scan_enabled": "1",
     }
     with get_db() as conn:
         placeholders = ",".join("?" for _ in defaults)
@@ -551,6 +650,12 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
     webhook_retry_max_seconds = values["webhook_retry_max_seconds"]
     webhook_retry_jitter_seconds = values["webhook_retry_jitter_seconds"]
     memory_dedupe_similarity = values["memory_dedupe_similarity"]
+    unconfirmed_inference_days = values["unconfirmed_inference_days"]
+    unconfirmed_inference_min_importance = values["unconfirmed_inference_min_importance"]
+    proposal_pending_cap_per_rule = values["proposal_pending_cap_per_rule"]
+    proposal_pending_cap_total = values["proposal_pending_cap_total"]
+    proposal_generation_budget_per_run = values["proposal_generation_budget_per_run"]
+    consolidation_scan_enabled = values["consolidation_scan_enabled"] in ("1", "true")
     credential_count = int(count_row["count"] if count_row else 0)
 
     account_html = f"""
@@ -610,7 +715,7 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
         snapshot_rows = "".join(
             [
                 f"<tr><td>Credential Entries</td><td>{credential_count}</td><td class='text-muted'>Encrypted secrets stored in the vault</td></tr>",
-                f"<tr><td>Encryption Key</td><td><span class='badge badge-{ 'active' if key_status.get('mode') == 'keyring' else 'stale' }'>{escape_html(key_status.get('mode', 'unknown'))}</span></td><td class='text-muted'>Keyring size: {escape_html(key_status.get('keyring_size', 0))} · Primary key ID: {escape_html(key_status.get('primary_key_id', 'none'))}</td></tr>",
+                f"<tr><td>Encryption Key</td><td><span class='badge badge-{'active' if key_status.get('mode') == 'keyring' else 'stale'}'>{escape_html(key_status.get('mode', 'unknown'))}</span></td><td class='text-muted'>Keyring size: {escape_html(key_status.get('keyring_size', 0))} · Primary key ID: {escape_html(key_status.get('primary_key_id', 'none'))}</td></tr>",
                 f"<tr><td>Broker Credential</td><td><span class='badge badge-{broker_badge}'>{broker_label}</span></td><td class='text-muted'>Resolves {CREDENTIAL_PREFIX}* references at runtime</td></tr>",
             ]
         )
@@ -632,7 +737,9 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
 
         maint_status = get_maintenance_status()
         if maint_status["scheduler_enabled"]:
-            schedule_line = f"Runs automatically every {maint_status['interval_minutes']} minutes."
+            schedule_line = (
+                f"Runs automatically every {maint_status['interval_minutes']} minutes."
+            )
         else:
             schedule_line = (
                 f"Automatic scheduling is disabled (<code>{ENV_PREFIX}MAINTENANCE_INTERVAL_MINUTES=0</code>); "
@@ -641,12 +748,23 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
         if maint_status["last_run_at"]:
             summary = maint_status["last_run_summary"] or {}
             by = maint_status["last_run_by"] or "unknown"
+            proposals_generated = summary.get("proposals_generated", 0)
+            proposals_skipped = summary.get("proposals_skipped_at_cap", 0)
+            proposals_line = (
+                f", consolidation proposals generated: <code>{proposals_generated}</code>"
+                + (
+                    f" (skipped at cap: <code>{proposals_skipped}</code>)"
+                    if proposals_skipped
+                    else ""
+                )
+            )
             last_run_line = (
                 f"Last run: {local_dt(maint_status['last_run_at'])} ({escape_html(by)}) — "
                 f"stale activities marked: <code>{summary.get('stale_activities_marked', 0)}</code>, "
                 f"scratchpad pruned: <code>{summary.get('scratchpad_pruned', 0)}</code>, "
                 f"TTL swept: <code>{summary.get('ttl_swept', 0)}</code>, "
-                f"retracted/superseded purged: <code>{summary.get('retracted_purged', 0)}</code>."
+                f"retracted/superseded purged: <code>{summary.get('retracted_purged', 0)}</code>"
+                f"{proposals_line}."
             )
         else:
             last_run_line = "Last run: never — check back after the next scheduled run, or run it manually now."
@@ -719,6 +837,36 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
           <input type="number" id="memory-dedupe-similarity" min="0.5" max="1" step="0.01" value="{escape_html(memory_dedupe_similarity)}" style="width:120px">
           <p class="form-hint">Cosine similarity above which a new memory write is flagged as a possible duplicate of an existing record in the same scope. Advisory only — the write is never blocked. Requires vector search; without it no duplicate check runs. Lower catches more, at the cost of false alarms.</p>
         </div>
+        <div class="form-group">
+          <label>Unconfirmed Inference Cutoff (days)</label>
+          <input type="number" id="unconfirmed-inference-days" min="1" max="90" value="{escape_html(unconfirmed_inference_days)}" style="width:120px">
+          <p class="form-hint">Days an unconfirmed, agent-authored fact must age before the consolidation queue asks about it. Bounds 1–90; default 90. Reviewed facts (confirmed with evidence) skip the queue entirely.</p>
+        </div>
+        <div class="form-group">
+          <label>Unconfirmed Inference Minimum Importance</label>
+          <input type="number" id="unconfirmed-inference-min-importance" min="0" max="1" step="0.05" value="{escape_html(unconfirmed_inference_min_importance)}" style="width:120px">
+          <p class="form-hint">Below this importance, an unconfirmed fact ages out of ranking quietly instead of asking you to fact-check it. Bounds 0–1; default 0.7. Raise it to shrink the review queue to only what would actually be missed.</p>
+        </div>
+        <div class="form-group">
+          <label>Proposal Pending Cap (per rule/scope)</label>
+          <input type="number" id="proposal-pending-cap-per-rule" min="1" max="1000" value="{escape_html(proposal_pending_cap_per_rule)}" style="width:120px">
+          <p class="form-hint">Maximum pending proposals per (rule, scope) pair. Bounds 1–1000; default 20.</p>
+        </div>
+        <div class="form-group">
+          <label>Proposal Pending Cap (installation-wide)</label>
+          <input type="number" id="proposal-pending-cap-total" min="1" max="2000" value="{escape_html(proposal_pending_cap_total)}" style="width:120px">
+          <p class="form-hint">Maximum total pending proposals across all rules and scopes. Bounds 1–2000; default 50.</p>
+        </div>
+        <div class="form-group">
+          <label>Proposal Generation Budget per Run</label>
+          <input type="number" id="proposal-generation-budget-per-run" min="1" max="500" value="{escape_html(proposal_generation_budget_per_run)}" style="width:120px">
+          <p class="form-hint">Maximum new proposals a single generate_proposals call inserts, regardless of cap headroom. Bounds 1–500; default 20.</p>
+        </div>
+        <label class="checkbox-label">
+          <input type="checkbox" id="consolidation-scan-enabled" {"checked" if consolidation_scan_enabled else ""}>
+          Run consolidation queue automatically on the maintenance schedule
+        </label>
+        <p class="form-hint">Off leaves the Memory Clean-up queue to the manual "Check for more" button on the dashboard. Verification still runs unattended either way.</p>
         <div class="form-group">
           <label>Connector Execution Log Retention</label>
           <input type="number" id="execution-log-retention-days" min="0" max="365" value="{escape_html(execution_log_retention_days)}" style="width:120px">
@@ -991,11 +1139,16 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
       const r = await fetch('/api/backup/maintenance', {{ method: 'POST' }});
       const j = await r.json();
       if (j.ok) {{
+        const proposalsGen = j.data.proposals_generated || 0;
+        const proposalsSkip = j.data.proposals_skipped_at_cap || 0;
         document.getElementById('backup-result').innerHTML =
-          '<div class="alert alert-success">Maintenance complete. Stale activities marked: <code>' + j.data.stale_activities_marked + '</code>. Scratchpad memories pruned: <code>' + j.data.scratchpad_pruned + '</code>. Retracted/superseded purged: <code>' + j.data.retracted_purged + '</code>.</div>';
+          '<div class="alert alert-success">Maintenance complete. Stale activities marked: <code>' + j.data.stale_activities_marked + '</code>. Scratchpad memories pruned: <code>' + j.data.scratchpad_pruned + '</code>. Retracted/superseded purged: <code>' + j.data.retracted_purged + '</code>. Consolidation proposals generated: <code>' + proposalsGen + '</code>.</div>';
         const lastRunEl = document.getElementById('maintenance-last-run');
         if (lastRunEl) {{
-          lastRunEl.innerHTML = 'Last run: just now (manual) — stale activities marked: <code>' + j.data.stale_activities_marked + '</code>, scratchpad pruned: <code>' + j.data.scratchpad_pruned + '</code>, TTL swept: <code>' + j.data.ttl_swept + '</code>, retracted/superseded purged: <code>' + j.data.retracted_purged + '</code>.';
+          const skippedPart = proposalsSkip > 0
+            ? ' (skipped at cap: <code>' + proposalsSkip + '</code>)'
+            : '';
+          lastRunEl.innerHTML = 'Last run: just now (manual) — stale activities marked: <code>' + j.data.stale_activities_marked + '</code>, scratchpad pruned: <code>' + j.data.scratchpad_pruned + '</code>, TTL swept: <code>' + j.data.ttl_swept + '</code>, retracted/superseded purged: <code>' + j.data.retracted_purged + '</code>, consolidation proposals generated: <code>' + proposalsGen + '</code>' + skippedPart + '.';
         }}
         showToast('Maintenance complete');
       }} else {{ showToast(j.error?.message || 'Failed', 'danger'); }}
@@ -1074,6 +1227,12 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
         retracted_retention_days: document.getElementById('retracted-retention-days').value,
         episodic_memory_ttl_days: document.getElementById('episodic-memory-ttl-days').value,
         memory_dedupe_similarity: document.getElementById('memory-dedupe-similarity').value,
+        unconfirmed_inference_days: document.getElementById('unconfirmed-inference-days').value,
+        unconfirmed_inference_min_importance: document.getElementById('unconfirmed-inference-min-importance').value,
+        proposal_pending_cap_per_rule: document.getElementById('proposal-pending-cap-per-rule').value,
+        proposal_pending_cap_total: document.getElementById('proposal-pending-cap-total').value,
+        proposal_generation_budget_per_run: document.getElementById('proposal-generation-budget-per-run').value,
+        consolidation_scan_enabled: document.getElementById('consolidation-scan-enabled').checked ? 'true' : 'false',
         execution_log_retention_days: document.getElementById('execution-log-retention-days').value,
         webhook_log_retention_days: document.getElementById('webhook-log-retention-days').value,
         webhook_retry_max_attempts: document.getElementById('webhook-retry-max-attempts').value,
@@ -1264,9 +1423,7 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
 
 
 @router.get("/settings/password")
-def settings_password_page(
-    request: Request, session: dict = Depends(require_auth)
-):
+def settings_password_page(request: Request, session: dict = Depends(require_auth)):
     js = """
     <script>
     function showPasswordStatus(message, type) {

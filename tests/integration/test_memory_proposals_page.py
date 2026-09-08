@@ -43,6 +43,26 @@ def test_queued_proposal_is_rendered_with_its_evidence(test_client, admin_token)
     assert "Retracted Records below" in html
 
 
+def test_queue_is_grouped_by_scope_and_collapsed(test_client, admin_token):
+    """Proposals across different scopes render as separate, collapsed-by-
+    default groups rather than one flat list — reviewing one project at a
+    time, not a wall of unrelated cards."""
+    _write(content=CLOSEOUT, scope="workspace:alpha")
+    _write(content=CLOSEOUT.replace("STA-47", "STA-48"), scope="workspace:beta")
+    test_client.post(
+        "/api/memory/proposals/generate",
+        headers={"Authorization": f"Bearer {admin_token}"},
+        json={},
+    )
+
+    html = _page(test_client, admin_token)
+    assert 'data-proposal-scope="workspace:alpha"' in html
+    assert 'data-proposal-scope="workspace:beta"' in html
+    # <details> without an `open` attribute renders collapsed by default.
+    assert '<details class="card" style="margin-bottom:12px" data-proposal-scope="workspace:alpha" open' not in html
+    assert "(1 memory)" in html
+
+
 def test_rule_accuracy_table_is_present(test_client, admin_token):
     html = _page(test_client, admin_token)
     assert "How good these suggestions have been" in html

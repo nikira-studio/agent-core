@@ -41,7 +41,10 @@ def _insert_legacy_record(conn, record_id: str, record_status: str) -> None:
 
 def test_status_changed_at_column_missing_before_migration():
     conn = _bare_connection()
-    columns = {row["name"] for row in conn.execute("PRAGMA table_info(memory_records)").fetchall()}
+    columns = {
+        row["name"]
+        for row in conn.execute("PRAGMA table_info(memory_records)").fetchall()
+    }
     assert "status_changed_at" not in columns
 
 
@@ -53,12 +56,17 @@ def test_migration_adds_column_and_backfills_legacy_retracted_rows():
 
     _ensure_memory_metadata_columns(conn)
 
-    columns = {row["name"] for row in conn.execute("PRAGMA table_info(memory_records)").fetchall()}
+    columns = {
+        row["name"]
+        for row in conn.execute("PRAGMA table_info(memory_records)").fetchall()
+    }
     assert "status_changed_at" in columns
 
     rows = {
         row["id"]: row["status_changed_at"]
-        for row in conn.execute("SELECT id, status_changed_at FROM memory_records").fetchall()
+        for row in conn.execute(
+            "SELECT id, status_changed_at FROM memory_records"
+        ).fetchall()
     }
     # Retracted/superseded legacy rows get a fresh "now" stamp, not backdated
     # to created_at (2020) -- backdating would make them immediately
@@ -113,7 +121,9 @@ def test_user_active_migration_defaults_existing_accounts_to_active():
     assert row["is_active"] == 1
 
     _ensure_user_active_column(conn)
-    columns = {row["name"] for row in conn.execute("PRAGMA table_info(users)").fetchall()}
+    columns = {
+        row["name"] for row in conn.execute("PRAGMA table_info(users)").fetchall()
+    }
     assert "is_active" in columns
 
 
@@ -133,8 +143,12 @@ def test_existing_binding_table_adds_resolution_columns_before_indexes():
 
     create_schema(conn)
 
-    columns = {row["name"] for row in conn.execute("PRAGMA table_info(connector_bindings)")}
-    indexes = {row["name"] for row in conn.execute("PRAGMA index_list(connector_bindings)")}
+    columns = {
+        row["name"] for row in conn.execute("PRAGMA table_info(connector_bindings)")
+    }
+    indexes = {
+        row["name"] for row in conn.execute("PRAGMA index_list(connector_bindings)")
+    }
     assert "logical_alias" in columns
     assert "is_preferred" in columns
     assert "idx_bindings_alias_unique" in indexes
@@ -203,6 +217,8 @@ def test_create_schema_records_and_skips_applied_revision(monkeypatch):
         {"revision": 1, "name": "normalize-current-schema"},
         {"revision": 2, "name": "canonical-system-settings"},
         {"revision": 3, "name": "agent-capabilities-and-webhook-queue"},
+        {"revision": 4, "name": "system-settings-default-rows"},
+        {"revision": 5, "name": "unconfirmed-inference-importance-gate"},
     ]
 
     def unexpected_rerun(_conn):
@@ -210,6 +226,41 @@ def test_create_schema_records_and_skips_applied_revision(monkeypatch):
 
     monkeypatch.setattr(schema_module, "_migrate_001_current_schema", unexpected_rerun)
     create_schema(conn)
+
+
+def test_migration_005_bumps_only_the_unmodified_default(monkeypatch):
+    """An install that already migrated to revision 4 has an explicit
+    unconfirmed_inference_days='7' row. Migration 5 must bump that to the
+    new 90-day default, but must never touch a value an operator already
+    changed away from '7'."""
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    create_schema(conn)
+
+    def read(key):
+        row = conn.execute(
+            "SELECT value FROM system_settings WHERE key = ?", (key,)
+        ).fetchone()
+        return row["value"] if row else None
+
+    # A fresh install already lands on 90 via migration 4's current defaults.
+    assert read("unconfirmed_inference_days") == "90"
+    assert read("unconfirmed_inference_min_importance") == "0.7"
+
+    # Simulate a pre-revision-5 install that still had the old seeded "7",
+    # then re-run just the targeted migration.
+    conn.execute(
+        "UPDATE system_settings SET value = '7' WHERE key = 'unconfirmed_inference_days'"
+    )
+    schema_module._migrate_005_unconfirmed_inference_importance_gate(conn)
+    assert read("unconfirmed_inference_days") == "90"
+
+    # An operator's deliberate override must survive the same migration.
+    conn.execute(
+        "UPDATE system_settings SET value = '30' WHERE key = 'unconfirmed_inference_days'"
+    )
+    schema_module._migrate_005_unconfirmed_inference_importance_gate(conn)
+    assert read("unconfirmed_inference_days") == "30"
 
 
 def test_legacy_id_keyed_system_settings_are_rebuilt_for_current_writes(
@@ -235,17 +286,22 @@ def test_legacy_id_keyed_system_settings_are_rebuilt_for_current_writes(
     create_schema(conn)
 
     columns = {
-        row["name"]: row
-        for row in conn.execute("PRAGMA table_info(system_settings)")
+        row["name"]: row for row in conn.execute("PRAGMA table_info(system_settings)")
     }
     assert columns["key"]["pk"] == 1
     assert "id" not in columns
-    assert conn.execute(
-        "SELECT value FROM system_settings WHERE key = 'vector_api_key'"
-    ).fetchone()["value"] == "encrypted-legacy"
+    assert (
+        conn.execute(
+            "SELECT value FROM system_settings WHERE key = 'vector_api_key'"
+        ).fetchone()["value"]
+        == "encrypted-legacy"
+    )
 
     monkeypatch.setattr(system_settings_service, "get_db", lambda: conn)
     system_settings_service.write_raw({"vector_model": "test-model"})
-    assert conn.execute(
-        "SELECT value FROM system_settings WHERE key = 'vector_model'"
-    ).fetchone()["value"] == "test-model"
+    assert (
+        conn.execute(
+            "SELECT value FROM system_settings WHERE key = 'vector_model'"
+        ).fetchone()["value"]
+        == "test-model"
+    )

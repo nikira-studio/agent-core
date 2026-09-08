@@ -1,5 +1,3 @@
-
-
 import json
 
 
@@ -46,7 +44,9 @@ def test_memory_write_rejects_invalid_source_kind(test_client, agent_token):
     assert r.json()["error"]["code"] == "INVALID_SOURCE_KIND"
 
 
-def test_memory_write_rejects_invalid_confidence_and_importance(test_client, agent_token):
+def test_memory_write_rejects_invalid_confidence_and_importance(
+    test_client, agent_token
+):
     confidence = test_client.post(
         "/api/memory/write",
         headers={"Authorization": f"Bearer {agent_token}"},
@@ -93,7 +93,9 @@ def test_memory_search(test_client, agent_token):
     assert "records" in r.json()["data"]
 
 
-def test_memory_import_notes_creates_searchable_external_records(test_client, agent_token):
+def test_memory_import_notes_creates_searchable_external_records(
+    test_client, agent_token
+):
     import_r = test_client.post(
         "/api/memory/import",
         headers={"Authorization": f"Bearer {agent_token}"},
@@ -115,7 +117,10 @@ def test_memory_import_notes_creates_searchable_external_records(test_client, ag
     assert import_r.status_code == 201, import_r.json()
     data = import_r.json()["data"]
     assert data["total_records"] == 2
-    assert {item["filename"] for item in data["imported"]} == {"memory.md", "handoff.md"}
+    assert {item["filename"] for item in data["imported"]} == {
+        "memory.md",
+        "handoff.md",
+    }
     assert all(record["source_kind"] == "external_import" for record in data["records"])
 
     provenance = json.loads(data["records"][0]["provenance_json"])
@@ -134,14 +139,19 @@ def test_memory_import_notes_creates_searchable_external_records(test_client, ag
     assert any("zephyrdelta-import-token" in record["content"] for record in records)
 
 
-def test_memory_import_rejects_pii_in_shared_scope_before_writing(test_client, admin_token):
+def test_memory_import_rejects_pii_in_shared_scope_before_writing(
+    test_client, admin_token
+):
     import_r = test_client.post(
         "/api/memory/import",
         headers={"Authorization": f"Bearer {admin_token}"},
         json={
             "scope": "shared",
             "sources": [
-                {"filename": "safe.md", "content": "safe import token before rejection"},
+                {
+                    "filename": "safe.md",
+                    "content": "safe import token before rejection",
+                },
                 {"filename": "private.md", "content": "contact alice@example.com"},
             ],
         },
@@ -163,7 +173,9 @@ def test_memory_page_exposes_import_controls(test_client, admin_token):
     assert r.status_code == 200
     html = r.text
     assert "Import Notes" in html
-    assert "curated handoffs, decision notes, project facts, or markdown summaries" in html
+    assert (
+        "curated handoffs, decision notes, project facts, or markdown summaries" in html
+    )
     assert "What good notes look like" in html
     assert "default save class for imports" in html
     assert 'id="mem-import-files"' in html
@@ -233,7 +245,9 @@ def test_memory_get_excludes_retracted_records_by_default(test_client, agent_tok
     )
     assert default_r.status_code == 200
     default_ids = {r["id"] for r in default_r.json()["data"]["records"]}
-    assert record_id not in default_ids, "retracted record leaked into the default (unfiltered) view"
+    assert record_id not in default_ids, (
+        "retracted record leaked into the default (unfiltered) view"
+    )
 
     all_r = test_client.post(
         "/api/memory/get",
@@ -242,7 +256,9 @@ def test_memory_get_excludes_retracted_records_by_default(test_client, agent_tok
     )
     assert all_r.status_code == 200
     all_ids = {r["id"] for r in all_r.json()["data"]["records"]}
-    assert record_id in all_ids, "record_status='all' should still surface retracted records"
+    assert record_id in all_ids, (
+        "record_status='all' should still surface retracted records"
+    )
 
     retracted_only_r = test_client.post(
         "/api/memory/get",
@@ -448,7 +464,8 @@ def test_memory_retract_stamps_status_changed_at(clean_db):
 
     with get_db() as conn:
         restored = conn.execute(
-            "SELECT status_changed_at, record_status FROM memory_records WHERE id = ?", (record_id,)
+            "SELECT status_changed_at, record_status FROM memory_records WHERE id = ?",
+            (record_id,),
         ).fetchone()
     assert restored["record_status"] == "active"
     assert restored["status_changed_at"] is None
@@ -481,7 +498,9 @@ def test_memory_supersede_on_write_stamps_status_changed_at(clean_db):
     assert row["status_changed_at"] is not None
 
 
-def test_memory_retract_accepts_json_body_and_uses_correct_error_code(test_client, agent_token):
+def test_memory_retract_accepts_json_body_and_uses_correct_error_code(
+    test_client, agent_token
+):
     write_r = test_client.post(
         "/api/memory/write",
         headers={"Authorization": f"Bearer {agent_token}"},
@@ -652,11 +671,9 @@ def test_memory_write_roundtrips_provenance_and_freshness_fields(
         "content": "Preference with freshness metadata",
         "memory_class": "preference",
         "scope": "agent:testagent",
-        "source_kind": "operator_authored",
         "slot_key": "style",
         "valid_from": "2026-05-15T00:00:00Z",
         "valid_to": "2026-06-15T00:00:00Z",
-        "last_confirmed_at": "2026-05-15T01:00:00Z",
     }
     r = test_client.post(
         "/api/memory/write",
@@ -668,11 +685,15 @@ def test_memory_write_roundtrips_provenance_and_freshness_fields(
     assert record["slot_key"] == "style"
     assert record["valid_from"] == "2026-05-15T00:00:00+00:00"
     assert record["valid_to"] == "2026-06-15T00:00:00+00:00"
-    assert record["last_confirmed_at"] == "2026-05-15T01:00:00+00:00"
+    # last_confirmed_at is server-owned: only memory_confirm with evidence
+    # sets it. A fresh write leaves it null. See plan.md Workstream 1.
+    assert record["last_confirmed_at"] is None
     assert record["provenance_json"]
     provenance = json.loads(record["provenance_json"])
     assert provenance["channel"] == "api"
-    assert provenance["source_kind"] == "operator_authored"
+    # The default source_kind for an agent write is agent_inference; an agent
+    # cannot claim operator_authored (Workstream 1 restriction).
+    assert provenance["source_kind"] == "agent_inference"
 
     fetched = test_client.get(
         f"/api/memory/{record['id']}",
@@ -682,6 +703,59 @@ def test_memory_write_roundtrips_provenance_and_freshness_fields(
     fetched_record = fetched.json()["data"]["record"]
     assert fetched_record["slot_key"] == "style"
     assert fetched_record["provenance_json"] == record["provenance_json"]
+
+
+def test_rest_memory_write_rejects_client_supplied_last_confirmed_at(
+    test_client, agent_token
+):
+    """last_confirmed_at cannot be set through the ordinary write path."""
+    r = test_client.post(
+        "/api/memory/write",
+        headers={"Authorization": f"Bearer {agent_token}"},
+        json={
+            "content": "An attempt to sneak in confirmation",
+            "memory_class": "fact",
+            "scope": "agent:testagent",
+            "last_confirmed_at": "2026-05-15T01:00:00Z",
+        },
+    )
+    assert r.status_code == 400, r.json()
+    assert r.json()["error"]["code"] == "LAST_CONFIRMED_AT_READ_ONLY"
+
+
+def test_rest_memory_write_rejects_human_source_kind_from_agent(
+    test_client, agent_token
+):
+    """An agent may not claim operator_authored or human_direct."""
+    for tier in ("operator_authored", "human_direct"):
+        r = test_client.post(
+            "/api/memory/write",
+            headers={"Authorization": f"Bearer {agent_token}"},
+            json={
+                "content": "Pretending to be human",
+                "memory_class": "fact",
+                "scope": "agent:testagent",
+                "source_kind": tier,
+            },
+        )
+        assert r.status_code == 403, (tier, r.json())
+        assert r.json()["error"]["code"] == "SOURCE_KIND_DENIED"
+
+
+def test_rest_memory_write_rejects_external_import_from_agent(test_client, agent_token):
+    """external_import is reserved for the import path and merge-restore."""
+    r = test_client.post(
+        "/api/memory/write",
+        headers={"Authorization": f"Bearer {agent_token}"},
+        json={
+            "content": "Pretending to be imported",
+            "memory_class": "fact",
+            "scope": "agent:testagent",
+            "source_kind": "external_import",
+        },
+    )
+    assert r.status_code == 403, r.json()
+    assert r.json()["error"]["code"] == "SOURCE_KIND_DENIED"
 
 
 def test_memory_write_ignores_client_supplied_provenance(test_client, agent_token):

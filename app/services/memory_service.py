@@ -189,12 +189,21 @@ def set_subject_anchor(
             (normalized, provenance, record_id),
         )
         from app.services.workspace_sync_service import record_change
+
         record_change(
-            conn, memory_scope=record["scope"], change_type="memory_reanchored",
-            resource_type="memory", resource_id=record_id, source_agent_id=changed_by,
-            summary={"topic": record.get("topic"), "memory_class": record["memory_class"],
-                     "subject_anchor": normalized, "record_status": record["record_status"],
-                     "preview": record["content"][:240]},
+            conn,
+            memory_scope=record["scope"],
+            change_type="memory_reanchored",
+            resource_type="memory",
+            resource_id=record_id,
+            source_agent_id=changed_by,
+            summary={
+                "topic": record.get("topic"),
+                "memory_class": record["memory_class"],
+                "subject_anchor": normalized,
+                "record_status": record["record_status"],
+                "preview": record["content"][:240],
+            },
         )
         conn.commit()
     return get_memory_record(record_id)
@@ -220,7 +229,9 @@ def _normalize_scope(scope: str) -> str:
     return scope
 
 
-def _normalize_optional_timestamp(value: Optional[str], field_name: str) -> Optional[str]:
+def _normalize_optional_timestamp(
+    value: Optional[str], field_name: str
+) -> Optional[str]:
     if value is None or value == "":
         return None
     try:
@@ -293,7 +304,9 @@ def provenance_for_write(
             if active:
                 payload["activity_id"] = active["id"]
         except Exception:
-            logger.debug("Could not resolve active activity for provenance", exc_info=True)
+            logger.debug(
+                "Could not resolve active activity for provenance", exc_info=True
+            )
     return build_provenance(
         actor_type=actor_type,
         actor_id=actor_id,
@@ -411,7 +424,9 @@ EPISODIC_ADVISORY_PATTERNS = (
     (re.compile(r"\bper-fire\b", re.I), "reads as a per-fire log"),
     (re.compile(r"\bidle closeout\b", re.I), "reads as an idle closeout"),
     (
-        re.compile(r"\b[A-Z]{2,6}-\d+\b.{0,80}\bclosed\s+(done|in_review)\b", re.I | re.S),
+        re.compile(
+            r"\b[A-Z]{2,6}-\d+\b.{0,80}\bclosed\s+(done|in_review)\b", re.I | re.S
+        ),
         "reads as a ticket closeout",
     ),
 )
@@ -446,12 +461,20 @@ EPISODIC_EXPIRY_PATTERNS = (
 # heartbeats, e.g. "the scheduler config is read once at startup ... heartbeat
 # recovery runs scanSilentActiveRuns()".
 EPISODIC_LEAD_CHARS = 200
-EPISODIC_TIMESTAMP = re.compile(r"\b(20\d\d-\d\d-\d\d|\d\d:\d\d\s*(UTC|Z)|fire #\s*\d+)")
+EPISODIC_TIMESTAMP = re.compile(
+    r"\b(20\d\d-\d\d-\d\d|\d\d:\d\d\s*(UTC|Z)|fire #\s*\d+)"
+)
 # Records *about* a cleanup quote the very phrases they are describing.
 EPISODIC_META = re.compile(r"\bconsolidation note\b|\bretracted \d+\b", re.I)
 
 EPISODIC_TTL_DAYS_DEFAULT = 30
 DEDUPE_SIMILARITY_DEFAULT = 0.92
+
+# Prefix length used for the non-embedding "near-exact-prefix" match against
+# retracted records (Workstream 4) and for the corpus-scan duplicate_cluster
+# rule. Defined here so both checks share one definition of "near-exact
+# prefix", and renaming one in the future means renaming it everywhere.
+DUPLICATE_PREFIX_CHARS = 90
 
 
 def detect_episodic_shape(content: str, topic: Optional[str] = None) -> Optional[str]:
@@ -509,35 +532,56 @@ def find_near_duplicates(
     threshold: Optional[float] = None,
     limit: int = 3,
     exclude_id: Optional[str] = None,
+    statuses: tuple[str, ...] = ("active",),
 ) -> list[dict]:
-    """Find active records in the same scope that already say roughly this.
+    """Find records in the same scope whose content is already close to this.
 
     Semantic-only: without embeddings there is no reliable way to tell a
     near-duplicate from a record that merely shares vocabulary, and a false
     "you already wrote this" is worse than no warning at all. Returns [] when
     vector search is unavailable rather than guessing from keyword overlap.
+
+    `statuses` defaults to ``("active",)`` so the existing call site keeps its
+    narrow meaning. ``assess_memory_write`` passes both ``"active"`` and
+    ``"retracted"`` so a write that closely matches a previously-retracted
+    record can be flagged, partitioned by `record_status` in the returned
+    `candidates` (see Workstream 4). The `limit` is applied per status rather
+    than across the combined result, so the arguably-more-important retracted
+    match is not crowded out by three active matches ranked just above it.
+
+    Retracted records' vectors persist (only `delete_memory_hard` removes
+    them) so an embedding-based match still works for them.
     """
     if not content.strip():
         return []
-    if not (_EMBEDDING_AVAILABLE and vector_settings_service.is_vector_search_enabled()):
+    if not statuses:
+        statuses = ("active",)
+    statuses = tuple(s for s in statuses if s)
+    if not statuses:
         return []
 
     cutoff = (
         threshold
         if threshold is not None
-        else _system_setting_float("memory_dedupe_similarity", DEDUPE_SIMILARITY_DEFAULT)
+        else _system_setting_float(
+            "memory_dedupe_similarity", DEDUPE_SIMILARITY_DEFAULT
+        )
     )
 
-    try:
-        vector_bytes, _ = embedding_service.generate_embedding(content)
-    except Exception:
-        logger.debug("Embedding failed during duplicate check", exc_info=True)
-        return []
-    if vector_bytes is None:
-        return []
+    embedding_unavailable = not (
+        _EMBEDDING_AVAILABLE and vector_settings_service.is_vector_search_enabled()
+    )
+    vector_bytes: Optional[bytes] = None
+    if not embedding_unavailable:
+        try:
+            vector_bytes, _ = embedding_service.generate_embedding(content)
+        except Exception:
+            logger.debug("Embedding failed during duplicate check", exc_info=True)
+        # vector_bytes may legitimately be None here — the fallback below
+        # catches whatever the embedding path missed.
 
-    conditions = ["scope = ?", "record_status = 'active'"]
-    params: list = [_normalize_scope(scope)]
+    conditions = ["scope = ?", f"record_status IN ({','.join('?' for _ in statuses)})"]
+    params: list = [_normalize_scope(scope), *statuses]
     if memory_class:
         conditions.append("memory_class = ?")
         params.append(memory_class)
@@ -555,38 +599,183 @@ def find_near_duplicates(
             params,
         ).fetchall()
 
-    candidate_ids = [row["id"] for row in rows]
-    if not candidate_ids:
-        return []
+    # Per-status top-K: a single combined top-K lets enough higher-scoring
+    # active matches crowd a real retracted match out of the candidate set
+    # before the per-status partition ever sees it. Query each status's
+    # candidate_ids separately so each list gets a fair top-K of its own.
+    by_id = {row["id"]: dict(row) for row in rows}
+    status_ids: dict[str, list[str]] = {s: [] for s in statuses}
+    for row in rows:
+        status = row["record_status"] or "active"
+        if status in status_ids:
+            status_ids[status].append(row["id"])
 
-    try:
-        scored = vector_service.cosine_search_top_k(
-            vector_bytes, max(limit * 4, 20), candidate_ids
-        )
-    except Exception:
-        logger.debug("Vector duplicate search failed", exc_info=True)
-        return []
+    scored_by_id: dict[str, float] = {}
+    if vector_bytes is not None and any(status_ids.values()):
+        for s, ids in status_ids.items():
+            if not ids:
+                continue
+            try:
+                # Per-status top-K. The "4" multiplier (matching the prior
+                # implementation) keeps the per-status pool generous enough
+                # that the cutoff can drop low-quality matches without
+                # leaving the result list empty.
+                scored = vector_service.cosine_search_top_k(
+                    vector_bytes, max(limit * 4, 20), ids
+                )
+            except Exception:
+                logger.debug("Vector duplicate search failed", exc_info=True)
+                continue
+            for rid, score in scored:
+                scored_by_id[rid] = float(score)
 
     by_id = {row["id"]: dict(row) for row in rows}
-    duplicates = []
-    for record_id, score in scored:
+    by_status: dict[str, list[dict]] = {s: [] for s in statuses}
+    for record_id, record in by_id.items():
+        score = scored_by_id.get(record_id)
+        if score is None:
+            continue
         if score < cutoff:
             continue
-        record = by_id.get(record_id)
-        if not record:
+        status = record.get("record_status") or "active"
+        if status not in by_status:
+            # A record's status changed between the SELECT and the partition;
+            # treat it as out of scope for both lists rather than misfile it.
             continue
-        duplicates.append(
+        by_status[status].append(
             {
                 "id": record["id"],
-                "similarity": round(float(score), 4),
+                "record_status": status,
+                "similarity": round(score, 4),
                 "topic": record.get("topic"),
                 "created_at": record.get("created_at"),
+                "retracted_at": record.get("status_changed_at"),
                 "content_preview": (record.get("content") or "")[:200],
             }
         )
-        if len(duplicates) >= limit:
+
+    result: list[dict] = []
+    for status, items in by_status.items():
+        items.sort(key=lambda x: x["similarity"], reverse=True)
+        result.extend(items[:limit])
+    return result
+
+
+# Cheap, no-embedding check for retracted records: normalize whitespace and
+# case, then compare the first DUPLICATE_PREFIX_CHARS characters against
+# every retracted record in the same scope. Used as an unconditional fallback
+# for the retracted-status check (see plan.md Workstream 4), so a transient
+# embedding failure on a vector-search-enabled installation does not disable
+# retraction awareness. Reuses the same normalization as
+# `_rule_duplicate_cluster` so what counts as a "near-exact-prefix match" is
+# one definition, not two.
+#
+# Match rule: the retracted record's first N normalized chars must equal the
+# new content's first N normalized chars, where N is the shorter of the two
+# lengths. We also require both sides to be at least MIN_PREFIX_CHARS long so
+# a trivial 1-character retracted record does not match a 1-character shared
+# prefix by accident.
+MIN_PREFIX_CHARS = 30
+
+
+def _normalize_for_prefix_match(content: str) -> str:
+    """The one normalization rule used by this codebase for "near-exact
+    prefix" matching against retracted records.
+
+    `" ".join(content.split())` collapses ANY run of tabs/newlines/CRs/spaces
+    into one space AND strips leading/trailing whitespace. Used on both
+    sides of the match — the new content and the stored record — so they
+    compare under the same definition. SQLite has no regex replace and
+    no native string-stripping function, and reproducing this rule in
+    SQL was getting fragile (see planb.md round-3 round-3 review for the
+    whitespace-collapsing round trip). Keeping the normalization in
+    Python, on a small retention-bounded candidate set, removes the
+    SQL-vs-Python drift risk and is fast enough — retracted rows are
+    retention-bounded and this function is only called from
+    `assess_memory_write`, not from the hot ranking path.
+    """
+    return " ".join((content or "").split()).lower()
+
+
+def _retracted_prefix_duplicates(
+    content: str,
+    scope: str,
+    memory_class: Optional[str] = None,
+    exclude_id: Optional[str] = None,
+    limit: int = 3,
+) -> list[dict]:
+    """Pull retracted records in the same scope that share a normalized
+    prefix with the new write — see ``assess_memory_write`` for the caller.
+
+    Two-step: cheap scope filter + status filter + lower-bound on
+    length (so we don't fetch records shorter than ``MIN_PREFIX_CHARS``
+    and waste Python normalization on them), then Python normalization of
+    the small retention-bounded set. The SQL only enforces the hard
+    "must be at least 30 chars" filter; the actual match is done in
+    Python so leading/trailing whitespace and any future normalization
+    tweaks land in one place, not two.
+    """
+    normalized = _normalize_for_prefix_match(content)
+    if len(normalized) < MIN_PREFIX_CHARS:
+        return []
+    prefix = normalized[:DUPLICATE_PREFIX_CHARS]
+
+    conditions = [
+        "scope = ?",
+        "record_status = 'retracted'",
+        "length(content) >= ?",  # at least MIN_PREFIX_CHARS long
+    ]
+    params: list = [
+        _normalize_scope(scope),
+        MIN_PREFIX_CHARS,
+    ]
+    if memory_class:
+        conditions.append("memory_class = ?")
+        params.append(memory_class)
+    if exclude_id:
+        conditions.append("id != ?")
+        params.append(exclude_id)
+    with get_db() as conn:
+        rows = conn.execute(
+            f"SELECT id, topic, created_at, status_changed_at, content "
+            f"FROM memory_records WHERE {' AND '.join(conditions)}",
+            params,
+        ).fetchall()
+
+    matches: list[dict] = []
+    for row in rows:
+        record_normalized = _normalize_for_prefix_match(row["content"] or "")
+        if len(record_normalized) < MIN_PREFIX_CHARS:
+            continue
+        # Match rule: the new content's normalized prefix (up to
+        # DUPLICATE_PREFIX_CHARS) and the record's normalized content
+        # (full or up to DUPLICATE_PREFIX_CHARS, whichever is shorter)
+        # must be equal.
+        if record_normalized.startswith(prefix):
+            matches.append(row)
+        elif (
+            prefix.startswith(record_normalized)
+            and len(prefix) <= DUPLICATE_PREFIX_CHARS
+        ):
+            # The record is the shorter side and the new content's prefix
+            # matches the whole record — same outcome from the other side
+            # of the OR.
+            matches.append(row)
+        if len(matches) >= limit:
             break
-    return duplicates
+
+    return [
+        {
+            "id": row["id"],
+            "record_status": "retracted",
+            "similarity": 1.0,
+            "topic": row["topic"],
+            "created_at": row["created_at"],
+            "retracted_at": row["status_changed_at"],
+            "content_preview": (row["content"] or "")[:200],
+        }
+        for row in matches
+    ]
 
 
 # The two directions need different tests, because they ask different questions.
@@ -731,10 +920,35 @@ def assess_memory_write(
         warnings.append({"code": "CLASS_MISMATCH", "message": class_mismatch})
 
     if check_duplicates and memory_class != "scratchpad":
-        duplicates = find_near_duplicates(
+        candidates = find_near_duplicates(
+            content,
+            scope,
+            memory_class,
+            exclude_id=exclude_id,
+            statuses=("active", "retracted"),
+        )
+        active_matches = [c for c in candidates if c.get("record_status") == "active"]
+        retracted_matches = [
+            c for c in candidates if c.get("record_status") == "retracted"
+        ]
+
+        # Non-embedding fallback for retracted matches, run unconditionally:
+        # a transient embedding failure on a vector-search-enabled installation
+        # would otherwise silently disable retraction awareness. The fallback
+        # is cheap (retracted rows are a retention-bounded set), needs no
+        # embedding, and matches on the same prefix definition the
+        # duplicate_cluster rule uses. See plan.md Workstream 4.
+        seen_retracted = {c["id"] for c in retracted_matches}
+        fallback = _retracted_prefix_duplicates(
             content, scope, memory_class, exclude_id=exclude_id
         )
-        if duplicates:
+        for c in fallback:
+            if c["id"] in seen_retracted:
+                continue
+            seen_retracted.add(c["id"])
+            retracted_matches.append(c)
+
+        if active_matches:
             warnings.append(
                 {
                     "code": "POSSIBLE_DUPLICATE",
@@ -743,7 +957,31 @@ def assess_memory_write(
                         "Prefer superseding one of them (supersedes_id) over adding a "
                         "near-duplicate."
                     ),
-                    "candidates": duplicates,
+                    "candidates": active_matches,
+                }
+            )
+        if retracted_matches:
+            warning_candidates = []
+            for c in retracted_matches:
+                retracted_at = c.get("retracted_at") or ""
+                date_label = retracted_at[:10] if retracted_at else "an earlier time"
+                warning_candidates.append(
+                    {
+                        "id": c["id"],
+                        "retracted_at": retracted_at,
+                        "similarity": c.get("similarity"),
+                        "content_preview": c.get("content_preview"),
+                    }
+                )
+            warnings.append(
+                {
+                    "code": "PREVIOUSLY_RETRACTED",
+                    "message": (
+                        f"A similar record in this scope was retracted on {date_label}. "
+                        "This may be routine (expired per-occurrence content) or a "
+                        "deliberate correction — worth a look before writing this."
+                    ),
+                    "candidates": warning_candidates,
                 }
             )
 
@@ -791,7 +1029,36 @@ def _evidence_bonus(record: dict) -> float:
         _freshness_bonus(record)
         + _usefulness_bonus(record)
         + _staleness_penalty(record)
+        + _provenance_penalty(record)
     )
+
+
+# Source_kind tiers the ranking treats as worth trusting before confirmation.
+# Only the two values Workstream 1 restricts to genuine human sessions are
+# exempt from _provenance_penalty — every other tier is agent-self-reported, so
+# the field is descriptive but not load-bearing until a human (or a future
+# attested-tool path) confirms it. external_import is treated the same as
+# inference: an unconfirmed imported fact is just an unconfirmed fact.
+HUMAN_PROVENANCE_KINDS = frozenset({"operator_authored", "human_direct"})
+PROVENANCE_PENALTY = -0.05
+
+
+def _provenance_penalty(record: dict) -> float:
+    """Push down records nobody has checked and that the system cannot verify.
+
+    Only facts carry this penalty — a decision's worth does not depend on how
+    it was sourced, and a scratchpad ages out on its own. A record that has
+    ever been confirmed (`last_confirmed_at` set) escapes the penalty entirely;
+    confirmation is the only path that lifts it, and only `confirm_memory` sets
+    the timestamp. See plan.md Workstream 2.
+    """
+    if record.get("memory_class") != "fact":
+        return 0.0
+    if record.get("last_confirmed_at"):
+        return 0.0
+    if record.get("source_kind") in HUMAN_PROVENANCE_KINDS:
+        return 0.0
+    return PROVENANCE_PENALTY
 
 
 def _usefulness_bonus(record: dict) -> float:
@@ -806,10 +1073,10 @@ def _usefulness_bonus(record: dict) -> float:
     recalls = record.get("recall_count") or 0
     helpful = record.get("helpful_count") or 0
     unhelpful = record.get("unhelpful_count") or 0
-    bonus = min(recalls, 10) * 0.004          # up to +0.04
-    bonus += min(helpful, 5) * 0.02           # up to +0.10
-    bonus -= min(unhelpful, 5) * 0.04         # down to -0.20, so a marked-unhelpful
-    return bonus                              # record falls below an unrated one
+    bonus = min(recalls, 10) * 0.004  # up to +0.04
+    bonus += min(helpful, 5) * 0.02  # up to +0.10
+    bonus -= min(unhelpful, 5) * 0.04  # down to -0.20, so a marked-unhelpful
+    return bonus  # record falls below an unrated one
 
 
 def _staleness_penalty(record: dict) -> float:
@@ -863,7 +1130,9 @@ def record_feedback(record_id: str, helpful: bool) -> Optional[dict]:
     return get_memory_record(record_id)
 
 
-def confirm_memory(record_id: str, evidence: str, verified_by: str = "unknown") -> Optional[dict]:
+def confirm_memory(
+    record_id: str, evidence: str, verified_by: str = "unknown"
+) -> Optional[dict]:
     """Mark an active record as checked against the world, as of now.
 
     `evidence` is required and says what was actually looked at. Confirmation
@@ -1198,8 +1467,7 @@ def records_for_activity(
 def get_memory_record(record_id: str) -> Optional[dict]:
     with get_db() as conn:
         row = conn.execute(
-            f"SELECT {MEMORY_RECORD_COLUMNS} "
-            "FROM memory_records WHERE id = ?",
+            f"SELECT {MEMORY_RECORD_COLUMNS} FROM memory_records WHERE id = ?",
             (record_id,),
         ).fetchone()
         return dict(row) if row else None
@@ -1331,9 +1599,7 @@ def move_memory(
             if vector_bytes is not None:
                 vector_service.store_embedding(new_id, vector_bytes)
         except Exception as e:
-            logger.warning(
-                "Vector embedding failed for memory move %s: %s", new_id, e
-            )
+            logger.warning("Vector embedding failed for memory move %s: %s", new_id, e)
 
     return get_memory_record(new_id), None
 
@@ -1376,7 +1642,9 @@ def search_memory(
 ) -> tuple[list[dict], str]:
     sanitized = _sanitize_fts_query(query)
 
-    status_filter = " AND (mr.expires_at IS NULL OR datetime(mr.expires_at) > datetime('now'))"
+    status_filter = (
+        " AND (mr.expires_at IS NULL OR datetime(mr.expires_at) > datetime('now'))"
+    )
     if not include_retracted:
         status_filter += " AND mr.record_status != 'retracted'"
 
@@ -1435,7 +1703,7 @@ def search_memory(
                 with get_db() as conn:
                     candidate_rows = conn.execute(
                         f"""
-                        SELECT mr.{MEMORY_RECORD_COLUMNS.replace(', ', ', mr.')}
+                        SELECT mr.{MEMORY_RECORD_COLUMNS.replace(", ", ", mr.")}
                         FROM memory_records mr
                         WHERE mr.scope IN ({scope_placeholders}){status_filter}{extra_sql}
                         """,
@@ -1474,7 +1742,7 @@ def search_memory(
         # → zero results), breaking the documented "retry with exact topic
         # values" recall workflow.
         sql = f"""
-            SELECT mr.{MEMORY_RECORD_COLUMNS.replace(', ', ', mr.')}
+            SELECT mr.{MEMORY_RECORD_COLUMNS.replace(", ", ", mr.")}
             FROM memory_records mr
             JOIN memory_records_fts fts ON fts.rowid = mr.rowid
             WHERE memory_records_fts MATCH ? AND mr.scope IN ({scope_placeholders}){status_filter}{extra_sql}
