@@ -92,6 +92,29 @@ def test_context_carries_rules_work_changes_and_index(test_client, admin_token):
     assert index.index(decision["id"]) < index.index(fact["id"])
 
 
+def test_index_puts_records_in_current_use_before_untouched_old_ones(test_client, admin_token):
+    headers = _setup(admin_token)
+    old_decision, _ = memory_service.write_memory("Old decision nobody uses.", "decision", SCOPE, topic="old")
+    used_fact, _ = memory_service.write_memory("Fact agents keep recalling.", "fact", SCOPE, topic="used")
+    with get_db() as conn:
+        conn.execute(
+            "UPDATE memory_records SET created_at = '2026-01-01T00:00:00+00:00', "
+            "last_recalled_at = '2026-02-01T00:00:00+00:00' WHERE id = ?",
+            (old_decision["id"],),
+        )
+        conn.execute(
+            "UPDATE memory_records SET created_at = '2026-01-01T00:00:00+00:00' WHERE id = ?",
+            (used_fact["id"],),
+        )
+        conn.commit()
+    memory_service.record_recall([used_fact["id"]])
+    activity_service.create_activity(agent_id="ctx-agent", user_id="u", task_description="t", memory_scope=SCOPE)
+
+    text = _context(test_client, headers, memory_scope=SCOPE, host_session_ref="s-later")["context"]
+    index = text[text.index("## Key records"):]
+    assert index.index(used_fact["id"]) < index.index(old_decision["id"])
+
+
 def test_same_host_session_reuses_its_execution(test_client, admin_token):
     headers = _setup(admin_token)
     first = _context(test_client, headers, memory_scope=SCOPE, host_session_ref="s-1")

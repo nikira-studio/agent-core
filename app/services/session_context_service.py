@@ -35,6 +35,8 @@ MAX_BUDGET_CHARS = 50000
 MIN_BUDGET_CHARS = 1000
 
 _INDEX_LIMIT = 40
+_INDEX_FRESH_DAYS = 14
+_INDEX_RECALLED_DAYS = 30
 _CHANGE_LIMIT = 50
 _RECENT_LIMIT = 4
 _ATTENTION_LIMIT = 6
@@ -143,15 +145,26 @@ def _changes(scope: str, agent_id: str, shown_activity_ids: set[str]) -> list[di
 
 
 def _index(conn, scope: str, exclude_ids: set[str]) -> tuple[list[dict], int]:
-    """Decisions first: a constraint is the most expensive thing to rediscover."""
+    """Records in current use first: written or confirmed lately, then recalled
+    lately, then the rest. Within a tier decisions lead, since a constraint is
+    the most expensive thing to rediscover. Old records nobody touches fall
+    off the list; a rule that must always show belongs in pinned."""
     rows = conn.execute(
         f"""SELECT id, content, memory_class, topic FROM memory_records
         WHERE scope = ? AND record_status = 'active' AND pinned = 0
           AND memory_class IN ('decision', 'fact', 'preference')
           AND (expires_at IS NULL OR datetime(expires_at) > datetime('now'))
-        ORDER BY (memory_class = 'decision') DESC,
+        ORDER BY CASE
+                   WHEN datetime(MAX(created_at, COALESCE(last_confirmed_at, '')))
+                        >= datetime('now', '-{_INDEX_FRESH_DAYS} days') THEN 0
+                   WHEN datetime(last_recalled_at)
+                        >= datetime('now', '-{_INDEX_RECALLED_DAYS} days') THEN 1
+                   ELSE 2
+                 END,
+                 (memory_class = 'decision') DESC,
                  COALESCE(helpful_count, 0) - COALESCE(unhelpful_count, 0) DESC,
-                 COALESCE(last_confirmed_at, created_at) DESC
+                 COALESCE(recall_count, 0) DESC,
+                 created_at DESC
         LIMIT {_INDEX_LIMIT + len(exclude_ids)}"""
         ,
         (scope,),
