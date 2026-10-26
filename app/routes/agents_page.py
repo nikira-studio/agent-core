@@ -71,20 +71,6 @@ def agents_page(request: Request, session: dict = Depends(require_auth)):
     edit_read_html = build_scope_list("edit-read")
     edit_write_html = build_scope_list("edit-write")
     edit_recall_html = build_scope_list("edit-recall")
-    delegation_create_html = (
-        '<div class="form-group"><label class="checkbox-label">'
-        '<input type="checkbox" id="ca-can-delegate"> '
-        '<span>May issue or approve delegation grants</span></label>'
-        '<p class="form-hint">High-trust administrator setting. It is not required to submit a delegation request.</p></div>'
-        if is_admin else ""
-    )
-    delegation_edit_html = (
-        '<div class="form-group"><label class="checkbox-label">'
-        '<input type="checkbox" id="edit-can-delegate"> '
-        '<span>May issue or approve delegation grants</span></label>'
-        '<p class="form-hint">High-trust administrator setting. It is not required to submit a delegation request.</p></div>'
-        if is_admin else ""
-    )
 
     def capability_controls(prefix):
         labels = [
@@ -174,7 +160,6 @@ def agents_page(request: Request, session: dict = Depends(require_auth)):
       const write = [ownScope].concat(getSelectedScopes('ca-write-scopes'));
       const recallAll = document.getElementById('ca-recall-all')?.checked;
       const recall = recallAll ? read : [ownScope].concat(getSelectedScopes('ca-recall-scopes'));
-      const delegate = document.getElementById('ca-can-delegate')?.checked;
       const capabilities = getSelectedCapabilities('ca');
       const preview = document.getElementById('ca-authority-preview');
       if (!preview) return;
@@ -182,7 +167,6 @@ def agents_page(request: Request, session: dict = Depends(require_auth)):
         'Read: <code>' + escapeHtml(read.join(', ')) + '</code><br>' +
         'Write: <code>' + escapeHtml(write.join(', ')) + '</code><br>' +
         'Default recall: <code>' + escapeHtml(recall.join(', ')) + '</code><br>' +
-        'Can delegate: <code>' + (delegate ? 'yes' : 'no') + '</code><br>' +
         'Capabilities: <code>' + escapeHtml(capabilities.join(', ')) + '</code>';
     }
     function applyLeastPrivilegedPreset() {
@@ -193,8 +177,6 @@ def agents_page(request: Request, session: dict = Depends(require_auth)):
       });
       const recallAll = document.getElementById('ca-recall-all');
       if (recallAll) recallAll.checked = false;
-      const canDelegate = document.getElementById('ca-can-delegate');
-      if (canDelegate) canDelegate.checked = false;
       document.querySelectorAll('#create-agent-form [data-capability]').forEach(input => input.checked = input.dataset.capability === 'memory' || input.dataset.capability === 'coordination');
       toggleRecallPicker('ca');
       createAuthorityPreview();
@@ -289,11 +271,6 @@ def agents_page(request: Request, session: dict = Depends(require_auth)):
       document.getElementById('edit-description').value = a.description || '';
       document.getElementById('edit-owner').textContent = a.owner_user_id || '-';
       document.getElementById('edit-default-user').textContent = a.default_user_id || a.owner_user_id || '-';
-      const delegation = document.getElementById('edit-can-delegate');
-      if (delegation) {
-        delegation.checked = Boolean(a.can_delegate);
-        delegation.disabled = Boolean(readOnly);
-      }
       setSelectedCapabilities('edit', a.capabilities || []);
       const readScopes = JSON.parse(a.read_scopes_json || '[]');
       const writeScopes = JSON.parse(a.write_scopes_json || '[]');
@@ -381,8 +358,6 @@ def agents_page(request: Request, session: dict = Depends(require_auth)):
         };
         body.read_scopes.push(ownScope);
         body.write_scopes.push(ownScope);
-        const editCanDelegate = document.getElementById('edit-can-delegate');
-        if (editCanDelegate) body.can_delegate = editCanDelegate.checked;
         const editRecallAll = document.getElementById('edit-recall-all');
         if (editRecallAll && editRecallAll.checked) {
           body.reset_default_recall_scopes = true;
@@ -416,8 +391,6 @@ def agents_page(request: Request, session: dict = Depends(require_auth)):
         const privateScope = 'agent:' + agentId;
         if (!body.read_scopes.includes(privateScope)) body.read_scopes.push(privateScope);
         if (!body.write_scopes.includes(privateScope)) body.write_scopes.push(privateScope);
-        const createCanDelegate = document.getElementById('ca-can-delegate');
-        if (createCanDelegate) body.can_delegate = createCanDelegate.checked;
         const caRecallAll = document.getElementById('ca-recall-all');
         if (caRecallAll && !caRecallAll.checked) {
           const recall = getSelectedScopes('ca-recall-scopes');
@@ -494,7 +467,7 @@ def agents_page(request: Request, session: dict = Depends(require_auth)):
           <div id="ca-capability-controls">{capability_create_html}</div>
           <div class="form-group">
             <button type="button" class="btn btn-sm btn-secondary" onclick="applyLeastPrivilegedPreset()">Use least-privileged service-agent preset</button>
-            <p class="form-hint">Private agent read/write scope, inherited owner user read scope, no workspace or shared scopes, and delegation disabled. You can add explicit authority afterward.</p>
+            <p class="form-hint">Private agent read/write scope, inherited owner user read scope, no workspace or shared scopes. You can add explicit authority afterward.</p>
           </div>
           <div class="form-group">
             <label>Can Read From</label>
@@ -514,7 +487,6 @@ def agents_page(request: Request, session: dict = Depends(require_auth)):
               <p class="form-hint"><strong>Checked</strong> = recall from everything the agent can read (the default — same as before this setting existed). <strong>Uncheck</strong> to recall only the scopes ticked below. The agent's own scope is always included, and any other readable scope stays reachable on demand via <code>memory_search(scope=…)</code>.</p>
             </div>
           </div>
-          {delegation_create_html}
           <div id="ca-authority-preview" class="form-hint" style="white-space:normal"></div>
           <div id="create-agent-error" class="alert alert-danger" style="display:none"></div>
           <div class="modal-footer">
@@ -567,7 +539,6 @@ def agents_page(request: Request, session: dict = Depends(require_auth)):
               <p class="form-hint"><strong>Checked</strong> = recall from everything the agent can read (the default — same as before this setting existed). <strong>Uncheck</strong> to recall only the scopes ticked below. The agent's own scope is always included, and any other readable scope stays reachable on demand via <code>memory_search(scope=…)</code>.</p>
             </div>
           </div>
-          {delegation_edit_html}
           <div class="modal-footer">
             <button type="button" class="btn btn-secondary" onclick="closeModal('edit-agent-modal')">Cancel</button>
             <button id="edit-agent-save" type="submit" class="btn">Save Changes</button>

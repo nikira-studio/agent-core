@@ -1,4 +1,5 @@
 import asyncio
+import json
 import re
 from dataclasses import dataclass
 from typing import Any, Optional
@@ -9,11 +10,120 @@ from app.security.pii_detector import contains_pii
 from app.services import audit_service, memory_service, workspace_sync_service
 
 
-@dataclass(frozen=True)
+@dataclass
 class MemoryOperationError(Exception):
     code: str
     message: str
     status_code: int
+
+
+def validate_response_budget(value: Any) -> Optional[int]:
+    """Validate caller input once at the search boundary."""
+    if value is None:
+        return None
+    if type(value) is not int or value <= 0:
+        raise MemoryOperationError(
+            "INVALID_RESPONSE_BUDGET",
+            "max_response_chars must be a positive integer or null",
+            400,
+        )
+    return value
+
+
+def budget_search_response(data: dict, max_response_chars: Optional[int]) -> dict:
+    """Keep a whole-record prefix within the JSON-RPC logical-text budget.
+
+    Projection and pagination have already run. No database writes here: callers
+    record recall only after this function selects the delivered response.
+    """
+    if max_response_chars is None:
+        return data
+
+    def size(payload: dict) -> int:
+        return len(json.dumps(payload, indent=2, default=str))
+
+    full = {**data, "response_limited": False}
+    if size(full) <= max_response_chars:
+        return full
+
+    records = data["records"]
+    if records:
+        # Find the longest prefix, including every metadata field in each check.
+        low, high = 1, len(records) - 1
+        best = None
+        while low <= high:
+            count = (low + high) // 2
+            candidate = {
+                **data,
+                "records": records[:count],
+                "total": count,
+                "response_limited": True,
+            }
+            if size(candidate) <= max_response_chars:
+                best = candidate
+                low = count + 1
+            else:
+                high = count - 1
+        if best is not None:
+            return best
+        empty = {
+            **data,
+            "records": [],
+            "total": 0,
+            "response_limited": True,
+            "warnings": [
+                {
+                    "code": "RESPONSE_BUDGET_TOO_SMALL",
+                    "message": "Matching memories exist, but the first record does not fit. Raise max_response_chars.",
+                }
+            ],
+        }
+        if size(empty) <= max_response_chars:
+            return empty
+    raise MemoryOperationError(
+        "RESPONSE_BUDGET_TOO_SMALL",
+        "max_response_chars cannot fit the required response metadata",
+        400,
+    )
+
+
+def fetch_memory_by_ids(ids: Any, ctx: EffectiveAuthority, *, view: Optional[str], channel: str) -> dict:
+    """The index-then-fetch half of session context: full records by id.
+
+    Records the caller cannot read are reported as not found, the same as ids
+    that do not exist, so the call cannot be used to probe other scopes. A fetch
+    is the strongest signal that a record reached an agent, so it counts as a
+    recall and is audited with the ids.
+    """
+    if not isinstance(ids, list) or not ids or not all(isinstance(i, str) for i in ids):
+        raise MemoryOperationError("INVALID_IDS", "ids must be a non-empty list of record ids", 400)
+    if len(ids) > memory_service.MAX_FETCH_IDS:
+        raise MemoryOperationError(
+            "TOO_MANY_IDS", f"at most {memory_service.MAX_FETCH_IDS} ids per call", 400
+        )
+    records = [
+        r
+        for r in memory_service.get_memory_records_by_ids(ids)
+        if ctx.can("memory", "read", scope=r["scope"])
+    ]
+    found = {r["id"] for r in records}
+    if view != "full":
+        records = [memory_service.lean_record(r) for r in records]
+    memory_service.record_recall(list(found))
+    audit_service.write_event(
+        actor_type=ctx.actor_type,
+        actor_id=ctx.actor_id,
+        action="memory_fetched",
+        resource_type="memory",
+        resource_id=None,
+        result="success",
+        details={"ids": [i for i in ids if i in found], "missing": len(set(ids) - found), "channel": channel},
+    )
+    return {
+        "records": records,
+        "total": len(records),
+        "not_found": [i for i in dict.fromkeys(ids) if i not in found],
+    }
 
 
 # The two source_kind values that assert human authorship. Restricted to genuine
@@ -30,9 +140,9 @@ def validate_source_kind_authority(
 
     Returns ``(code, message)`` on a denial, ``None`` when the value is allowed
     for this caller. Anything claiming human provenance must come from an
-    authenticated human session (`actor_type == "user"`); `external_import` is
-    reserved for the import path and the merge-restore transform and is never
-    allowed through this validator.
+    authenticated human session (`actor_type == "user"`); `external_import` only
+    labels records that came in through the retired import paths, so it is
+    never allowed through this validator.
 
     Other tiers (`agent_inference`, `tool_output`, `episodic_inference`,
     `semantic_inference`) are agent-self-reported and have no restriction here
@@ -47,7 +157,7 @@ def validate_source_kind_authority(
     if source_kind == "external_import":
         return (
             "SOURCE_KIND_DENIED",
-            "external_import is reserved for the import and merge-restore paths",
+            "external_import labels records from the retired import paths and cannot be written",
         )
     return None
 

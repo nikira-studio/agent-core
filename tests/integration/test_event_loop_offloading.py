@@ -42,7 +42,6 @@ BLOCKING = frozenset(
         "exchange_callback",
         "_fetch_directory",
         "test_delivery",
-        "review_scope",
         "test_vector_connection",
         # Long-running local work: zipping and re-encrypting the whole
         # database, rewriting every credential under a new key, walking the
@@ -52,7 +51,6 @@ BLOCKING = frozenset(
         "decrypt_backup_package",
         "build_backup_zip",
         "restore_from_zip",
-        "merge_restore_from_zip",
         "rotate_key",
         "restore_key",
         "rotate_broker_credential",
@@ -62,8 +60,6 @@ BLOCKING = frozenset(
         "export_memory_jsonl",
         "export_credentials_metadata",
         "export_audit_csv",
-        "generate_handoff_briefing",
-        "generate_prd_handoff_briefing",
         "generate_proposals",
     }
 )

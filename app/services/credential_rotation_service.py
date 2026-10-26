@@ -34,6 +34,7 @@ def _rotate_key(admin_user_id: str) -> tuple[bool, str, dict]:
             rotate_key as _do_rotate,
             get_primary_key,
             decrypt_with_key,
+            write_private_key,
         )
         from app.services import audit_service
 
@@ -43,8 +44,7 @@ def _rotate_key(admin_user_id: str) -> tuple[bool, str, dict]:
         pre_backup_path = backup_dir / f"credential.pre_rotation.{timestamp}.bak"
 
         old_primary = get_primary_key()
-        with open(pre_backup_path, "wb") as f:
-            f.write(old_primary)
+        write_private_key(pre_backup_path, old_primary)
 
         new_key, new_keyring = _do_rotate()
 
@@ -130,12 +130,26 @@ def _restore_key(admin_user_id: str, key_bytes: bytes) -> tuple[bool, str]:
         return False, "Invalid Fernet key"
 
     with get_db() as conn:
-        rows = conn.execute("SELECT value_encrypted FROM credentials").fetchall()
+        # Every store sharing this ring must remain readable after replacement.
+        # Vector settings and spilled results may contain legacy plaintext.
+        rows = conn.execute("""
+            SELECT value_encrypted AS ciphertext FROM credentials
+            UNION ALL SELECT secret_encrypted FROM webhook_registrations
+            UNION ALL SELECT secret_encrypted FROM otp_secrets
+            UNION ALL SELECT pending_secret_encrypted FROM otp_secrets
+            UNION ALL SELECT session_data_encrypted FROM connector_session_cache
+            UNION ALL SELECT value FROM system_settings
+                WHERE key = 'vector_api_key' AND value LIKE 'gAAAA%'
+            UNION ALL SELECT content FROM tool_result_spill
+                WHERE content LIKE 'gAAAA%'
+        """).fetchall()
         for row in rows:
+            if not row["ciphertext"]:
+                continue
             try:
-                fernet.decrypt(row["value_encrypted"].encode())
+                fernet.decrypt(row["ciphertext"].encode())
             except Exception:
-                return False, "Provided key cannot decrypt all credential entries"
+                return False, "Provided key cannot decrypt all encrypted entries"
 
     keyring_path = settings.data_dir / "credential.keyring"
     backup_dir = settings.data_dir / "backups"
@@ -169,7 +183,6 @@ def _restore_key(admin_user_id: str, key_bytes: bytes) -> tuple[bool, str]:
 
     from app.security import encryption
 
-    encryption._fernet = None
-    encryption._keyring = None
+    encryption.reset_key_cache()
 
     return True, "Key restored successfully"

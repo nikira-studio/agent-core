@@ -55,7 +55,7 @@ def test_overview_page_has_operational_search(admin_client):
     html = r.text
     assert "Operational Search" in html
     assert 'id="dashboard-search-query"' in html
-    assert "Search memory, activities, briefings, connector types, and visible bindings." in html
+    assert "Search memory, activities, connector types, and visible bindings." in html
 
 
 def test_legacy_integrations_wizard_is_removed(admin_client):
@@ -95,16 +95,16 @@ def test_dashboard_search_spans_operational_state(admin_client):
     import json
 
     from app.database import get_db
-    from app.services import activity_service, briefing_service, connector_service, memory_service
+    from app.services import activity_service, connector_service, memory_service
 
-    activity = activity_service.create_activity(
+    activity_service.create_activity(
         "search-alpha-agent",
         "admin",
         "Search Alpha task",
         memory_scope="user:admin",
     )
     memory_service.write_memory(
-        content="Search Alpha briefing needle",
+        content="Search Alpha memory needle",
         memory_class="fact",
         scope="user:admin",
         source_kind="agent_inference",
@@ -135,13 +135,6 @@ def test_dashboard_search_spans_operational_state(admin_client):
         "shared",
         enabled=True,
     )
-    briefing = briefing_service.generate_handoff_briefing(
-        activity["id"],
-        requesting_agent_id="search-alpha-agent",
-        requesting_user_id="admin",
-    )
-    assert briefing
-
     r = admin_client.post(
         "/api/dashboard/search",
         json={"query": "Search Alpha", "limit": 5},
@@ -150,6 +143,6 @@ def test_dashboard_search_spans_operational_state(admin_client):
     data = r.json()["data"]
     assert data["counts"]["memory"] >= 1
     assert data["counts"]["activities"] >= 1
-    assert data["counts"]["briefings"] >= 1
+    assert "briefings" not in data["counts"]
     assert data["counts"]["connector_types"] >= 1
     assert data["counts"]["bindings"] >= 1

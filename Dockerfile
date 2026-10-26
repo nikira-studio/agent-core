@@ -11,6 +11,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY app/ ./app/
 COPY runner/ ./runner/
 COPY docs/ ./docs/
+COPY integrations/ ./integrations/
 COPY .env.example ./
 
 RUN mkdir -p /data && chown -R 1001:1001 /data

@@ -458,7 +458,7 @@ class TestCliEngineExecute:
         assert result["success"] is True
         call_args = mock_run.call_args
         assert call_args[1]["input"] == b"apiVersion: v1\nkind: Pod"
-        assert call_args[1]["stdin"] == subprocess.PIPE
+        assert "stdin" not in call_args[1]
 
     @patch("app.connectors.cli_engine.subprocess.run")
     def test_execute_env_passed_explicitly(self, mock_run):

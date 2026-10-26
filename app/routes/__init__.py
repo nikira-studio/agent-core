@@ -1,15 +1,12 @@
 from app.routes.health import router as health_router
 from app.routes.spec import router as spec_router
 from app.routes.auth import router as auth_router
-from app.routes.delegations import router as delegations_router
-from app.routes.delegation_requests import router as delegation_requests_router
 from app.routes.agents import router as agents_router
 from app.routes.workspaces import router as workspaces_router
 from app.routes.credentials import router as credentials_router
 from app.routes.internal import router as internal_router
 from app.routes.memory import router as memory_router
 from app.routes.activity import router as activity_router
-from app.routes.briefings import router as briefings_router
 from app.routes.mcp import router as mcp_router
 from app.routes.integrations_page import router as integrations_page_router
 from app.routes.dashboard_api import router as dashboard_api_router
@@ -30,10 +27,10 @@ from app.routes.overview_page import router as overview_page_router
 from app.routes.auth_pages import router as auth_pages_router
 from app.routes.settings_page import router as settings_page_router
 from app.routes.webhooks_page import router as webhooks_page_router
-from app.routes.delegation_requests_page import router as delegation_requests_page_router
 from app.routes.events import router as events_router
 from app.routes.webhooks import router as webhooks_router
 from app.routes.workspace_sync import router as workspace_sync_router
+from app.routes.session_context import router as session_context_router
 from app.routes.discovery import router as discovery_router
 from app.routes.guidance import router as guidance_router
 
@@ -41,15 +38,12 @@ __all__ = [
     "health_router",
     "spec_router",
     "auth_router",
-    "delegations_router",
-    "delegation_requests_router",
     "agents_router",
     "workspaces_router",
     "credentials_router",
     "internal_router",
     "memory_router",
     "activity_router",
-    "briefings_router",
     "mcp_router",
     "integrations_page_router",
     "dashboard_api_router",
@@ -70,10 +64,12 @@ __all__ = [
     "auth_pages_router",
     "settings_page_router",
     "webhooks_page_router",
-    "delegation_requests_page_router",
     "events_router",
     "webhooks_router",
     "workspace_sync_router",
+    "session_context_router",
     "discovery_router",
     "guidance_router",
 ]
+
+from app.routes.credential_consumers import router as credential_consumers_router

@@ -99,39 +99,6 @@ def test_cleanup_rules_never_propose_a_pinned_record(clean_db):
     assert memory_proposal_service.list_proposals(status="pending") == []
 
 
-def test_the_usefulness_reviewer_skips_pinned_records(clean_db):
-    """No model call, and no cost, on something already judged by a person."""
-    from app.services import usefulness_service
-
-    vague = _write(
-        content="On 2026-05-16 the deploy failed and was traced to a missing dependency.",
-        memory_class="fact",
-    )
-    assert usefulness_service.candidates("workspace:proj"), "precondition"
-
-    memory_service.set_pinned(vague["id"], True)
-    assert usefulness_service.candidates("workspace:proj") == []
-
-
-def test_a_handoff_briefing_carries_standing_context(clean_db):
-    from app.services import activity_service, briefing_service
-
-    activity = activity_service.create_activity(
-        agent_id="agent-a", user_id="alex",
-        task_description="Refactor the ingest path", memory_scope="workspace:proj",
-    )
-    memory_service.set_pinned(_write()["id"], True)
-
-    briefing = briefing_service.generate_handoff_briefing(
-        activity["id"],
-        requesting_agent_id="agent-b",
-        requesting_user_id="alex",
-        authorized_scopes=["workspace:proj"],
-        is_admin=True,
-    )
-    assert any("vendored dependencies" in r["content"] for r in briefing["pinned"])
-
-
 def test_pinned_state_is_visible_in_results(clean_db):
     record = _write()
     memory_service.set_pinned(record["id"], True)

@@ -32,7 +32,7 @@ You can also trigger a backup from the dashboard: **Settings → Backup → Expo
 
 ## Restore
 
-Restore also requires an admin session. It's a destructive operation, so read the modes before choosing.
+Restore also requires an admin session. It's a destructive operation: it replaces your current database and encryption key entirely with the backup contents. Everything you have now is gone. Use it to recover from a corrupted or lost database.
 
 ```bash
 curl -X POST http://localhost:3500/api/backup/restore \
@@ -42,12 +42,9 @@ curl -X POST http://localhost:3500/api/backup/restore \
   -F "mode=replace_all"
 ```
 
-**Mode options:**
+`mode` is optional and defaults to `replace_all`, the only supported mode. Any other value, including the removed `merge`, is rejected with `400 INVALID_MODE`.
 
-- **`replace_all`**: replaces your current database and encryption key entirely with the backup contents. Everything you have now is gone. Use this to recover from a corrupted or lost database.
-
-  A full restore holds the database still while it swaps: requests already in flight are allowed to finish, and requests arriving during the swap get a `503` with a `Retry-After` rather than a connection to a file that is about to be replaced. If in-flight work does not finish within the drain window, the restore refuses and changes nothing. **This gate is per process**, so a restore is only safe on the supported single-worker deployment; see [Configuration](configuration.md#workers).
-- **`merge`**: adds records from the backup that don't conflict with existing records. If a record with the same primary key already exists, the current version wins. Useful for combining two independent Agent Core installs or bringing back specific records without overwriting what you have.
+A restore holds the database still while it swaps: requests already in flight are allowed to finish, and requests arriving during the swap get a `503` with a `Retry-After` rather than a connection to a file that is about to be replaced. If in-flight work does not finish within the drain window, the restore refuses and changes nothing. **This gate is per process**, so a restore is only safe on the supported single-worker deployment; see [Configuration](configuration.md#workers).
 
 Before replacing anything, Agent Core always:
 
@@ -57,31 +54,6 @@ Before replacing anything, Agent Core always:
 4. Creates timestamped copies of your current database and key material in `data/backups/`
 
 If any validation step fails, your existing data is untouched.
-
-### Merge details
-
-A merge restore is more surgical:
-
-- Records with primary keys that already exist in the current database are skipped; current wins
-- Credential entries from the backup are automatically re-encrypted with your current key if the backup key differs, so they remain readable
-- The merge does not adopt the backup's encryption key; your current key stays in place
-
-**What comes across.** Users, workspaces and their collaborator grants, agents, memory records and their embeddings, credential entries, activity, connector types, bindings and execution history, adapter installations, webhook registrations, and system settings. Merged memory records are marked `external_import`, their `last_confirmed_at` is cleared, and their original source and confirmation values are retained under `provenance_json.import_original` for audit. Confirmation from another installation is not evidence about this installation.
-
-**What does not, and why.** Review proposals are installation-local judgments and are regenerated here rather than imported. Audit and webhook delivery logs are a record of what happened on the *other* installation, not state. Sessions, OTP secrets, and the broker credential are this machine's login and identity; importing them would hand out access. OAuth state, session caches, and spilled tool results regenerate on their own.
-
-**Related records are not re-pointed.** Tables merge independently and the current version wins, so a record whose id already exists here is skipped. Anything that referenced it is skipped too, and counted in `merge.skipped_conflicts`. Otherwise a connector binding from the backup would keep its own id, find its credential's id already taken, and quietly authenticate with *this* installation's unrelated secret. Same id with identical content is a genuine match, not a conflict, and merges normally.
-
-Relationships here are not all foreign keys. The merge checks both direct references and scope ownership before inserting related rows:
-
-- **direct references**: a binding's `credential_id`, an embedding's `record_id`
-- **scopes**: `workspace:proj` names a workspace, so a memory record or credential from a backup is not filed into a same-named workspace of yours that is a different project
-
-Review proposals also contain record IDs inside `target_ids_json`. Excluding the proposal table entirely avoids importing those installation-local verdicts or pointing one installation's proposed action at another installation's memory.
-
-Skipping also cascades: if a binding is not imported because its credential conflicts, an execution belonging to that binding is not imported either. Without that, the execution would be inserted with no binding to attach to and the database constraint would fail the whole merge instead of declining one row.
-
-**A partial merge reports itself as one.** If any table cannot be merged, the response is an error naming that table, and the rows that did come across are kept; undoing a half-finished merge is its own risk. Both the success and failure responses carry `merge.inserted_counts` (how many rows each table gained), `merge.tables_merged`, `merge.failed_tables`, and `merge.skipped_conflicts` (on a failure they appear under `error.details`), so you can see what actually landed rather than inferring it from a message.
 
 ---
 

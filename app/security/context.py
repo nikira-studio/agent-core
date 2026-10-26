@@ -27,12 +27,11 @@ def build_user_context(session: dict) -> RequestContext:
     user_id = session["user_id"]
     is_admin = session.get("role") == "admin"
     workspaces = workspace_service.list_accessible_workspaces(user_id, is_active=True)
-    readable_workspace_ids = [
-        w["id"] for w in workspaces if workspace_service.can_user_read_workspace(user_id, w["id"])
-    ]
-    writable_workspace_ids = [
-        w["id"] for w in workspaces if workspace_service.can_user_write_workspace(user_id, w["id"])
-    ]
+    readable, writable = workspace_service.get_workspace_authority(
+        user_id, [w["id"] for w in workspaces]
+    )
+    readable_workspace_ids = [w["id"] for w in workspaces if w["id"] in readable]
+    writable_workspace_ids = [w["id"] for w in workspaces if w["id"] in writable]
     active_workspace_ids = frozenset(readable_workspace_ids)
     readable_workspace_scopes = [f"workspace:{wid}" for wid in readable_workspace_ids]
     writable_workspace_scopes = [f"workspace:{wid}" for wid in writable_workspace_ids]
@@ -46,7 +45,15 @@ def build_user_context(session: dict) -> RequestContext:
         write_scopes=[f"user:{user_id}"] + writable_workspace_scopes,
         default_recall_scopes=[f"user:{user_id}"] + readable_workspace_scopes,
         active_workspace_ids=active_workspace_ids,
-        capabilities=frozenset({"memory", "coordination", "credentials", "connectors_read", "connectors_execute"}),
+        capabilities=frozenset(
+            {
+                "memory",
+                "coordination",
+                "credentials",
+                "connectors_read",
+                "connectors_execute",
+            }
+        ),
     )
 
 

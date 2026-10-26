@@ -61,6 +61,44 @@ class TestConnectorMCPTools:
         assert result["data"]["connector_type_id"] == "generic_http"
         assert "call_endpoint" in result["data"]["actions"]
 
+    def test_connectors_summary_is_compact_by_default(self, test_client, admin_token):
+        headers = {"Authorization": f"Bearer {admin_token}"}
+        compact = test_client.post("/mcp", headers=headers, json={
+            "tool": "connectors_summary", "params": {"enabled_only": False},
+        }).json()["data"]
+        assert compact["view"] == "compact"
+        for connector in compact["connectors"]:
+            assert "action_discovery" not in connector
+            for binding in connector["bindings"]:
+                assert set(binding) == {"id", "name", "scope", "usable", "health", "failing_actions"}
+        full = test_client.post("/mcp", headers=headers, json={
+            "tool": "connectors_summary", "params": {"enabled_only": False, "view": "full"},
+        }).json()["data"]
+        assert "view" not in full and full["total_connectors"] == compact["total_connectors"]
+
+    def test_connectors_actions_list_is_compact_until_one_action_is_asked_for(
+        self, test_client, admin_token
+    ):
+        headers = {"Authorization": f"Bearer {admin_token}"}
+        menu = test_client.post("/mcp", headers=headers, json={
+            "tool": "connectors_actions_list", "params": {"connector_type_id": "generic_http"},
+        }).json()["data"]
+        assert menu["view"] == "compact"
+        assert all("input_schema" not in tool for tool in menu["tools"])
+        assert {"action", "description", "required", "side_effect"} <= set(menu["tools"][0])
+
+        one = test_client.post("/mcp", headers=headers, json={
+            "tool": "connectors_actions_list",
+            "params": {"connector_type_id": "generic_http", "action": "call_endpoint"},
+        }).json()["data"]
+        assert [t["action"] for t in one["tools"]] == ["call_endpoint"] and one["view"] == "full"
+
+        missing = test_client.post("/mcp", headers=headers, json={
+            "tool": "connectors_actions_list",
+            "params": {"connector_type_id": "generic_http", "action": "nope"},
+        })
+        assert missing.status_code == 404
+
     def test_generic_http_backend_type_uses_generic_http_executor(
         self, test_client, admin_token, monkeypatch
     ):

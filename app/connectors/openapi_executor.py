@@ -6,6 +6,7 @@ import urllib.request
 from typing import Optional
 
 from app.connectors import BaseConnector
+from app.connectors.action_validation import validate_action_params
 from app.connectors.value_utils import decode_json_body
 from app.security.url_validation import validate_public_url
 from app.security.safe_http import safe_urlopen
@@ -15,6 +16,9 @@ _MAX_RESPONSE_BODY = 50_000
 
 class OpenApiExecutor(BaseConnector):
     connector_type_id = "__openapi__"
+
+    def __init__(self, connector_type: Optional[dict] = None):
+        self.ct = connector_type or {}
 
     def test_connection(
         self, credential: Optional[str], config_json: Optional[str]
@@ -226,11 +230,28 @@ class OpenApiExecutor(BaseConnector):
         for op in spec.get("operations", []):
             if op["method"] != "GET":
                 continue
-            has_required_path_param = any(
-                isinstance(p, dict) and p.get("in") == "path" and p.get("required")
+            action = op["operation_id"]
+            if action in (self.ct.get("disabled_actions") or []):
+                continue
+            meta = next(
+                (
+                    item
+                    for item in self.ct.get("supported_actions") or []
+                    if isinstance(item, dict) and item.get("name") == action
+                ),
+                {},
+            )
+            if meta.get("side_effect") not in (None, "none", "read"):
+                continue
+            if validate_action_params(self.ct, action, {}):
+                continue
+            has_required_param = any(
+                isinstance(p, dict) and p.get("required")
                 for p in op.get("parameters", [])
             )
-            if not has_required_path_param:
+            if not has_required_param and not (op.get("request_body") or {}).get(
+                "required"
+            ):
                 return {
                     "operation_id": op["operation_id"],
                     "method": "GET",

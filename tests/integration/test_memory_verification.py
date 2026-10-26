@@ -27,7 +27,7 @@ def _set_root(tmp_path, scope="workspace:proj"):
 # --- repo anchors ----------------------------------------------------------
 
 
-def test_a_present_file_verifies_and_records_evidence(clean_db, tmp_path):
+def test_a_present_file_records_an_anchor_check_not_a_confirmation(clean_db, tmp_path):
     (tmp_path / "app").mkdir()
     (tmp_path / "app" / "memory.py").write_text("# code")
     _set_root(tmp_path)
@@ -37,9 +37,10 @@ def test_a_present_file_verifies_and_records_evidence(clean_db, tmp_path):
     assert result["status"] == verification_service.VERIFIED
 
     stored = memory_service.get_memory_record(record["id"])
-    verified = json.loads(stored["provenance_json"])["verified"]
-    assert "app/memory.py exists" in verified["evidence"]
-    assert memory_service.days_since_confirmed(stored) == 0
+    assert stored["anchor_checked_at"]
+    # A file that still exists does not make the sentence about it true.
+    assert stored["last_confirmed_at"] is None
+    assert "verified" not in (stored["provenance_json"] or "")
 
 
 def test_a_vanished_file_reports_missing_without_touching_the_record(clean_db, tmp_path):
@@ -149,7 +150,7 @@ def test_a_pass_verifies_and_queues_review_for_what_vanished(clean_db, tmp_path)
     assert "gone.py" in proposals[0]["evidence"]["detail"]
     # The rationale is written for whoever reviews it, not for the machine.
     assert "out of date" in proposals[0]["rationale"]
-    assert memory_service.get_memory_record(present["id"])["last_confirmed_at"]
+    assert memory_service.get_memory_record(present["id"])["anchor_checked_at"]
 
 
 def test_a_repeated_pass_does_not_re_ask(clean_db, tmp_path):
@@ -292,7 +293,7 @@ def test_a_wrong_pointer_can_be_fixed_instead_of_retracted(clean_db, tmp_path):
     stored = memory_service.get_memory_record(record["id"])
     assert stored["subject_anchor"] == "repo:real.py"
     assert stored["record_status"] == "active"
-    assert stored["last_confirmed_at"], "a fixed pointer that resolves counts as verified"
+    assert stored["anchor_checked_at"], "a fixed pointer that resolves is checked"
 
     provenance = json.loads(stored["provenance_json"])
     assert provenance["anchor_corrected"]["from"] == "repo:app/data/data.db"
@@ -595,7 +596,7 @@ def test_a_binding_can_teach_it_a_new_anchor_type(clean_db, monkeypatch):
     result = verification_service.verify_record(record)
     assert result["status"] == verification_service.VERIFIED
     assert seen["params"]["url"] == "https://example.com/policy"
-    assert memory_service.get_memory_record(record["id"])["last_confirmed_at"]
+    assert memory_service.get_memory_record(record["id"])["anchor_checked_at"]
 
 
 def test_a_binding_reporting_not_found_is_evidence(clean_db, monkeypatch):

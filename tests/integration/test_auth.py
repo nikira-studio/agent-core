@@ -125,8 +125,7 @@ def test_effective_authority_reports_current_permanent_identity(test_client, age
     authority = response.json()["data"]["authority"]
     assert authority["authenticated_actor"] == {"type": "agent", "id": "testagent"}
     assert authority["executor_agent_id"] == "testagent"
-    assert authority["authorization_mode"] == "permanent"
-    assert authority["grant_id"] is None
+    assert "grant_id" not in authority
 
 
 def test_login_failed_attempts_are_rate_limited(test_client, clean_db):

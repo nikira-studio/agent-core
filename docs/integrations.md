@@ -6,7 +6,7 @@ This doc is about wiring tools up. For what the pieces are and why they behave a
 
 The dashboard **Integrations** page at `/integrations` generates ready-to-paste configs for specific tools and is usually the fastest path. This doc explains what's happening under the hood and covers cases the generator doesn't handle. The current presets include Claude Code, Codex, Cursor, Windsurf, Antigravity, and a generic MCP/REST path.
 
-Start small. First connect an agent over MCP and use a workspace for durable shared memory. Add stored credentials when a local tool needs a secret, then add connector bindings when Agent Core should run an external action. Activities, workspaces, webhooks, and delegation build on that path when you need them.
+Start small. First connect an agent over MCP and use a workspace for durable shared memory. Add stored credentials when a local tool needs a secret, then add connector bindings when Agent Core should run an external action. Activities, workspaces, and webhooks build on that path when you need them.
 
 The dashboard **Connectors** page at `/connectors` is where you register external capabilities for Agent Core itself. It supports:
 
@@ -103,15 +103,7 @@ Once connected, these tools are available in any session:
 | `memory_feedback` | Report whether a recalled record actually helped |
 | `memory_verify` | Check anchored facts against the code, host or service they describe |
 | `memory_reanchor` | Fix a record's pointer when the file moved or the anchor was wrong |
-| `get_briefing` | Pull a briefing when taking over from another agent |
-| `briefing_list` | List generated briefings visible to the current agent or user |
-| `effective_authority` | Report the caller's current effective authority: permanent scopes, or the grant's permissions on a delegated call |
-| `delegations_list` | List delegated grants visible to the caller |
-| `delegation_request` | Ask for short-lived, narrowed authority the caller does not hold; a human reviews it on the dashboard |
-| `delegation_requests_list` | List delegation requests visible to the caller |
-| `delegation_request_approve` | Approve a request, optionally narrowing it; never returns a secret |
-| `delegation_request_deny` | Deny a request with an optional reason |
-| `delegation_revoke` | Revoke a delegated grant |
+| `effective_authority` | Report the caller's current effective authority: identity, read and write scopes, workspaces, and capabilities |
 | `connectors_list` | List installed connector types as lean summaries (no full specs); supports `limit`/`offset`. Use `connectors_actions_list` for a type's actions |
 | `connectors_bindings_list` | List connector bindings in authorized scopes |
 | `connectors_bindings_test` | Test a binding using the stored credential |
@@ -129,9 +121,7 @@ At session startup, call `workspace_sync` for the shared workspace and keep the 
 
 Workspace context is not repository access. If a task points to files outside the current checkout, switch to an authorized checkout or report the mismatch. Do not use memory summaries as a substitute for reviewing the source.
 
-If one agent needs to hand work to another, write the durable state into the shared workspace scope and generate or link a briefing. Use targeted `memory_search`, `activity_list`, and `briefing_list` calls when the sync response does not contain enough older context. The private `agent:<id>` scope is scratch space for that agent, not the handoff channel.
-
-If you run a coordinator that farms work out to worker agents (an orchestration framework, a scheduler, or a script of your own), the delegation tools let it request short-lived, narrowed authority per task instead of every worker holding standing broad scopes. See the [Delegated Authorization contract](delegated-authorization-integration.md) for the claim flow and header transport; claiming a grant is REST-only so the secret never appears in a model-visible tool result.
+If one agent needs to hand work to another, write the durable state into the shared workspace scope and close the activity with a `handoff` (`completed`, `next_steps`, `open_questions`, `needs_human`). Use targeted `memory_search`, `activity_search`, and `activity_get` calls when the session context does not contain enough older history. The private `agent:<id>` scope is scratch space for that agent, not the handoff channel.
 
 ### Scope model
 
@@ -328,7 +318,7 @@ For adapters that define their own request path, set `base_url` to the service r
 
 **Three backends** the engine understands: `http` (declarative requests with session/refresh support), `mcp` (point at an external MCP server), `cli` (drive a local binary). All run out-of-process or as pure data; adapters never inject Python into your Agent Core process.
 
-**Three install paths:** the Browse Adapters page (system templates + already-dropped-in user adapters), a drop-in into `data/adapters/<id>/adapter.json`, or `git:owner/repo@ref` for adapters shared from a git repo. Code-bearing backends (`mcp`/`cli`) get a dangerous-pattern scan before enabling.
+**Two install paths:** the Browse Adapters page (system templates + already-dropped-in user adapters), or a drop-in into `data/adapters/<id>/adapter.json`. Code-bearing backends (`mcp`/`cli`) get a dangerous-pattern scan before enabling.
 
 Uninstall behavior is split by source: system adapters remove the installed copy from `data/adapters/` and clear the catalog entry; user-dropped adapters clear the catalog entry but leave the local file in place so you can reinstall without re-downloading. Updates are driven by the adapter `version`; bump it whenever you change a bundled template. Updating keeps the connector type id stable and preserves bindings.
 
@@ -594,7 +584,7 @@ Write durable shared memory to the selected workspace. Read the user scope for s
 1. At session start, call `workspace_sync` and acknowledge all returned pages.
 2. Start meaningful tasks with `activity_update` in the selected workspace.
 3. If a fresh activity returns `since_last_active`, process the bounded digest without treating it as complete history.
-4. Search relevant memory before acting. Review activities and briefings before a handoff, review, or resume.
+4. Search relevant memory before acting. For a handoff, review, or resume, start from the recent work, next steps, and open questions in the session context; use `activity_search` or `activity_get` for older history.
 5. Store durable facts and decisions in the workspace. Keep routine progress in activity records.
 6. Check credential references and connector bindings before asking for manual setup or a raw secret.
 ```
@@ -690,7 +680,7 @@ Credential scope and binding scope are both intentional:
 - **Credential scope** controls who can access the stored secret.
 - **Binding scope** controls where the connector is available to agents.
 
-Binding visibility grants access to every action enabled on the connector type. Disable an action on the connector type to remove it from all bindings. Use a delegated grant to restrict temporary access to exact binding/action pairs.
+Binding visibility grants access to every action enabled on the connector type. Disable an action on the connector type to remove it from all bindings.
 
 For normal workspace use, set both to the same workspace. For advanced use, a credential in a user scope can power multiple workspace bindings if the acting agent has access to both.
 
@@ -748,7 +738,7 @@ curl -X POST http://localhost:3500/api/activity/<activity-id>/heartbeat \
   -H "Authorization: Bearer <agent-api-key>"
 ```
 
-If an agent misses heartbeats for more than `AGENT_CORE_STALE_THRESHOLD_MINUTES` (default: 5 minutes), its activity is automatically marked `stale`. The dashboard surfaces these with options to resume, reassign to another agent, generate a briefing, or cancel.
+If an agent misses heartbeats for more than `AGENT_CORE_STALE_THRESHOLD_MINUTES` (default: 5 minutes), its activity is automatically marked `stale`. The dashboard surfaces these with options to resume, reassign to another agent, or cancel.
 
 If you want another agent to pick up the work, tell that agent to check for assigned work in its current workspace. The pickup step is explicit and deliberate: Agent Core stores the work record and the agent claims it when it checks.
 
@@ -804,27 +794,12 @@ The practical flow is:
 
 1. The current agent keeps its activity record up to date with `activity_update` heartbeats.
 2. It writes durable decisions, facts, and handoff notes to memory when something should survive beyond the current session.
-3. When work stops, the next agent reads the latest activity, relevant memory, and any generated briefing.
-4. If an activity is stale or being handed off intentionally, generate a briefing with `/api/briefings/handoff` or `get_briefing`. Briefings are on-demand task transfer artifacts, not something the system scheduler produces automatically.
+3. When it finishes or stops, it calls `activity_update` with `status` completed or blocked, a `task_result`, and `handoff={completed, next_steps, open_questions, needs_human}`.
+4. The next session's context shows that work with its next steps and open questions. Older history is available through `activity_search` and `activity_get`.
 
 This isn't automatic orchestration; it's a durable handoff trail and mailroom. A different agent picks up where the last one stopped, with full context, instead of starting blind.
 
-If work needs to cross users or workspaces, make that explicit in the activity scope and briefing trail. The safest pattern is: leave the task in the correct workspace, have the receiving agent check for assigned work in that workspace, then claim it. If a broad memory search returns nothing, retry with exact topic values, specific words from prior records, or a known record ID. Conceptual queries miss when embeddings aren't available.
-
----
-
-## Handing work to another agent
-
-When one agent needs to pass work to another (switching tools, handing off a task, or escalating), you can generate a briefing that gives the incoming agent immediate context:
-
-```bash
-curl -X POST http://localhost:3500/api/briefings/handoff \
-  -H "Authorization: Bearer <agent-api-key>" \
-  -H "Content-Type: application/json" \
-  -d '{"activity_id": "<activity-id>"}'
-```
-
-The briefing includes the current task description, any recorded task result, recent decisions, key facts, and relevant memory pulled from the activity's scope. The incoming agent can call `get_briefing` via MCP to pull this as part of its startup.
+If work needs to cross users or workspaces, make that explicit in the activity scope and its handoff. The safest pattern is: leave the task in the correct workspace, have the receiving agent check for assigned work in that workspace, then claim it. If a broad memory search returns nothing, retry with exact topic values, specific words from prior records, or a known record ID. Conceptual queries miss when embeddings aren't available.
 
 ---
 
@@ -930,9 +905,6 @@ Webhooks are **admin-only** and managed from the **Webhooks** page in the dashbo
 | `activity_cancelled` | An activity is cancelled |
 | `activity_recovered` | An activity is recovered (reassigned, resumed, closed) |
 | `connector_executed` | A connector binding action completes |
-| `delegation_request_created` | An agent asks for short-lived delegated authority; the event to route to a phone or chat channel, since pending requests wait on a human decision |
-| `delegation_request_approved` | A delegation request is approved |
-| `delegation_request_denied` | A delegation request is denied |
 
 ### Payload shape
 

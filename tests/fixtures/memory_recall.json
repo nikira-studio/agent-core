@@ -1,0 +1,1865 @@
+{
+  "records": [
+    {
+      "id": "scheduler-target",
+      "content": "scheduler scheduler scheduler: retry failures with bounded backoff.",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.1,
+      "age_days": 1
+    },
+    {
+      "id": "scheduler-distractor-0",
+      "content": "scheduler appears in this unrelated planning discussion. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. ",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.95,
+      "age_days": 1
+    },
+    {
+      "id": "scheduler-distractor-1",
+      "content": "scheduler appears in this unrelated planning discussion. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. ",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.95,
+      "age_days": 1
+    },
+    {
+      "id": "scheduler-distractor-2",
+      "content": "scheduler appears in this unrelated planning discussion. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. ",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.95,
+      "age_days": 1
+    },
+    {
+      "id": "scheduler-distractor-3",
+      "content": "scheduler appears in this unrelated planning discussion. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. ",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.95,
+      "age_days": 1
+    },
+    {
+      "id": "scheduler-distractor-4",
+      "content": "scheduler appears in this unrelated planning discussion. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. ",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.95,
+      "age_days": 1
+    },
+    {
+      "id": "scheduler-distractor-5",
+      "content": "scheduler appears in this unrelated planning discussion. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. ",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.95,
+      "age_days": 1
+    },
+    {
+      "id": "scheduler-distractor-6",
+      "content": "scheduler appears in this unrelated planning discussion. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. ",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.95,
+      "age_days": 1
+    },
+    {
+      "id": "scheduler-distractor-7",
+      "content": "scheduler appears in this unrelated planning discussion. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. ",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.95,
+      "age_days": 1
+    },
+    {
+      "id": "webhook-target",
+      "content": "webhook webhook webhook: retry failures with bounded backoff.",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.1,
+      "age_days": 1
+    },
+    {
+      "id": "webhook-distractor-0",
+      "content": "webhook appears in this unrelated planning discussion. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. ",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.95,
+      "age_days": 1
+    },
+    {
+      "id": "webhook-distractor-1",
+      "content": "webhook appears in this unrelated planning discussion. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. ",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.95,
+      "age_days": 1
+    },
+    {
+      "id": "webhook-distractor-2",
+      "content": "webhook appears in this unrelated planning discussion. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. ",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.95,
+      "age_days": 1
+    },
+    {
+      "id": "webhook-distractor-3",
+      "content": "webhook appears in this unrelated planning discussion. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. ",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.95,
+      "age_days": 1
+    },
+    {
+      "id": "webhook-distractor-4",
+      "content": "webhook appears in this unrelated planning discussion. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. ",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.95,
+      "age_days": 1
+    },
+    {
+      "id": "webhook-distractor-5",
+      "content": "webhook appears in this unrelated planning discussion. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. ",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.95,
+      "age_days": 1
+    },
+    {
+      "id": "webhook-distractor-6",
+      "content": "webhook appears in this unrelated planning discussion. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. ",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.95,
+      "age_days": 1
+    },
+    {
+      "id": "webhook-distractor-7",
+      "content": "webhook appears in this unrelated planning discussion. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. ",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.95,
+      "age_days": 1
+    },
+    {
+      "id": "backup-target",
+      "content": "backup backup backup: retry failures with bounded backoff.",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.1,
+      "age_days": 1
+    },
+    {
+      "id": "backup-distractor-0",
+      "content": "backup appears in this unrelated planning discussion. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. ",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.95,
+      "age_days": 1
+    },
+    {
+      "id": "backup-distractor-1",
+      "content": "backup appears in this unrelated planning discussion. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. ",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.95,
+      "age_days": 1
+    },
+    {
+      "id": "backup-distractor-2",
+      "content": "backup appears in this unrelated planning discussion. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. ",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.95,
+      "age_days": 1
+    },
+    {
+      "id": "backup-distractor-3",
+      "content": "backup appears in this unrelated planning discussion. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. ",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.95,
+      "age_days": 1
+    },
+    {
+      "id": "backup-distractor-4",
+      "content": "backup appears in this unrelated planning discussion. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. ",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.95,
+      "age_days": 1
+    },
+    {
+      "id": "backup-distractor-5",
+      "content": "backup appears in this unrelated planning discussion. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. ",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.95,
+      "age_days": 1
+    },
+    {
+      "id": "backup-distractor-6",
+      "content": "backup appears in this unrelated planning discussion. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. ",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.95,
+      "age_days": 1
+    },
+    {
+      "id": "backup-distractor-7",
+      "content": "backup appears in this unrelated planning discussion. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. ",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.95,
+      "age_days": 1
+    },
+    {
+      "id": "delegation-target",
+      "content": "delegation delegation delegation: retry failures with bounded backoff.",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.1,
+      "age_days": 1
+    },
+    {
+      "id": "delegation-distractor-0",
+      "content": "delegation appears in this unrelated planning discussion. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. ",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.95,
+      "age_days": 1
+    },
+    {
+      "id": "delegation-distractor-1",
+      "content": "delegation appears in this unrelated planning discussion. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. ",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.95,
+      "age_days": 1
+    },
+    {
+      "id": "delegation-distractor-2",
+      "content": "delegation appears in this unrelated planning discussion. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. ",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.95,
+      "age_days": 1
+    },
+    {
+      "id": "delegation-distractor-3",
+      "content": "delegation appears in this unrelated planning discussion. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. ",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.95,
+      "age_days": 1
+    },
+    {
+      "id": "delegation-distractor-4",
+      "content": "delegation appears in this unrelated planning discussion. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. ",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.95,
+      "age_days": 1
+    },
+    {
+      "id": "delegation-distractor-5",
+      "content": "delegation appears in this unrelated planning discussion. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. ",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.95,
+      "age_days": 1
+    },
+    {
+      "id": "delegation-distractor-6",
+      "content": "delegation appears in this unrelated planning discussion. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. ",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.95,
+      "age_days": 1
+    },
+    {
+      "id": "delegation-distractor-7",
+      "content": "delegation appears in this unrelated planning discussion. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. ",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.95,
+      "age_days": 1
+    },
+    {
+      "id": "migration-target",
+      "content": "migration migration migration: retry failures with bounded backoff.",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.1,
+      "age_days": 1
+    },
+    {
+      "id": "migration-distractor-0",
+      "content": "migration appears in this unrelated planning discussion. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. ",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.95,
+      "age_days": 1
+    },
+    {
+      "id": "migration-distractor-1",
+      "content": "migration appears in this unrelated planning discussion. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. ",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.95,
+      "age_days": 1
+    },
+    {
+      "id": "migration-distractor-2",
+      "content": "migration appears in this unrelated planning discussion. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. ",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.95,
+      "age_days": 1
+    },
+    {
+      "id": "migration-distractor-3",
+      "content": "migration appears in this unrelated planning discussion. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. ",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.95,
+      "age_days": 1
+    },
+    {
+      "id": "migration-distractor-4",
+      "content": "migration appears in this unrelated planning discussion. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. ",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.95,
+      "age_days": 1
+    },
+    {
+      "id": "migration-distractor-5",
+      "content": "migration appears in this unrelated planning discussion. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. ",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.95,
+      "age_days": 1
+    },
+    {
+      "id": "migration-distractor-6",
+      "content": "migration appears in this unrelated planning discussion. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. ",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.95,
+      "age_days": 1
+    },
+    {
+      "id": "migration-distractor-7",
+      "content": "migration appears in this unrelated planning discussion. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. ",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.95,
+      "age_days": 1
+    },
+    {
+      "id": "connector-target",
+      "content": "connector connector connector: retry failures with bounded backoff.",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.1,
+      "age_days": 1
+    },
+    {
+      "id": "connector-distractor-0",
+      "content": "connector appears in this unrelated planning discussion. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. ",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.95,
+      "age_days": 1
+    },
+    {
+      "id": "connector-distractor-1",
+      "content": "connector appears in this unrelated planning discussion. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. ",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.95,
+      "age_days": 1
+    },
+    {
+      "id": "connector-distractor-2",
+      "content": "connector appears in this unrelated planning discussion. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. ",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.95,
+      "age_days": 1
+    },
+    {
+      "id": "connector-distractor-3",
+      "content": "connector appears in this unrelated planning discussion. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. ",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.95,
+      "age_days": 1
+    },
+    {
+      "id": "connector-distractor-4",
+      "content": "connector appears in this unrelated planning discussion. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. ",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.95,
+      "age_days": 1
+    },
+    {
+      "id": "connector-distractor-5",
+      "content": "connector appears in this unrelated planning discussion. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. ",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.95,
+      "age_days": 1
+    },
+    {
+      "id": "connector-distractor-6",
+      "content": "connector appears in this unrelated planning discussion. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. ",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.95,
+      "age_days": 1
+    },
+    {
+      "id": "connector-distractor-7",
+      "content": "connector appears in this unrelated planning discussion. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. General planning notes about tasks and meetings. ",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.95,
+      "age_days": 1
+    },
+    {
+      "id": "exact-0",
+      "content": "The documented identifier is POST /api/webhook/health.",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.5,
+      "age_days": 1
+    },
+    {
+      "id": "exact-1",
+      "content": "The documented identifier is BUILDHOST.",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.5,
+      "age_days": 1
+    },
+    {
+      "id": "exact-2",
+      "content": "The documented identifier is AC_REF_EXAMPLE.",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.5,
+      "age_days": 1
+    },
+    {
+      "id": "exact-3",
+      "content": "The documented identifier is sqlitefts.",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.5,
+      "age_days": 1
+    },
+    {
+      "id": "exact-4",
+      "content": "The documented identifier is grantissuer.",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.5,
+      "age_days": 1
+    },
+    {
+      "id": "exact-5",
+      "content": "The documented identifier is reanchor.",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.5,
+      "age_days": 1
+    },
+    {
+      "id": "topic-0",
+      "content": "The implementation detail number 0 lives in the shared service.",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.5,
+      "age_days": 1,
+      "topic": "database-layout",
+      "subject_anchor": "repo:app/database.py"
+    },
+    {
+      "id": "topic-1",
+      "content": "The implementation detail number 1 lives in the shared service.",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.5,
+      "age_days": 1,
+      "topic": "retry-policy"
+    },
+    {
+      "id": "topic-2",
+      "content": "The implementation detail number 2 lives in the shared service.",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.5,
+      "age_days": 1,
+      "topic": "permission-model"
+    },
+    {
+      "id": "current",
+      "content": "deploymentport service uses port 3500.",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.5,
+      "age_days": 1,
+      "valid_from_days": -10
+    },
+    {
+      "id": "old",
+      "content": "deploymentport service used port 3000.",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.5,
+      "age_days": 1,
+      "record_status": "superseded",
+      "valid_from_days": -100,
+      "valid_to_days": -10
+    },
+    {
+      "id": "expired",
+      "content": "deploymentport service used port 9999.",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.5,
+      "age_days": 1,
+      "expires_days": -1
+    },
+    {
+      "id": "confirmed",
+      "content": "evidencerank service endpoint is checked against the repository.",
+      "memory_class": "fact",
+      "scope": "agent:recall-eval",
+      "importance": 0.5,
+      "age_days": 1,
+      "last_confirmed_days": 0
+    },
+    {
+      "id": "unconfirmed",
+      "content": "evidencerank service endpoint is checked against the repository.",
+      "memory_class": "fact",
+      "scope": "agent:recall-eval",
+      "importance": 0.5,
+      "age_days": 1
+    },
+    {
+      "id": "stale",
+      "content": "evidencerank service endpoint is checked against the repository.",
+      "memory_class": "fact",
+      "scope": "agent:recall-eval",
+      "importance": 0.5,
+      "age_days": 1,
+      "last_confirmed_days": -400
+    },
+    {
+      "id": "helpful",
+      "content": "usefulnessrank context explains the agent startup sequence.",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.5,
+      "age_days": 1,
+      "helpful_count": 10
+    },
+    {
+      "id": "unrated",
+      "content": "usefulnessrank context explains the agent startup sequence.",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.5,
+      "age_days": 1
+    },
+    {
+      "id": "unhelpful",
+      "content": "usefulnessrank context explains the agent startup sequence.",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.5,
+      "age_days": 1,
+      "unhelpful_count": 10
+    },
+    {
+      "id": "old-decision",
+      "content": "standingpolicy decisions remain in force until revised.",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.5,
+      "age_days": 400
+    },
+    {
+      "id": "allowed",
+      "content": "scopeisolation credentials remain inside the connector.",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.5,
+      "age_days": 1
+    },
+    {
+      "id": "denied",
+      "content": "scopeisolation credentials remain inside the connector.",
+      "memory_class": "decision",
+      "scope": "agent:someone-else",
+      "importance": 0.5,
+      "age_days": 1
+    },
+    {
+      "id": "page-000",
+      "content": "pagination stable record 000.",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.5,
+      "age_days": 1
+    },
+    {
+      "id": "page-001",
+      "content": "pagination stable record 001.",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.5,
+      "age_days": 1
+    },
+    {
+      "id": "page-002",
+      "content": "pagination stable record 002.",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.5,
+      "age_days": 1
+    },
+    {
+      "id": "page-003",
+      "content": "pagination stable record 003.",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.5,
+      "age_days": 1
+    },
+    {
+      "id": "page-004",
+      "content": "pagination stable record 004.",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.5,
+      "age_days": 1
+    },
+    {
+      "id": "page-005",
+      "content": "pagination stable record 005.",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.5,
+      "age_days": 1
+    },
+    {
+      "id": "page-006",
+      "content": "pagination stable record 006.",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.5,
+      "age_days": 1
+    },
+    {
+      "id": "page-007",
+      "content": "pagination stable record 007.",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.5,
+      "age_days": 1
+    },
+    {
+      "id": "page-008",
+      "content": "pagination stable record 008.",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.5,
+      "age_days": 1
+    },
+    {
+      "id": "page-009",
+      "content": "pagination stable record 009.",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.5,
+      "age_days": 1
+    },
+    {
+      "id": "page-010",
+      "content": "pagination stable record 010.",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.5,
+      "age_days": 1
+    },
+    {
+      "id": "page-011",
+      "content": "pagination stable record 011.",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.5,
+      "age_days": 1
+    },
+    {
+      "id": "page-012",
+      "content": "pagination stable record 012.",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.5,
+      "age_days": 1
+    },
+    {
+      "id": "page-013",
+      "content": "pagination stable record 013.",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.5,
+      "age_days": 1
+    },
+    {
+      "id": "page-014",
+      "content": "pagination stable record 014.",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.5,
+      "age_days": 1
+    },
+    {
+      "id": "page-015",
+      "content": "pagination stable record 015.",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.5,
+      "age_days": 1
+    },
+    {
+      "id": "page-016",
+      "content": "pagination stable record 016.",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.5,
+      "age_days": 1
+    },
+    {
+      "id": "page-017",
+      "content": "pagination stable record 017.",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.5,
+      "age_days": 1
+    },
+    {
+      "id": "page-018",
+      "content": "pagination stable record 018.",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.5,
+      "age_days": 1
+    },
+    {
+      "id": "page-019",
+      "content": "pagination stable record 019.",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.5,
+      "age_days": 1
+    },
+    {
+      "id": "page-020",
+      "content": "pagination stable record 020.",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.5,
+      "age_days": 1
+    },
+    {
+      "id": "page-021",
+      "content": "pagination stable record 021.",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.5,
+      "age_days": 1
+    },
+    {
+      "id": "page-022",
+      "content": "pagination stable record 022.",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.5,
+      "age_days": 1
+    },
+    {
+      "id": "page-023",
+      "content": "pagination stable record 023.",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.5,
+      "age_days": 1
+    },
+    {
+      "id": "page-024",
+      "content": "pagination stable record 024.",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.5,
+      "age_days": 1
+    },
+    {
+      "id": "page-025",
+      "content": "pagination stable record 025.",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.5,
+      "age_days": 1
+    },
+    {
+      "id": "page-026",
+      "content": "pagination stable record 026.",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.5,
+      "age_days": 1
+    },
+    {
+      "id": "page-027",
+      "content": "pagination stable record 027.",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.5,
+      "age_days": 1
+    },
+    {
+      "id": "page-028",
+      "content": "pagination stable record 028.",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.5,
+      "age_days": 1
+    },
+    {
+      "id": "page-029",
+      "content": "pagination stable record 029.",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.5,
+      "age_days": 1
+    },
+    {
+      "id": "page-030",
+      "content": "pagination stable record 030.",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.5,
+      "age_days": 1
+    },
+    {
+      "id": "page-031",
+      "content": "pagination stable record 031.",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.5,
+      "age_days": 1
+    },
+    {
+      "id": "page-032",
+      "content": "pagination stable record 032.",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.5,
+      "age_days": 1
+    },
+    {
+      "id": "page-033",
+      "content": "pagination stable record 033.",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.5,
+      "age_days": 1
+    },
+    {
+      "id": "page-034",
+      "content": "pagination stable record 034.",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.5,
+      "age_days": 1
+    },
+    {
+      "id": "page-035",
+      "content": "pagination stable record 035.",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.5,
+      "age_days": 1
+    },
+    {
+      "id": "page-036",
+      "content": "pagination stable record 036.",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.5,
+      "age_days": 1
+    },
+    {
+      "id": "page-037",
+      "content": "pagination stable record 037.",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.5,
+      "age_days": 1
+    },
+    {
+      "id": "page-038",
+      "content": "pagination stable record 038.",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.5,
+      "age_days": 1
+    },
+    {
+      "id": "page-039",
+      "content": "pagination stable record 039.",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.5,
+      "age_days": 1
+    },
+    {
+      "id": "page-040",
+      "content": "pagination stable record 040.",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.5,
+      "age_days": 1
+    },
+    {
+      "id": "page-041",
+      "content": "pagination stable record 041.",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.5,
+      "age_days": 1
+    },
+    {
+      "id": "page-042",
+      "content": "pagination stable record 042.",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.5,
+      "age_days": 1
+    },
+    {
+      "id": "page-043",
+      "content": "pagination stable record 043.",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.5,
+      "age_days": 1
+    },
+    {
+      "id": "page-044",
+      "content": "pagination stable record 044.",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.5,
+      "age_days": 1
+    },
+    {
+      "id": "page-045",
+      "content": "pagination stable record 045.",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.5,
+      "age_days": 1
+    },
+    {
+      "id": "page-046",
+      "content": "pagination stable record 046.",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.5,
+      "age_days": 1
+    },
+    {
+      "id": "page-047",
+      "content": "pagination stable record 047.",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.5,
+      "age_days": 1
+    },
+    {
+      "id": "page-048",
+      "content": "pagination stable record 048.",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.5,
+      "age_days": 1
+    },
+    {
+      "id": "page-049",
+      "content": "pagination stable record 049.",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.5,
+      "age_days": 1
+    },
+    {
+      "id": "page-050",
+      "content": "pagination stable record 050.",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.5,
+      "age_days": 1
+    },
+    {
+      "id": "page-051",
+      "content": "pagination stable record 051.",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.5,
+      "age_days": 1
+    },
+    {
+      "id": "page-052",
+      "content": "pagination stable record 052.",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.5,
+      "age_days": 1
+    },
+    {
+      "id": "page-053",
+      "content": "pagination stable record 053.",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.5,
+      "age_days": 1
+    },
+    {
+      "id": "page-054",
+      "content": "pagination stable record 054.",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.5,
+      "age_days": 1
+    },
+    {
+      "id": "page-055",
+      "content": "pagination stable record 055.",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.5,
+      "age_days": 1
+    },
+    {
+      "id": "page-056",
+      "content": "pagination stable record 056.",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.5,
+      "age_days": 1
+    },
+    {
+      "id": "page-057",
+      "content": "pagination stable record 057.",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.5,
+      "age_days": 1
+    },
+    {
+      "id": "page-058",
+      "content": "pagination stable record 058.",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.5,
+      "age_days": 1
+    },
+    {
+      "id": "page-059",
+      "content": "pagination stable record 059.",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.5,
+      "age_days": 1
+    },
+    {
+      "id": "page-060",
+      "content": "pagination stable record 060.",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.5,
+      "age_days": 1
+    },
+    {
+      "id": "page-061",
+      "content": "pagination stable record 061.",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.5,
+      "age_days": 1
+    },
+    {
+      "id": "page-062",
+      "content": "pagination stable record 062.",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.5,
+      "age_days": 1
+    },
+    {
+      "id": "page-063",
+      "content": "pagination stable record 063.",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.5,
+      "age_days": 1
+    },
+    {
+      "id": "page-064",
+      "content": "pagination stable record 064.",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.5,
+      "age_days": 1
+    },
+    {
+      "id": "page-065",
+      "content": "pagination stable record 065.",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.5,
+      "age_days": 1
+    },
+    {
+      "id": "page-066",
+      "content": "pagination stable record 066.",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.5,
+      "age_days": 1
+    },
+    {
+      "id": "page-067",
+      "content": "pagination stable record 067.",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.5,
+      "age_days": 1
+    },
+    {
+      "id": "page-068",
+      "content": "pagination stable record 068.",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.5,
+      "age_days": 1
+    },
+    {
+      "id": "page-069",
+      "content": "pagination stable record 069.",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.5,
+      "age_days": 1
+    },
+    {
+      "id": "page-070",
+      "content": "pagination stable record 070.",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.5,
+      "age_days": 1
+    },
+    {
+      "id": "page-071",
+      "content": "pagination stable record 071.",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.5,
+      "age_days": 1
+    },
+    {
+      "id": "page-072",
+      "content": "pagination stable record 072.",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.5,
+      "age_days": 1
+    },
+    {
+      "id": "page-073",
+      "content": "pagination stable record 073.",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.5,
+      "age_days": 1
+    },
+    {
+      "id": "page-074",
+      "content": "pagination stable record 074.",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.5,
+      "age_days": 1
+    },
+    {
+      "id": "page-075",
+      "content": "pagination stable record 075.",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.5,
+      "age_days": 1
+    },
+    {
+      "id": "page-076",
+      "content": "pagination stable record 076.",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.5,
+      "age_days": 1
+    },
+    {
+      "id": "page-077",
+      "content": "pagination stable record 077.",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.5,
+      "age_days": 1
+    },
+    {
+      "id": "page-078",
+      "content": "pagination stable record 078.",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.5,
+      "age_days": 1
+    },
+    {
+      "id": "page-079",
+      "content": "pagination stable record 079.",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.5,
+      "age_days": 1
+    },
+    {
+      "id": "page-080",
+      "content": "pagination stable record 080.",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.5,
+      "age_days": 1
+    },
+    {
+      "id": "page-081",
+      "content": "pagination stable record 081.",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.5,
+      "age_days": 1
+    },
+    {
+      "id": "page-082",
+      "content": "pagination stable record 082.",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.5,
+      "age_days": 1
+    },
+    {
+      "id": "page-083",
+      "content": "pagination stable record 083.",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.5,
+      "age_days": 1
+    },
+    {
+      "id": "page-084",
+      "content": "pagination stable record 084.",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.5,
+      "age_days": 1
+    },
+    {
+      "id": "page-085",
+      "content": "pagination stable record 085.",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.5,
+      "age_days": 1
+    },
+    {
+      "id": "page-086",
+      "content": "pagination stable record 086.",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.5,
+      "age_days": 1
+    },
+    {
+      "id": "page-087",
+      "content": "pagination stable record 087.",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.5,
+      "age_days": 1
+    },
+    {
+      "id": "page-088",
+      "content": "pagination stable record 088.",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.5,
+      "age_days": 1
+    },
+    {
+      "id": "page-089",
+      "content": "pagination stable record 089.",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.5,
+      "age_days": 1
+    },
+    {
+      "id": "page-090",
+      "content": "pagination stable record 090.",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.5,
+      "age_days": 1
+    },
+    {
+      "id": "page-091",
+      "content": "pagination stable record 091.",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.5,
+      "age_days": 1
+    },
+    {
+      "id": "page-092",
+      "content": "pagination stable record 092.",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.5,
+      "age_days": 1
+    },
+    {
+      "id": "page-093",
+      "content": "pagination stable record 093.",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.5,
+      "age_days": 1
+    },
+    {
+      "id": "page-094",
+      "content": "pagination stable record 094.",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.5,
+      "age_days": 1
+    },
+    {
+      "id": "page-095",
+      "content": "pagination stable record 095.",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.5,
+      "age_days": 1
+    },
+    {
+      "id": "page-096",
+      "content": "pagination stable record 096.",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.5,
+      "age_days": 1
+    },
+    {
+      "id": "page-097",
+      "content": "pagination stable record 097.",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.5,
+      "age_days": 1
+    },
+    {
+      "id": "page-098",
+      "content": "pagination stable record 098.",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.5,
+      "age_days": 1
+    },
+    {
+      "id": "page-099",
+      "content": "pagination stable record 099.",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.5,
+      "age_days": 1
+    },
+    {
+      "id": "page-100",
+      "content": "pagination stable record 100.",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.5,
+      "age_days": 1
+    },
+    {
+      "id": "page-101",
+      "content": "pagination stable record 101.",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.5,
+      "age_days": 1
+    },
+    {
+      "id": "page-102",
+      "content": "pagination stable record 102.",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.5,
+      "age_days": 1
+    },
+    {
+      "id": "page-103",
+      "content": "pagination stable record 103.",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.5,
+      "age_days": 1
+    },
+    {
+      "id": "page-104",
+      "content": "pagination stable record 104.",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.5,
+      "age_days": 1
+    },
+    {
+      "id": "page-105",
+      "content": "pagination stable record 105.",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.5,
+      "age_days": 1
+    },
+    {
+      "id": "page-106",
+      "content": "pagination stable record 106.",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.5,
+      "age_days": 1
+    },
+    {
+      "id": "page-107",
+      "content": "pagination stable record 107.",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.5,
+      "age_days": 1
+    },
+    {
+      "id": "page-108",
+      "content": "pagination stable record 108.",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.5,
+      "age_days": 1
+    },
+    {
+      "id": "page-109",
+      "content": "pagination stable record 109.",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.5,
+      "age_days": 1
+    },
+    {
+      "id": "page-110",
+      "content": "pagination stable record 110.",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.5,
+      "age_days": 1
+    },
+    {
+      "id": "page-111",
+      "content": "pagination stable record 111.",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.5,
+      "age_days": 1
+    },
+    {
+      "id": "page-112",
+      "content": "pagination stable record 112.",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.5,
+      "age_days": 1
+    },
+    {
+      "id": "page-113",
+      "content": "pagination stable record 113.",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.5,
+      "age_days": 1
+    },
+    {
+      "id": "page-114",
+      "content": "pagination stable record 114.",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.5,
+      "age_days": 1
+    },
+    {
+      "id": "semantic-job",
+      "content": "The scheduled maintenance task removes expired memories.",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.5,
+      "age_days": 1
+    },
+    {
+      "id": "semantic-secret",
+      "content": "The credential stays in the connector service.",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.5,
+      "age_days": 1
+    },
+    {
+      "id": "semantic-handoff",
+      "content": "The briefing includes prior decisions and task results.",
+      "memory_class": "decision",
+      "scope": "agent:recall-eval",
+      "importance": 0.5,
+      "age_days": 1
+    }
+  ],
+  "queries": [
+    {
+      "id": "lexical-scheduler",
+      "query": "scheduler",
+      "expected_ids": [
+        "scheduler-target"
+      ],
+      "category": "lexical",
+      "params": {}
+    },
+    {
+      "id": "lexical-webhook",
+      "query": "webhook",
+      "expected_ids": [
+        "webhook-target"
+      ],
+      "category": "lexical",
+      "params": {}
+    },
+    {
+      "id": "lexical-backup",
+      "query": "backup",
+      "expected_ids": [
+        "backup-target"
+      ],
+      "category": "lexical",
+      "params": {}
+    },
+    {
+      "id": "lexical-delegation",
+      "query": "delegation",
+      "expected_ids": [
+        "delegation-target"
+      ],
+      "category": "lexical",
+      "params": {}
+    },
+    {
+      "id": "lexical-migration",
+      "query": "migration",
+      "expected_ids": [
+        "migration-target"
+      ],
+      "category": "lexical",
+      "params": {}
+    },
+    {
+      "id": "lexical-connector",
+      "query": "connector",
+      "expected_ids": [
+        "connector-target"
+      ],
+      "category": "lexical",
+      "params": {}
+    },
+    {
+      "id": "exact-0",
+      "query": "POST /api/webhook/health",
+      "expected_ids": [
+        "exact-0"
+      ],
+      "category": "exact",
+      "params": {}
+    },
+    {
+      "id": "exact-1",
+      "query": "BUILDHOST",
+      "expected_ids": [
+        "exact-1"
+      ],
+      "category": "exact",
+      "params": {}
+    },
+    {
+      "id": "exact-2",
+      "query": "AC_REF_EXAMPLE",
+      "expected_ids": [
+        "exact-2"
+      ],
+      "category": "exact",
+      "params": {}
+    },
+    {
+      "id": "exact-3",
+      "query": "sqlitefts",
+      "expected_ids": [
+        "exact-3"
+      ],
+      "category": "exact",
+      "params": {}
+    },
+    {
+      "id": "exact-4",
+      "query": "grantissuer",
+      "expected_ids": [
+        "exact-4"
+      ],
+      "category": "exact",
+      "params": {}
+    },
+    {
+      "id": "exact-5",
+      "query": "reanchor",
+      "expected_ids": [
+        "exact-5"
+      ],
+      "category": "exact",
+      "params": {}
+    },
+    {
+      "id": "topic-0",
+      "query": "database-layout",
+      "expected_ids": [
+        "topic-0"
+      ],
+      "category": "topic",
+      "params": {}
+    },
+    {
+      "id": "topic-1",
+      "query": "retry-policy",
+      "expected_ids": [
+        "topic-1"
+      ],
+      "category": "topic",
+      "params": {}
+    },
+    {
+      "id": "topic-2",
+      "query": "permission-model",
+      "expected_ids": [
+        "topic-2"
+      ],
+      "category": "topic",
+      "params": {}
+    },
+    {
+      "id": "current",
+      "query": "deploymentport",
+      "expected_ids": [
+        "current"
+      ],
+      "category": "lifecycle",
+      "params": {},
+      "forbidden_ids": [
+        "old",
+        "expired"
+      ]
+    },
+    {
+      "id": "historical",
+      "query": "deploymentport",
+      "expected_ids": [
+        "old"
+      ],
+      "category": "lifecycle",
+      "params": {
+        "as_of_days": -20
+      },
+      "forbidden_ids": [
+        "current",
+        "expired"
+      ]
+    },
+    {
+      "id": "confirmation",
+      "query": "evidencerank",
+      "expected_ids": [
+        "confirmed"
+      ],
+      "category": "evidence",
+      "params": {
+        "limit": 1
+      }
+    },
+    {
+      "id": "usefulness",
+      "query": "usefulnessrank",
+      "expected_ids": [
+        "helpful"
+      ],
+      "category": "evidence",
+      "params": {
+        "limit": 1
+      }
+    },
+    {
+      "id": "old-decision",
+      "query": "standingpolicy",
+      "expected_ids": [
+        "old-decision"
+      ],
+      "category": "evidence",
+      "params": {}
+    },
+    {
+      "id": "authorized",
+      "query": "scopeisolation",
+      "expected_ids": [
+        "allowed"
+      ],
+      "category": "authorization",
+      "params": {},
+      "forbidden_ids": [
+        "denied"
+      ]
+    },
+    {
+      "id": "denied-scope",
+      "query": "scopeisolation",
+      "expected_ids": [],
+      "category": "authorization",
+      "params": {
+        "scope": "agent:someone-else"
+      },
+      "expected_status": 403
+    },
+    {
+      "id": "pagination-first",
+      "query": "pagination",
+      "expected_ids": [
+        "page-000",
+        "page-001",
+        "page-002",
+        "page-003",
+        "page-004"
+      ],
+      "category": "pagination",
+      "params": {}
+    },
+    {
+      "id": "pagination-later",
+      "query": "pagination",
+      "expected_ids": [
+        "page-105",
+        "page-106",
+        "page-107",
+        "page-108",
+        "page-109"
+      ],
+      "category": "pagination",
+      "params": {
+        "offset": 105
+      }
+    },
+    {
+      "id": "paraphrase-job",
+      "query": "scheduled cleanup",
+      "expected_ids": [
+        "semantic-job"
+      ],
+      "category": "paraphrase",
+      "params": {}
+    },
+    {
+      "id": "paraphrase-secret",
+      "query": "where do passwords remain",
+      "expected_ids": [
+        "semantic-secret"
+      ],
+      "category": "paraphrase",
+      "params": {}
+    },
+    {
+      "id": "paraphrase-handoff",
+      "query": "context for resuming work",
+      "expected_ids": [
+        "semantic-handoff"
+      ],
+      "category": "paraphrase",
+      "params": {}
+    },
+    {
+      "id": "anchor",
+      "query": "implementation detail",
+      "expected_ids": [
+        "topic-0"
+      ],
+      "category": "filter",
+      "params": {
+        "subject_anchor": "repo:app/database"
+      }
+    },
+    {
+      "id": "class",
+      "query": "evidencerank",
+      "expected_ids": [
+        "confirmed",
+        "unconfirmed",
+        "stale"
+      ],
+      "category": "filter",
+      "params": {
+        "memory_class": "fact"
+      }
+    },
+    {
+      "id": "no-match",
+      "query": "nonexistentterm",
+      "expected_ids": [],
+      "category": "empty",
+      "params": {}
+    }
+  ]
+}

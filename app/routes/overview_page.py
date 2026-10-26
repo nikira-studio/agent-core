@@ -94,21 +94,8 @@ async def dashboard_search(
         limit=200,
     )
     activity_hits: list[dict] = []
-    briefing_hits: list[dict] = []
     for activity in activity_rows:
         metadata = _json_loads(activity.get("metadata_json"))
-        is_briefing = bool(
-            isinstance(metadata, dict)
-            and metadata.get("briefing")
-            or (activity.get("task_description") or "").startswith("Briefing")
-            or (activity.get("task_description") or "").startswith("Handoff briefing")
-            or (activity.get("task_description") or "").startswith(
-                "PRD briefing"
-            )
-            or (activity.get("task_description") or "").startswith(
-                "PRD handoff briefing"
-            )
-        )
         search_blob = [
             activity.get("task_description", ""),
             activity.get("status", ""),
@@ -129,18 +116,16 @@ async def dashboard_search(
             str(activity.get("updated_at") or activity.get("started_at") or "")[:16],
         ]
         summary = " · ".join(part for part in summary_parts if part)
-        item = _search_result(
-            "briefing" if is_briefing else "activity",
-            activity.get("task_description", "")[:120],
-            summary,
-            "/activity",
-            "Briefing" if is_briefing else "Activity",
+        activity_hits.append(
+            _search_result(
+                "activity",
+                activity.get("task_description", "")[:120],
+                summary,
+                "/activity",
+                "Activity",
+            )
         )
-        if is_briefing:
-            briefing_hits.append(item)
-        else:
-            activity_hits.append(item)
-        if len(activity_hits) >= limit and len(briefing_hits) >= limit:
+        if len(activity_hits) >= limit:
             break
 
     visible_bindings = connector_service.list_bindings()
@@ -221,13 +206,11 @@ async def dashboard_search(
             "counts": {
                 "memory": len(memory_hits),
                 "activities": len(activity_hits),
-                "briefings": len(briefing_hits),
                 "connector_types": len(connector_type_hits),
                 "bindings": len(binding_hits),
             },
             "memory": memory_hits,
             "activities": activity_hits,
-            "briefings": briefing_hits,
             "connector_types": connector_type_hits,
             "bindings": binding_hits,
         }
@@ -260,7 +243,6 @@ def dashboard_home(request: Request, session: dict = Depends(require_auth)):
                     (SELECT COUNT(*) FROM connector_bindings WHERE enabled = 1) AS binding_count,
                     (SELECT COUNT(*) FROM connector_executions) AS execution_count,
                     (SELECT COUNT(*) FROM agent_activity WHERE status IN ('active', 'reassigned')) AS task_count,
-                    (SELECT COUNT(*) FROM delegation_requests WHERE status = 'pending') AS delegation_count,
                     (SELECT COUNT(*) FROM users) AS user_count
                 """
             ).fetchone()
@@ -280,10 +262,9 @@ def dashboard_home(request: Request, session: dict = Depends(require_auth)):
                     (SELECT COUNT(*) FROM connector_bindings WHERE scope = ? AND enabled = 1) AS binding_count,
                     (SELECT COUNT(*) FROM connector_executions ce JOIN connector_bindings cb ON ce.binding_id = cb.id WHERE cb.scope = ?) AS execution_count,
                     (SELECT COUNT(*) FROM agent_activity WHERE user_id = ? AND status IN ('active', 'reassigned')) AS task_count,
-                    (SELECT COUNT(*) FROM delegation_requests WHERE status = 'pending' AND target_user_id = ?) AS delegation_count,
                     0 AS user_count
                 """,
-                (user_scope, user_scope, user_scope, session["user_id"], session["user_id"]),
+                (user_scope, user_scope, user_scope, session["user_id"]),
             ).fetchone()
         recent_activity = activity_service.list_activities(
             user_id=session["user_id"], limit=8
@@ -296,7 +277,6 @@ def dashboard_home(request: Request, session: dict = Depends(require_auth)):
     enabled_connector_binding_count = int(counts["binding_count"])
     connector_execution_count = int(counts["execution_count"])
     active_task_count = int(counts["task_count"])
-    pending_delegation_count = int(counts["delegation_count"])
     connector_type_count = len(connector_types)
     enabled_action_count = sum(
         max(len(ct.get("supported_actions") or []) - len(ct.get("disabled_actions") or []), 0)
@@ -314,7 +294,6 @@ def dashboard_home(request: Request, session: dict = Depends(require_auth)):
       <a class="stat-card stat-link" href="/workspaces"><div class="value">{workspace_count}</div><div class="label">Active Workspaces</div></a>
       <a class="stat-card stat-link" href="/activity" id="stat-open-activities"><div class="value">{active_task_count}</div><div class="label">Open Activities</div></a>
       <a class="stat-card stat-link" href="/activity" id="stat-stale-blocked"><div class="value">{len(attention)}</div><div class="label">Needs Attention</div></a>
-      <a class="stat-card stat-link" href="/delegation-requests" id="stat-pending-delegations"><div class="value">{pending_delegation_count}</div><div class="label">Pending Delegations</div></a>
       <a class="stat-card stat-link" href="/memory"><div class="value">{memory_count}</div><div class="label">Memory Records</div></a>
     </div>"""
 
@@ -336,7 +315,7 @@ def dashboard_home(request: Request, session: dict = Depends(require_auth)):
     <div class="card">
       <div class="section-header">
         <h3>Operational Search</h3>
-        <div class="section-note">Search memory, activities, briefings, connector types, and visible bindings.</div>
+        <div class="section-note">Search memory, activities, connector types, and visible bindings.</div>
       </div>
       <form onsubmit="runDashboardSearch(event)" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
         <input type="text" id="dashboard-search-query" class="search-input" placeholder="Search by task, memory, connector, or binding..." style="min-width:260px;flex:1" autocomplete="off">
@@ -345,7 +324,7 @@ def dashboard_home(request: Request, session: dict = Depends(require_auth)):
       </form>
       <p class="text-muted" style="margin:10px 0 0">This looks at the live operational state agents can actually use, then points you back to the right page.</p>
       <div id="dashboard-search-results" style="margin-top:14px">
-        <div class="empty">Search operational state to find memory, work, briefings, and connector visibility.</div>
+        <div class="empty">Search operational state to find memory, work, and connector visibility.</div>
       </div>
     </div>"""
 
@@ -409,15 +388,6 @@ def dashboard_home(request: Request, session: dict = Depends(require_auth)):
     </div>
     <script>
     window.{JS_WINDOW_EVENT} = async function(event) {{
-      if ((event.type || '').startsWith('delegation_request_')) {{
-        var pendingEl = document.getElementById('stat-pending-delegations');
-        if (!pendingEl) return;
-        var res = await apiFetch('/api/delegation-requests');
-        if (!res.ok) return;
-        var pending = ((res.data || {{}}).requests || []).filter(function(r) {{ return r.status === 'pending'; }}).length;
-        pendingEl.querySelector('.value').textContent = pending;
-        return;
-      }}
       if (!(event.type || '').startsWith('activity_')) return;
       var j = await apiFetch('/api/dashboard/activity/summary');
       if (!j.ok) return;
@@ -488,7 +458,6 @@ def dashboard_home(request: Request, session: dict = Depends(require_auth)):
       }}
       const sections = [
         renderSection('Memory', data.memory || []),
-        renderSection('Briefings', data.briefings || []),
         renderSection('Activities', data.activities || []),
         renderSection('Connector Types', data.connector_types || []),
         renderSection('Bindings', data.bindings || [])
@@ -501,7 +470,7 @@ def dashboard_home(request: Request, session: dict = Depends(require_auth)):
       const input = document.getElementById('dashboard-search-query');
       const results = document.getElementById('dashboard-search-results');
       input.value = '';
-      results.innerHTML = '<div class="empty">Search operational state to find memory, work, briefings, and connector visibility.</div>';
+      results.innerHTML = '<div class="empty">Search operational state to find memory, work, and connector visibility.</div>';
       input.focus();
     }}
     </script>

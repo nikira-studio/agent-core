@@ -290,7 +290,7 @@ def test_claude_generator_preloads_workspace_sync_schemas():
         "http://x", "user:u", "workspace:w", "agent:a", "Agent", "ws"
     )
     preload = (
-        'ToolSearch("select:mcp__agent-core__workspace_sync,'
+        'ToolSearch("select:mcp__agent-core__session_context,mcp__agent-core__workspace_sync,'
         'mcp__agent-core__workspace_sync_ack,'
         'mcp__agent-core__memory_search,'
         'mcp__agent-core__activity_update,'

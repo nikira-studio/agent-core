@@ -94,7 +94,7 @@ def _http_factory(connector_type: dict) -> BaseConnector:
 def _openapi_factory(connector_type: dict) -> BaseConnector:
     from app.connectors.openapi_executor import OpenApiExecutor
 
-    return OpenApiExecutor()
+    return OpenApiExecutor(connector_type)
 
 
 def _cli_factory(connector_type: dict) -> BaseConnector:

@@ -23,8 +23,6 @@ def test_mcp_manifest(test_client, agent_token):
         "connectors_bindings_list",
         "connectors_bindings_test",
         "connectors_run",
-        "get_briefing",
-        "briefing_list",
     }
     assert expected.issubset(tool_names)
 
@@ -576,95 +574,6 @@ def test_mcp_activity_update_can_store_task_note(test_client, agent_token):
     assert activity["task_note"] == "Progress via MCP"
 
 
-def test_mcp_tool_briefing_list(test_client, agent_token):
-    created = test_client.post(
-        "/mcp",
-        headers={"Authorization": f"Bearer {agent_token}"},
-        json={
-            "tool": "activity_update",
-            "params": {"task_description": "Briefing list test"},
-        },
-    )
-    assert created.status_code == 201, created.json()
-    activity_id = created.json()["data"]["activity"]["id"]
-
-    briefing = test_client.post(
-        "/api/briefings/handoff",
-        headers={"Authorization": f"Bearer {agent_token}"},
-        json={"activity_id": activity_id},
-    )
-    assert briefing.status_code == 201, briefing.json()
-
-    r = test_client.post(
-        "/mcp",
-        headers={"Authorization": f"Bearer {agent_token}"},
-        json={"tool": "briefing_list", "params": {"limit": 10}},
-    )
-    assert r.status_code == 200
-    data = r.json()
-    assert data["ok"] is True
-    assert "briefings" in data["data"]
-    assert data["data"]["count"] >= 1
-
-
-def test_mcp_briefing_list_filters_authorization_before_pagination(
-    test_client, agent_token
-):
-    from app.database import get_db
-    from app.services import activity_service
-
-    visible = activity_service.create_activity(
-        agent_id="testagent",
-        user_id="admin",
-        task_description="Briefing visible older",
-        memory_scope="agent:testagent",
-        metadata_json=json.dumps({"briefing": {"summary": "visible"}}),
-    )
-    hidden = activity_service.create_activity(
-        agent_id="otheragent",
-        user_id="admin",
-        task_description="Briefing hidden newer",
-        memory_scope="workspace:hidden",
-        metadata_json=json.dumps({"briefing": {"summary": "hidden"}}),
-    )
-    with get_db() as conn:
-        conn.execute(
-            """
-            UPDATE agent_activity
-            SET status = 'completed', started_at = ?, ended_at = ?
-            WHERE id = ?
-            """,
-            (
-                "2026-01-01T00:00:00+00:00",
-                "2026-01-01T00:01:00+00:00",
-                visible["id"],
-            ),
-        )
-        conn.execute(
-            """
-            UPDATE agent_activity
-            SET status = 'completed', started_at = ?, ended_at = ?
-            WHERE id = ?
-            """,
-            (
-                "2026-01-02T00:00:00+00:00",
-                "2026-01-02T00:01:00+00:00",
-                hidden["id"],
-            ),
-        )
-        conn.commit()
-
-    response = test_client.post(
-        "/mcp",
-        headers={"Authorization": f"Bearer {agent_token}"},
-        json={"tool": "briefing_list", "params": {"limit": 1}},
-    )
-
-    assert response.status_code == 200, response.json()
-    briefings = response.json()["data"]["briefings"]
-    assert [briefing["id"] for briefing in briefings] == [visible["id"]]
-
-
 def test_mcp_memory_search_rejects_removed_classes(test_client, agent_token):
     r = test_client.post(
         "/mcp",
@@ -749,7 +658,7 @@ def test_mcp_memory_write_rejects_human_source_kind_from_agent(
 
 
 def test_mcp_memory_write_rejects_external_import_from_agent(test_client, agent_token):
-    """external_import is reserved for the import path and merge-restore."""
+    """external_import only labels records from the retired import paths."""
     r = test_client.post(
         "/mcp",
         headers={"Authorization": f"Bearer {agent_token}"},

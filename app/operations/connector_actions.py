@@ -40,9 +40,6 @@ def run_connector_action(
             status_code=403,
         )
     if not authority.can_binding_action(binding_id, action, scope=binding["scope"]):
-        connector_service.audit_delegated_execution_denial(
-            authority, binding_id, action
-        )
         return ConnectorActionOutcome(
             binding=binding,
             error_code="SCOPE_DENIED",

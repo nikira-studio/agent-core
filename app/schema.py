@@ -45,7 +45,6 @@ CREATE TABLE IF NOT EXISTS agents (
     read_scopes_json TEXT NOT NULL DEFAULT '[]',
     write_scopes_json TEXT NOT NULL DEFAULT '[]',
     default_recall_scopes_json TEXT,
-    can_delegate INTEGER NOT NULL DEFAULT 0 CHECK (can_delegate IN (0, 1)),
     capabilities_json TEXT NOT NULL DEFAULT '["memory","coordination","credentials","connectors_read","connectors_execute"]',
     api_key_hash TEXT NOT NULL,
     is_active INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0, 1)),
@@ -57,88 +56,6 @@ CREATE TABLE IF NOT EXISTS agents (
 
 CREATE INDEX IF NOT EXISTS idx_agents_owner ON agents(owner_user_id);
 CREATE INDEX IF NOT EXISTS idx_agents_active ON agents(is_active);
-
--- Delegated authority is deliberately normalized: a scope alone is never a
--- grant to every resource that happens to live in that scope.
-CREATE TABLE IF NOT EXISTS delegated_grants (
-    id TEXT PRIMARY KEY, secret_hash TEXT,
-    issuer_actor_type TEXT NOT NULL CHECK (issuer_actor_type IN ('user', 'agent')),
-    issuer_actor_id TEXT NOT NULL, principal_user_id TEXT NOT NULL,
-    recipient_agent_id TEXT NOT NULL, coordinator_agent_id TEXT,
-    purpose TEXT NOT NULL, activity_id TEXT, correlation_id TEXT,
-    status TEXT NOT NULL CHECK (status IN ('approved_unclaimed','active','revoked','expired','exhausted')),
-    issued_at TEXT NOT NULL, not_before TEXT, expires_at TEXT NOT NULL,
-    claim_expires_at TEXT NOT NULL, claimed_at TEXT, max_uses INTEGER,
-    use_count INTEGER NOT NULL DEFAULT 0, revoked_at TEXT, revoked_by_actor_id TEXT,
-    revocation_reason TEXT,
-    FOREIGN KEY (principal_user_id) REFERENCES users(id),
-    FOREIGN KEY (recipient_agent_id) REFERENCES agents(id)
-);
-CREATE INDEX IF NOT EXISTS idx_delegated_grants_recipient ON delegated_grants(recipient_agent_id, status, expires_at);
-CREATE INDEX IF NOT EXISTS idx_delegated_grants_principal ON delegated_grants(principal_user_id, status);
-CREATE INDEX IF NOT EXISTS idx_delegated_grants_issuer ON delegated_grants(issuer_actor_type, issuer_actor_id, status);
-CREATE INDEX IF NOT EXISTS idx_delegated_grants_status_expiry ON delegated_grants(status, expires_at);
-CREATE TABLE IF NOT EXISTS delegated_grant_scope_permissions (
-    grant_id TEXT NOT NULL, resource_type TEXT NOT NULL CHECK (resource_type IN ('memory','briefing')),
-    operation TEXT NOT NULL, scope TEXT NOT NULL,
-    PRIMARY KEY (grant_id, resource_type, operation, scope),
-    FOREIGN KEY (grant_id) REFERENCES delegated_grants(id) ON DELETE CASCADE
-);
-CREATE TABLE IF NOT EXISTS delegated_grant_resource_permissions (
-    grant_id TEXT NOT NULL, resource_type TEXT NOT NULL CHECK (resource_type IN ('activity')),
-    operation TEXT NOT NULL, resource_id TEXT NOT NULL,
-    PRIMARY KEY (grant_id, resource_type, operation, resource_id),
-    FOREIGN KEY (grant_id) REFERENCES delegated_grants(id) ON DELETE CASCADE
-);
-CREATE TABLE IF NOT EXISTS delegated_grant_actions (
-    grant_id TEXT NOT NULL, binding_id TEXT NOT NULL, action TEXT NOT NULL,
-    PRIMARY KEY (grant_id, binding_id, action),
-    FOREIGN KEY (grant_id) REFERENCES delegated_grants(id) ON DELETE CASCADE,
-    FOREIGN KEY (binding_id) REFERENCES connector_bindings(id)
-);
-
-CREATE TABLE IF NOT EXISTS delegation_requests (
-    id TEXT PRIMARY KEY,
-    requester_actor_type TEXT NOT NULL CHECK (requester_actor_type IN ('user', 'agent')),
-    requester_actor_id TEXT NOT NULL,
-    target_user_id TEXT NOT NULL,
-    recipient_agent_id TEXT NOT NULL,
-    coordinator_agent_id TEXT,
-    purpose TEXT NOT NULL,
-    ttl_seconds INTEGER NOT NULL CHECK (ttl_seconds > 0 AND ttl_seconds <= 3600),
-    activity_id TEXT,
-    correlation_id TEXT,
-    status TEXT NOT NULL CHECK (status IN ('pending', 'approved', 'denied')),
-    created_at TEXT NOT NULL,
-    decided_at TEXT,
-    decided_by_actor_type TEXT,
-    decided_by_actor_id TEXT,
-    decision_reason TEXT,
-    grant_id TEXT,
-    FOREIGN KEY (target_user_id) REFERENCES users(id),
-    FOREIGN KEY (recipient_agent_id) REFERENCES agents(id),
-    FOREIGN KEY (coordinator_agent_id) REFERENCES agents(id),
-    FOREIGN KEY (grant_id) REFERENCES delegated_grants(id) ON DELETE SET NULL
-);
-CREATE INDEX IF NOT EXISTS idx_delegation_requests_target ON delegation_requests(target_user_id, status, created_at);
-CREATE INDEX IF NOT EXISTS idx_delegation_requests_requester ON delegation_requests(requester_actor_type, requester_actor_id, created_at);
-CREATE TABLE IF NOT EXISTS delegation_request_scope_permissions (
-    request_id TEXT NOT NULL, resource_type TEXT NOT NULL CHECK (resource_type IN ('memory','briefing')),
-    operation TEXT NOT NULL, scope TEXT NOT NULL,
-    PRIMARY KEY (request_id, resource_type, operation, scope),
-    FOREIGN KEY (request_id) REFERENCES delegation_requests(id) ON DELETE CASCADE
-);
-CREATE TABLE IF NOT EXISTS delegation_request_resource_permissions (
-    request_id TEXT NOT NULL, resource_type TEXT NOT NULL CHECK (resource_type IN ('activity')),
-    operation TEXT NOT NULL, resource_id TEXT NOT NULL,
-    PRIMARY KEY (request_id, resource_type, operation, resource_id),
-    FOREIGN KEY (request_id) REFERENCES delegation_requests(id) ON DELETE CASCADE
-);
-CREATE TABLE IF NOT EXISTS delegation_request_actions (
-    request_id TEXT NOT NULL, binding_id TEXT NOT NULL, action TEXT NOT NULL,
-    PRIMARY KEY (request_id, binding_id, action),
-    FOREIGN KEY (request_id) REFERENCES delegation_requests(id) ON DELETE CASCADE
-);
 
 -- Workspaces table
 CREATE TABLE IF NOT EXISTS workspaces (
@@ -192,6 +109,24 @@ CREATE TABLE IF NOT EXISTS credentials (
 
 CREATE INDEX IF NOT EXISTS idx_credentials_scope ON credentials(scope, name);
 CREATE INDEX IF NOT EXISTS idx_credentials_reference ON credentials(reference_name);
+
+-- An agent asks for a secret; a person supplies it in the dashboard. The value
+-- never passes through the agent, so it never enters a model's context.
+CREATE TABLE IF NOT EXISTS credential_requests (
+    id TEXT PRIMARY KEY,
+    scope TEXT NOT NULL,
+    name TEXT NOT NULL,
+    purpose TEXT NOT NULL,
+    requested_by_agent_id TEXT NOT NULL,
+    requested_by_user_id TEXT,
+    status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'fulfilled', 'cancelled')),
+    credential_id TEXT,
+    created_at TEXT NOT NULL,
+    resolved_at TEXT,
+    resolved_by TEXT
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_credential_requests_pending
+ON credential_requests(scope, name) WHERE status = 'pending';
 
 -- Memory records table
 CREATE TABLE IF NOT EXISTS memory_records (
@@ -273,6 +208,34 @@ CREATE TABLE IF NOT EXISTS audit_log (
 CREATE INDEX IF NOT EXISTS idx_audit_timestamp ON audit_log(timestamp);
 CREATE INDEX IF NOT EXISTS idx_audit_actor ON audit_log(actor_type, actor_id);
 CREATE INDEX IF NOT EXISTS idx_audit_action ON audit_log(action, timestamp);
+
+-- Exact machine credential grants are independent of inherited read scopes.
+CREATE TABLE IF NOT EXISTS credential_consumer_grants (
+    id TEXT PRIMARY KEY,
+    consumer_agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+    entry_id TEXT NOT NULL REFERENCES credentials(id) ON DELETE CASCADE,
+    created_by TEXT NOT NULL REFERENCES users(id),
+    expires_at TEXT,
+    revoked_at TEXT,
+    allow_write INTEGER NOT NULL DEFAULT 0 CHECK(allow_write IN (0,1)),
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_credential_consumer_grants_lookup
+ON credential_consumer_grants(consumer_agent_id, entry_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_credential_consumer_grants_active
+ON credential_consumer_grants(consumer_agent_id, entry_id) WHERE revoked_at IS NULL;
+
+-- Consumer write receipts contain hashes and outcomes, never secret payloads.
+CREATE TABLE IF NOT EXISTS credential_consumer_writes (
+    consumer_agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+    entry_id TEXT NOT NULL REFERENCES credentials(id) ON DELETE CASCADE,
+    request_id TEXT NOT NULL,
+    payload_sha256 TEXT NOT NULL,
+    result_json TEXT NOT NULL,
+    status_code INTEGER NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY(consumer_agent_id,entry_id,request_id)
+);
 
 -- Broker credentials table
 CREATE TABLE IF NOT EXISTS broker_credentials (
@@ -544,6 +507,14 @@ def _apply_schema_migrations(conn) -> None:
             "unconfirmed-inference-importance-gate",
             _migrate_005_unconfirmed_inference_importance_gate,
         ),
+        (6, "credential-consumer-explicit-write-grants", _migrate_006_consumer_write_grants),
+        (7, "credential-resolution-audit-retention", _migrate_007_credential_resolution_rollups),
+        (8, "quiet-unattended-confirm-changes", _migrate_008_quiet_unattended_confirms),
+        (9, "execution-log-without-response-bodies", _migrate_009_drop_execution_bodies),
+        (10, "anchor-checks-are-not-confirmations", _migrate_010_anchor_checked_at),
+        (11, "drop-delegation-tables", _migrate_011_drop_delegation_tables),
+        (12, "structured-activity-handoffs", _migrate_012_activity_handoffs),
+        (13, "remove-handoff-briefings", _migrate_013_remove_handoff_briefings),
     )
     applied = {
         row["revision"]
@@ -635,7 +606,6 @@ def _migrate_001_current_schema(conn) -> None:
     _ensure_memory_proposals_table(conn)
     _widen_proposal_actions(conn)
     _ensure_agents_default_recall_column(conn)
-    _ensure_agents_delegation_column(conn)
     _ensure_agents_capabilities_column(conn)
     _ensure_connector_execution_authority_columns(conn)
     _ensure_connector_execution_failure_columns(conn)
@@ -773,17 +743,6 @@ def _ensure_agents_default_recall_column(conn) -> None:
     }
     if "default_recall_scopes_json" not in columns:
         conn.execute("ALTER TABLE agents ADD COLUMN default_recall_scopes_json TEXT")
-        conn.commit()
-
-
-def _ensure_agents_delegation_column(conn) -> None:
-    columns = {
-        row["name"] for row in conn.execute("PRAGMA table_info(agents)").fetchall()
-    }
-    if "can_delegate" not in columns:
-        conn.execute(
-            "ALTER TABLE agents ADD COLUMN can_delegate INTEGER NOT NULL DEFAULT 0"
-        )
         conn.commit()
 
 
@@ -951,7 +910,8 @@ def _ensure_workspace_sync_schema(conn) -> None:
         CREATE TRIGGER workspace_memory_au AFTER UPDATE ON memory_records
         WHEN new.scope LIKE 'workspace:%' AND (
             old.record_status IS NOT new.record_status OR
-            old.last_confirmed_at IS NOT new.last_confirmed_at OR
+            (old.last_confirmed_at IS NOT new.last_confirmed_at AND
+             COALESCE(json_extract(CASE WHEN json_valid(new.provenance_json) THEN new.provenance_json ELSE '{}' END, '$.verified.by'), '') != 'verification-pass') OR
             old.pinned IS NOT new.pinned
         )
         BEGIN
@@ -964,8 +924,8 @@ def _ensure_workspace_sync_schema(conn) -> None:
                 CASE
                     WHEN new.record_status = 'superseded' THEN 'memory_superseded'
                     WHEN new.record_status = 'retracted' THEN 'memory_retracted'
-                    WHEN old.last_confirmed_at IS NOT new.last_confirmed_at THEN 'memory_confirmed'
-                    ELSE 'memory_pin_changed'
+                    WHEN old.pinned IS NOT new.pinned THEN 'memory_pin_changed'
+                    ELSE 'memory_confirmed'
                 END,
                 'memory', new.id, json_extract(CASE WHEN json_valid(new.provenance_json) THEN new.provenance_json ELSE '{}' END, '$.agent_id'),
                 new.source_execution_id,
@@ -976,10 +936,7 @@ def _ensure_workspace_sync_schema(conn) -> None:
         END;
 
         CREATE TRIGGER workspace_activity_ai AFTER INSERT ON agent_activity
-        WHEN new.memory_scope LIKE 'workspace:%' AND NOT (
-            COALESCE(json_extract(CASE WHEN json_valid(new.metadata_json) THEN new.metadata_json ELSE '{}' END, '$.type'), '') = 'handoff_briefing'
-            AND json_extract(CASE WHEN json_valid(new.metadata_json) THEN new.metadata_json ELSE '{}' END, '$.briefing') IS NULL
-        )
+        WHEN new.memory_scope LIKE 'workspace:%'
         BEGIN
             INSERT INTO workspace_changes
             (id, memory_scope, sequence, change_type, resource_type, resource_id,
@@ -987,12 +944,7 @@ def _ensure_workspace_sync_schema(conn) -> None:
             VALUES (
                 lower(hex(randomblob(16))), new.memory_scope,
                 COALESCE((SELECT MAX(sequence) + 1 FROM workspace_changes WHERE memory_scope = new.memory_scope), 1),
-                CASE WHEN json_extract(CASE WHEN json_valid(new.metadata_json) THEN new.metadata_json ELSE '{}' END, '$.type') = 'handoff_briefing'
-                    OR json_extract(CASE WHEN json_valid(new.metadata_json) THEN new.metadata_json ELSE '{}' END, '$.briefing') IS NOT NULL
-                    THEN 'briefing_created' ELSE 'activity_created' END,
-                CASE WHEN json_extract(CASE WHEN json_valid(new.metadata_json) THEN new.metadata_json ELSE '{}' END, '$.type') = 'handoff_briefing'
-                    OR json_extract(CASE WHEN json_valid(new.metadata_json) THEN new.metadata_json ELSE '{}' END, '$.briefing') IS NOT NULL
-                    THEN 'briefing' ELSE 'activity' END,
+                'activity_created', 'activity',
                 new.id, new.agent_id, new.source_execution_id,
                 json_object('task_description', new.task_description, 'task_note', new.task_note,
                     'task_result', new.task_result, 'status', new.status,
@@ -1017,20 +969,12 @@ def _ensure_workspace_sync_schema(conn) -> None:
                 lower(hex(randomblob(16))), new.memory_scope,
                 COALESCE((SELECT MAX(sequence) + 1 FROM workspace_changes WHERE memory_scope = new.memory_scope), 1),
                 CASE
-                    WHEN (
-                            json_extract(CASE WHEN json_valid(old.metadata_json) THEN old.metadata_json ELSE '{}' END, '$.type') = 'handoff_briefing'
-                            OR json_extract(CASE WHEN json_valid(new.metadata_json) THEN new.metadata_json ELSE '{}' END, '$.type') = 'handoff_briefing'
-                         )
-                         AND json_extract(CASE WHEN json_valid(old.metadata_json) THEN old.metadata_json ELSE '{}' END, '$.briefing') IS NULL
-                         AND json_extract(CASE WHEN json_valid(new.metadata_json) THEN new.metadata_json ELSE '{}' END, '$.briefing') IS NOT NULL THEN 'briefing_created'
                     WHEN old.assigned_agent_id IS NOT new.assigned_agent_id THEN 'activity_reassigned'
                     WHEN new.status = 'completed' THEN 'activity_completed'
                     WHEN new.status = 'blocked' THEN 'activity_blocked'
                     ELSE 'activity_updated'
                 END,
-                CASE WHEN json_extract(CASE WHEN json_valid(new.metadata_json) THEN new.metadata_json ELSE '{}' END, '$.type') = 'handoff_briefing'
-                    OR json_extract(CASE WHEN json_valid(new.metadata_json) THEN new.metadata_json ELSE '{}' END, '$.briefing') IS NOT NULL
-                    THEN 'briefing' ELSE 'activity' END,
+                'activity',
                 new.id, new.agent_id, new.source_execution_id,
                 json_object('task_description', new.task_description, 'task_note', new.task_note,
                     'task_result', new.task_result, 'status', new.status,
@@ -1124,7 +1068,7 @@ def _ensure_activity_fts(conn) -> None:
 
     Activity records are the episodic tier of memory: what an agent actually
     worked on, one row per task, with a result. They were write-only — reachable
-    through activity_list and briefings but never searchable — so agents wrote
+    through activity_list but never searchable — so agents wrote
     per-task work logs into memory_records instead, where nothing ages them out.
     Indexing the trail gives that content a queryable home of its own.
 
@@ -1181,8 +1125,8 @@ def _drop_retired_memory_columns(conn) -> None:
 
     event_time was identical to created_at on all but 2 of 425 records in the
     first real corpus — it recorded when a write happened, which created_at
-    already does. Restores stay compatible because _insert_missing_rows
-    intersects the backup's columns with the current schema.
+    already does. A restored backup that still has the column is cleaned up
+    the same way the next time schema setup runs.
     """
     columns = {
         row["name"]
@@ -1246,6 +1190,10 @@ def _ensure_memory_metadata_columns(conn) -> None:
         # because records that can never be confirmed keep sorting to the front
         # and consume the whole budget every run.
         ("last_verify_attempt_at", "TEXT"),
+        # When the verifier last found the record's anchor present. Separate
+        # from last_confirmed_at on purpose: a file that still exists does not
+        # make the sentence about it true.
+        ("anchor_checked_at", "TEXT"),
         # Records the operator wants every session to see without having to
         # search for them. Ranking can bury a constraint, and a buried
         # constraint is the same as no constraint.
@@ -1596,3 +1544,131 @@ def _seed_connector_types(conn) -> None:
             ),
         )
     conn.commit()
+
+
+def _migrate_006_consumer_write_grants(conn) -> None:
+    columns = {row["name"] for row in conn.execute("PRAGMA table_info(credential_consumer_grants)")}
+    if "allow_write" not in columns:
+        conn.execute("ALTER TABLE credential_consumer_grants ADD COLUMN allow_write INTEGER NOT NULL DEFAULT 0 CHECK(allow_write IN (0,1))")
+
+
+def _migrate_007_credential_resolution_rollups(conn) -> None:
+    """Create compact daily counts for aged successful credential resolutions."""
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS credential_resolution_daily (
+            resolution_date TEXT NOT NULL,
+            action TEXT NOT NULL CHECK (action IN ('credential_consumer_resolved', 'broker_resolve')),
+            actor_type TEXT NOT NULL,
+            actor_id TEXT NOT NULL DEFAULT '',
+            credential_entry_id TEXT NOT NULL DEFAULT '',
+            success_count INTEGER NOT NULL CHECK (success_count > 0),
+            PRIMARY KEY (resolution_date, action, actor_type, actor_id, credential_entry_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_credential_resolution_daily_date
+        ON credential_resolution_daily(resolution_date);
+        """
+    )
+
+
+def _migrate_008_quiet_unattended_confirms(conn) -> None:
+    """Recreate the workspace triggers so unattended re-confirms stay out of sync.
+
+    The maintenance verifier re-stamps last_confirmed_at on every pass, and each
+    stamp became a workspace change: 35% of all changes on the first deployment,
+    none of them telling an agent anything new. Confirms by an agent or a person
+    still sync, because a peer checking a record is worth knowing about.
+    """
+    _ensure_workspace_sync_schema(conn)
+
+
+def _migrate_009_drop_execution_bodies(conn) -> None:
+    """Replace stored connector response bodies with their size.
+
+    The execution log kept raw API responses (health data, account lists, mail)
+    in plain text for weeks, and nothing read them back. New executions store
+    only the size; this clears what was already written.
+    """
+    conn.execute(
+        """UPDATE connector_executions
+        SET result_body_json = json_object('response_chars', length(result_body_json))
+        WHERE result_body_json IS NOT NULL"""
+    )
+
+
+
+def _migrate_010_anchor_checked_at(conn) -> None:
+    """Move automatic anchor checks out of last_confirmed_at.
+
+    The verifier used to stamp last_confirmed_at whenever a fact's anchor
+    existed, which reset its staleness even when the fact was wrong. Those
+    stamps become anchor_checked_at. A record's last_confirmed_at falls back to
+    its latest evidence-based confirmation in the audit log, or to none.
+    """
+    columns = {row["name"] for row in conn.execute("PRAGMA table_info(memory_records)")}
+    if "anchor_checked_at" not in columns:
+        conn.execute("ALTER TABLE memory_records ADD COLUMN anchor_checked_at TEXT")
+    conn.execute(
+        """UPDATE memory_records
+        SET anchor_checked_at = last_confirmed_at,
+            last_confirmed_at = (
+                SELECT MAX(a.timestamp) FROM audit_log a
+                WHERE a.action = 'memory_confirmed' AND a.resource_id = memory_records.id
+            )
+        WHERE last_confirmed_at IS NOT NULL
+          AND json_valid(provenance_json)
+          AND json_extract(provenance_json, '$.verified.by') = 'verification-pass'"""
+    )
+
+
+def _migrate_011_drop_delegation_tables(conn) -> None:
+    """Drop the delegated-grant and delegation-request tables.
+
+    Delegation was removed after the audit trail showed no use. Children go
+    first so no foreign key points at a table that is already gone. The
+    attribution columns on connector_executions and agents.can_delegate stay
+    in place on existing databases; dropping a column in SQLite needs a table
+    rebuild, and nothing reads them any more.
+    """
+    for table in (
+        "delegated_grant_scope_permissions",
+        "delegated_grant_resource_permissions",
+        "delegated_grant_actions",
+        "delegation_request_scope_permissions",
+        "delegation_request_resource_permissions",
+        "delegation_request_actions",
+        "delegation_requests",
+        "delegated_grants",
+    ):
+        conn.execute(f"DROP TABLE IF EXISTS {table}")
+
+
+def _migrate_012_activity_handoffs(conn) -> None:
+    """Structured handoffs live on the activity they close.
+
+    handoff_json holds what the next session needs (completed, next_steps,
+    open_questions, needs_human). handoff_requested_at records that a Stop hook
+    already asked for one, so it asks once per task. handoff_resolved_at is set
+    when a person has dealt with a needs_human request.
+    """
+    columns = {row["name"] for row in conn.execute("PRAGMA table_info(agent_activity)")}
+    for column in ("handoff_json", "handoff_requested_at", "handoff_resolved_at"):
+        if column not in columns:
+            conn.execute(f"ALTER TABLE agent_activity ADD COLUMN {column} TEXT")
+
+
+def _migrate_013_remove_handoff_briefings(conn) -> None:
+    """Remove handoff briefings in favour of structured handoffs on activities.
+
+    Briefings were stored as agent_activity rows carrying the whole briefing
+    body in metadata_json. The workspace triggers are recreated without their
+    briefing branches, then the briefing rows and their workspace changes go.
+    """
+    _ensure_workspace_sync_schema(conn)
+    conn.execute("DELETE FROM workspace_changes WHERE resource_type = 'briefing'")
+    conn.execute(
+        """DELETE FROM agent_activity
+        WHERE json_valid(metadata_json)
+          AND (json_extract(metadata_json, '$.briefing') IS NOT NULL
+               OR json_extract(metadata_json, '$.type') = 'handoff_briefing')"""
+    )

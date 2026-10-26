@@ -377,14 +377,12 @@ RULE_DESCRIPTIONS = {
     "unconfirmed_inference": "A fact written by an agent that nobody has ever checked",
     "anchor_missing": "Describes a file or service that is no longer there",
     "pin_request": "An agent asked for this to be shown to every session",
-    "low_value": "A model read this and could not find anything a future agent could act on",
 }
 
 # What a reviewer found when answering a confirm proposal. Two of these retract
 # the record but for different reasons, and the difference is worth keeping:
 # "no_longer_current" means the world moved, while "not_useful" means the memory
-# was never actionable enough to be worth carrying. The second is the signal a
-# usefulness check would need to learn from — age and shape cannot detect it.
+# was never actionable enough to be worth carrying.
 OUTCOMES = ("still_current", "no_longer_current", "not_useful")
 RETRACTING_OUTCOMES = ("no_longer_current", "not_useful")
 
@@ -401,7 +399,6 @@ ACTION_PROMPTS = {
 RULE_PROMPTS = {
     "pin_request": "Should this be shown to every session, whatever the task?",
     "anchor_missing": "This points at something that is no longer there — is the memory still worth keeping?",
-    "low_value": "Is there anything here a future session could act on?",
 }
 
 
@@ -466,17 +463,6 @@ def _rationale_unconfirmed_inference(evidence: dict) -> str:
 # not replayed from the copy that was stored when it was queued. Wording gets
 # revised; a proposal sitting in the queue for a week should not still be
 # explaining itself in last week's words.
-def _rationale_low_value(evidence: dict) -> str:
-    reason = (evidence.get("reason") or "").strip()
-    judged_by = evidence.get("model") or "the configured reviewer"
-    opinion = f' It said: "{reason}"' if reason else ""
-    return (
-        f"This was read by {judged_by}, which judged that a future session could not "
-        f"act on it.{opinion} That is an opinion, not a measurement — keep the record "
-        "if it is useful to you."
-    )
-
-
 def _rationale_pin_request(evidence: dict) -> str:
     agent = evidence.get("requested_by") or "an agent"
     if evidence.get("pin") is False:
@@ -518,7 +504,6 @@ RATIONALE_BUILDERS = {
     "unconfirmed_inference": _rationale_unconfirmed_inference,
     "anchor_missing": _rationale_anchor_missing,
     "pin_request": _rationale_pin_request,
-    "low_value": _rationale_low_value,
 }
 
 

@@ -23,12 +23,17 @@ def test_each_manifest_tool_has_a_policy_or_is_explicitly_public():
     assert manifest_names == set(_TOOL_CAPABILITIES) | public_tools
 
 
-def test_served_skill_tool_references_match_the_manifest():
+def test_served_skill_references_match_manifest_tools_or_parameters():
     manifest_names = {tool["name"] for tool in MANIFEST["tools"]}
+    parameter_names = {
+        name
+        for tool in MANIFEST["tools"]
+        for name in tool["inputSchema"].get("properties", {})
+    }
     skills_dir = Path(__file__).resolve().parents[2] / "app" / "agent_skills"
     for path in skills_dir.glob("*/SKILL.md"):
         content = path.read_text(encoding="utf-8")
-        assert set(re.findall(r"`([a-z_]+)`", content)) <= manifest_names
+        assert set(re.findall(r"`([a-z_]+)`", content)) <= manifest_names | parameter_names
 
 
 def test_manifest_hides_tools_outside_agent_capabilities():

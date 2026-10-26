@@ -131,14 +131,12 @@ class TestAgentsPage:
         assert "inherited and cannot be removed" in r.text
         assert "body.read_scopes.includes(userScope)" not in r.text
 
-    def test_admin_agent_page_exposes_delegation_control_and_user_scopes(
+    def test_admin_agent_page_exposes_user_scopes_without_delegation(
         self, admin_client
     ):
         r = admin_client.get("/agents")
         assert r.status_code == 200
-        assert 'id="ca-can-delegate"' in r.text
-        assert 'id="edit-can-delegate"' in r.text
-        assert "May issue or approve delegation grants" in r.text
+        assert "can-delegate" not in r.text
         assert "Personal User Scopes" in r.text
 
     def test_non_admin_can_see_shared_agents_read_only(self, user_client):
@@ -417,10 +415,3 @@ class TestMemoryDetailModal:
         assert "mem-detail-status" in r.text
         assert "Status" in r.text
 
-    def test_activity_briefing_modal_shows_structured_sections(self, admin_client):
-        r = admin_client.get("/activity")
-        assert "briefing-content" in r.text
-        assert "Facts" in r.text
-        assert "Decisions" in r.text
-        assert "Preferences" in r.text
-        assert "Recent Completed" in r.text

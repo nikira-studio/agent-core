@@ -13,7 +13,8 @@ reach the host" as "the record is wrong" would retract true records whenever the
 network hiccuped, which is precisely the failure that makes automated cleanup
 untrustworthy. Only ``missing`` is evidence, and only about the anchor: a file
 that still exists does not make the sentence about it true, so a passing check
-refreshes confirmation but never asserts the content is correct.
+records anchor_checked_at and leaves last_confirmed_at, which only an
+evidence-based confirmation sets, alone.
 
 Verifiers are read-only by construction. Nothing here writes to a repo, a host,
 or a service; the strongest thing it does is run a connector binding's own
@@ -227,7 +228,7 @@ def _verify_via_binding(spec: dict, anchor_type: str, value: str) -> tuple[str, 
     return UNVERIFIABLE, f"the '{anchor_type}:' verifier could not confirm {value} right now"
 
 
-def verify_record(record: dict, verified_by: str = "verification-pass") -> dict:
+def verify_record(record: dict) -> dict:
     """Check one record against its anchor. Writes only on a clean pass."""
     anchor = record.get("subject_anchor")
     outcome = {
@@ -262,14 +263,7 @@ def verify_record(record: dict, verified_by: str = "verification-pass") -> dict:
         return {**outcome, "status": UNVERIFIABLE, "detail": f"check failed: {exc}"}
 
     if status == VERIFIED:
-        try:
-            memory_service.confirm_memory(
-                record["id"],
-                evidence=f"anchor check: {detail}",
-                verified_by=verified_by,
-            )
-        except ValueError:
-            logger.debug("Could not confirm %s", record.get("id"), exc_info=True)
+        memory_service.mark_anchor_checked(record["id"])
 
     return {**outcome, "status": status, "detail": detail}
 

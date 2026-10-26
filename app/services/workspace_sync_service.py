@@ -84,6 +84,54 @@ def _new_execution(
     return execution_id, acknowledged, True
 
 
+def start_session_execution(
+    *, agent_id: str, user_id: str, memory_scope: str, host_session_ref: Optional[str]
+) -> dict:
+    """Open (or reuse) the execution behind an injected session context.
+
+    The injected context already tells the agent what changed, so the cursor
+    starts at the newest change: a later workspace_sync then returns only what
+    happens during the session. A hook can fire more than once per host session
+    (clear, compact), so an active execution with the same host_session_ref is
+    reused instead of opening a second one.
+    """
+    now = utc_now_iso()
+    with get_db() as conn:
+        execution_id = None
+        if host_session_ref:
+            row = conn.execute(
+                """SELECT id FROM agent_executions
+                WHERE agent_id = ? AND user_id = ? AND memory_scope = ?
+                  AND host_session_ref = ? AND status = 'active'
+                ORDER BY started_at DESC LIMIT 1""",
+                (agent_id, user_id, memory_scope, host_session_ref),
+            ).fetchone()
+            execution_id = row["id"] if row else None
+        reused = execution_id is not None
+        if not reused:
+            execution_id, _, _ = _new_execution(
+                conn, agent_id, user_id, memory_scope, host_session_ref
+            )
+        newest = conn.execute(
+            "SELECT COALESCE(MAX(sequence), 0) AS seq FROM workspace_changes WHERE memory_scope = ?",
+            (memory_scope,),
+        ).fetchone()["seq"]
+        conn.execute(
+            """UPDATE execution_sync_state
+            SET acknowledged_sequence = MAX(acknowledged_sequence, ?),
+                highest_delivered_sequence = MAX(highest_delivered_sequence, ?),
+                updated_at = ?
+            WHERE execution_id = ? AND memory_scope = ?""",
+            (newest, newest, now, execution_id, memory_scope),
+        )
+        conn.execute(
+            "UPDATE agent_executions SET last_seen_at = ? WHERE id = ?",
+            (now, execution_id),
+        )
+        conn.commit()
+    return {"execution_id": execution_id, "reused": reused, "cursor": int(newest)}
+
+
 def validate_execution(
     *, execution_id: Optional[str], agent_id: str, user_id: str, memory_scope: str
 ) -> None:
@@ -188,21 +236,20 @@ def sync_workspace(
     groups = {
         "memory_changes": [],
         "activity_changes": [],
-        "briefing_changes": [],
         "other_session_changes": [],
     }
     for change in changes:
         if change["resource_type"] == "memory":
             groups["memory_changes"].append(change)
-        elif change["resource_type"] == "briefing":
-            groups["briefing_changes"].append(change)
         else:
             groups["activity_changes"].append(change)
         if (
             change.get("source_execution_id")
             and change["source_execution_id"] != execution_id
         ):
-            groups["other_session_changes"].append(change)
+            # Ids only: the change itself is already in its resource group, and
+            # repeating it doubled the page for no new information.
+            groups["other_session_changes"].append(change["id"])
     return {
         "execution_id": execution_id,
         "execution_created": created,

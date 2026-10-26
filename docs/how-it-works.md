@@ -8,7 +8,7 @@ Everything here is current behaviour. For exact request and response shapes, see
 
 ## 1. The shape of the system
 
-Agent Core is a single local HTTP service backed by one SQLite database. It stores five kinds of thing and does nothing else:
+Agent Core is a single local HTTP service backed by one SQLite database. It stores four kinds of thing and does nothing else:
 
 | | What it holds | Who writes it |
 | --- | --- | --- |
@@ -16,7 +16,6 @@ Agent Core is a single local HTTP service backed by one SQLite database. It stor
 | **Activity** | What happened: one record per task, with a heartbeat | Agents |
 | **Credentials** | Encrypted secrets, exposed only as references | Operator |
 | **Connectors** | How to reach external services, and with which credential | Operator |
-| **Grants** | Lent authority: narrowed, expiring, revocable | Operator and delegating agents |
 
 Agents connect to it. It does not connect to agents, schedule them, or run their work. That boundary is deliberate: an agent's harness already decides what to do next, and a memory layer that also tried to would have to be replaced every time you changed agents. Agent Core is what stays constant while the agents around it change.
 
@@ -40,7 +39,7 @@ Agents connect to it. It does not connect to agents, schedule them, or run their
                                             external services
 ```
 
-Nothing leaves the machine unless you configure something that reaches out: a connector action, an embedding backend, a review model, or an outbound webhook notification. Those are the only outbound paths, and all four are off until an operator sets them up.
+Nothing leaves the machine unless you configure something that reaches out: a connector action, an embedding backend, or an outbound webhook notification. Those are the only outbound paths, and all three are off until an operator sets them up.
 
 ### Two transports, one implementation
 
@@ -74,8 +73,6 @@ A scope is a named box. Every memory record lives in exactly one, and every agen
 The common mistake is using `agent:<id>` as a handoff channel. It is private and it disappears with the agent; a shared workspace is both a cleaner grant and a durable one. If an agent has durable knowledge and no workspace to put it in, that is a setup gap to fix, not a reason to use the private scope.
 
 Scope enforcement happens in one place, before any read or write reaches the data. An agent asking for a scope it does not hold gets `SCOPE_DENIED`; it is never silently given a filtered result, because a silently narrowed answer looks identical to a complete one.
-
-Scopes are standing access: what an agent holds from now on. When an agent should have access for one task rather than from now on, that is a delegated grant, covered in [section 7](#7-delegation-authority-for-one-task).
 
 ---
 
@@ -165,7 +162,7 @@ Search results are a **lean projection** by default: content and the few fields 
 
 ### Pinned standing context
 
-A few records per scope can be **pinned**: the rules that apply whatever the task is. Pinned records are returned by `memory_pinned` at the start of a session rather than having to win a search, are included in every handoff briefing, and are skipped by the clean-up rules.
+A few records per scope can be **pinned**: the rules that apply whatever the task is. Pinned records are returned by `memory_pinned` at the start of a session rather than having to win a search, are included in every session context, and are skipped by the clean-up rules.
 
 Two constraints make this safe:
 
@@ -180,7 +177,7 @@ A shared memory corpus decays in two different ways, and they need different tre
 
 | Result | Meaning | What happens |
 | --- | --- | --- |
-| `verified` | The subject is there | Record is stamped as confirmed today |
+| `verified` | The subject is there | `anchor_checked_at` is set. The record is **not** confirmed: a file that still exists does not make the sentence about it true, so staleness still counts from the last evidence-based confirmation |
 | `missing` | The subject is definitively gone (404, no such path) | Becomes a review proposal |
 | `unverifiable` | Could not check: timeout, error, no configured root | **Nothing** |
 
@@ -197,11 +194,10 @@ Only `missing` is evidence. An outage is not a false memory, and a system that f
 | `unconfirmed_inference` | Never-confirmed, non-human facts older than the configured cutoff | Maintenance or you generate proposals |
 | `anchor_missing` | The file or service it describes is gone | The verification pass finds it missing |
 | `pin_request` | An agent asked for standing context | An agent calls `memory_pin` |
-| `low_value` | A model found nothing a future session could act on | You run the usefulness review |
 
-The first five share one capped generation pass. The maintenance schedule runs it when `consolidation_scan_enabled` is on, and the review page or `POST /api/memory/proposals/generate` runs the same pass on demand. Per-rule-and-scope, installation-wide, and per-run caps keep unattended generation bounded; fair rotation prevents one noisy scope from owning every run. The last three rules are queued as their triggering events happen.
+The first five share one capped generation pass. The maintenance schedule runs it when `consolidation_scan_enabled` is on, and the review page or `POST /api/memory/proposals/generate` runs the same pass on demand. Per-rule-and-scope, installation-wide, and per-run caps keep unattended generation bounded; fair rotation prevents one noisy scope from owning every run. The last two rules are queued as their triggering events happen.
 
-Every one of them **proposes; none of them act**. Nothing is applied until an operator answers, and each rule keeps a record of how often its suggestions were accepted, so a rule that keeps being wrong is visible as a number instead of as a vague sense that the queue is noisy. `low_value` can never be automated regardless of its record, because it is a judgement about worth rather than a measurement, and the cost of a wrong call is deleting a constraint someone depended on.
+Every one of them **proposes; none of them act**. Nothing is applied until an operator answers, and each rule keeps a record of how often its suggestions were accepted, so a rule that keeps being wrong is visible as a number instead of as a vague sense that the queue is noisy.
 
 Confirming a record requires **evidence** naming what was checked. Reading a record is not checking it, and choosing `still_current` on a proposal does not set `last_confirmed_at`. Use the separate **Confirm with evidence** action when the record was actually verified.
 
@@ -213,28 +209,27 @@ Memory holds what stays true. The activity trail holds what happened: one record
 
 ```
 activity_update   open a task, heartbeat every minute or two, close with a result
-workspace_sync    receive pinned context, assignments, briefings, and changes since this execution's cursor
+workspace_sync    receive pinned context, assignments, and changes since this execution's cursor
 workspace_sync_ack acknowledge a delivered page after processing it
 activity_search   "what did we do on X last month"
 activity_list     what is stale or pending
 activity_get      one task, plus the memory records written during it
 activity_pickup   claim work a human assigned to this agent
-get_briefing      the prior task, its decisions, and relevant workspace memory
 ```
 
-It is **self-reported on purpose**. There is no detection of agent work: an agent that does not call `activity_update` does not appear, and no briefing can be generated for it. The alternative, inferring activity, would produce a trail that looks authoritative and is quietly incomplete.
+It is **self-reported on purpose**. There is no detection of agent work: an agent that does not call `activity_update` does not appear, and no handoff is recorded for it. The alternative, inferring activity, would produce a trail that looks authoritative and is quietly incomplete.
 
 Because every memory write cites the activity that was open at the time, the trail links both ways: `activity_get` returns what a task concluded, not only what it was attempting. Picking up someone else's work shows both.
 
 Work assigned from the dashboard is **pulled, not pushed**: `activity_pickup` returns the next assigned task or `null`. Agents check when they start or when idle. Nothing arrives unbidden, which is what keeps the handoff trail auditable.
 
-Workspace changes use the same pull model. `workspace_sync` creates an execution ID for one host session and returns changes after that execution's acknowledged cursor. The response separates memory, activity, and briefing changes. `other_session_changes` repeats changes written by another execution as a convenience, so clients process each stable change ID only once. After processing a page, the client advances its cursor with `workspace_sync_ack`.
+Workspace changes use the same pull model. `workspace_sync` creates an execution ID for one host session and returns changes after that execution's acknowledged cursor. The response separates memory and activity changes. `other_session_changes` lists the IDs of changes written by another execution; the changes themselves are in their resource groups. After processing a page, the client advances its cursor with `workspace_sync_ack`.
 
-Starting a new workspace activity through the MCP `activity_update` tool also has a bounded safety net. If the supplied execution is not already caught up, Agent Core can return `since_last_active`: a change-sequence-based digest since that agent's previous non-briefing activity. It includes baseline and truncation metadata because the change feed has finite retention. The digest is best-effort and additive; activity creation still succeeds when it cannot be computed. It is omitted for write-only callers and for executions that already received the current change feed.
+Starting a new workspace activity through the MCP `activity_update` tool also has a bounded safety net. If the supplied execution is not already caught up, Agent Core can return `since_last_active`: a change-sequence-based digest since that agent's previous activity. It includes baseline and truncation metadata because the change feed has finite retention. The digest is best-effort and additive; activity creation still succeeds when it cannot be computed. It is omitted for write-only callers and for executions that already received the current change feed.
 
 The Activity dashboard reports execution linkage for workspace activities over the installation lifetime and the last 30 days. Linkage means the activity carried an execution ID; it does not prove that the agent read or acted on every delivered change.
 
-The durable change log does not replace memory, activities, or briefings. It tells a session which source records changed. Agent Core retains change rows for a bounded period, so an expired cursor returns `cursor_reset: true` and a recent bootstrap instead of pretending that no changes occurred.
+The durable change log does not replace memory or activities. It tells a session which source records changed. Agent Core retains change rows for a bounded period, so an expired cursor returns `cursor_reset: true` and a recent bootstrap instead of pretending that no changes occurred.
 
 ---
 
@@ -281,62 +276,24 @@ connectors_run            do it, server-side
 
 Adapters declare their requirements, and a binding only exposes actions whose requirements are met, so a half-configured integration presents as unavailable rather than failing at the moment an agent depends on it. Every execution is logged, and the log is pruned on the same retention sweep as everything else.
 
-Binding visibility grants access to every action enabled on the connector type. Connector types define which actions exist and which are disabled; bindings decide which users, agents, or workspaces can use the connection. Delegated grants can narrow temporary access to exact binding/action pairs.
+Binding visibility grants access to every action enabled on the connector type. Connector types define which actions exist and which are disabled; bindings decide which users, agents, or workspaces can use the connection.
 
 ---
 
-## 7. Delegation: authority for one task
+## 7. Optional capabilities
 
-Scopes fit the agents you work with every day. Some access should not stand, though: a coordinator farming a task out to a worker agent, a scheduled job that needs one connector action a night, a new agent you are not ready to trust with anything permanent. Delegation covers that case: one actor lends an agent a narrowed slice of its authority, and the loan expires.
-
-The pattern is the local equivalent of temporary credentials from a cloud provider (AWS STS role assumption, OAuth token exchange): attenuated authority, never broader than the issuer's, bounded in time, revocable at will.
-
-### Grants
-
-A **grant** names a recipient agent, a purpose, a TTL (capped at one hour), and exactly what it permits: memory and briefing operations in named scopes, specific activity records, and specific connector binding/action pairs. Whoever issues it (a human in the dashboard, or an agent with `can_delegate`) can only give away a subset of what they currently hold.
-
-The recipient claims the grant once, over REST, with its own API key, and receives the grant secret exactly once. Claiming is deliberately not an MCP tool: a secret returned as a tool result would land in a model context, and from there in transcripts and logs. From then on, delegated requests carry both credentials together:
-
-```http
-Authorization: Bearer ac_sk_<the recipient's own key>
-X-Agent-Core-Grant: ac_dg_<grant-id>.<secret>
-```
-
-While the grant header is present, the grant **replaces** the recipient's permanent authority; it is never added to it. A worker holding a grant for one workspace cannot also reach whatever else its key normally could. Issuer, recipient, expiry, revocation, and the issuer's own current authority are revalidated on every request, so revoking a grant (or demoting its issuer) takes effect immediately, not at the next claim.
-
-### Requests: asking for authority you don't have
-
-A coordinator does not need authority to ask for it. `delegation_request` records what is wanted (recipient, purpose, TTL, exact permissions), and the request appears on the dashboard's **Delegation** page. A human approves, narrows, or denies it there. Approval can keep or remove requested permissions; it can never add one. The decision is one-time, audited, and produces an unclaimed grant that goes through the normal claim flow; approval never returns a secret either.
-
-This is the system's human-in-the-loop answer for agent authority: the agent states exactly what it wants, a person decides, and no secret ever passes through a model on the way.
-
-### What this makes possible
-
-Anything that coordinates worker agents (an orchestration framework, a scheduler, a script of your own) faces the same choice: give every worker standing broad credentials, or hand out narrow ones per task. Delegation makes the second choice available to anything that speaks REST, while Agent Core keeps identity, enforcement, and audit in one place. Every delegated action is attributed end to end (principal, issuer, coordinator, executor, grant) in the audit log, and delegated memory writes carry the same provenance.
-
-Backups deliberately revoke grants: restoring a database brings back records, never live authority.
-
-The exact permission shapes, lifecycle rules, and error codes are in the [Delegated Authorization contract](delegated-authorization-integration.md).
-
----
-
-## 8. Optional capabilities
-
-Three things make Agent Core better and none of them are required. Each has a defined fallback, because a memory layer that stops working when an optional service is down is not a memory layer.
+Two things make Agent Core better and neither of them are required. Each has a defined fallback, because a memory layer that stops working when an optional service is down is not a memory layer.
 
 | Capability | Enables | Without it |
 | --- | --- | --- |
 | **Embedding backend** | Semantic and hybrid search | Full-text search; exact keywords matter more |
-| **Review model** | Usefulness review, judgement-based clean-up | Mechanical rules still run; model-backed features report as unconfigured |
 | **Verification bindings** | Checking anchor types beyond `repo:`/`host:`/`service:` | Those anchors report `unverifiable`, which changes nothing about the record |
 
-The rule they all follow: **a capability is never a dependency.** Configuring one turns on features, including for records written long before it existed. Removing one turns those features off and leaves everything else untouched. Nothing degrades into guessing.
-
-The review model deserves one explicit note: pointing it at a model on a machine you control means record content never leaves that machine; pointing it at a hosted API means it does. That trade-off is why there is no default and why the features that use it are off until you turn them on.
+The rule they both follow: **a capability is never a dependency.** Configuring one turns on features, including for records written long before it existed. Removing one turns those features off and leaves everything else untouched. Nothing degrades into guessing.
 
 ---
 
-## 9. What runs on a schedule
+## 8. What runs on a schedule
 
 One in-process sweep, hourly by default, does all of it (`AGENT_CORE_MAINTENANCE_INTERVAL_MINUTES`, `0` to disable; the manual **Run Maintenance** button still works):
 
@@ -351,7 +308,7 @@ The last run's time, trigger, and results are visible in **Settings → Backup &
 
 ---
 
-## 10. Your data
+## 9. Your data
 
 ```
 data/
@@ -366,7 +323,7 @@ data/
 
 ---
 
-## 11. The rules the system holds to
+## 10. The rules the system holds to
 
 Every design decision above comes from one of these. When something in Agent Core surprises you, one of these is usually the reason.
 
@@ -382,9 +339,7 @@ Every design decision above comes from one of these. When something in Agent Cor
 
 **Explicit beats automatic.** Agents write and read deliberately; work is pulled, not pushed; nothing transfers by magic. It makes the trail auditable and the context intentional.
 
-**Authority is lent, never taken.** A grant is a subset of what its issuer holds, replaces the recipient's own authority rather than adding to it, and expires on its own. Approval can narrow a request, never expand it, and no grant secret is ever visible to a model.
-
-**Local by default.** Memory, credentials, and configuration stay on your disk. The outbound paths are the ones you configured, and there are only four.
+**Local by default.** Memory, credentials, and configuration stay on your disk. The outbound paths are the ones you configured, and there are only three.
 
 ---
 
@@ -397,7 +352,6 @@ Every design decision above comes from one of these. When something in Agent Cor
 | [API Reference](api.md) | Every REST endpoint and MCP tool |
 | [Configuration](configuration.md) | Settings, optional capabilities, data layout |
 | [Security](security.md) | Scope model, secret handling, deployment checklist |
-| [Delegated Authorization](delegated-authorization-integration.md) | The delegation contract for coordinators and agent runtimes |
 | [Adapters](adapters.md) | Building and sharing connector integrations |
 | [Backup & Restore](backup-restore.md) | Export, restore, maintenance |
 | [Troubleshooting](troubleshooting.md) | Common issues and fixes |

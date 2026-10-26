@@ -10,6 +10,7 @@ from typing import Any, Optional
 
 from app.connectors import BaseConnector
 from app.connectors.base import Credential
+from app.connectors.action_validation import validate_action_params
 from app.connectors.value_utils import extract_jsonpath, parse_json_object
 from app.connectors.errors import (
     AuthExpiredError,
@@ -75,7 +76,9 @@ class HttpEngine(BaseConnector):
             self.spec = raw
         self.needs_session = "session" in self.spec or "refresh" in self.spec
 
-    def test_connection(self, credential: Credential, config_json: Optional[str]) -> dict:
+    def test_connection(
+        self, credential: Credential, config_json: Optional[str]
+    ) -> dict:
         requests = self.spec.get("requests") or {}
         if not isinstance(requests, dict) or not requests:
             return {"success": False, "error": "No requests defined for this adapter"}
@@ -89,7 +92,39 @@ class HttpEngine(BaseConnector):
         )
         action = next((name for name in preferred_actions if name in requests), None)
         if not action:
-            action = next(iter(requests.keys()))
+            return {"success": False, "error": "No safe connection test action defined"}
+
+        if action in (self.ct.get("disabled_actions") or []):
+            return {
+                "success": False,
+                "error": "Connection test action is disabled",
+                "error_code": "DISABLED_ACTION",
+            }
+        meta = next(
+            (
+                item
+                for item in self.ct.get("supported_actions") or []
+                if isinstance(item, dict) and item.get("name") == action
+            ),
+            {},
+        )
+        side_effect = meta.get("side_effect")
+        method = requests[action].get("method", "GET").upper()
+        if side_effect not in ("none", "read") and not (
+            side_effect is None and method in ("GET", "HEAD", "OPTIONS")
+        ):
+            return {
+                "success": False,
+                "error": "Connection test action must be read-only",
+            }
+
+        config = parse_json_object(config_json)
+        defaults = config.get("default_params", {})
+        param_error = validate_action_params(
+            self.ct, action, defaults if isinstance(defaults, dict) else {}
+        )
+        if param_error:
+            return param_error
 
         try:
             session = None
@@ -293,7 +328,11 @@ class HttpEngine(BaseConnector):
                     return fb if fb is _OMIT else str(fb)
                 return str(val)
             if filter_name == "rfc822_base64url":
-                return _make_rfc822_base64url(params) if isinstance(params, dict) else m.group(0)
+                return (
+                    _make_rfc822_base64url(params)
+                    if isinstance(params, dict)
+                    else m.group(0)
+                )
             if val is None:
                 return m.group(0)
             return str(val)
@@ -392,8 +431,12 @@ class HttpEngine(BaseConnector):
                 if session
                 else credential.get("access_token")
             )
-            header = template.replace("{{ cred.access_token }}", str(access_token or ""))
-            req["headers"][name] = self._render(header, {"_cred": credential.fields}, {})
+            header = template.replace(
+                "{{ cred.access_token }}", str(access_token or "")
+            )
+            req["headers"][name] = self._render(
+                header, {"_cred": credential.fields}, {}
+            )
 
     # ─── session ─────────────────────────────────────────────────────────────
 
@@ -503,7 +546,9 @@ class HttpEngine(BaseConnector):
                 error_data = json.loads(e.read().decode("utf-8"))
             except Exception:
                 error_data = {}
-            message = error_data.get("error_description") or error_data.get("error") or str(e)
+            message = (
+                error_data.get("error_description") or error_data.get("error") or str(e)
+            )
             raise AuthExpiredError(f"OAuth refresh failed: {message}") from e
         except Exception as e:
             raise AuthExpiredError(f"OAuth refresh failed: {e}") from e
@@ -617,7 +662,9 @@ class HttpEngine(BaseConnector):
         return result
 
     @staticmethod
-    def _limit_list_response(body: Any, response_spec: dict, params: dict) -> tuple[Any, bool]:
+    def _limit_list_response(
+        body: Any, response_spec: dict, params: dict
+    ) -> tuple[Any, bool]:
         """Enforce a list limit when an upstream API accepts but ignores it.
 
         Adapters opt in through ``response.limit_list_by_param``. This keeps the

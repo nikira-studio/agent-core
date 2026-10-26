@@ -48,9 +48,9 @@ manifest's `bin`, `args`, and `env` before installing.
 
 Server-side outbound calls (webhooks, OpenAPI/MCP import, HTTP connectors) run
 through a URL validator. Blocking of private, loopback, and link-local hosts is
-**opt-in** via `AC_BLOCK_INTERNAL_HOSTS=true`, because the local-first design
+**opt-in** via `AGENT_CORE_BLOCK_INTERNAL_HOSTS=true`, because the local-first design
 routinely needs to reach `localhost` and Docker-network services. When enabled,
-use `AC_ALLOWED_INTERNAL_HOSTS` to allow specific internal hosts. Operators who
+use `AGENT_CORE_ALLOWED_INTERNAL_HOSTS` to allow specific internal hosts. Operators who
 expose Agent Core beyond a trusted host should enable internal-host blocking.
 
 Run a secret scan before publishing:

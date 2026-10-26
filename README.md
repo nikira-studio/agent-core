@@ -14,7 +14,7 @@ Most installations need only shared memory at first. Add the next layer when a r
 2. [Write and recall shared memory](#memory-that-persists-across-sessions). This is the default reason to use Agent Core.
 3. Add [encrypted credentials and the Credential Broker](docs/credential-broker.md) when a local tool needs a secret without putting it in a prompt.
 4. Add [connector bindings](docs/integrations.md#connectors-agent-core-runs-actions-directly) when Agent Core should call an external service itself.
-5. Use activities, workspaces, briefings, delegation, webhooks, backups, and administration when your work needs them.
+5. Use activities, workspaces, webhooks, backups, and administration when your work needs them.
 
 You do not need to configure every capability before your first agent can use memory.
 
@@ -66,7 +66,7 @@ A fresh install gives you a local control layer that agents can actually use:
 
 Agent Core is a local HTTP server. It speaks REST and MCP (Model Context Protocol), so anything that can make an HTTP request can talk to it. Agents authenticate with an API key and use tools like `memory_search`, `memory_write`, `credential_get`, and the connector discovery/execution tools.
 
-Memory, credentials, and configuration all live on your disk. The only intentional outbound call in the UI is the public API directory browser for connector imports; operational data still stays local unless you explicitly run a connector against an external service.
+Memory, credentials, and configuration all live on your disk. Outbound traffic happens when an agent runs a connector action, when scheduled maintenance tests a connector binding to verify a memory anchored to it, when you browse the public API directory for connector imports, and when you register outbound webhooks. Nothing else leaves the host.
 
 For the full picture, read **[How it works](docs/how-it-works.md)**: how memory is modelled, what keeps the corpus honest, how connectors and credentials fit together, and the reasoning behind each.
 
@@ -121,6 +121,8 @@ There is also a **clean-up review** in the dashboard. Rules look for records tha
 
 > Without semantic search configured, exact keywords matter more than fuzzy phrasing. `memory_search("authentication")` won't match a record that says "login logic", so use terms that match what was actually written. See [Requirements](#requirements) for how to enable semantic search.
 
+Keyword search ranks matches by text relevance alongside confirmation and usefulness signals. Agents can pass `max_response_chars` to memory search to receive a whole-record response within a chosen character budget. Over MCP the budget defaults to the inline size limit. See the [search API contract](docs/api.md#memory). `scripts/value_report.py` reports whether stored data reaches agents: read-through of offloaded results, empty searches per agent, never-recalled memory per scope, and sync-stream noise.
+
 ![Agent Core memory](docs/images/agent-memory.png)
 
 ### Credentials and connectors
@@ -151,27 +153,19 @@ At runtime:  Broker injects the token locally, or the connector executor uses it
 
 ### Shared context across tools and people
 
-Working with a team, or switching between Claude Code and Cursor on the same project? Create a workspace and grant each agent access to it. At session startup, an agent calls `workspace_sync` to receive pinned context, assigned activities, new briefings, and workspace changes since that execution's last acknowledged cursor. Targeted `memory_search` calls still fill gaps when the agent needs older context.
+Working with a team, or switching between Claude Code and Cursor on the same project? Create a workspace and grant each agent access to it. At session startup, an agent calls `workspace_sync` to receive pinned context, assigned activities, and workspace changes since that execution's last acknowledged cursor. Targeted `memory_search` calls still fill gaps when the agent needs older context.
 
 Sync is an explicit pull, not a background process. Each session has its own execution ID, even when two sessions use the same agent identity. That lets one Codex session see work recorded by another Codex session without confusing the two sessions. As a fallback, starting a new workspace activity can return a bounded `since_last_active` digest. Agent Core omits that digest when the supplied execution is already caught up through `workspace_sync`.
 
 ![Agent Core agents](docs/images/agent-workspace.png)
 
-### Short-lived authority for agent teams
-
-Standing scopes fit the agents you use every day. Sometimes an agent should get access for one task only: a coordinator handing work to a worker agent, a nightly job that needs a single connector action, a new tool you aren't ready to trust with anything permanent.
-
-For that, Agent Core supports **delegation**, the local version of the temporary credentials cloud providers issue (AWS STS, OAuth token exchange). A grant is always a subset of what its issuer holds, expires within an hour, and *replaces* the recipient's normal access while in use instead of adding to it. Agents that lack authority can request it; the request lands on your dashboard, where you approve it, narrow it, or deny it. No secret ever passes through a model, and every delegated action is attributed in the audit log from the agent that asked to the agent that acted.
-
-This is what lets any framework that coordinates worker agents sit on top of Agent Core without every worker holding broad permanent credentials. Coordination stays in your framework; Agent Core stays the layer that holds identity, authority, and audit. See [How it works](docs/how-it-works.md#7-delegation-authority-for-one-task) for the mechanism and the [Delegated Authorization contract](docs/delegated-authorization-integration.md) for integration details.
-
 ---
 
 ## Activity and handoffs
 
-The activity dashboard lists active agent tasks, flags sessions that have gone stale (no heartbeat for more than the configured threshold), and surfaces pending handoffs with options to reassign or generate a briefing. It also reports what share of workspace activities were linked to a workspace-sync execution, for both the installation lifetime and the last 30 days. When an agent picks up stale work, it can pull a briefing that includes the prior task description, recent decisions, and relevant memory from the workspace scope.
+The activity dashboard lists active agent tasks, flags sessions that have gone stale (no heartbeat for more than the configured threshold), and surfaces pending handoffs with options to reassign. It also reports what share of workspace activities were linked to a workspace-sync execution, for both the installation lifetime and the last 30 days. When an agent finishes or stops a task, it records a structured handoff on the activity (`completed`, `next_steps`, `open_questions`, `needs_human`), and the next session's context shows it.
 
-Activity tracking is self-reported. There is no automatic detection of agent work: a working agent must call `activity_update` at the start of a task and periodically as a heartbeat. Without that, nothing appears in the dashboard and no briefing can be generated.
+Activity tracking is self-reported. There is no automatic detection of agent work: a working agent must call `activity_update` at the start of a task and periodically as a heartbeat. Without that, nothing appears in the dashboard and no handoff is recorded.
 
 The trail is searchable, and it is the right home for "what did we do on X last month". Durable memory is for what stays true; the activity trail is for what happened. Agents that record per-task progress in memory instead get told so on write.
 
@@ -183,7 +177,6 @@ workspace_sync_ack → acknowledge a delivered page after processing it
 activity_pickup  → check for work a human assigned to this agent in this workspace
 activity_search  → search what agents have already worked on ("what did we do on X")
 activity_list    → find what's stale or pending (for reviews and handoffs)
-get_briefing     → pull the prior task description, decisions, and workspace memory
 memory_search    → fill in any gaps with a targeted query
 ```
 
@@ -260,11 +253,10 @@ For REST-based clients or custom integrations, every feature is also available t
 | --- | --- |
 | [Quickstart](docs/quickstart.md) | Install, connect an agent, write shared memory, then add credentials and connectors when needed |
 | [Integrations](docs/integrations.md) | Set up MCP, credentials, connectors, activities, collaboration, and webhooks in that order |
-| [How it works](docs/how-it-works.md) | The system model and full feature set: memory, activity, credentials, connectors, delegation, and maintenance |
+| [How it works](docs/how-it-works.md) | The system model and full feature set: memory, activity, credentials, connectors, and maintenance |
 | [Credential Broker](docs/credential-broker.md) | How `AC_SECRET_*` references work and how to resolve them at runtime |
 | [Configuration](docs/configuration.md) | Environment variables, ports, and data directory layout |
 | [Security](docs/security.md) | Scope model, secret handling, and deployment checklist |
-| [Delegated Authorization](docs/delegated-authorization-integration.md) | Lending agents short-lived, narrowed authority, and the contract for coordinators and agent runtimes |
 | [API reference](docs/api.md) | Full REST and MCP endpoint reference |
 | [Backup and restore](docs/backup-restore.md) | Export, restore, and routine maintenance |
 | [Troubleshooting](docs/troubleshooting.md) | Common issues and fixes |

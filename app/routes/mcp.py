@@ -15,20 +15,21 @@ from app.services import (
     memory_service,
     credential_service,
     activity_service,
-    briefing_service,
     audit_service,
     tool_spill_service,
     artifact_export_service,
     embedding_service,
-    delegation_service,
 )
 from app.config import settings
 from app.models.enums import MEMORY_CLASSES, SOURCE_KINDS
 from app.operations.connector_actions import run_connector_action
 from app.operations.memory import (
     MemoryOperationError,
+    budget_search_response,
     confirm_memory as run_memory_confirm,
+    fetch_memory_by_ids,
     validate_search_query,
+    validate_response_budget,
     validate_source_kind_authority,
     write_memory as run_memory_write,
 )
@@ -66,17 +67,10 @@ _TOOL_CAPABILITIES = {
             "activity_pickup",
             "workspace_sync",
             "workspace_sync_ack",
-            "get_briefing",
-            "briefing_list",
-            "delegation_request",
-            "delegations_list",
-            "delegation_requests_list",
-            "delegation_request_approve",
-            "delegation_request_deny",
-            "delegation_revoke",
+            "session_context",
         )
     },
-    **{name: "credentials" for name in ("credential_get", "credential_list")},
+    **{name: "credentials" for name in ("credential_get", "credential_list", "credential_request")},
     **{
         name: "connectors_read"
         for name in (
@@ -131,6 +125,11 @@ MANIFEST = {
                         "description": "Defaults to lean (content plus the fields you can act on). Use full only when you need lifecycle columns such as provenance or supersession.",
                     },
                     "limit": {"type": "integer", "default": 20},
+                    "offset": {"type": "integer", "default": 0},
+                    "max_response_chars": {
+                        "type": ["integer", "null"], "minimum": 1,
+                        "description": "Optional limit on the pretty-printed JSON data response, including metadata. Returns whole records in rank order. When omitted, the response is trimmed to fit inline; if response_limited is true, page on by raising offset by the number of records returned.",
+                    },
                     "include_retracted": {"type": "boolean", "default": False},
                     "include_superseded": {"type": "boolean", "default": False},
                 },
@@ -140,7 +139,8 @@ MANIFEST = {
         {
             "name": "memory_get",
             "description": (
-                "Get memory records by scope. Defaults to active records only; pass "
+                "Get memory records by id (ids=[...], as listed in the session context "
+                "index), or by scope. By scope, defaults to active records only; pass "
                 "record_status='all' to also see retracted/superseded records, or a "
                 "specific status to inspect just that one. Use "
                 "view='compact' to survey/audit a scope (metadata + a short content "
@@ -151,6 +151,12 @@ MANIFEST = {
             "inputSchema": {
                 "type": "object",
                 "properties": {
+                    "ids": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "maxItems": 50,
+                        "description": "Fetch these records in full. When given, scope and paging are ignored.",
+                    },
                     "scope": {"type": "string"},
                     "record_status": {
                         "type": "string",
@@ -305,7 +311,8 @@ MANIFEST = {
             "name": "memory_verify",
             "description": (
                 "Check anchored facts against the thing they describe — a repo path or a "
-                "connector binding — and record evidence on the ones that pass. Records "
+                "connector binding. A present anchor sets anchor_checked_at; it does not "
+                "confirm the record, which needs memory_confirm with evidence. Records "
                 "whose anchor has vanished are queued for review rather than retracted. "
                 "Reports verified / missing / unverifiable counts."
             ),
@@ -388,6 +395,24 @@ MANIFEST = {
             },
         },
         {
+            "name": "credential_request",
+            "description": (
+                "Ask a person for a secret you need: a token, password or key that is not stored yet. "
+                "Never ask for the raw value in the conversation. This opens a request the owner fills "
+                "on the Agent Core Credentials page; the value never passes through you. Call it again "
+                "with the same scope and name to check: once filled it returns the AC_SECRET reference."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "scope": {"type": "string", "description": "Where to store it, e.g. workspace:<id> or user:<id>."},
+                    "name": {"type": "string", "description": "Short stable name, e.g. github-token."},
+                    "purpose": {"type": "string", "description": "What it is for and where to get it, shown to the person."},
+                },
+                "required": ["scope", "name", "purpose"],
+            },
+        },
+        {
             "name": "activity_update",
             "description": "Update the current agent's active activity in the requested memory scope, or create one there if none exists",
             "inputSchema": {
@@ -399,6 +424,19 @@ MANIFEST = {
                     "status": {"type": "string"},
                     "memory_scope": {"type": "string"},
                     "execution_id": {"type": "string"},
+                    "handoff": {
+                        "type": "object",
+                        "description": (
+                            "Record when the task finishes or stops: what the next session needs. "
+                            "The next session start shows it."
+                        ),
+                        "properties": {
+                            "completed": {"type": "string", "description": "One line on what got done."},
+                            "next_steps": {"type": "array", "items": {"type": "string"}},
+                            "open_questions": {"type": "array", "items": {"type": "string"}},
+                            "needs_human": {"type": "string", "description": "What a person must do or decide, if anything."},
+                        },
+                    },
                 },
             },
         },
@@ -463,7 +501,7 @@ MANIFEST = {
         },
         {
             "name": "workspace_sync",
-            "description": "Synchronize pinned context, assigned activities, briefings, memory changes, and activity changes since this execution's cursor. Process each stable change id only once even when it appears in more than one group.",
+            "description": "Synchronize pinned context, assigned activities, memory changes, and activity changes since this execution's cursor. Process each stable change id only once even when it appears in more than one group.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -474,6 +512,28 @@ MANIFEST = {
                     "host_session_ref": {"type": "string"},
                 },
                 "required": ["memory_scope"],
+            },
+        },
+        {
+            "name": "session_context",
+            "description": (
+                "Start a session: one call returns standing rules, unfinished or handed-off work, "
+                "recent results, changes since your last session, and an index of key records, "
+                "fitted to max_chars, plus the execution_id to use for the session. Call it once at "
+                "session start instead of workspace_sync plus several memory searches. Clients with "
+                "a SessionStart hook receive this automatically."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "memory_scope": {
+                        "type": "string",
+                        "description": "Workspace scope. Omit to match the cwd against configured workspace repo roots.",
+                    },
+                    "cwd": {"type": "string"},
+                    "host_session_ref": {"type": "string"},
+                    "max_chars": {"type": "integer", "default": 9000, "minimum": 1000, "maximum": 50000},
+                },
             },
         },
         {
@@ -490,104 +550,9 @@ MANIFEST = {
             },
         },
         {
-            "name": "get_briefing",
-            "description": "Get a handoff briefing by ID",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "briefing_id": {"type": "string"},
-                },
-                "required": ["briefing_id"],
-            },
-        },
-        {
-            "name": "briefing_list",
-            "description": "List generated briefings visible to the current agent or user",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "agent_id": {"type": "string"},
-                    "limit": {"type": "integer", "default": 50},
-                    "offset": {"type": "integer", "default": 0},
-                },
-            },
-        },
-        {
-            "name": "delegation_request",
-            "description": "Request narrowly scoped authority for an active recipient agent; this does not grant authority",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "recipient_agent_id": {"type": "string"},
-                    "purpose": {"type": "string"},
-                    "ttl_seconds": {"type": "integer", "maximum": 3600},
-                    "scope_permissions": {"type": "array", "items": {"type": "object"}},
-                    "resource_permissions": {
-                        "type": "array",
-                        "items": {"type": "object"},
-                    },
-                    "binding_actions": {"type": "array", "items": {"type": "object"}},
-                    "activity_id": {"type": "string"},
-                    "correlation_id": {"type": "string"},
-                },
-                "required": ["recipient_agent_id", "purpose", "ttl_seconds"],
-            },
-        },
-        {
             "name": "effective_authority",
             "description": "Inspect the authenticated request's non-secret effective authority",
             "inputSchema": {"type": "object", "properties": {}},
-        },
-        {
-            "name": "delegations_list",
-            "description": "List non-secret issued, received, and active grants visible to the authenticated actor",
-            "inputSchema": {"type": "object", "properties": {}},
-        },
-        {
-            "name": "delegation_requests_list",
-            "description": "List delegation requests visible to the authenticated actor",
-            "inputSchema": {"type": "object", "properties": {}},
-        },
-        {
-            "name": "delegation_request_approve",
-            "description": "Approve a visible pending request, optionally narrowing each permission list",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "request_id": {"type": "string"},
-                    "scope_permissions": {"type": "array", "items": {"type": "object"}},
-                    "resource_permissions": {
-                        "type": "array",
-                        "items": {"type": "object"},
-                    },
-                    "binding_actions": {"type": "array", "items": {"type": "object"}},
-                },
-                "required": ["request_id"],
-            },
-        },
-        {
-            "name": "delegation_request_deny",
-            "description": "Deny a visible pending delegation request",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "request_id": {"type": "string"},
-                    "reason": {"type": "string"},
-                },
-                "required": ["request_id"],
-            },
-        },
-        {
-            "name": "delegation_revoke",
-            "description": "Immediately revoke a grant the actor issued or received",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "grant_id": {"type": "string"},
-                    "reason": {"type": "string"},
-                },
-                "required": ["grant_id"],
-            },
         },
         {
             "name": "connectors_list",
@@ -644,24 +609,35 @@ MANIFEST = {
         },
         {
             "name": "connectors_actions_list",
-            "description": "List actions available for a connector type",
+            "description": (
+                "List actions for a connector type: name, one-line description, side effect and "
+                "required parameters. Pass action=<name> for that action's full input schema "
+                "before calling connectors_run."
+            ),
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "connector_type_id": {"type": "string"},
+                    "action": {"type": "string", "description": "Return this one action with its full input schema."},
+                    "query": {"type": "string", "description": "Substring filter on action names."},
+                    "view": {"type": "string", "enum": ["compact", "full"], "default": "compact"},
+                    "include_disabled": {"type": "boolean", "default": False},
+                    "limit": {"type": "integer", "default": 100, "maximum": 200},
+                    "offset": {"type": "integer", "default": 0},
                 },
                 "required": ["connector_type_id"],
             },
         },
         {
             "name": "connectors_summary",
-            "description": "Summarize visible connector types, bindings, credentials, actions, and health state for the current caller",
+            "description": "Summarize visible connector types and bindings for the current caller: one line of state per binding (usable, health, failing actions). Pass view='full' or a connector_type_id for credential and health detail.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "scope": {"type": "string"},
                     "connector_type_id": {"type": "string"},
                     "enabled_only": {"type": "boolean", "default": True},
+                    "view": {"type": "string", "enum": ["compact", "full"], "default": "compact"},
                 },
             },
         },
@@ -816,6 +792,9 @@ def _maybe_offload_tool_result(
         is_error
         or threshold <= 0
         or tool_name == "result_fetch"
+        # Already fitted to its own character budget; offloading it would hide
+        # the session context behind a handle the agent may never open.
+        or tool_name == "session_context"
         or len(text) <= threshold
     ):
         return text
@@ -855,18 +834,17 @@ def _memory_provenance(ctx: EffectiveAuthority, source_kind: str, scope: str) ->
     )
 
 
-def _memory_audit_details(record: dict, **extra) -> dict:
-    details = {
-        "record_id": record.get("id"),
-        "memory_class": record.get("memory_class"),
-        "scope": record.get("scope"),
+def _compact_connector_tool(tool: dict) -> dict:
+    schema = tool.get("input_schema") or {}
+    description = " ".join(str(tool.get("description") or "").split())
+    return {
+        "action": tool["action"],
+        "description": description if len(description) <= 160 else description[:159] + "…",
+        "side_effect": tool.get("side_effect"),
+        "enabled": tool.get("enabled", True),
+        "required": list(schema.get("required") or []) if isinstance(schema, dict) else [],
+        "capability_policy": tool.get("capability_policy"),
     }
-    if record.get("topic"):
-        details["topic"] = record.get("topic")
-    if record.get("slot_key"):
-        details["slot_key"] = record.get("slot_key")
-    details.update({k: v for k, v in extra.items() if v is not None})
-    return details
 
 
 def _connector_action_count(ct: dict) -> int:
@@ -962,7 +940,7 @@ def _maybe_attach_digest(
        noise. The check excludes the new activity's own change row, which
        was stamped at activity creation and is not something any execution
        could have delivered before this very call.
-    2. Otherwise, look up the prior (non-briefing) activity for this agent
+    2. Otherwise, look up the prior activity for this agent
        in this scope, then call `digest_for_new_arrival`.
     3. Any failure in either step is logged and swallowed — the digest is
        strictly best-effort, the activity itself is already persisted.
@@ -1045,7 +1023,12 @@ async def handle_mcp_tool(
     except Exception:
         return _mcp_error("INVALID_REQUEST", "Request body must be valid JSON", 400)
 
-    if _is_jsonrpc_request(body):
+    if not isinstance(body, dict):
+        return _mcp_error("INVALID_REQUEST", "Request body must be an object", 400)
+
+    if "jsonrpc" in body:
+        if not _is_jsonrpc_request(body) or not isinstance(body["method"], str):
+            return _jsonrpc_error(None, -32600, "Invalid JSON-RPC request")
         return await _handle_mcp_jsonrpc(body, request, ctx)
 
     return await _handle_custom_mcp_tool(body, ctx)
@@ -1054,6 +1037,10 @@ async def handle_mcp_tool(
 async def _handle_mcp_jsonrpc(body: dict, request: Request, ctx: EffectiveAuthority):
     request_id = body.get("id")
     method = body.get("method")
+    if isinstance(request_id, (dict, list, bool)):
+        return _jsonrpc_error(None, -32600, "Invalid request id")
+    if "params" in body and not isinstance(body["params"], dict):
+        return _jsonrpc_error(request_id, -32602, "params must be an object")
 
     if method == "initialize":
         return _jsonrpc_response(
@@ -1071,8 +1058,8 @@ async def _handle_mcp_jsonrpc(body: dict, request: Request, ctx: EffectiveAuthor
                     f"{APP_NAME} provides workspace memory, activity tracking, and credential access. "
                     "At the start of every non-trivial task: call activity_update (status=active, memory_scope=workspace:<your-scope>), "
                     "then run 2-3 memory_search queries for relevant context. "
-                    "Send activity_update heartbeats or task_note progress updates every 1-2 minutes while working; mark completed with task_result when done. "
-                    f"Use credential_get for {CREDENTIAL_PREFIX}* references — never ask the user for raw secrets. "
+                    "Send activity_update heartbeats or task_note progress updates every 1-2 minutes while working; when finishing or stopping, set status completed or blocked with task_result and a handoff (completed, next_steps, open_questions, needs_human). "
+                    f"Use credential_get for {CREDENTIAL_PREFIX}* references — never ask the user for raw secrets; use credential_request when one is missing. "
                     "If tools appear unavailable, your host may defer MCP schemas — run the host's tool discovery or schema-load step first."
                 ),
             },
@@ -1090,9 +1077,11 @@ async def _handle_mcp_jsonrpc(body: dict, request: Request, ctx: EffectiveAuthor
     if method == "tools/call":
         params = body.get("params") or {}
         tool_name = params.get("name")
-        arguments = params.get("arguments") or {}
-        if not tool_name:
+        arguments = params.get("arguments", {})
+        if not isinstance(tool_name, str) or not tool_name:
             return _jsonrpc_error(request_id, -32602, "Tool name is required")
+        if not isinstance(arguments, dict):
+            return _jsonrpc_error(request_id, -32602, "arguments must be an object")
 
         custom_response = await _handle_custom_mcp_tool(
             {"tool": tool_name, "params": arguments}, ctx
@@ -1128,7 +1117,7 @@ async def _handle_custom_mcp_tool(body: dict, ctx: EffectiveAuthority):
     tool = body.get("tool")
     params = body.get("params", {})
 
-    if not tool:
+    if not isinstance(tool, str) or not tool:
         return _mcp_error("TOOL_REQUIRED", "tool name is required", 400)
 
     required_capability = _TOOL_CAPABILITIES.get(tool)
@@ -1151,93 +1140,10 @@ async def _handle_custom_mcp_tool(body: dict, ctx: EffectiveAuthority):
         # than adding a guard per handler and forgetting one.
         return _mcp_error("INVALID_PARAMS", _missing_params_message(tool, missing), 400)
 
-    if tool == "delegation_request":
-        request = delegation_service.create_request(
-            ctx,
-            recipient_agent_id=params["recipient_agent_id"],
-            purpose=params["purpose"],
-            ttl_seconds=int(params["ttl_seconds"]),
-            scope_permissions=params.get("scope_permissions") or [],
-            resource_permissions=params.get("resource_permissions") or [],
-            binding_actions=params.get("binding_actions") or [],
-            activity_id=params.get("activity_id"),
-            correlation_id=params.get("correlation_id"),
-        )
-        audit_service.write_event(
-            ctx.actor_type,
-            ctx.actor_id,
-            "delegation_request_created",
-            "delegation_request",
-            request["id"],
-        )
-        return JSONResponse(
-            content={"ok": True, "data": {"request": request}}, status_code=201
-        )
     if tool == "effective_authority":
         return JSONResponse(
             content={"ok": True, "data": {"authority": ctx.safe_summary()}}
         )
-    if tool == "delegations_list":
-        return JSONResponse(
-            content={
-                "ok": True,
-                "data": {"grants": delegation_service.list_grants(ctx)},
-            }
-        )
-    if tool == "delegation_requests_list":
-        return JSONResponse(
-            content={
-                "ok": True,
-                "data": {"requests": delegation_service.list_requests(ctx)},
-            }
-        )
-    if tool == "delegation_request_approve":
-        result = delegation_service.approve_request(
-            params["request_id"],
-            ctx,
-            scope_permissions=params.get("scope_permissions")
-            if "scope_permissions" in params
-            else None,
-            resource_permissions=params.get("resource_permissions")
-            if "resource_permissions" in params
-            else None,
-            binding_actions=params.get("binding_actions")
-            if "binding_actions" in params
-            else None,
-        )
-        audit_service.write_event(
-            ctx.actor_type,
-            ctx.actor_id,
-            "delegation_request_approved",
-            "delegation_request",
-            params["request_id"],
-            details={"grant_id": result["grant"]["id"]},
-        )
-        return JSONResponse(content={"ok": True, "data": result})
-    if tool == "delegation_request_deny":
-        request = delegation_service.deny_request(
-            params["request_id"], ctx, params.get("reason")
-        )
-        audit_service.write_event(
-            ctx.actor_type,
-            ctx.actor_id,
-            "delegation_request_denied",
-            "delegation_request",
-            params["request_id"],
-        )
-        return JSONResponse(content={"ok": True, "data": {"request": request}})
-    if tool == "delegation_revoke":
-        grant = delegation_service.revoke_grant(
-            params["grant_id"], ctx, params.get("reason")
-        )
-        audit_service.write_event(
-            ctx.actor_type,
-            ctx.actor_id,
-            "delegation_grant_revoked",
-            "delegated_grant",
-            params["grant_id"],
-        )
-        return JSONResponse(content={"ok": True, "data": {"grant": grant}})
     if tool == "connectors_resolve":
         from app.services import connector_service
 
@@ -1266,13 +1172,38 @@ async def _handle_custom_mcp_tool(body: dict, ctx: EffectiveAuthority):
                 "No offloaded result for that handle (it may have expired).",
                 404,
             )
+        # Paired with tool_result_offloaded by handle: an offload nobody fetches
+        # is a payload the agent never saw, which is what the value report counts.
+        audit_service.write_event(
+            actor_type="agent",
+            actor_id=ctx.agent_id,
+            action="tool_result_fetched",
+            resource_type="tool_result_spill",
+            resource_id=handle,
+            result="success",
+            details={
+                "tool": result["tool"],
+                "offset": result["offset"],
+                "returned_chars": result["returned_chars"],
+                "total_chars": result["total_chars"],
+                "has_more": result["has_more"],
+            },
+        )
         return JSONResponse(content={"ok": True, "data": result})
 
     if tool == "memory_search":
         try:
             query_text = validate_search_query(params.get("query", ""))
+            max_response_chars = validate_response_budget(params.get("max_response_chars"))
         except MemoryOperationError as exc:
             return _mcp_error(exc.code, exc.message, exc.status_code)
+        if max_response_chars is None and settings.TOOL_RESULT_SPILL_THRESHOLD > 0:
+            # Without a budget, an oversized result is offloaded and the agent
+            # sees a preview instead of the records it searched for — a quarter
+            # of searches on the first deployment. Trimming to whole records
+            # under the offload threshold delivers the best matches inline, and
+            # record_recall below then counts only what the agent received.
+            max_response_chars = settings.TOOL_RESULT_SPILL_THRESHOLD
         memory_class = params.get("memory_class")
         if memory_class and memory_class not in MEMORY_CLASSES:
             return _mcp_error(
@@ -1293,21 +1224,14 @@ async def _handle_custom_mcp_tool(body: dict, ctx: EffectiveAuthority):
             allowed = [search_scope]
         else:
             candidates = ctx.default_recall_scopes or ctx.read_scopes
-            if ctx.is_delegated:
-                candidates = [
-                    scope
-                    for resource, operation, scope in ctx.scope_permissions
-                    if resource == "memory" and operation == "read"
-                ]
             allowed = ctx.filter_scopes("memory", "read", candidates)
         if not allowed:
             embedding_status = await asyncio.to_thread(
                 embedding_service.safe_backend_status
             )
-            return JSONResponse(
-                content={
-                    "ok": True,
-                    "data": {
+            try:
+                data = budget_search_response(
+                    {
                         "records": [],
                         "retrieval_mode": "fts_only",
                         "embedding_backend_status": embedding_service.backend_label(
@@ -1315,8 +1239,11 @@ async def _handle_custom_mcp_tool(body: dict, ctx: EffectiveAuthority):
                         ),
                         "total": 0,
                     },
-                }
-            )
+                    max_response_chars,
+                )
+            except MemoryOperationError as exc:
+                return _mcp_error(exc.code, exc.message, exc.status_code)
+            return JSONResponse(content={"ok": True, "data": data})
         try:
             records, mode = await asyncio.to_thread(
                 memory_service.search_memory,
@@ -1342,6 +1269,24 @@ async def _handle_custom_mcp_tool(body: dict, ctx: EffectiveAuthority):
             records = [memory_service.lean_record(r) for r in records]
         embedding_status = await asyncio.to_thread(
             embedding_service.safe_backend_status
+        )
+        try:
+            data = budget_search_response(
+                {
+                    "records": records,
+                    "retrieval_mode": mode,
+                    "embedding_backend_status": embedding_service.backend_label(
+                        embedding_status
+                    ),
+                    "total": len(records),
+                },
+                max_response_chars,
+            )
+        except MemoryOperationError as exc:
+            return _mcp_error(exc.code, exc.message, exc.status_code)
+        records = data["records"]
+        await asyncio.to_thread(
+            memory_service.record_recall, [r["id"] for r in records]
         )
         audit_service.write_event(
             actor_type="agent",
@@ -1379,19 +1324,7 @@ async def _handle_custom_mcp_tool(body: dict, ctx: EffectiveAuthority):
                     ),
                 },
             )
-        return JSONResponse(
-            content={
-                "ok": True,
-                "data": {
-                    "records": records,
-                    "retrieval_mode": mode,
-                    "embedding_backend_status": embedding_service.backend_label(
-                        embedding_status
-                    ),
-                    "total": len(records),
-                },
-            }
-        )
+        return JSONResponse(content={"ok": True, "data": data})
 
     elif tool == "memory_get":
         # Compact view (lean metadata + content preview) so a whole scope can be
@@ -1400,6 +1333,14 @@ async def _handle_custom_mcp_tool(body: dict, ctx: EffectiveAuthority):
         view = params.get("view")
         if view not in (None, "full", "compact"):
             return _mcp_error("INVALID_PARAMS", "view must be 'full' or 'compact'", 400)
+        if params.get("ids") is not None:
+            try:
+                data = await asyncio.to_thread(
+                    fetch_memory_by_ids, params["ids"], ctx, view=view, channel="mcp"
+                )
+            except MemoryOperationError as exc:
+                return _mcp_error(exc.code, exc.message, exc.status_code)
+            return JSONResponse(content={"ok": True, "data": data})
         if params.get("scope"):
             if not ctx.can("memory", "read", scope=params["scope"]):
                 return _mcp_error("SCOPE_DENIED", "Access denied to this scope", 403)
@@ -1411,12 +1352,6 @@ async def _handle_custom_mcp_tool(body: dict, ctx: EffectiveAuthority):
             )
         else:
             candidates = ctx.default_recall_scopes or ctx.read_scopes
-            if ctx.is_delegated:
-                candidates = [
-                    scope
-                    for resource, operation, scope in ctx.scope_permissions
-                    if resource == "memory" and operation == "read"
-                ]
             allowed = ctx.filter_scopes("memory", "read", candidates)
             records = memory_service.get_memory_by_scopes(
                 scopes=allowed,
@@ -1449,12 +1384,6 @@ async def _handle_custom_mcp_tool(body: dict, ctx: EffectiveAuthority):
 
     elif tool == "memory_pinned":
         candidates = ctx.default_recall_scopes or ctx.read_scopes
-        if ctx.is_delegated:
-            candidates = [
-                scope
-                for resource, operation, scope in ctx.scope_permissions
-                if resource == "memory" and operation == "read"
-            ]
         scopes = ctx.filter_scopes("memory", "read", candidates)
         records = memory_service.pinned_records(scopes)
         return JSONResponse(
@@ -1585,12 +1514,6 @@ async def _handle_custom_mcp_tool(body: dict, ctx: EffectiveAuthority):
             return _mcp_error("SCOPE_DENIED", "Access denied to this scope", 403)
         if not verify_scope:
             candidates = list(ctx.write_scopes)
-            if ctx.is_delegated:
-                candidates = [
-                    scope
-                    for resource, operation, scope in ctx.scope_permissions
-                    if resource == "memory" and operation == "write"
-                ]
             writable = ctx.filter_scopes("memory", "write", candidates)
             if not writable:
                 return _mcp_error("SCOPE_DENIED", "No writable scope to verify", 403)
@@ -1766,6 +1689,36 @@ async def _handle_custom_mcp_tool(body: dict, ctx: EffectiveAuthority):
             content={"ok": True, "data": {"entries": entries, "total": len(entries)}}
         )
 
+    elif tool == "credential_request":
+        from app.services import credential_request_service
+
+        scope = (params.get("scope") or "").strip()
+        name = (params.get("name") or "").strip()
+        purpose = (params.get("purpose") or "").strip()
+        if not scope or not name or not purpose:
+            return _mcp_error("INVALID_PARAMS", "scope, name and purpose are required", 400)
+        if len(name) > 100 or len(purpose) > 1000:
+            return _mcp_error("INVALID_PARAMS", "name is limited to 100 and purpose to 1000 characters", 400)
+        if not enforcer.can_write(scope):
+            return _mcp_error("SCOPE_DENIED", "You cannot store credentials in this scope", 403)
+        try:
+            result = credential_request_service.request_credential(
+                agent_id=ctx.agent_id, user_id=ctx.user_id, scope=scope, name=name, purpose=purpose
+            )
+        except ValueError as exc:
+            return _mcp_error("TOO_MANY_REQUESTS", str(exc), 429)
+        if result.get("created"):
+            audit_service.write_event(
+                actor_type="agent",
+                actor_id=ctx.agent_id,
+                action="credential_requested",
+                resource_type="credential_request",
+                resource_id=result["request_id"],
+                result="success",
+                details={"scope": result["scope"], "name": name},
+            )
+        return JSONResponse(content={"ok": True, "data": result})
+
     elif tool == "activity_update":
         # An agent identity can work in more than one workspace at once. The
         # requested scope identifies that activity stream; never select a
@@ -1789,14 +1742,20 @@ async def _handle_custom_mcp_tool(body: dict, ctx: EffectiveAuthority):
                 )
             except ValueError as exc:
                 return _mcp_error(str(exc), "Invalid execution", 400)
+        handoff = None
+        if params.get("handoff") is not None:
+            from app.services.session_context_service import normalize_handoff
+
+            try:
+                handoff = normalize_handoff(params["handoff"])
+            except ValueError as exc:
+                return _mcp_error("INVALID_HANDOFF", str(exc), 400)
         existing = activity_service.get_active_activity_for_agent(
             ctx.agent_id, ctx.user_id, memory_scope=memory_scope
         )
+        if existing and handoff:
+            activity_service.set_handoff(existing["id"], handoff)
         if existing:
-            if ctx.is_delegated and not ctx.can_resource(
-                "activity", "update", existing["id"]
-            ):
-                return _mcp_error("FORBIDDEN", "Access denied", 403)
             if params.get("status"):
                 if params["status"] in (
                     "completed",
@@ -1864,14 +1823,17 @@ async def _handle_custom_mcp_tool(body: dict, ctx: EffectiveAuthority):
             activity_service.notify(
                 _event, _updated, previous_status=existing["status"]
             )
-            return JSONResponse(
-                content={"ok": True, "data": {"activity": _updated}},
-            )
+            data = {"activity": _updated}
+            if _new_status in ("completed", "blocked") and not _updated.get("handoff_json"):
+                data["warnings"] = [
+                    {
+                        "code": "HANDOFF_MISSING",
+                        "message": "Closed without a handoff. Pass handoff={completed, next_steps, "
+                        "open_questions, needs_human} so the next session can pick this up.",
+                    }
+                ]
+            return JSONResponse(content={"ok": True, "data": data})
         else:
-            if ctx.is_delegated:
-                return _mcp_error(
-                    "FORBIDDEN", "Delegated activity creation is unsupported", 403
-                )
             if not params.get("task_description"):
                 return _mcp_error(
                     "TASK_REQUIRED", "task_description required to create activity", 400
@@ -1908,7 +1870,6 @@ async def _handle_custom_mcp_tool(body: dict, ctx: EffectiveAuthority):
             if (
                 memory_scope
                 and memory_scope.startswith("workspace:")
-                and not ctx.is_delegated
                 and enforcer.can_read(memory_scope)
             ):
                 digest = _maybe_attach_digest(
@@ -1929,10 +1890,7 @@ async def _handle_custom_mcp_tool(body: dict, ctx: EffectiveAuthority):
         activity = activity_service.get_activity(params["activity_id"])
         if not activity:
             return _mcp_error("NOT_FOUND", "Activity not found", 404)
-        if ctx.is_delegated:
-            if not ctx.can_resource("activity", "read", activity["id"]):
-                return _mcp_error("FORBIDDEN", "Access denied", 403)
-        elif (
+        if (
             activity.get("agent_id") != ctx.agent_id
             and activity.get("assigned_agent_id") != ctx.agent_id
             and not ctx.is_admin
@@ -1945,12 +1903,6 @@ async def _handle_custom_mcp_tool(body: dict, ctx: EffectiveAuthority):
             authorized_scopes=(
                 None
                 if ctx.is_admin
-                else [
-                    scope
-                    for resource, operation, scope in ctx.scope_permissions
-                    if resource == "memory" and operation == "read"
-                ]
-                if ctx.is_delegated
                 else enforcer.filter_readable_scopes(ctx.read_scopes)
             ),
         )
@@ -1981,24 +1933,14 @@ async def _handle_custom_mcp_tool(body: dict, ctx: EffectiveAuthority):
         )
         authorized_scopes = (
             None
-            if ctx.is_admin or ctx.is_delegated
+            if ctx.is_admin
             else enforcer.filter_readable_scopes(ctx.read_scopes)
-        )
-        authorized_ids = (
-            [
-                resource_id
-                for resource, operation, resource_id in ctx.resource_permissions
-                if resource == "activity" and operation == "read"
-            ]
-            if ctx.is_delegated
-            else None
         )
         activities = activity_service.list_activities(
             status=status,
             agent_id=agent_filter,
             assigned_agent_id=assigned_filter,
             authorized_scopes=authorized_scopes,
-            authorized_resource_ids=authorized_ids,
             limit=limit,
             offset=offset,
         )
@@ -2015,17 +1957,8 @@ async def _handle_custom_mcp_tool(body: dict, ctx: EffectiveAuthority):
         offset = max(int(params.get("offset", 0) or 0), 0)
         authorized_scopes = (
             None
-            if ctx.is_admin or ctx.is_delegated
+            if ctx.is_admin
             else enforcer.filter_readable_scopes(ctx.read_scopes)
-        )
-        authorized_ids = (
-            [
-                resource_id
-                for resource, operation, resource_id in ctx.resource_permissions
-                if resource == "activity" and operation == "read"
-            ]
-            if ctx.is_delegated
-            else None
         )
         activities = activity_service.search_activities(
             query,
@@ -2034,7 +1967,6 @@ async def _handle_custom_mcp_tool(body: dict, ctx: EffectiveAuthority):
             memory_scope=params.get("memory_scope"),
             since=params.get("since"),
             authorized_scopes=authorized_scopes,
-            authorized_resource_ids=authorized_ids,
             limit=limit,
             offset=offset,
         )
@@ -2046,10 +1978,6 @@ async def _handle_custom_mcp_tool(body: dict, ctx: EffectiveAuthority):
         )
 
     elif tool == "activity_pickup":
-        if ctx.is_delegated:
-            return _mcp_error(
-                "FORBIDDEN", "Delegated activity pickup is unsupported", 403
-            )
         authorized_scopes = enforcer.filter_readable_scopes(ctx.read_scopes)
         activity = activity_service.claim_next_activity(ctx.agent_id, authorized_scopes)
         if activity:
@@ -2074,68 +2002,44 @@ async def _handle_custom_mcp_tool(body: dict, ctx: EffectiveAuthority):
             }
         )
 
-    elif tool == "get_briefing":
-        briefing = briefing_service.get_briefing(params["briefing_id"])
-        if not briefing:
-            return _mcp_error("NOT_FOUND", "Briefing not found", 404)
-        act = activity_service.get_activity(params["briefing_id"])
-        if ctx.is_delegated:
-            scope = (act or {}).get("memory_scope")
-            if (
-                not act
-                or not ctx.can_resource("activity", "read", act["id"])
-                or not scope
-                or not ctx.can("briefing", "read", scope=scope)
-            ):
-                return _mcp_error("FORBIDDEN", "Access denied", 403)
-        elif (
-            act
-            and act.get("agent_id") != ctx.agent_id
-            and act.get("assigned_agent_id") != ctx.agent_id
-            and not ctx.is_admin
-        ):
-            return _mcp_error("FORBIDDEN", "Access denied", 403)
-        return JSONResponse(content={"ok": True, "data": {"briefing": briefing}})
+    elif tool == "session_context":
+        from app.routes.session_context import readable_workspace_scopes
+        from app.services import session_context_service
 
-    elif tool == "briefing_list":
-        agent_filter = params.get("agent_id")
-        limit = min(int(params.get("limit", 50) or 50), 100)
-        offset = max(int(params.get("offset", 0) or 0), 0)
-        authorized_scopes = (
-            None
-            if ctx.is_admin or ctx.is_delegated
-            else enforcer.filter_readable_scopes(ctx.read_scopes)
+        if not ctx.agent_id:
+            return _mcp_error("AGENT_REQUIRED", "Session context requires an agent", 400)
+        requested = params.get("memory_scope")
+        if requested and (
+            not requested.startswith("workspace:") or not enforcer.can_read(requested)
+        ):
+            return _mcp_error("SCOPE_DENIED", "Access denied to this workspace", 403)
+        readable = readable_workspace_scopes(ctx)
+        if requested and requested not in readable:
+            readable.append(requested)
+        try:
+            budget = int(params.get("max_chars", session_context_service.DEFAULT_BUDGET_CHARS))
+        except (TypeError, ValueError):
+            return _mcp_error("INVALID_PARAMS", "max_chars must be an integer", 400)
+        result = await asyncio.to_thread(
+            session_context_service.build_session_context,
+            agent_id=ctx.agent_id,
+            user_id=ctx.user_id or "",
+            readable_scopes=readable,
+            memory_scope=requested,
+            cwd=params.get("cwd"),
+            host_session_ref=params.get("host_session_ref"),
+            source="mcp",
+            budget=budget,
+            channel="mcp",
         )
-        authorized_ids = (
-            [
-                resource_id
-                for resource, operation, resource_id in ctx.resource_permissions
-                if resource == "activity" and operation == "read"
-            ]
-            if ctx.is_delegated
-            else None
-        )
-        briefings = briefing_service.list_briefings(
-            agent_id=agent_filter if ctx.is_admin else None,
-            authorized_scopes=authorized_scopes,
-            authorized_resource_ids=authorized_ids,
-            limit=limit,
-            offset=offset,
-        )
-        return JSONResponse(
-            content={
-                "ok": True,
-                "data": {"briefings": briefings, "count": len(briefings)},
-            }
-        )
+        # The id lists are for the audit trail; the agent reads them in the text.
+        result.pop("memory_ids", None)
+        result.pop("activity_ids", None)
+        return JSONResponse(content={"ok": True, "data": result})
 
     elif tool in ("workspace_sync", "workspace_sync_ack"):
         from app.services import workspace_sync_service
 
-        if ctx.is_delegated:
-            return _mcp_error(
-                "FORBIDDEN", "Delegated workspace sync is unsupported", 403
-            )
         memory_scope = params["memory_scope"]
         if not enforcer.can_read(memory_scope):
             return _mcp_error("SCOPE_DENIED", "Access denied to this workspace", 403)
@@ -2269,15 +2173,28 @@ async def _handle_custom_mcp_tool(body: dict, ctx: EffectiveAuthority):
         ct = connector_service.get_connector_type(params["connector_type_id"])
         if not ct:
             return _mcp_error("NOT_FOUND", "Connector type not found", 404)
+        wanted = params.get("action")
+        view = "full" if wanted else params.get("view", "compact")
+        if view not in ("compact", "full"):
+            return _mcp_error("INVALID_PARAMS", "view must be 'compact' or 'full'", 400)
         tool_result = await asyncio.to_thread(
             connector_service.generate_connector_type_tools,
             ct,
             disabled_actions=ct.get("disabled_actions") or [],
             include_disabled=bool(params.get("include_disabled", False)),
-            query=params.get("query"),
-            limit=min(int(params.get("limit", 100) or 100), 200),
-            offset=max(int(params.get("offset", 0) or 0), 0),
+            query=wanted or params.get("query"),
+            limit=200 if wanted else min(int(params.get("limit", 100) or 100), 200),
+            offset=0 if wanted else max(int(params.get("offset", 0) or 0), 0),
         )
+        tools = tool_result["tools"]
+        if wanted:
+            tools = [t for t in tools if t["action"] == wanted]
+            if not tools:
+                return _mcp_error("NOT_FOUND", f"No action named {wanted!r}", 404)
+        elif view == "compact":
+            # Full input schemas made this one of the most-offloaded tools: an
+            # agent needs the menu first and one action's schema second.
+            tools = [_compact_connector_tool(t) for t in tools]
 
         return JSONResponse(
             content={
@@ -2286,8 +2203,10 @@ async def _handle_custom_mcp_tool(body: dict, ctx: EffectiveAuthority):
                     "connector_type_id": ct["id"],
                     "display_name": ct["display_name"],
                     "auth_type": ct["auth_type"],
-                    "actions": [tool["action"] for tool in tool_result["tools"]],
-                    "tools": tool_result["tools"],
+                    "total": tool_result.get("total", len(tools)),
+                    "view": view,
+                    "actions": [t["action"] for t in tools],
+                    "tools": tools,
                 },
             }
         )
@@ -2302,6 +2221,35 @@ async def _handle_custom_mcp_tool(body: dict, ctx: EffectiveAuthority):
             scope=params.get("scope"),
             enabled_only=bool(params.get("enabled_only", True)),
         )
+        view = params.get("view") or ("full" if params.get("connector_type_id") else "compact")
+        if view not in ("compact", "full"):
+            return _mcp_error("INVALID_PARAMS", "view must be 'compact' or 'full'", 400)
+        if view == "compact":
+            # The overview never fit inline in its full form. Per binding, the
+            # agent needs to know whether it can use it and whether it is healthy.
+            summary = {
+                **summary,
+                "view": "compact",
+                "connectors": [
+                    {
+                        "id": c["id"],
+                        "display_name": c["display_name"],
+                        "action_count": c["action_count"],
+                        "bindings": [
+                            {
+                                "id": b["id"],
+                                "name": b["name"],
+                                "scope": b["scope"],
+                                "usable": b["usable_by_caller"],
+                                "health": b["health"]["test_status"],
+                                "failing_actions": len(b["health"]["failing_actions"]),
+                            }
+                            for b in c["bindings"]
+                        ],
+                    }
+                    for c in summary["connectors"]
+                ],
+            }
         return JSONResponse(content={"ok": True, "data": summary})
 
     elif tool == "connectors_run":

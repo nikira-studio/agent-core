@@ -32,6 +32,13 @@ def _build_reference_name(name: str) -> str:
     return f"{base}_{_generate_unique_suffix()}"
 
 
+def normalize_scope(scope: str) -> str:
+    parts = scope.split(":", 1)
+    if len(parts) == 2 and parts[0] in ("user", "agent", "workspace"):
+        return f"{parts[0]}:{normalize_id(parts[1])}"
+    return scope
+
+
 def create_credential(
     scope: str,
     name: str,
@@ -41,11 +48,7 @@ def create_credential(
     expires_at: Optional[str] = None,
     created_by: Optional[str] = None,
 ) -> dict:
-    parts = scope.split(":", 1)
-    if len(parts) == 2 and parts[0] in ("user", "agent", "workspace"):
-        normalized_scope = f"{parts[0]}:{normalize_id(parts[1])}"
-    else:
-        normalized_scope = scope
+    normalized_scope = normalize_scope(scope)
     entry_id = secrets.token_urlsafe(16)
     value_encrypted = encrypt_value(value_plaintext)
 

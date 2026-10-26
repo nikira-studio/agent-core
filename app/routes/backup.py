@@ -59,10 +59,11 @@ async def backup_restore(
     backup_key = form.get("backup_key", "").strip()
     mode = form.get("mode", "replace_all")
 
-    if mode not in ("replace_all", "merge"):
-        return error_response(
-            "INVALID_MODE", "mode must be 'replace_all' or 'merge'", 400
-        )
+    # Restore always replaces the whole installation. Refusing any other mode
+    # keeps a client that still asks for a partial restore from getting a full
+    # replace it did not expect.
+    if mode != "replace_all":
+        return error_response("INVALID_MODE", "mode must be 'replace_all'", 400)
 
     if not zip_file:
         return error_response("MISSING_FILE", "No backup file provided", 400)
@@ -91,29 +92,15 @@ async def backup_restore(
     except Exception:
         return error_response("INVALID_BACKUP_KEY", "Invalid backup key", 400)
 
-    if mode == "merge":
-        ok, msg, manifest = await asyncio.to_thread(
-            backup_service.merge_restore_from_zip,
-            BytesIO(contents),
-            str(settings.db_path),
-            str(settings.credential_key_path),
-        )
-    else:
-        ok, msg, manifest = await asyncio.to_thread(
-            backup_service.restore_from_zip,
-            BytesIO(contents),
-            str(settings.db_path),
-            str(settings.credential_key_path),
-        )
+    ok, msg, manifest = await asyncio.to_thread(
+        backup_service.restore_from_zip,
+        BytesIO(contents),
+        str(settings.db_path),
+        str(settings.credential_key_path),
+    )
 
     if not ok:
-        # A failed merge is usually a partial one: rows that did land are kept,
-        # so the counts are the operator's only view of what the database now
-        # holds. Dropping them here left the message naming a table and nothing
-        # else — the state was unknowable without opening the database.
-        return error_response(
-            "RESTORE_FAILED", msg, 400, details=manifest.get("merge") if manifest else None
-        )
+        return error_response("RESTORE_FAILED", msg, 400)
 
     from app.services import audit_service
     from app.routes.auth import get_client_ip
@@ -140,10 +127,6 @@ async def backup_restore(
             MANIFEST_VERSION_KEY: manifest.get(MANIFEST_VERSION_KEY),
         },
     }
-    # A merge is a partial operation by design — the operator needs to see what
-    # actually came across, not just that the request succeeded.
-    if manifest.get("merge"):
-        payload["merge"] = manifest["merge"]
     return success_response(payload)
 
 

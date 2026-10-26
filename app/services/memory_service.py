@@ -4,7 +4,6 @@ import secrets
 import json
 import sqlite3
 from datetime import timedelta
-from pathlib import PurePath
 from typing import Optional
 
 from app.database import get_db
@@ -23,14 +22,20 @@ except Exception:
 logger = logging.getLogger(__name__)
 
 FTS5_SPECIAL = re.compile(r'[()^:*?"\'-]|--(.*?)$')
-MARKDOWN_HEADING = re.compile(r"^\s{0,3}#{1,6}\s+\S+")
 
 MEMORY_RECORD_COLUMNS = (
     "id, content, memory_class, scope, topic, confidence, importance, "
     "source_kind, created_at, record_status, superseded_by_id, "
     "supersedes_id, provenance_json, slot_key, valid_from, valid_to, last_confirmed_at, "
     "expires_at, status_changed_at, subject_anchor, recall_count, last_recalled_at, "
-    "helpful_count, unhelpful_count, last_verify_attempt_at, pinned"
+    "helpful_count, unhelpful_count, last_verify_attempt_at, anchor_checked_at, pinned"
+)
+
+# Ranking never needs claim text or provenance blobs. Load complete records only
+# for the final page so broad searches do not copy every matching claim into RAM.
+MEMORY_RANK_COLUMNS = (
+    "id, memory_class, importance, source_kind, created_at, record_status, "
+    "valid_from, valid_to, last_confirmed_at, recall_count, helpful_count, unhelpful_count"
 )
 
 # What a search result actually needs to be useful to the caller. Everything
@@ -48,6 +53,7 @@ MEMORY_RESULT_FIELDS = (
     "subject_anchor",
     "created_at",
     "last_confirmed_at",
+    "anchor_checked_at",
     "record_status",
     "pinned",
 )
@@ -336,71 +342,6 @@ def _annotate_provenance(provenance_json: Optional[str], **extras) -> Optional[s
         return provenance_json
     payload.update(extras)
     return json.dumps(payload, separators=(",", ":"), sort_keys=True)
-
-
-def sanitize_import_filename(filename: str) -> str:
-    name = (filename or "notes.txt").replace("\\", "/").rsplit("/", 1)[-1].strip()
-    name = PurePath(name).name.strip() or "notes.txt"
-    return name[:160]
-
-
-def parse_import_text(
-    content: str,
-    filename: str,
-    *,
-    max_chunk_chars: int = 2400,
-) -> list[dict]:
-    """Split imported notes into deterministic memory-sized chunks."""
-    text = content.replace("\r\n", "\n").replace("\r", "\n").strip()
-    if not text:
-        return []
-
-    sections: list[str] = []
-    current: list[str] = []
-    for line in text.split("\n"):
-        if MARKDOWN_HEADING.match(line) and current:
-            sections.append("\n".join(current).strip())
-            current = [line]
-        else:
-            current.append(line)
-    if current:
-        sections.append("\n".join(current).strip())
-
-    chunks: list[dict] = []
-    source = sanitize_import_filename(filename)
-
-    def add_chunk(chunk_text: str) -> None:
-        normalized = chunk_text.strip()
-        if normalized:
-            chunks.append({"content": normalized, "source_filename": source})
-
-    for section in sections:
-        if len(section) <= max_chunk_chars:
-            add_chunk(section)
-            continue
-
-        buffer = ""
-        for paragraph in re.split(r"\n\s*\n", section):
-            paragraph = paragraph.strip()
-            if not paragraph:
-                continue
-            if len(paragraph) > max_chunk_chars:
-                if buffer:
-                    add_chunk(buffer)
-                    buffer = ""
-                for start in range(0, len(paragraph), max_chunk_chars):
-                    add_chunk(paragraph[start : start + max_chunk_chars])
-                continue
-            next_buffer = f"{buffer}\n\n{paragraph}".strip() if buffer else paragraph
-            if len(next_buffer) > max_chunk_chars:
-                add_chunk(buffer)
-                buffer = paragraph
-            else:
-                buffer = next_buffer
-        if buffer:
-            add_chunk(buffer)
-
-    return chunks
 
 
 # Shapes that describe one occurrence of recurring work rather than something
@@ -1130,6 +1071,16 @@ def record_feedback(record_id: str, helpful: bool) -> Optional[dict]:
     return get_memory_record(record_id)
 
 
+def mark_anchor_checked(record_id: str) -> None:
+    """The verifier found this record's anchor present. Not a confirmation."""
+    with get_db() as conn:
+        conn.execute(
+            "UPDATE memory_records SET anchor_checked_at = ? WHERE id = ? AND record_status = 'active'",
+            (utc_now_iso(), record_id),
+        )
+        conn.commit()
+
+
 def confirm_memory(
     record_id: str, evidence: str, verified_by: str = "unknown"
 ) -> Optional[dict]:
@@ -1473,6 +1424,24 @@ def get_memory_record(record_id: str) -> Optional[dict]:
         return dict(row) if row else None
 
 
+MAX_FETCH_IDS = 50
+
+
+def get_memory_records_by_ids(record_ids: list[str]) -> list[dict]:
+    """Records for the given ids, in the order asked for; unknown ids are skipped."""
+    ids = list(dict.fromkeys(i for i in record_ids if isinstance(i, str) and i))[:MAX_FETCH_IDS]
+    if not ids:
+        return []
+    placeholders = ",".join("?" for _ in ids)
+    with get_db() as conn:
+        rows = conn.execute(
+            f"SELECT {MEMORY_RECORD_COLUMNS} FROM memory_records WHERE id IN ({placeholders})",
+            ids,
+        ).fetchall()
+    by_id = {row["id"]: dict(row) for row in rows}
+    return [by_id[i] for i in ids if i in by_id]
+
+
 def retract_memory(record_id: str) -> bool:
     with get_db() as conn:
         cursor = conn.execute(
@@ -1643,7 +1612,7 @@ def search_memory(
     sanitized = _sanitize_fts_query(query)
 
     status_filter = (
-        " AND (mr.expires_at IS NULL OR datetime(mr.expires_at) > datetime('now'))"
+        " AND (mr.expires_at IS NULL OR datetime(mr.expires_at) > datetime(?))"
     )
     if not include_retracted:
         status_filter += " AND mr.record_status != 'retracted'"
@@ -1664,7 +1633,9 @@ def search_memory(
         status_filter += " AND mr.record_status != 'superseded'"
 
     scope_placeholders = ",".join(["?" for _ in authorized_scopes])
-    status_params = [as_of_instant, as_of_instant] if as_of_instant else []
+    status_params = [utc_now().isoformat()]
+    if as_of_instant:
+        status_params.extend([as_of_instant, as_of_instant])
     params = [sanitized] + authorized_scopes + status_params
     extra = []
     extra_vals = []
@@ -1691,6 +1662,8 @@ def search_memory(
 
     retrieval_mode = "fts_only"
     semantic_candidates: list[dict] = []
+    if limit == 0:
+        return [], retrieval_mode
 
     if (
         sanitized
@@ -1703,7 +1676,7 @@ def search_memory(
                 with get_db() as conn:
                     candidate_rows = conn.execute(
                         f"""
-                        SELECT mr.{MEMORY_RECORD_COLUMNS.replace(", ", ", mr.")}
+                        SELECT mr.{MEMORY_RANK_COLUMNS.replace(", ", ", mr.")}
                         FROM memory_records mr
                         WHERE mr.scope IN ({scope_placeholders}){status_filter}{extra_sql}
                         """,
@@ -1711,9 +1684,11 @@ def search_memory(
                     ).fetchall()
                 candidate_ids = [r["id"] for r in candidate_rows]
                 if candidate_ids:
-                    top_k = min(limit * 3, 100)
+                    # Cosine already scores this entire authorized set. Keep it
+                    # until evidence and current-record priority are applied;
+                    # truncating first makes ranking depend on the requested page.
                     scored = vector_service.cosine_search_top_k(
-                        vector_bytes, top_k, candidate_ids
+                        vector_bytes, len(candidate_ids), candidate_ids
                     )
                     scored_map = {rec_id: score for rec_id, score in scored}
                     semantic_candidates = [
@@ -1722,9 +1697,6 @@ def search_memory(
                     for r in semantic_candidates:
                         r["_semantic_score"] = scored_map.get(r["id"], 0.0)
                         r["_freshness_score"] = _evidence_bonus(r)
-                    semantic_candidates.sort(
-                        key=lambda x: x["_semantic_score"], reverse=True
-                    )
                     retrieval_mode = "hybrid"
         except Exception as e:
             logger.warning(
@@ -1742,22 +1714,28 @@ def search_memory(
         # → zero results), breaking the documented "retry with exact topic
         # values" recall workflow.
         sql = f"""
-            SELECT mr.{MEMORY_RECORD_COLUMNS.replace(", ", ", mr.")}
+            SELECT mr.{MEMORY_RANK_COLUMNS.replace(", ", ", mr.")},
+                   bm25(memory_records_fts) AS _lexical_score
             FROM memory_records mr
             JOIN memory_records_fts fts ON fts.rowid = mr.rowid
             WHERE memory_records_fts MATCH ? AND mr.scope IN ({scope_placeholders}){status_filter}{extra_sql}
-            ORDER BY mr.importance DESC, mr.created_at DESC
-            LIMIT ? OFFSET ?
+            ORDER BY bm25(memory_records_fts), mr.id
         """
-        # Fetch limit+offset rows with no SQL offset so the final merged[start:end]
-        # slice can apply pagination correctly for both fts_only and hybrid paths.
-        fts_sql_limit = limit + max(offset, 0) if limit >= 0 else limit
-        fts_params = params + extra_vals + [fts_sql_limit, 0]
+        # Rank all eligible matches before slicing. A BM25-only cutoff can hide
+        # a current or confirmed record that the final ranking should prefer.
+        fts_params = params + extra_vals
         with get_db() as conn:
             fts_rows = conn.execute(sql, fts_params).fetchall()
             fts_results = [dict(row) for row in fts_rows]
+            best_lexical = fts_results[0]["_lexical_score"] if fts_results else 0.0
             for r in fts_results:
                 r["_freshness_score"] = _evidence_bonus(r)
+                # BM25 is negative in FTS5. Relative strength in [0, .5]
+                # carries relevance through the final sort without overwhelming
+                # confirmation/feedback for equally relevant claims.
+                r["_lexical_bonus"] = (
+                    0.5 * r["_lexical_score"] / best_lexical if best_lexical else 0.0
+                )
     elif not semantic_candidates:
         return [], "fts_only"
 
@@ -1772,6 +1750,7 @@ def search_memory(
         # that matched the query perfectly. The floor slots exact matches above
         # weak semantic hits while letting strong semantic scores still win.
         fts_ids = {r["id"] for r in fts_results}
+        lexical_bonuses = {r["id"]: r["_lexical_bonus"] for r in fts_results}
         _EXACT_MATCH_FLOOR = 0.6
         for r in semantic_candidates:
             if r["id"] not in seen_ids:
@@ -1791,13 +1770,18 @@ def search_memory(
 
             if x["id"] in fts_ids:
                 score = max(score, _EXACT_MATCH_FLOOR)
-            return score + x.get("_freshness_score", 0.0)
+            return (
+                score
+                + x.get("_freshness_score", 0.0)
+                + lexical_bonuses.get(x["id"], 0.0)
+            )
 
         merged.sort(
             key=lambda x: (
                 _current_record_priority(x),
                 -_hybrid_score(x),
                 x.get("created_at", ""),
+                x["id"],
             )
         )
     else:
@@ -1805,28 +1789,39 @@ def search_memory(
         merged.sort(
             key=lambda x: (
                 _current_record_priority(x),
-                # Self-assigned importance is kept as the weakest term rather
-                # than removed outright: on a corpus with no usage history yet
-                # it is the only ordering signal there is, and dropping it now
-                # would make ranking worse before the evidence-based terms have
-                # anything to say. It is scaled down so a single piece of real
-                # feedback outweighs the gap between two self-assigned scores.
-                -(x.get("importance", 0.5) * 0.25 + x.get("_freshness_score", 0.0)),
+                # Importance is a weak fallback alongside text relevance and
+                # observed evidence, including for records with no usage history.
+                -(
+                    x.get("importance", 0.5) * 0.25
+                    + x.get("_freshness_score", 0.0)
+                    + x.get("_lexical_bonus", 0.0)
+                ),
                 x.get("created_at", ""),
+                x["id"],
             )
         )
-
-    for r in merged:
-        r.pop("_semantic_score", None)
-        r.pop("_freshness_score", None)
 
     start = max(offset, 0)
     end = start + max(limit, 0) if limit >= 0 else None
     page = merged[start:end]
-    # Only the page the caller actually sees counts as a recall — the candidate
-    # set is an implementation detail and would inflate every record in scope.
-    record_recall([r["id"] for r in page])
-    return page, retrieval_mode
+    if not page:
+        return [], retrieval_mode
+    with get_db() as conn:
+        # JSON1 is already required for provenance filters. One parameter avoids
+        # SQLite variable limits for the existing unlimited (negative limit) mode.
+        rows = conn.execute(
+            f"""
+            SELECT mr.{MEMORY_RECORD_COLUMNS.replace(", ", ", mr.")}
+            FROM json_each(?) page JOIN memory_records mr ON mr.id = page.value
+            WHERE mr.scope IN ({scope_placeholders}){status_filter}{extra_sql}
+            ORDER BY CAST(page.key AS INTEGER)
+            """,
+            [json.dumps([r["id"] for r in page])]
+            + authorized_scopes
+            + status_params
+            + extra_vals,
+        ).fetchall()
+    return [dict(r) for r in rows], retrieval_mode
 
 
 def get_memory_by_scope(

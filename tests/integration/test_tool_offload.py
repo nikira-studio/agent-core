@@ -94,3 +94,26 @@ def test_small_tool_result_not_offloaded(test_client, agent_token):
 def test_result_fetch_unknown_handle_errors(test_client, agent_token):
     fr = _tools_call(test_client, agent_token, "result_fetch", {"handle": "nope-not-real"})
     assert fr.json()["result"]["isError"] is True
+
+
+def test_result_fetch_is_audited_against_its_offload(test_client, agent_token):
+    from app.database import get_db
+
+    scope = "agent:testagent"
+    _seed_memory(scope, 40)
+    r = _tools_call(test_client, agent_token, "memory_get", {"scope": scope, "view": "full"})
+    handle = json.loads(_call_text(r))["handle"]
+    _tools_call(test_client, agent_token, "result_fetch", {"handle": handle, "limit": 4000})
+
+    with get_db() as conn:
+        rows = conn.execute(
+            "SELECT action, details_json FROM audit_log WHERE resource_id = ? "
+            "ORDER BY id",
+            (handle,),
+        ).fetchall()
+    assert [row["action"] for row in rows] == ["tool_result_offloaded", "tool_result_fetched"]
+    fetched = json.loads(rows[1]["details_json"])
+    assert fetched["tool"] == "memory_get"
+    assert fetched["offset"] == 0
+    assert fetched["returned_chars"] == 4000
+    assert fetched["has_more"] is True

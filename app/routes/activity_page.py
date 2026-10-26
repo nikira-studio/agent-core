@@ -141,7 +141,6 @@ def activity_page(request: Request, session: dict = Depends(require_auth)):
         f"<td class='activity-handoff-cell'>{escape_html(agent_labels.get(a.get('reassigned_from_agent_id', ''), a.get('reassigned_from_agent_id', '')))}</td>"
         f"<td class='activity-updated-cell'>{local_dt(a.get('updated_at'), style='date')}<br>{local_dt(a.get('updated_at'), style='time')}</td>"
         f"<td><div class='actions-cell activity-actions-cell'>"
-        f"<button type='button' class='btn btn-sm btn-secondary' data-activity-briefing='{escape_html(a['id'])}'>Briefing</button>"
         f"<button type='button' class='btn btn-sm btn-secondary' data-activity-reassign='{escape_html(a['id'])}' title='Reassign'>Reassign</button>"
         f"<button type='button' class='btn btn-sm btn-secondary' data-activity-start='{escape_html(a['id'])}' {'disabled' if a.get('status') not in ('stale', 'blocked', 'reassigned') else ''} title='Reactivate'>Start</button>"
         f"<button type='button' class='btn btn-sm btn-secondary' data-activity-done='{escape_html(a['id'])}' {'disabled' if a.get('status') not in ('active', 'stale', 'blocked', 'reassigned') else ''} title='Complete'>Done</button>"
@@ -173,8 +172,6 @@ def activity_page(request: Request, session: dict = Depends(require_auth)):
     // but the shape is the point: a value inside an inline handler is JavaScript
     // source, and the next field rendered that way may not be server-generated.
     document.addEventListener('click', function(ev) {
-      const briefing = ev.target.closest('[data-activity-briefing]');
-      if (briefing) { ev.preventDefault(); createHandoff(briefing.dataset.activityBriefing); return; }
       const reassign = ev.target.closest('[data-activity-reassign]');
       if (reassign) { ev.preventDefault(); reassignActivity(reassign.dataset.activityReassign); return; }
       const start = ev.target.closest('[data-activity-start]');
@@ -221,41 +218,6 @@ def activity_page(request: Request, session: dict = Depends(require_auth)):
       } else {
         showToast(j.error?.message || 'Prune failed', 'danger');
       }
-    }
-    async function createHandoff(id) {
-      const j = await apiFetch('/api/briefings/handoff', { method: 'POST', body: JSON.stringify({ activity_id: id }) });
-      if (j.ok) {
-        const b = j.data.briefing;
-        const section = function(title, items, emptyLabel) {
-          const rows = (items || []).map(function(item) {
-            const label = item.content || item.description || item.task_description || '';
-            const meta = item.task_result || item.task_note || item.outcome || item.ended_at || item.started_at || item.generated_at || '';
-            return '<li><div style="font-weight:600">' + escapeHtml(label).substring(0, 120) + '</div>' +
-              (meta ? '<div class="text-muted" style="font-size:0.85rem">' + escapeHtml(String(meta)).substring(0, 60) + '</div>' : '') +
-              '</li>';
-          }).join('');
-          return '<div style="margin-top:12px"><h4 style="margin-bottom:8px">' + escapeHtml(title) + '</h4>' +
-            '<ul style="margin:0;padding-left:20px">' + (rows || '<li class="text-muted">' + escapeHtml(emptyLabel) + '</li>') + '</ul></div>';
-        };
-        const meta = [
-          '<div class="card" style="margin-bottom:12px;padding:12px">',
-          '<div class="text-muted" style="font-size:0.85rem">Source activity</div>',
-          '<div style="font-weight:600">' + escapeHtml(b.task_description || '') + '</div>',
-          (b.task_note ? '<div class="text-muted" style="font-size:0.85rem;margin-top:4px">Note: ' + escapeHtml(b.task_note) + '</div>' : ''),
-          (b.task_result ? '<div class="text-muted" style="font-size:0.85rem;margin-top:4px">Result: ' + escapeHtml(b.task_result) + '</div>' : ''),
-          '<div class="text-muted" style="font-size:0.85rem;margin-top:4px">',
-          'Agent: ' + escapeHtml(b.agent_id || '') + ' | Assigned: ' + escapeHtml(b.assigned_agent_id || '') + ' | Generated: ' + escapeHtml((b.generated_at || '').substring(0, 19)),
-          '</div>',
-          '</div>'
-        ].join('');
-        document.getElementById('briefing-content').innerHTML =
-          meta +
-          section('Facts', b.facts, 'No facts') +
-          section('Decisions', b.decisions, 'No decisions') +
-          section('Preferences', b.preferences, 'No preferences') +
-          section('Recent Completed', b.recent_completed, 'No recent completed activity');
-        openModal('briefing-modal');
-      } else { showToast(j.error.message || 'Failed', 'danger'); }
     }
     async function doCreateActivity(e) {
       e.preventDefault();
@@ -305,7 +267,7 @@ def activity_page(request: Request, session: dict = Depends(require_auth)):
     </div>
     <div class="card">
       <h3>Tasks</h3>
-      <p class="text-muted" style="font-size:0.85rem;margin-bottom:8px">Assign work to agents and track progress. An agent session calls <code>activity_pickup</code> at startup or when idle to claim tasks assigned to it in its configured workspace. Use reassign and briefing when work needs to move between agents.</p>
+      <p class="text-muted" style="font-size:0.85rem;margin-bottom:8px">Assign work to agents and track progress. An agent session calls <code>activity_pickup</code> at startup or when idle to claim tasks assigned to it in its configured workspace. Use reassign when work needs to move between agents.</p>
       <div class="card" style="margin-bottom:12px;padding:14px">
         <div class="section-header" style="margin-bottom:8px">
           <h3>Coordination Snapshot</h3>
@@ -417,17 +379,6 @@ def activity_page(request: Request, session: dict = Depends(require_auth)):
             <button type="submit" class="btn btn-danger">Prune</button>
           </div>
         </form>
-      </div>
-    </div>
-
-    <!-- Briefing Modal -->
-    <div class="modal-overlay" id="briefing-modal" style="display:none">
-      <div class="modal" style="max-width:600px">
-  <h3>Briefing</h3>
-        <div id="briefing-content" style="max-height:400px;overflow-y:auto"></div>
-        <div class="modal-footer">
-          <button class="btn btn-secondary" onclick="closeModal('briefing-modal')">Close</button>
-        </div>
       </div>
     </div>
     """,

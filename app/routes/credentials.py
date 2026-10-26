@@ -71,6 +71,101 @@ class UpdateCredentialRequest(BaseModel):
         return _normalise_expiry(value)
 
 
+class FulfillCredentialRequest(BaseModel):
+    value: str
+    label: Optional[str] = None
+    expires_at: Optional[str] = None
+
+    @field_validator("value")
+    @classmethod
+    def _check_value(cls, value):
+        if not value.strip():
+            raise ValueError("value must not be empty")
+        return value
+
+    @field_validator("expires_at")
+    @classmethod
+    def _check_expiry(cls, value):
+        return _normalise_expiry(value)
+
+
+def _person_with_write(ctx: EffectiveAuthority, scope: str):
+    """Requests are filled by a person: an agent asked, so an agent may not answer."""
+    if ctx.actor_type != "user":
+        return error_response("FORBIDDEN", "Only a person can fill or cancel a credential request", 403)
+    enforcer = ScopeEnforcer(
+        ctx.read_scopes, ctx.write_scopes, ctx.agent_id,
+        is_admin=ctx.is_admin, active_workspace_ids=ctx.active_workspace_ids,
+    )
+    if not enforcer.can_write(scope):
+        return error_response("SCOPE_DENIED", "Access denied to this scope", 403)
+    return None
+
+
+@router.get("/requests")
+def list_credential_requests(ctx: EffectiveAuthority = Depends(get_request_context)):
+    from app.services import credential_request_service
+
+    enforcer = ScopeEnforcer(
+        ctx.read_scopes, ctx.write_scopes, ctx.agent_id,
+        is_admin=ctx.is_admin, active_workspace_ids=ctx.active_workspace_ids,
+    )
+    requests = [
+        r for r in credential_request_service.list_pending() if enforcer.can_read(r["scope"])
+    ]
+    return success_response({"requests": requests, "total": len(requests)})
+
+
+@router.post("/requests/{request_id}/fulfill")
+def fulfill_credential_request(
+    request_id: str,
+    body: FulfillCredentialRequest,
+    ctx: EffectiveAuthority = Depends(get_request_context),
+):
+    from app.services import credential_request_service
+
+    pending = credential_request_service.get_request(request_id)
+    if not pending or pending["status"] != "pending":
+        return error_response("NOT_FOUND", "No pending request with that id", 404)
+    denied = _person_with_write(ctx, pending["scope"])
+    if denied:
+        return denied
+    try:
+        entry = credential_request_service.fulfill(
+            request_id, value=body.value, user_id=ctx.user_id,
+            label=body.label, expires_at=body.expires_at,
+        )
+    except sqlite3.IntegrityError:
+        return error_response(
+            "DUPLICATE_CREDENTIAL",
+            "A credential with that name already exists in this scope; the agent will receive it on its next request.",
+            409,
+        )
+    except LookupError:
+        return error_response("NOT_FOUND", "No pending request with that id", 404)
+    audit_service.write_event(
+        actor_type=ctx.actor_type, actor_id=ctx.actor_id,
+        action="credential_request_fulfilled", resource_type="credential",
+        resource_id=entry["id"], result="success",
+        details={"request_id": request_id, "requested_by": pending["requested_by_agent_id"]},
+    )
+    return success_response({"entry": {k: entry[k] for k in ("id", "scope", "name", "reference_name")}})
+
+
+@router.post("/requests/{request_id}/cancel")
+def cancel_credential_request(request_id: str, ctx: EffectiveAuthority = Depends(get_request_context)):
+    from app.services import credential_request_service
+
+    pending = credential_request_service.get_request(request_id)
+    if not pending or pending["status"] != "pending":
+        return error_response("NOT_FOUND", "No pending request with that id", 404)
+    denied = _person_with_write(ctx, pending["scope"])
+    if denied:
+        return denied
+    credential_request_service.cancel(request_id, user_id=ctx.user_id)
+    return success_response({"request_id": request_id, "status": "cancelled"})
+
+
 @router.get("/entries")
 def list_entries(
     scope: Optional[str] = None,

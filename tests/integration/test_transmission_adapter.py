@@ -492,6 +492,8 @@ class TestTransmissionAdapterManifest:
             )
         )
 
+        engine.ct["supported_actions"] = [{"name": "get_session_stats", "side_effect": "read"}]
+
         calls = []
         engine._raise_on_errors = MagicMock()
 
@@ -634,22 +636,22 @@ class TestTransmissionDestructiveActionSafety:
         }
         # the exact malformed call that wiped the queue (object, not array)
         assert (
-            cs._validate_action_params(ct, "remove_torrent", {"ids": {"item": "7"}})[
+            cs.validate_action_params(ct, "remove_torrent", {"ids": {"item": "7"}})[
                 "error_code"
             ]
             == "INVALID_PARAMS"
         )
         # empty list would mean "all" to Transmission
         assert (
-            cs._validate_action_params(ct, "remove_torrent", {"ids": []})["error_code"]
+            cs.validate_action_params(ct, "remove_torrent", {"ids": []})["error_code"]
             == "INVALID_PARAMS"
         )
         # missing required selector
         assert (
-            cs._validate_action_params(ct, "remove_torrent", {"delete_data": False})[
+            cs.validate_action_params(ct, "remove_torrent", {"delete_data": False})[
                 "error_code"
             ]
             == "INVALID_PARAMS"
         )
         # a well-formed call passes
-        assert cs._validate_action_params(ct, "remove_torrent", {"ids": [7]}) is None
+        assert cs.validate_action_params(ct, "remove_torrent", {"ids": [7]}) is None

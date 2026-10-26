@@ -2,9 +2,7 @@
 
 ``RequestContext`` remains the authenticated identity and permanent scope
 snapshot.  This wrapper is the only object new protected operations should
-accept: it makes the requested resource operation explicit and leaves a single
-place to intersect a future delegated grant without teaching every route about
-grant storage or transport headers.
+accept: it makes the requested resource operation explicit.
 """
 
 from dataclasses import dataclass
@@ -19,17 +17,15 @@ from app.security.scope_enforcer import ScopeEnforcer
 RESOURCE_OPERATIONS: dict[str, frozenset[str]] = {
     "memory": frozenset({"read", "write"}),
     "activity": frozenset({"read", "create", "update", "cancel"}),
-    "briefing": frozenset({"read", "create"}),
     "connector": frozenset({"read", "execute"}),
     "credential": frozenset({"read", "write", "reference", "reveal"}),
 }
 
-ALL_CAPABILITIES = frozenset({"memory", "coordination", "credentials", "connectors_read", "connectors_execute"})
+ALL_CAPABILITIES = frozenset({"memory", "coordination", "credentials", "connectors_read", "connectors_execute", "credentials_resolve"})
 RESOURCE_CAPABILITIES: dict[tuple[str, str], str] = {
     ("memory", "read"): "memory", ("memory", "write"): "memory",
     ("activity", "read"): "coordination", ("activity", "create"): "coordination",
     ("activity", "update"): "coordination", ("activity", "cancel"): "coordination",
-    ("briefing", "read"): "coordination", ("briefing", "create"): "coordination",
     ("credential", "read"): "credentials", ("credential", "write"): "credentials",
     ("credential", "reference"): "credentials", ("credential", "reveal"): "credentials",
     ("connector", "read"): "connectors_read", ("connector", "execute"): "connectors_execute",
@@ -40,27 +36,9 @@ WRITE_OPERATIONS = frozenset({"write", "create", "update", "cancel", "execute", 
 
 @dataclass(frozen=True)
 class EffectiveAuthority:
-    """Effective authority for one request, currently permanent-only.
-
-    The optional delegation fields are intentionally descriptive until grant
-    enforcement is introduced.  They make the future intersection explicit
-    without silently changing any existing permanent-key behavior.
-    """
+    """Effective authority for one request: the caller's permanent key or session."""
 
     context: RequestContext
-    grant_id: Optional[str] = None
-    principal_user_id: Optional[str] = None
-    issuer_actor_id: Optional[str] = None
-    coordinator_agent_id: Optional[str] = None
-    correlation_id: Optional[str] = None
-    scope_permissions: frozenset[tuple[str, str, str]] = frozenset()
-    resource_permissions: frozenset[tuple[str, str, str]] = frozenset()
-    binding_actions: frozenset[tuple[str, str]] = frozenset()
-    expires_at: Optional[str] = None
-
-    def __post_init__(self) -> None:
-        if self.principal_user_id is None:
-            object.__setattr__(self, "principal_user_id", self.context.user_id)
 
     @property
     def actor_type(self) -> str:
@@ -99,10 +77,6 @@ class EffectiveAuthority:
         return self.context.is_admin
 
     @property
-    def is_delegated(self) -> bool:
-        return self.grant_id is not None
-
-    @property
     def capabilities(self) -> frozenset[str]:
         # Older RequestContext construction in integrations did not include
         # capabilities. Preserve its full-authority behavior. An explicit empty
@@ -118,22 +92,12 @@ class EffectiveAuthority:
         return RESOURCE_CAPABILITIES.get((resource_type, operation))
 
     def can(self, resource_type: str, operation: str, *, scope: Optional[str] = None) -> bool:
-        """Test a closed resource operation against the effective authority.
-
-        Scope is an address, never sufficient delegated authority on its own.
-        Delegation is deliberately unsupported until the grant service can
-        intersect resource permissions, so a grant-bearing authority fails
-        closed rather than falling back to permanent agent scopes.
-        """
+        """Test a closed resource operation against the effective authority."""
         if operation not in RESOURCE_OPERATIONS.get(resource_type, frozenset()):
             return False
         required = self.required_capability(resource_type, operation)
         if required and not self.has_capability(required):
             return False
-        if self.is_delegated:
-            if scope is None:
-                return False
-            return (resource_type, operation, scope) in self.scope_permissions
         if scope is None:
             return self.context.is_admin
         enforcer = ScopeEnforcer(
@@ -147,24 +111,12 @@ class EffectiveAuthority:
             return enforcer.can_write(scope)
         return enforcer.can_read(scope)
 
-    def can_resource(self, resource_type: str, operation: str, resource_id: str) -> bool:
-        if operation not in RESOURCE_OPERATIONS.get(resource_type, frozenset()):
-            return False
-        required = self.required_capability(resource_type, operation)
-        if required and not self.has_capability(required):
-            return False
-        if self.is_delegated:
-            return (resource_type, operation, resource_id) in self.resource_permissions
-        return True
-
     def filter_scopes(self, resource_type: str, operation: str, scopes: list[str]) -> list[str]:
         return [scope for scope in scopes if self.can(resource_type, operation, scope=scope)]
 
     def can_binding_action(self, binding_id: str, action: str, *, scope: str) -> bool:
         if not self.has_capability("connectors_execute"):
             return False
-        if self.is_delegated:
-            return (binding_id, action) in self.binding_actions
         return self.can("connector", "read", scope=scope)
 
     def safe_summary(self) -> dict:
@@ -172,36 +124,17 @@ class EffectiveAuthority:
         return {
             "authenticated_actor": {"type": self.context.actor_type, "id": self.context.actor_id},
             "executor_agent_id": self.context.agent_id,
-            "principal_user_id": self.principal_user_id,
-            "authorization_mode": "delegated" if self.is_delegated else "permanent",
-            "grant_id": self.grant_id,
-            "expires_at": self.expires_at,
+            "principal_user_id": self.context.user_id,
             "effective_read_scopes": self.context.read_scopes,
             "effective_write_scopes": self.context.write_scopes,
             "active_workspace_ids": sorted(self.context.active_workspace_ids),
             "capabilities": sorted(self.capabilities),
-            "resource_permissions": [
-                {"resource_type": resource, "operation": operation, "scope": scope}
-                for resource, operation, scope in sorted(self.scope_permissions)
-            ] + [
-                {"resource_type": resource, "operation": operation, "resource_id": resource_id}
-                for resource, operation, resource_id in sorted(self.resource_permissions)
-            ],
-            "binding_actions": [
-                {"binding_id": binding_id, "action": action}
-                for binding_id, action in sorted(self.binding_actions)
-            ],
         }
 
     def safe_attribution(self) -> dict:
         return {
-            "authorization_mode": "delegated" if self.is_delegated else "permanent",
-            "principal_user_id": self.principal_user_id,
+            "principal_user_id": self.context.user_id,
             "executor_agent_id": self.context.agent_id,
-            "issuer_actor_id": self.issuer_actor_id,
-            "coordinator_agent_id": self.coordinator_agent_id,
-            "grant_id": self.grant_id,
-            "correlation_id": self.correlation_id,
         }
 
 
@@ -216,7 +149,6 @@ class SystemAuthority:
     reason: str
     actor_id: str = "system"
     actor_type: str = "system"
-    grant_id: None = None
 
     def can_binding_action(self, binding_id: str, action: str, *, scope: str) -> bool:
         return bool(self.reason and binding_id and action and scope)

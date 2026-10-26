@@ -13,17 +13,16 @@ from app.routes import (
     health_router,
     spec_router,
     auth_router,
-    delegations_router,
-    delegation_requests_router,
     agents_router,
     workspaces_router,
     credentials_router,
+    credential_consumers_router,
     internal_router,
     memory_router,
     memory_proposals_router,
     activity_router,
-    briefings_router,
     workspace_sync_router,
+    session_context_router,
     discovery_router,
     guidance_router,
     mcp_router,
@@ -45,7 +44,6 @@ from app.routes import (
     auth_pages_router,
     settings_page_router,
     webhooks_page_router,
-    delegation_requests_page_router,
     events_router,
     webhooks_router,
 )
@@ -97,34 +95,6 @@ def create_app() -> FastAPI:
         description=f"{APP_NAME} local-first AI agent control layer",
         lifespan=_lifespan,
     )
-
-    @app.middleware("http")
-    async def reject_body_grant_credentials(request: Request, call_next):
-        """Grant credentials are transport metadata, never model/body data."""
-        content_type = request.headers.get("content-type", "").lower()
-        if "application/json" in content_type:
-            try:
-                payload = await request.json()
-            except Exception:
-                payload = None
-            forbidden = {
-                "grant_secret", "grant_credential", "delegation_secret",
-                "x-agent-core-grant",
-            }
-
-            def contains_forbidden(value) -> bool:
-                if isinstance(value, dict):
-                    return any(str(key).lower() in forbidden or contains_forbidden(item) for key, item in value.items())
-                if isinstance(value, list):
-                    return any(contains_forbidden(item) for item in value)
-                return False
-
-            if contains_forbidden(payload):
-                return JSONResponse(
-                    status_code=400,
-                    content={"ok": False, "error": {"code": "GRANT_HEADER_REQUIRED", "message": "Delegated credentials are accepted only in the dedicated header"}},
-                )
-        return await call_next(request)
 
     @app.middleware("http")
     async def security_headers(request: Request, call_next):
@@ -244,19 +214,18 @@ def create_app() -> FastAPI:
     app.include_router(health_router, tags=["health"])
     app.include_router(spec_router, tags=["spec"])
     app.include_router(auth_router, tags=["auth"])
-    app.include_router(delegations_router, tags=["delegations"])
-    app.include_router(delegation_requests_router, tags=["delegations"])
     app.include_router(agents_router, tags=["agents"])
     app.include_router(workspaces_router, tags=["workspaces"])
     app.include_router(credentials_router, tags=["credentials"])
+    app.include_router(credential_consumers_router)
     app.include_router(internal_router, tags=["internal"])
     # Before memory_router: its GET /api/memory/{record_id} would otherwise
     # match /api/memory/proposals and look for a record called "proposals".
     app.include_router(memory_proposals_router, tags=["memory"])
     app.include_router(memory_router, tags=["memory"])
     app.include_router(activity_router, tags=["activity"])
-    app.include_router(briefings_router, tags=["briefings"])
     app.include_router(workspace_sync_router, tags=["workspace_sync"])
+    app.include_router(session_context_router, tags=["session_context"])
     app.include_router(discovery_router, tags=["discovery"])
     app.include_router(guidance_router, tags=["guidance"])
     app.include_router(mcp_router, tags=["mcp"])
@@ -275,7 +244,6 @@ def create_app() -> FastAPI:
     app.include_router(auth_pages_router, tags=["auth_pages"])
     app.include_router(settings_page_router, tags=["settings_page"])
     app.include_router(webhooks_page_router, tags=["webhooks_page"])
-    app.include_router(delegation_requests_page_router, tags=["delegation_requests_page"])
     app.include_router(dashboard_api_router, tags=["dashboard_api"])
     app.include_router(backup_router, tags=["backup"])
     app.include_router(events_router, tags=["events"])

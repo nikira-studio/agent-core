@@ -8,6 +8,7 @@ from contextvars import ContextVar
 import time
 from types import SimpleNamespace
 from typing import Optional
+from app.connectors.action_validation import validate_action_params
 from app.database import get_db
 from app.models.enums import normalize_id
 from app.security.exceptions import APIError
@@ -562,16 +563,10 @@ def resolve_authorized_binding(
     for binding in candidates:
         if action and action not in available_actions:
             continue
-        if authority.is_delegated:
-            allowed = (
-                authority.can_binding_action(binding["id"], action, scope=binding["scope"])
-                if action else any(item[0] == binding["id"] for item in authority.binding_actions)
-            )
-        else:
-            allowed = (
-                can_run_binding_action(authority, binding, connector_type or {}, action)
-                if action else authority.can("connector", "read", scope=binding["scope"])
-            )
+        allowed = (
+            can_run_binding_action(authority, binding, connector_type or {}, action)
+            if action else authority.can("connector", "read", scope=binding["scope"])
+        )
         if allowed:
             visible.append(binding)
     if logical_alias is not None:
@@ -596,15 +591,6 @@ def resolve_authorized_binding(
 
 def delete_binding(binding_id: str) -> bool:
     with get_db() as conn:
-        conn.execute(
-            """UPDATE delegation_requests SET grant_id = NULL WHERE grant_id IN
-               (SELECT grant_id FROM delegated_grant_actions WHERE binding_id = ?)""",
-            (binding_id,),
-        )
-        conn.execute(
-            "DELETE FROM delegated_grants WHERE id IN (SELECT grant_id FROM delegated_grant_actions WHERE binding_id = ?)",
-            (binding_id,),
-        )
         conn.execute(
             "DELETE FROM connector_executions WHERE binding_id = ?", (binding_id,)
         )
@@ -1180,44 +1166,6 @@ def _validate_action_for_connector(connector_type: dict, action: str) -> Optiona
     return None
 
 
-def _validate_action_params(
-    connector_type: dict, action: str, params: Optional[dict]
-) -> Optional[dict]:
-    """Validate caller params against the action's declared input_schema before
-    executing. Returns an error dict to abort, or None to proceed.
-
-    This is a safety gate: it stops malformed, missing, or empty required params
-    from ever reaching the connector. It matters most for destructive actions
-    whose backend treats an omitted/empty selector as "apply to ALL" (e.g.
-    Transmission torrent-remove with no ids removes the entire queue). Declaring
-    the selector required with minItems>=1 turns "remove all by accident" into a
-    rejected call.
-    """
-    meta = None
-    for a in connector_type.get("supported_actions") or []:
-        if isinstance(a, dict) and a.get("name") == action:
-            meta = a
-            break
-    schema = (meta or {}).get("input_schema")
-    if not isinstance(schema, dict) or not schema.get("properties"):
-        return None  # nothing declared to validate against
-    try:
-        import jsonschema
-
-        jsonschema.validate(instance=params or {}, schema=schema)
-    except jsonschema.ValidationError as e:
-        return {
-            "success": False,
-            "error": f"Invalid parameters for '{action}': {e.message}",
-            "error_code": "INVALID_PARAMS",
-        }
-    except Exception:
-        # A real ValidationError above always blocks. Only swallow validator
-        # infrastructure errors (e.g. a malformed schema) so they don't wedge
-        # every call, but log them loudly.
-        logger.exception("param schema validation failed to run for action %s", action)
-    return None
-
 
 def _action_meta(connector_type: dict, action: str) -> dict:
     for a in connector_type.get("supported_actions") or []:
@@ -1330,7 +1278,7 @@ def execute_binding_action(
     effective_params = _prepare_action_params(
         connector_type, action, params, binding_config
     )
-    param_error = _validate_action_params(connector_type, action, effective_params)
+    param_error = validate_action_params(connector_type, action, effective_params)
     if param_error:
         return param_error
 
@@ -1512,20 +1460,6 @@ def execute_authorized_binding_action_with_logging(
         _execution_authority.reset(token)
 
 
-def audit_delegated_execution_denial(authority, binding_id: str, action: str) -> None:
-    if not getattr(authority, "is_delegated", False):
-        return
-    from app.services import audit_service
-
-    details = authority.safe_attribution()
-    details["action"] = action
-    audit_service.write_event(
-        actor_type=authority.actor_type, actor_id=authority.actor_id,
-        action="connector_action_executed", resource_type="connector_binding",
-        resource_id=binding_id, result="blocked", details=details,
-    )
-
-
 def can_run_binding_action(authority, binding: dict, connector_type: dict, action: str) -> bool:
     return authority.can_binding_action(binding["id"], action, scope=binding["scope"])
 
@@ -1582,13 +1516,6 @@ def execute_binding_action_with_logging(
     return result
 
 
-# An execution log is a record that a call happened and how it went. It is not
-# a cache of what the call returned. Storing whole response bodies made the log
-# 142 MB of a 180 MB database on the first real deployment — 1,463 rows at an
-# average of 101 KB, one of them 3.5 MB — for a table nothing reads in full.
-# Truncation keeps the head, which is where the shape of a response and any
-# error detail live.
-EXECUTION_BODY_MAX_CHARS = 16_000
 
 # Failure rate at which an action is worth reporting, with a minimum call count
 # so one bad call out of two does not read as a broken connector.
@@ -1619,14 +1546,16 @@ def classify_failure(error_code: Optional[str], error_message: Optional[str]) ->
     return "unknown"
 
 
-def _truncate_execution_body(body: Optional[str]) -> Optional[str]:
-    if body is None or len(body) <= EXECUTION_BODY_MAX_CHARS:
-        return body
-    dropped = len(body) - EXECUTION_BODY_MAX_CHARS
-    return (
-        body[:EXECUTION_BODY_MAX_CHARS]
-        + f"\n…[execution log truncated: {dropped:,} more characters]"
-    )
+def _execution_body_summary(body: Optional[str]) -> Optional[str]:
+    """What the execution log keeps of a response: its size, never its content.
+
+    Responses carry whatever the external service returned (health data, account
+    lists, mail) and the log is plain text kept for weeks. Status, error and
+    duration are what debugging needs; the body itself already went to the caller.
+    """
+    if body is None:
+        return None
+    return json.dumps({"response_chars": len(body)}, separators=(",", ":"))
 
 
 def log_execution(
@@ -1641,28 +1570,24 @@ def log_execution(
     failure_category: Optional[str] = None,
 ) -> str:
     execution_id = secrets.token_urlsafe(16)
-    result_body_json = _truncate_execution_body(result_body_json)
+    result_body_json = _execution_body_summary(result_body_json)
     authority = _execution_authority.get()
     context = getattr(authority, "context", None)
     attribution = (
         getattr(authority, "actor_type", None),
         getattr(authority, "actor_id", None),
-        getattr(authority, "principal_user_id", None),
+        getattr(context, "user_id", None),
         getattr(context, "agent_id", None),
-        getattr(authority, "issuer_actor_id", None),
-        getattr(authority, "coordinator_agent_id", None),
-        getattr(authority, "grant_id", None),
-        getattr(authority, "correlation_id", None),
-        "delegated" if getattr(authority, "grant_id", None) else "system" if authority and not context else "permanent" if authority else None,
+        "system" if authority and not context else "permanent" if authority else None,
     )
     with get_db() as conn:
         conn.execute(
             """
             INSERT INTO connector_executions
             (id, binding_id, action, params_json, result_status, result_body_json, error_message, duration_ms,
-             actor_type, actor_id, principal_user_id, executor_agent_id, issuer_actor_id,
-             coordinator_agent_id, grant_id, correlation_id, authorization_mode, error_code, failure_category)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             actor_type, actor_id, principal_user_id, executor_agent_id, authorization_mode,
+             error_code, failure_category)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 execution_id,
@@ -1883,16 +1808,6 @@ def delete_connector_type(connector_type_id: str) -> bool:
                 "DELETE FROM connector_executions WHERE binding_id = ?",
                 (row[0],),
             )
-        conn.execute(
-            """UPDATE delegation_requests SET grant_id = NULL WHERE grant_id IN
-               (SELECT dga.grant_id FROM delegated_grant_actions dga
-                JOIN connector_bindings cb ON cb.id = dga.binding_id WHERE cb.connector_type_id = ?)""",
-            (connector_type_id,),
-        )
-        conn.execute(
-            "DELETE FROM delegated_grants WHERE id IN (SELECT dga.grant_id FROM delegated_grant_actions dga JOIN connector_bindings cb ON cb.id = dga.binding_id WHERE cb.connector_type_id = ?)",
-            (connector_type_id,),
-        )
         conn.execute(
             "DELETE FROM connector_bindings WHERE connector_type_id = ?",
             (connector_type_id,),

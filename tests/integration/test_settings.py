@@ -41,7 +41,7 @@ def test_non_admin_settings_hides_admin_controls(authenticated_client):
     assert "Encryption Key" not in html
 
 
-def test_admin_settings_exposes_encryption_key_and_restore_mode_controls(admin_client):
+def test_admin_settings_exposes_encryption_key_and_restore_controls(admin_client):
     r = admin_client.get("/settings")
     assert r.status_code == 200
     html = r.text
@@ -51,8 +51,8 @@ def test_admin_settings_exposes_encryption_key_and_restore_mode_controls(admin_c
     assert f"{CREDENTIAL_PREFIX}* references at runtime" in html
     assert "Rotate Key" in html
     assert "Restore Key" in html
-    assert 'id="restore-mode"' in html
-    assert 'value="merge"' in html
+    assert 'id="restore-file"' in html
+    assert 'value="merge"' not in html
     assert "/api/credentials/rotate" in html
     assert "/api/credentials/restore-key" in html
     assert 'id="backup-otp"' not in html

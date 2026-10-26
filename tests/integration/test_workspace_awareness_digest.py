@@ -9,7 +9,6 @@ from app.database import get_db
 from app.services import (
     activity_service,
     agent_service,
-    briefing_service,
     memory_service,
     system_settings_service,
     workspace_service,
@@ -92,45 +91,8 @@ def _create_activity(
 # --- prior-activity selection ---------------------------------------------
 
 
-def test_get_last_activity_in_scope_excludes_handoff_briefing(clean_db):
-    """A handoff briefing row is not the prior activity.
-
-    The trigger `workspace_activity_ai` excludes handoff briefings from
-    `workspace_changes` writes with `resource_type='activity'` (schema.py:
-    871-872); selecting a briefing as the prior activity would make the
-    cutoff lookup find nothing and silently fall back to `retained_tail`.
-    """
-    real = activity_service.create_activity(
-        agent_id="a1",
-        user_id="u1",
-        task_description="real",
-        memory_scope="workspace:digest-test",
-    )
-    briefing_service.generate_handoff_briefing(
-        activity_id=real["id"],
-        requesting_agent_id="a1",
-        requesting_user_id="u1",
-        authorized_scopes=["workspace:digest-test"],
-        is_admin=False,
-    )
-    with get_db() as conn:
-        briefing_row = conn.execute(
-            "SELECT id FROM agent_activity WHERE agent_id='a1' "
-            "AND json_extract(metadata_json, '$.type')='handoff_briefing' "
-            "AND memory_scope='workspace:digest-test' LIMIT 1"
-        ).fetchone()
-    assert briefing_row, "the briefing insert should have created an activity row"
-
-    found = activity_service.get_last_activity_in_scope("a1", "workspace:digest-test")
-    assert found is not None
-    assert found["id"] == real["id"], (
-        "the briefing row (latest by started_at) must be skipped, the real "
-        "activity must be returned"
-    )
-
-
-def test_get_last_activity_in_scope_returns_real_when_no_briefing(clean_db):
-    """Without any briefing in the way, the latest real activity is returned."""
+def test_get_last_activity_in_scope_returns_latest(clean_db):
+    """The agent's latest activity in the scope is returned."""
     activity_service.create_activity(
         agent_id="a1",
         user_id="u1",
@@ -268,38 +230,6 @@ def test_digest_includes_same_agent_prior_session_writes(clean_db):
         limit=10,
     )
     assert any(c["change_type"] == "memory_written" for c in digest["changes"])
-
-
-def test_digest_briefing_appears_in_content_but_excludes_from_prior_selection(clean_db):
-    """A briefing created AFTER the real prior activity appears in `changes`,
-    but is not used as the prior-activity selection itself."""
-    real_prior = activity_service.create_activity(
-        agent_id="a1",
-        user_id="u1",
-        task_description="real",
-        memory_scope="workspace:d5",
-    )
-    # Briefing after the real prior.
-    briefing_service.generate_handoff_briefing(
-        activity_id=real_prior["id"],
-        requesting_agent_id="a1",
-        requesting_user_id="u1",
-        authorized_scopes=["workspace:d5"],
-        is_admin=False,
-    )
-    digest = workspace_sync_service.digest_for_new_arrival(
-        memory_scope="workspace:d5",
-        prior_activity_id=real_prior["id"],
-        new_activity_id="new",
-        limit=10,
-    )
-    assert digest["baseline"] == "prior_activity"
-    # The briefing's change row exists with resource_type='briefing' and
-    # should appear in changes.
-    briefing_changes = [
-        c for c in digest["changes"] if c["resource_type"] == "briefing"
-    ]
-    assert briefing_changes, "briefing changes should appear in the digest"
 
 
 def test_digest_falls_back_to_retained_tail_when_prior_pruned(clean_db):

@@ -24,17 +24,16 @@ What is *not* solved: nothing detects a plausible-but-wrong record written in go
 
 ## Where memory content can leave the machine
 
-Secrets have one controlled path out (below). Memory *content* has three, all off until an operator configures them, and all pointed wherever that operator chose:
+Secrets have one controlled path out (below). Memory *content* has two, both off until an operator configures them, and all pointed wherever that operator chose:
 
 | Feature | What is sent | Sent where |
 | --- | --- | --- |
 | **Embedding backend** | Record content, on write and on search | The embedding endpoint you configured |
-| **Review model** | Record content of the records being judged | The model endpoint or connector binding you configured |
 | **Verification bindings** | The anchor value only, never record content | The binding's service |
 
 Point any of these at a service on a machine you control and nothing leaves it. Point one at a hosted API and your memory content is sent there. That is the entire trade-off, and it is why none of them has a default and why the features that use them stay off until switched on.
 
-Connector actions are the fourth outbound path, but those are explicit by nature: an agent asked for a call to be made.
+Connector actions are the third outbound path, but those are explicit by nature: an agent asked for a call to be made.
 
 ---
 
@@ -72,7 +71,7 @@ If an API key or broker credential is lost, rotate it. There's no way to recover
 
 ## Scope model
 
-Scopes are the permission boundary for everything in Agent Core: memory, credentials, activity records, and briefings. Every operation is checked against the caller's scopes.
+Scopes are the permission boundary for everything in Agent Core: memory, credentials, and activity records. Every operation is checked against the caller's scopes.
 
 | Scope | What it covers |
 | --- | --- |
@@ -88,23 +87,8 @@ A few other things worth knowing:
 - **Inactive agents can't authenticate.** Rotating or deactivating an agent immediately revokes access.
 - **Disabled users can't authenticate.** Disabling an account revokes its dashboard sessions immediately and rejects new login sessions. An agent's `default_user_id` is the principal whose workspace access is attenuated at request time; disabling that principal also removes the workspace and personal-user authority it could lend to the agent. The agent owner manages the record and is only the fallback principal for older agents.
 - **Inactive workspaces stop authorizing access.** Deactivating a workspace makes `workspace:<id>` invalid for reads and writes.
-- **Use workspace scopes for collaboration, not personal scopes.** The `agent:<id>` scope is private scratch space; don't use it as a handoff channel. For cross-agent work, use workspace scopes and keep activity and briefing records current. Activity is a mailroom-style handoff board, not an orchestrator: a human or agent can leave work there, but the receiving agent still has to explicitly check for and claim it. Other users do not automatically see a shared workspace row in their own dashboard; they see the shared capability through the agent scopes you grant.
+- **Use workspace scopes for collaboration, not personal scopes.** The `agent:<id>` scope is private scratch space; don't use it as a handoff channel. For cross-agent work, use workspace scopes and keep activity records and their handoffs current. Activity is a mailroom-style handoff board, not an orchestrator: a human or agent can leave work there, but the receiving agent still has to explicitly check for and claim it. Other users do not automatically see a shared workspace row in their own dashboard; they see the shared capability through the agent scopes you grant.
 - **Share workspaces with users, not with agent identities.** Workspace membership is the source of truth for collaboration. Once a user is added as a collaborator, they can grant their own agents `workspace:<id>` access. At runtime, each stored agent scope is intersected with the principal's current `can_read` or `can_write` bit; merely retaining a collaborator row grants nothing. Revoking or downgrading collaboration therefore stops new runtime access even if an old agent scope is still present.
-
----
-
-## Delegated authority
-
-Scopes are standing access. A delegated grant is the temporary form: a narrowed, expiring slice of one actor's authority, lent to a recipient agent for a single task. The full lifecycle and error codes are in [Delegated Authorization](delegated-authorization-integration.md); these are the security properties it holds to:
-
-- **Subset only.** A grant is checked against the issuer's current authority when issued and again on every use. Approving a request can keep or remove requested permissions, never add one (`APPROVAL_EXPANDS_REQUEST`).
-- **Replacement, not union.** While the grant header is present, grant authority replaces the recipient's permanent scopes entirely. A delegated worker cannot combine the grant with whatever its own key could normally reach.
-- **The secret is shown once, and never to a model.** The recipient claims the grant over REST with its own API key; claiming is deliberately not an MCP tool, so the secret cannot land in a model context. The credential travels only in the `X-Agent-Core-Grant` header and is rejected if it appears in JSON bodies or MCP arguments.
-- **Two credentials, both required.** A grant secret is not a bearer token. Delegated requests need the recipient's own API key plus the grant header, so a leaked grant secret authenticates nothing by itself.
-- **Bounded and revocable.** Grant TTL is capped at one hour and claim windows at five minutes. Issuer, recipient, or an admin can revoke, and expiry, revocation, or demotion of the issuer takes effect on the recipient's next request.
-- **Credential references are not delegable.** A grant can permit specific connector binding actions; the binding's credential is resolved server-side, and neither its reference nor its value is ever exposed to the delegated agent.
-- **Fully attributed.** Every delegated action records principal, issuer, coordinator, executor, and grant in the audit log. Delegated memory writes carry the same server-derived provenance.
-- **Backups cannot resurrect authority.** Backup export clears grant hashes and forces claimable or active grants to revoked. Restore never reactivates a grant, and merge restore omits the grant and request tables.
 
 ---
 
@@ -136,7 +120,7 @@ Connectors are the server-side path for external actions:
 4. Agent Core verifies that the binding is visible to the agent. Binding visibility grants access to every action enabled on the connector type.
 5. Agent Core resolves the credential internally, calls the external service, logs the execution, and returns the result.
 
-Both transports enforce binding visibility identically: `connectors_run` over MCP and `POST /api/connector-bindings/{id}/run` over REST call the same check. Connector types define the available actions; bindings decide which users, agents, or workspaces can use the connection. Delegated grants may narrow access to exact binding/action pairs.
+Both transports enforce binding visibility identically: `connectors_run` over MCP and `POST /api/connector-bindings/{id}/run` over REST call the same check. Connector types define the available actions; bindings decide which users, agents, or workspaces can use the connection.
 
 Credential scope controls access to the stored secret. Binding scope controls where the connector is available. In normal workspace use, set both to the same workspace.
 
@@ -152,8 +136,6 @@ Any write to the `shared` memory scope is automatically scanned for content that
 - Social Security Numbers
 
 If a match is found, the write is rejected with `422 PII_DETECTED`. This prevents personal data and secrets from accidentally landing in the shared scope where any authorized agent can read them. Agent-private memory (`agent:<id>`) doesn't have this restriction.
-
-The same protection applies to `/api/memory/import`. Imports are manual writes from curated text or markdown notes into the existing memory table, and shared-scope imports are scanned before records are created.
 
 Search queries that look like credentials, or are too short/noisy (single stop words, punctuation-only strings), are also rejected before FTS execution.
 
@@ -209,9 +191,9 @@ curl -X POST http://localhost:3500/api/credentials/restore-key \
   -d '{"key_base64": "<base64-encoded-fernet-key>"}'
 ```
 
-This replaces the current keyring with a single-key keyring containing the restored key. All credential entries must be decryptable by that key. A `credential_key_restored` audit event is written.
+This replaces the current keyring with a single-key keyring containing the restored key. Before changing key files, Agent Core verifies that the key can decrypt all stored encrypted data, including credentials, OTP secrets, webhook secrets, connector sessions, vector API keys, and spilled tool results. If any encrypted entry fails validation, restoration is rejected and the existing keys remain in place. A successful restore writes a `credential_key_restored` audit event.
 
-> Only restore a key if you know it can decrypt your existing credential entries. Restoring a key that can't decrypt your data will leave those credentials inaccessible.
+After key rotation, stored data may use multiple keys. In that case, restore the full backup with its matching keyring rather than replacing the ring with one key.
 
 ---
 

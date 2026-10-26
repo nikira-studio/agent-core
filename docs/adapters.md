@@ -55,16 +55,6 @@ For an adapter you have on disk (or want to author locally):
 
 Invalid manifests are logged and skipped; they never crash startup. The list of valid manifests appears on the Browse page automatically.
 
-### 3. Install from a git URL
-
-For adapters someone has published in a git repo:
-
-```
-git:owner/repo@ref
-```
-
-Agent Core clones the repo, validates the manifest, runs the dangerous-pattern scan (for code-bearing backends), and copies it into `data/adapters/`. The `@ref` (branch, tag, or commit SHA) is optional.
-
 ## Bind a credential and call actions
 
 Adapters use the same binding model as every other connector type:
@@ -457,6 +447,10 @@ After rendering, `active` is a JSON boolean, not the string `"true"`.
 
 ## Testing your adapter
 
+For an HTTP adapter, set `backend.test_action` to an enabled health or read action. Connection tests also recognize `get_session_stats`, `healthcheck`, `test_connection`, and `ping`. They never fall back to the first request in the manifest.
+
+Declare `side_effect: "read"` or `"none"` for a POST-based read probe such as an RPC status call. Write and destructive actions cannot serve as connection tests. GET, HEAD, and OPTIONS probes can omit `side_effect`. Required inputs must be supplied through the binding's `config_json.default_params`; otherwise the test fails before sending a request.
+
 Write wire-level tests that mock the transport layer (HTTP or subprocess) and assert the rendered request matches what the service expects. These catch template errors that unit tests miss because they verify the actual bytes leaving the adapter.
 
 For an `http` adapter:
@@ -493,23 +487,7 @@ See `tests/integration/test_transmission_adapter.py`, `tests/integration/test_go
 
 ## Sharing your adapter
 
-The shareable artifact is the `adapter.json` (plus its directory if you bundle any helper assets). Two distribution paths:
-
-### Drop-in
-
-Email or send the directory. The recipient drops it in their `data/adapters/<id>/` and clicks **Install** from Browse Adapters (or restarts).
-
-### Git
-
-Push the adapter to a public or private git repo with `adapter.json` at the root (or in a subdirectory matching the adapter id). Recipients install with:
-
-```
-git:owner/repo@ref
-```
-
-via the Browse Adapters page. The ref (branch/tag/commit) is optional. Agent Core clones, validates, runs the dangerous-pattern scan for code-bearing backends, and installs.
-
-A future agent-core registry would make this `agent-core adapters install <slug>`; that path is intentionally deferred until there's demand to operate a hosted catalog.
+The shareable artifact is the `adapter.json` (plus its directory if you bundle any helper assets). Send the directory; the recipient drops it in their `data/adapters/<id>/` and clicks **Install** from Browse Adapters (or restarts). Installing straight from a git URL is not supported.
 
 ## Reference: shipped adapters
 

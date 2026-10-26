@@ -59,43 +59,6 @@ def list_proposals(
     return success_response({"proposals": proposals, "total": len(proposals)})
 
 
-class ReviewUsefulnessRequest(BaseModel):
-    scope: Optional[str] = None
-    limit: Optional[int] = None
-
-
-@router.post("/review-usefulness")
-async def review_usefulness(
-    body: ReviewUsefulnessRequest,
-    request: Request,
-    session: dict = Depends(require_admin),
-):
-    """Ask the configured model which records a future session could not act on.
-
-    Off unless an operator has configured a reviewer binding: this sends record
-    content to whatever model that binding points at, which on a local-first
-    system is the operator's call to make, not a default.
-    """
-    from app.services import usefulness_service
-
-    result = await asyncio.to_thread(
-        usefulness_service.review_scope, scope=body.scope, limit=body.limit
-    )
-    if not result["ready"]:
-        return error_response("REVIEWER_NOT_CONFIGURED", result["reason"], 400)
-
-    audit_service.write_event(
-        actor_type="user",
-        actor_id=session["user_id"],
-        action="memory_usefulness_reviewed",
-        resource_type="memory_proposal",
-        result="success",
-        details={k: v for k, v in result.items() if k != "ready"},
-        ip_address=_client_ip(request),
-    )
-    return success_response(result)
-
-
 @router.get("/stats")
 def proposal_stats(session: dict = Depends(require_admin)):
     """Per-rule verdict history: how often each rule has been right so far."""

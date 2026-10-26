@@ -503,68 +503,6 @@ def memory_page(request: Request, session: dict = Depends(require_auth)):
         showToast('Memory write failed: ' + (err.message || err), 'danger');
       }
     }
-    async function doImport(e) {
-      if (e && e.preventDefault) e.preventDefault();
-      const importBtn = document.getElementById('mem-import-submit');
-      const resultEl = document.getElementById('mem-import-result');
-      const originalLabel = importBtn ? importBtn.textContent : '';
-      if (importBtn) {
-        importBtn.disabled = true;
-        importBtn.textContent = 'Importing...';
-      }
-      if (resultEl) {
-        resultEl.innerHTML = '<div class="alert alert-info">Importing notes...</div>';
-      }
-      try {
-        const files = Array.from(document.getElementById('mem-import-files').files || []);
-        const pasted = document.getElementById('mem-import-text').value.trim();
-        const sources = [];
-        for (const file of files) {
-          sources.push({ filename: file.name, content: await file.text() });
-        }
-        if (pasted) {
-          sources.push({
-            filename: document.getElementById('mem-import-name').value.trim() || 'pasted-notes.txt',
-            content: pasted
-          });
-        }
-        if (!sources.length) {
-          showToast('Choose files or paste text to import', 'warning');
-          if (resultEl) resultEl.innerHTML = '<div class="alert alert-warning">Choose files or paste text to import.</div>';
-          return;
-        }
-        const body = {
-          scope: document.getElementById('mem-import-scope').value || '"""
-        + user_scope
-        + """',
-          memory_class: document.getElementById('mem-import-class').value,
-          topic: document.getElementById('mem-import-topic').value.trim() || null,
-          confidence: parseFloat(document.getElementById('mem-import-confidence').value) || 0.85,
-          importance: parseFloat(document.getElementById('mem-import-importance').value) || 0.6,
-          sources
-        };
-        const j = await apiFetch('/api/memory/import', { method: 'POST', body: JSON.stringify(body) });
-        if (j.ok) {
-          const total = j.data.total_records || 0;
-          const names = (j.data.imported || []).map(x => x.filename + ' (' + x.record_count + ')').join(', ');
-          if (resultEl) resultEl.innerHTML = '<div class="alert alert-success">Imported ' + total + ' record' + (total === 1 ? '' : 's') + (names ? ': ' + escapeHtml(names) : '') + '</div>';
-          showToast('Imported ' + total + ' memory record' + (total === 1 ? '' : 's'), 'success');
-          refreshMemory();
-        } else {
-          showToast(j.error?.message || 'Import failed', 'danger');
-          if (resultEl) resultEl.innerHTML = '<div class="alert alert-danger">' + escapeHtml(j.error?.message || 'Import failed') + '</div>';
-        }
-      } catch (err) {
-        console.error('Memory import failed', err);
-        showToast('Memory import failed: ' + (err.message || err), 'danger');
-        if (resultEl) resultEl.innerHTML = '<div class="alert alert-danger">Memory import failed: ' + escapeHtml(err.message || err) + '</div>';
-      } finally {
-        if (importBtn) {
-          importBtn.disabled = false;
-          importBtn.textContent = originalLabel || 'Import';
-        }
-      }
-    }
     function displayRecords(records) {
       const tbody = document.getElementById('mem-results-body');
       if (!records.length) { tbody.innerHTML = '<tr><td colspan=5 class=empty>No records found.</td></tr>'; return; }
@@ -703,7 +641,6 @@ def memory_page(request: Request, session: dict = Depends(require_auth)):
             f"""
     <div class="page-header"><h1>Memory</h1><div class="page-actions">
         <button class="btn" onclick="openModal('write-memory-modal')">+ Save Memory</button>
-        <button class="btn btn-secondary" onclick="openModal('import-memory-modal')">Import Notes</button>
         <button class="btn btn-secondary" onclick="toggleFilters()">Search</button>
     </div></div>
 
@@ -846,83 +783,6 @@ def memory_page(request: Request, session: dict = Depends(require_auth)):
           <div class="modal-footer">
             <button type="button" class="btn btn-secondary" onclick="closeModal('write-memory-modal')">Cancel</button>
             <button type="submit" class="btn" onclick="doWrite(event)">Write</button>
-          </div>
-        </form>
-      </div>
-    </div>
-
-    <!-- Import Memory Modal -->
-    <div class="modal-overlay" id="import-memory-modal" style="display:none">
-      <div class="modal" style="max-width:680px">
-        <h3>Import Notes</h3>
-        <form id="import-memory-form" onsubmit="doImport(event)">
-          <div class="form-group">
-            <label>Text files</label>
-            <input type="file" id="mem-import-files" multiple accept=".txt,.md,.markdown,text/plain,text/markdown">
-            <p class="form-hint">Import curated handoffs, decision notes, project facts, or markdown summaries into normal memory records. If a file is mostly agent instructions, extract only the durable facts first.</p>
-            <p class="form-hint">For raw instruction files like `CLAUDE.md` or `AGENTS.md`, AI-assisted extract-and-review is usually the better fit; this import path is for the distilled notes.</p>
-            <details style="margin-top:8px">
-              <summary class="text-muted" style="cursor:pointer">What good notes look like</summary>
-              <div style="margin-top:8px">
-                <p class="form-hint" style="margin-bottom:8px">Use short, durable statements that a future agent could search and reuse. One idea per line or paragraph works best.</p>
-                <pre style="white-space:pre-wrap;background:var(--bg);padding:10px;border-radius:6px;margin:0;overflow:auto"># Project Notes
-- Workspace: sage
-- Decision: default imported notes to `fact`
-- Fact: keep the import literal, not AI-summarized
-- Preference: use concise notes with explicit scope and topic</pre>
-              </div>
-            </details>
-          </div>
-          <div class="form-group">
-            <label>Pasted notes</label>
-            <input type="text" id="mem-import-name" placeholder="pasted-notes.txt" autocomplete="off" style="margin-bottom:6px">
-            <textarea id="mem-import-text" rows="7" placeholder="Paste curated notes here when you are not importing a file"></textarea>
-          </div>
-          <div class="form-row">
-            <div class="form-group">
-              <label>Save as</label>
-              <select id="mem-import-class">
-                <option value="fact">Fact</option>
-                <option value="decision">Decision</option>
-                <option value="scratchpad">Scratchpad</option>
-              </select>
-            </div>
-            <div class="form-group">
-              <label>Save to</label>
-              <select id="mem-import-scope" required>
-                <option value="{user_scope}" selected>{user_scope_label}</option>
-                {agent_options}
-                {project_options}
-                <option value="shared">Shared memory (shared)</option>
-              </select>
-            </div>
-          </div>
-          <details style="margin-top:4px">
-            <summary class="text-muted" style="cursor:pointer">More options</summary>
-            <div class="form-row" style="margin-top:10px">
-            <div class="form-group">
-            </div>
-            <div class="form-group">
-              <label>Topic</label>
-              <input type="text" id="mem-import-topic" placeholder="Defaults to source filename" autocomplete="off">
-            </div>
-          </div>
-          <div class="form-row">
-            <div class="form-group">
-              <label>Confidence</label>
-              <input type="number" id="mem-import-confidence" value="0.85" min="0" max="1" step="0.05">
-              <p class="form-hint">Fact is the default save class for imports. Switch to Decision only when the note records a chosen direction.</p>
-            </div>
-            <div class="form-group">
-              <label>Importance</label>
-              <input type="number" id="mem-import-importance" value="0.6" min="0" max="1" step="0.05">
-            </div>
-            </div>
-          </details>
-          <div id="mem-import-result" style="margin-top:10px"></div>
-          <div class="modal-footer">
-            <button type="button" class="btn btn-secondary" onclick="closeModal('import-memory-modal')">Cancel</button>
-            <button type="submit" class="btn" id="mem-import-submit" onclick="doImport(event)">Import</button>
           </div>
         </form>
       </div>

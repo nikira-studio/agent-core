@@ -9,8 +9,8 @@ It does not run, schedule, or replace those agents.
 - Durable, scoped memory that agents can share across sessions and runtimes.
 - Encrypted credential storage. Agents receive references instead of raw secrets.
 - Connector bindings that run external API, MCP, adapter, and HTTP actions server-side.
-- Scoped access, short-lived delegated authority, and an audit trail.
-- Activity records and on-demand briefings for visible work and handoffs.
+- Scoped access and an audit trail.
+- Activity records with structured handoffs for visible work and task transfer.
 
 ## Interfaces
 
@@ -27,8 +27,9 @@ state and controlled capabilities that the runtime uses.
 ## Data model and deployment
 
 Agent Core is local-first and self-hosted. Memory, credentials, and configuration
-live on the operator's disk. Connector calls leave the host only when an agent
-explicitly runs a bound external action.
+live on the operator's disk. Outbound calls happen when an agent runs a connector
+action, when maintenance tests a binding to verify an anchored memory, and for
+registered outbound webhooks.
 
 ## Start here
 

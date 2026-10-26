@@ -1,6 +1,8 @@
 import threading
 import os
 import json
+import tempfile
+from pathlib import Path
 from typing import Optional
 
 from cryptography.fernet import Fernet, MultiFernet
@@ -18,6 +20,22 @@ KEY_OPERATION_LOCK = threading.RLock()
 
 _fernet: Optional[MultiFernet] = None
 _keyring: Optional[list[bytes]] = None
+
+
+def write_private_key(path, data: bytes) -> None:
+    """Atomically replace sensitive material without a world-readable temp file."""
+    target = Path(path)
+    descriptor, temporary = tempfile.mkstemp(prefix="credential.key.tmp-", dir=target.parent)
+    try:
+        with os.fdopen(descriptor, "wb") as output:
+            os.fchmod(output.fileno(), 0o600)
+            output.write(data)
+            output.flush()
+            os.fsync(output.fileno())
+        os.replace(temporary, target)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
 
 
 def _load_or_generate_key() -> bytes:
@@ -38,6 +56,7 @@ def _load_or_generate_key() -> bytes:
 
     key_path = settings.credential_key_path
     if os.path.exists(key_path):
+        os.chmod(key_path, 0o600)
         with open(key_path, "rb") as f:
             key = f.read()
         if len(key) != 44:
@@ -46,18 +65,19 @@ def _load_or_generate_key() -> bytes:
 
     os.makedirs(settings.data_dir, exist_ok=True)
     key = Fernet.generate_key()
-    with open(key_path, "wb") as f:
-        f.write(key)
-    os.chmod(key_path, 0o600)
+    write_private_key(key_path, key)
     return key
 
 
 def _load_keyring() -> list[bytes]:
+    if os.path.exists(settings.credential_key_path):
+        os.chmod(settings.credential_key_path, 0o600)
     keyring_path = settings.data_dir / "credential.keyring"
     if not os.path.exists(keyring_path):
         primary = _load_or_generate_key()
         _save_keyring([primary])
         return [primary]
+    os.chmod(keyring_path, 0o600)
     with open(keyring_path, "rb") as f:
         data = json.load(f)
     keys = []
@@ -76,11 +96,8 @@ def _save_keyring(keys: list[bytes]) -> None:
     if os.path.exists(keyring_path):
         with open(keyring_path, "rb") as f:
             prev = f.read()
-        with open(backup_path, "wb") as f:
-            f.write(prev)
-    with open(keyring_path, "w", encoding="utf-8") as f:
-        json.dump({"keys": [k.decode() for k in keys]}, f)
-    os.chmod(keyring_path, 0o600)
+        write_private_key(backup_path, prev)
+    write_private_key(keyring_path, json.dumps({"keys": [k.decode() for k in keys]}).encode())
 
 
 def _build_fernet(keys: list[bytes]) -> MultiFernet:
@@ -145,11 +162,8 @@ def rotate_key() -> tuple[bytes, list[bytes]]:
     if os.path.exists(key_path):
         with open(key_path, "rb") as f:
             prev = f.read()
-        with open(backup_path, "wb") as f:
-            f.write(prev)
-    with open(key_path, "wb") as f:
-        f.write(new_key)
-    os.chmod(key_path, 0o600)
+        write_private_key(backup_path, prev)
+    write_private_key(key_path, new_key)
     return new_key, new_keyring
 
 

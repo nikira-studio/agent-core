@@ -23,10 +23,16 @@ class GenericHttpConnector(BaseConnector):
                 "success": False,
                 "error": "Generic HTTP bindings need config_json.test_url or config_json.base_url",
             }
+        method = config.get("test_method", "GET").upper()
+        if method not in {"GET", "HEAD", "OPTIONS"}:
+            return {
+                "success": False,
+                "error": "Connection test method must be GET, HEAD or OPTIONS",
+            }
         result = self._call(
             credential=credential,
             config=config,
-            params={"url": test_url, "method": config.get("test_method", "GET")},
+            params={"url": test_url, "method": method},
         )
         if result.get("success"):
             return {

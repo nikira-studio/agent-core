@@ -61,15 +61,14 @@ class CliEngine(BaseConnector):
 
         stdin_content = cmd_def.get("stdin")
         stdin_bytes = None
-        if stdin_content:
+        if stdin_content is not None:
             rendered_stdin = self._render(stdin_content, params, config, credential)
-            stdin_bytes = rendered_stdin.encode("utf-8") if rendered_stdin else None
+            stdin_bytes = rendered_stdin.encode("utf-8")
 
         try:
             result = subprocess.run(
                 [self.bin] + argv,
                 env=env,
-                stdin=subprocess.PIPE if stdin_bytes else None,
                 input=stdin_bytes,
                 capture_output=True,
                 shell=False,

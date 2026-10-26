@@ -93,97 +93,6 @@ def test_memory_search(test_client, agent_token):
     assert "records" in r.json()["data"]
 
 
-def test_memory_import_notes_creates_searchable_external_records(
-    test_client, agent_token
-):
-    import_r = test_client.post(
-        "/api/memory/import",
-        headers={"Authorization": f"Bearer {agent_token}"},
-        json={
-            "scope": "agent:testagent",
-            "memory_class": "fact",
-            "sources": [
-                {
-                    "filename": "memory.md",
-                    "content": "# Project Notes\n- Workspace: testagent\n- Fact: Remember exact token zephyrdelta-import-token for this workspace.",
-                },
-                {
-                    "filename": "handoff.md",
-                    "content": "# Handoff\nUse quasarhandoff-token in handoff searches.",
-                },
-            ],
-        },
-    )
-    assert import_r.status_code == 201, import_r.json()
-    data = import_r.json()["data"]
-    assert data["total_records"] == 2
-    assert {item["filename"] for item in data["imported"]} == {
-        "memory.md",
-        "handoff.md",
-    }
-    assert all(record["source_kind"] == "external_import" for record in data["records"])
-
-    provenance = json.loads(data["records"][0]["provenance_json"])
-    assert provenance["route"] == "/api/memory/import"
-    assert provenance["source_kind"] == "external_import"
-    assert provenance["import_source"] in {"memory.md", "handoff.md"}
-    assert provenance["import_chunk"] == 1
-
-    search_r = test_client.post(
-        "/api/memory/search",
-        headers={"Authorization": f"Bearer {agent_token}"},
-        json={"query": "zephyrdelta import token", "scope": "agent:testagent"},
-    )
-    assert search_r.status_code == 200, search_r.json()
-    records = search_r.json()["data"]["records"]
-    assert any("zephyrdelta-import-token" in record["content"] for record in records)
-
-
-def test_memory_import_rejects_pii_in_shared_scope_before_writing(
-    test_client, admin_token
-):
-    import_r = test_client.post(
-        "/api/memory/import",
-        headers={"Authorization": f"Bearer {admin_token}"},
-        json={
-            "scope": "shared",
-            "sources": [
-                {
-                    "filename": "safe.md",
-                    "content": "safe import token before rejection",
-                },
-                {"filename": "private.md", "content": "contact alice@example.com"},
-            ],
-        },
-    )
-    assert import_r.status_code == 422
-    assert import_r.json()["error"]["code"] == "PII_DETECTED"
-
-    search_r = test_client.post(
-        "/api/memory/search",
-        headers={"Authorization": f"Bearer {admin_token}"},
-        json={"query": "safe import token", "scope": "shared"},
-    )
-    assert search_r.status_code == 200, search_r.json()
-    assert search_r.json()["data"]["records"] == []
-
-
-def test_memory_page_exposes_import_controls(test_client, admin_token):
-    r = test_client.get("/memory", headers={"Authorization": f"Bearer {admin_token}"})
-    assert r.status_code == 200
-    html = r.text
-    assert "Import Notes" in html
-    assert (
-        "curated handoffs, decision notes, project facts, or markdown summaries" in html
-    )
-    assert "What good notes look like" in html
-    assert "default save class for imports" in html
-    assert 'id="mem-import-files"' in html
-    assert 'id="mem-import-scope"' in html
-    assert 'id="mem-import-submit"' in html
-    assert 'onclick="doImport(event)"' in html
-
-
 def test_memory_search_rejects_removed_classes(test_client, agent_token):
     r = test_client.post(
         "/api/memory/search",
@@ -743,7 +652,7 @@ def test_rest_memory_write_rejects_human_source_kind_from_agent(
 
 
 def test_rest_memory_write_rejects_external_import_from_agent(test_client, agent_token):
-    """external_import is reserved for the import path and merge-restore."""
+    """external_import only labels records from the retired import paths."""
     r = test_client.post(
         "/api/memory/write",
         headers={"Authorization": f"Bearer {agent_token}"},

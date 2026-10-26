@@ -68,30 +68,3 @@ def test_preferred_then_unique_priority_and_mcp_parity(test_client, admin_token)
     )
     assert preferred.json()["data"]["binding"]["id"] == second["id"]
 
-
-def test_delegated_resolution_filters_exact_binding_and_action(
-    test_client, admin_token, agent_token
-):
-    first, second = _type_and_bindings()
-    grant = test_client.post(
-        "/api/delegations",
-        headers={"Authorization": f"Bearer {admin_token}"},
-        json={
-            "recipient_agent_id": "testagent", "purpose": "calendar", "ttl_seconds": 60,
-            "binding_actions": [{"binding_id": first["id"], "action": "create_event"}],
-        },
-    )
-    assert grant.status_code == 201, grant.json()
-    grant_id = grant.json()["data"]["grant"]["id"]
-    secret = test_client.post(
-        f"/api/delegations/{grant_id}/claim",
-        headers={"Authorization": f"Bearer {agent_token}"},
-    ).json()["data"]["grant_secret"]
-    resolved = test_client.post(
-        "/api/connector-bindings/resolve",
-        headers={"Authorization": f"Bearer {agent_token}", "X-Agent-Core-Grant": secret},
-        json={"connector_type_id": "calendar", "action": "create_event"},
-    )
-    assert resolved.status_code == 200, resolved.json()
-    assert resolved.json()["data"]["binding"]["id"] == first["id"]
-    assert resolved.json()["data"]["binding"]["id"] != second["id"]

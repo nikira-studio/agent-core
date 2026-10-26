@@ -91,3 +91,34 @@ document.addEventListener('click', function(ev) {
   const del = ev.target.closest('[data-credential-delete]');
   if (del) { ev.preventDefault(); deleteCredential(del.dataset.credentialDelete); }
 });
+
+
+async function fillCredentialRequest(e) {
+  e.preventDefault();
+  const id = document.getElementById('fill-request-id').value;
+  const body = { value: document.getElementById('fill-request-value').value };
+  const expires = endOfDayUtc(document.getElementById('fill-request-expires').value);
+  if (expires) body.expires_at = expires;
+  const j = await apiFetch('/api/credentials/requests/' + encodeURIComponent(id) + '/fulfill', {
+    method: 'POST', body: JSON.stringify(body),
+  });
+  if (j.ok) { showToast('Saved. The agent receives the reference on its next request.', 'success'); location.reload(); }
+  else { showToast(j.error?.message || 'Failed to save', 'danger'); }
+}
+
+document.addEventListener('click', async (event) => {
+  const fill = event.target.closest('[data-request-fill]');
+  if (fill) {
+    document.getElementById('fill-request-form').reset();
+    document.getElementById('fill-request-id').value = fill.dataset.requestFill;
+    document.getElementById('fill-request-name').textContent = fill.dataset.requestName;
+    openModal('fill-request-modal');
+    return;
+  }
+  const cancel = event.target.closest('[data-request-cancel]');
+  if (cancel) {
+    if (!confirm('Decline this request? The agent will see it was not filled.')) return;
+    const j = await apiFetch('/api/credentials/requests/' + encodeURIComponent(cancel.dataset.requestCancel) + '/cancel', { method: 'POST' });
+    if (j.ok) location.reload(); else showToast(j.error?.message || 'Failed', 'danger');
+  }
+});

@@ -4,7 +4,6 @@ import json
 import logging
 import re
 import shutil
-import subprocess
 import tempfile
 import threading
 import uuid
@@ -21,9 +20,6 @@ from app.security.dangerous_pattern_scanner import (
 from app.services import connector_service
 
 logger = logging.getLogger(__name__)
-
-
-GIT_SOURCE_RE = re.compile(r"^git:(?P<owner>[^/]+)/(?P<repo>[^@]+)@(?P<ref>.+)$")
 
 
 # Manifest validation is deliberately strict, but it is expensive enough that
@@ -695,89 +691,3 @@ def discover_and_seed_adapters(adapters_dir=None) -> None:
 
     logger.info("Adapter discovery complete: %d seeded, %d skipped", seeded, skipped)
 
-
-def install_from_git(source: str, adapters_dir: Path | None = None) -> str:
-    """Install an adapter from a git source into the user adapter directory."""
-
-    if adapters_dir is None:
-        adapters_dir = get_user_adapter_dir()
-
-    match = GIT_SOURCE_RE.match(source)
-    if not match:
-        raise AdapterInstallError(
-            f"Invalid git source format: {source!r}. Expected 'git:owner/repo@ref'"
-        )
-
-    owner = match.group("owner")
-    repo = match.group("repo")
-    ref = match.group("ref")
-    repo_url = f"https://github.com/{owner}/{repo}.git"
-    adapter_id = f"{owner}_{repo}"
-
-    with tempfile.TemporaryDirectory() as tmpdir:
-        tmp_path = Path(tmpdir)
-        try:
-            subprocess.run(
-                ["git", "clone", "--depth", "1", "-b", ref, repo_url, str(tmp_path)],
-                check=True,
-                capture_output=True,
-                text=True,
-                timeout=60,
-            )
-        except subprocess.TimeoutExpired:
-            raise AdapterInstallError(f"Git clone timed out for {repo_url}")
-        except subprocess.CalledProcessError as e:
-            raise AdapterInstallError(f"Git clone failed for {repo_url}: {e.stderr}")
-
-        manifest_path = tmp_path / "adapter.json"
-        if not manifest_path.exists():
-            manifest_path = tmp_path / "data" / "adapters" / adapter_id / "adapter.json"
-
-        if not manifest_path.exists():
-            raise AdapterInstallError(f"adapter.json not found in {owner}/{repo}@{ref}")
-
-        with open(manifest_path) as f:
-            adapter_json_content = f.read()
-
-        is_safe, dangerous_patterns = validate_adapter_source(adapter_json_content)
-        if not is_safe:
-            raise AdapterInstallError(
-                f"Dangerous patterns detected in {adapter_id}: {dangerous_patterns}"
-            )
-
-        # The whole repo rides along on copytree, so scan every text file in the
-        # clone, not just adapter.json — dangerous content elsewhere would still
-        # land in the user adapter dir. Skip .git internals and undecodable
-        # binaries.
-        for file_path in sorted(tmp_path.rglob("*")):
-            if not file_path.is_file() or ".git" in file_path.parts:
-                continue
-            try:
-                file_content = file_path.read_text()
-            except (OSError, UnicodeDecodeError):
-                continue
-            is_safe, dangerous_patterns = validate_adapter_source(file_content)
-            if not is_safe:
-                rel = file_path.relative_to(tmp_path)
-                raise AdapterInstallError(
-                    f"Dangerous patterns detected in {adapter_id} ({rel}): "
-                    f"{dangerous_patterns}"
-                )
-
-        # A CLI adapter names a local binary to execute; reject shells/interpreters.
-        try:
-            manifest_data = json.loads(adapter_json_content)
-        except json.JSONDecodeError:
-            manifest_data = {}
-        backend = manifest_data.get("backend") or {}
-        if isinstance(backend, dict) and backend.get("type") == "cli":
-            ok, reason = validate_cli_bin(backend.get("bin", ""))
-            if not ok:
-                raise AdapterInstallError(f"{adapter_id}: {reason}")
-
-        adapter_target_dir = adapters_dir / adapter_id
-        shutil.copytree(tmp_path, adapter_target_dir, dirs_exist_ok=True)
-
-    logger.info("Installed adapter %s from %s", adapter_id, source)
-    clear_adapter_source_cache()
-    return adapter_id

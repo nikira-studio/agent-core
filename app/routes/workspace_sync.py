@@ -30,8 +30,6 @@ class EndRequest(BaseModel):
 
 
 def _agent(ctx: EffectiveAuthority):
-    if ctx.is_delegated:
-        return None, error_response("FORBIDDEN", "Delegated workspace sync is unsupported", 403)
     if not ctx.agent_id:
         return None, error_response("AGENT_REQUIRED", "Workspace sync requires an agent", 400)
     return ctx.agent_id, None

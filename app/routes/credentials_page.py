@@ -112,6 +112,35 @@ def credentials_page(request: Request, session: dict = Depends(require_auth)):
           </td>
         </tr>"""
 
+    from app.services import credential_request_service
+
+    pending_requests = [
+        r for r in credential_request_service.list_pending() if enforcer.can_write(r["scope"])
+    ]
+    requests_html = ""
+    if pending_requests:
+        request_rows = "".join(
+            f"""
+        <tr>
+          <td>{escape_html(r["name"])}
+            <div class='text-muted' style='font-size:0.8rem'>asked by {escape_html(r["requested_by_agent_id"])} · {local_dt(r["created_at"], style="date")}</div></td>
+          <td><code>{escape_html(r["scope"])}</code></td>
+          <td>{escape_html(r["purpose"])}</td>
+          <td class='actions-cell'>
+            <button type='button' class='btn btn-sm' data-request-fill="{escape_html(r["id"])}" data-request-name="{escape_html(r["name"])}">Provide secret</button>
+            <button type='button' class='btn btn-sm btn-secondary' data-request-cancel="{escape_html(r["id"])}">Decline</button>
+          </td>
+        </tr>"""
+            for r in pending_requests
+        )
+        requests_html = f"""
+    <div class="card" id="credential-requests">
+      <h3>Requested by agents</h3>
+      <p class="text-muted">An agent needs these to continue. The value goes straight into the vault; the agent only ever receives the reference.</p>
+      <table><thead><tr><th>Name</th><th>Scope</th><th>What it's for</th><th class='actions-cell'>Actions</th></tr></thead>
+      <tbody>{request_rows}</tbody></table>
+    </div>"""
+
     if credential_entries:
         credentials_html = f"""
         <table><thead><tr><th>Name</th><th>Scope</th><th>Reference</th><th>Expires</th><th class='actions-cell'>Actions</th></tr></thead>
@@ -132,8 +161,29 @@ def credentials_page(request: Request, session: dict = Depends(require_auth)):
       </div>
     </div>
 
+    {requests_html}
     <div class="card">
       <div id="credentials-list">{credentials_html}</div>
+    </div>
+
+    <!-- Fill Credential Request Modal -->
+    <div class="modal-overlay" id="fill-request-modal" style="display:none">
+      <div class="modal">
+        <h3>Provide <span id="fill-request-name"></span></h3>
+        <form id="fill-request-form" onsubmit="fillCredentialRequest(event)">
+          <input type="hidden" id="fill-request-id">
+          <div class="form-group">
+            <label>Secret Value *</label>
+            <input type="password" id="fill-request-value" autocomplete="new-password" required>
+          </div>
+          <div class="form-group">
+            <label>Expires</label>
+            <input type="date" id="fill-request-expires">
+          </div>
+          <button type="submit" class="btn btn-primary">Save to vault</button>
+          <button type="button" class="btn btn-secondary" onclick="closeModal('fill-request-modal')">Cancel</button>
+        </form>
+      </div>
     </div>
 
     <!-- Create Credential Modal -->
@@ -208,6 +258,6 @@ def credentials_page(request: Request, session: dict = Depends(require_auth)):
     </div>
     """
 
-    extra_js = '<script src="/static/js/credentials.js?v=20260901"></script>'
+    extra_js = '<script src="/static/js/credentials.js?v=20261025"></script>'
 
     return render_page("Credentials", body, "/credentials", extra_js, session=session)

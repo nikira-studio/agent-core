@@ -17,12 +17,6 @@ AUDIT_ACTIONS = (
     "integration_output_generated",
     "agent_deactivated",
     "agent_reactivated",
-    "delegation_grant_created",
-    "delegation_grant_claimed",
-    "delegation_grant_revoked",
-    "delegation_request_created",
-    "delegation_request_approved",
-    "delegation_request_denied",
     "agent_purged",
     "credential_entry_created",
     "credential_entry_updated",
@@ -33,9 +27,14 @@ AUDIT_ACTIONS = (
     "credential_key_rotated",
     "credential_key_restored",
     "broker_resolve",
+    "credential_consumer_grant_created",
+    "credential_consumer_grant_revoked",
+    "credential_consumer_resolved",
+    "credential_consumer_denied",
+    "credential_consumer_written",
+    "credential_resolution_retention_applied",
     "credential_delete",
     "memory_write",
-    "memory_import",
     "memory_search",
     "memory_retract",
     "memory_move",
@@ -48,10 +47,16 @@ AUDIT_ACTIONS = (
     "memory_reanchored",
     "memory_feedback",
     "memory_proposals_generated",
-    "memory_usefulness_reviewed",
     "memory_proposal_decided",
     "retrieval_degraded",
     "tool_result_offloaded",
+    "tool_result_fetched",
+    "context_injected",
+    "memory_fetched",
+    "handoff_requested",
+    "handoff_resolved",
+    "credential_requested",
+    "credential_request_fulfilled",
     "activity_update",
     "activity_pickup",
     "activity_heartbeat",
@@ -61,8 +66,6 @@ AUDIT_ACTIONS = (
     "activity_cancelled",
     "activity_resumed",
     "activity_pruned",
-    "briefing_generated",
-    "handoff_created",
     "backup_export",
     "backup_restore",
     "scope_grant",
@@ -77,7 +80,6 @@ AUDIT_ACTIONS = (
     "audit_pruned",
     "scratchpad_pruned",
     "memory_ttl_swept",
-    "memory_import_downgraded",
     "memory_proposals_generated",
     "retracted_records_purged",
     "operational_logs_pruned",
@@ -124,6 +126,36 @@ def write_event(
     details: Optional[dict[str, Any]] = None,
     ip_address: Optional[str] = None,
 ) -> int:
+    with get_db() as conn:
+        return write_event_in_connection(
+            conn,
+            actor_type=actor_type,
+            actor_id=actor_id,
+            action=action,
+            resource_type=resource_type,
+            resource_id=resource_id,
+            result=result,
+            details=details,
+            ip_address=ip_address,
+        )
+
+
+def write_event_in_connection(
+    conn,
+    actor_type: str,
+    actor_id: Optional[str],
+    action: str,
+    resource_type: Optional[str] = None,
+    resource_id: Optional[str] = None,
+    result: str = "success",
+    details: Optional[dict[str, Any]] = None,
+    ip_address: Optional[str] = None,
+) -> int:
+    """Insert an audit event into a caller-owned transaction.
+
+    Transactional maintenance uses this to make the audit receipt atomic with
+    the data change. Ordinary callers should use :func:`write_event`.
+    """
     if actor_type not in ACTOR_TYPES:
         raise ValueError(f"Invalid actor_type: {actor_type}")
     if result not in RESULT_TYPES:
@@ -135,25 +167,24 @@ def write_event(
     if details:
         details_json = json.dumps(_sanitize_details(details))
 
-    with get_db() as conn:
-        cursor = conn.execute(
-            """
-            INSERT INTO audit_log
-            (actor_type, actor_id, action, resource_type, resource_id, result, details_json, ip_address)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                actor_type,
-                actor_id,
-                action,
-                resource_type,
-                resource_id,
-                result,
-                details_json,
-                ip_address,
-            ),
-        )
-        return cursor.lastrowid
+    cursor = conn.execute(
+        """
+        INSERT INTO audit_log
+        (actor_type, actor_id, action, resource_type, resource_id, result, details_json, ip_address)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            actor_type,
+            actor_id,
+            action,
+            resource_type,
+            resource_id,
+            result,
+            details_json,
+            ip_address,
+        ),
+    )
+    return cursor.lastrowid
 
 
 SECRET_KEYWORDS = (

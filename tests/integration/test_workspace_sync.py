@@ -1,5 +1,4 @@
 from app.database import get_db
-import json
 
 from app.services import activity_service, agent_service, memory_service, workspace_service
 
@@ -47,7 +46,7 @@ def test_two_executions_receive_and_acknowledge_workspace_changes(test_client, a
     assert page.status_code == 200, page.json()
     data = page.json()["data"]
     assert len(data["memory_changes"]) == 1
-    assert data["memory_changes"][0]["id"] == data["other_session_changes"][0]["id"]
+    assert data["other_session_changes"] == [data["memory_changes"][0]["id"]]
     assert data["memory_changes"][0]["source_execution_id"] == execution_a
 
     repeated = test_client.post("/mcp", headers=headers, json={
@@ -82,63 +81,6 @@ def test_change_insert_is_atomic_with_memory_write(clean_db):
     assert record and change
     assert change["resource_id"] == record["id"]
     assert workspace_sync_service.run_maintenance()["workspace_changes_pruned"] == 0
-
-
-def test_real_handoff_briefing_emits_briefing_created(test_client, admin_token):
-    api_key = _agent(admin_token)
-    headers = {"Authorization": f"Bearer {api_key}"}
-
-    sync = test_client.post("/mcp", headers=headers, json={
-        "tool": "workspace_sync", "params": {"memory_scope": "workspace:sync-test"}
-    })
-    assert sync.status_code == 200
-    execution_id = sync.json()["data"]["execution_id"]
-
-    created = test_client.post("/mcp", headers=headers, json={
-        "tool": "activity_update", "params": {
-            "task_description": "Prepare a real handoff",
-            "memory_scope": "workspace:sync-test",
-            "execution_id": execution_id,
-        },
-    })
-    assert created.status_code == 201, created.json()
-    activity_id = created.json()["data"]["activity"]["id"]
-
-    response = test_client.post(
-        "/api/briefings/handoff",
-        headers=headers,
-        json={"activity_id": activity_id, "execution_id": execution_id},
-    )
-    assert response.status_code == 201, response.json()
-    briefing_id = response.json()["data"]["briefing"]["id"]
-
-    with get_db() as conn:
-        briefing_row = conn.execute(
-            "SELECT metadata_json FROM agent_activity WHERE id = ?", (briefing_id,)
-        ).fetchone()
-        changes = conn.execute(
-            "SELECT change_type, resource_type FROM workspace_changes WHERE resource_id = ?",
-            (briefing_id,),
-        ).fetchall()
-
-    metadata = json.loads(briefing_row["metadata_json"])
-    assert metadata["type"] == "handoff_briefing"
-    assert metadata["source_activity_id"] == activity_id
-    assert metadata["briefing"]["id"] == briefing_id
-    assert [dict(row) for row in changes] == [{
-        "change_type": "briefing_created", "resource_type": "briefing"
-    }]
-
-    delivered = test_client.post("/mcp", headers=headers, json={
-        "tool": "workspace_sync", "params": {
-            "memory_scope": "workspace:sync-test", "execution_id": execution_id,
-        },
-    })
-    assert delivered.status_code == 200, delivered.json()
-    briefing_changes = delivered.json()["data"]["briefing_changes"]
-    assert [(change["change_type"], change["resource_id"]) for change in briefing_changes] == [
-        ("briefing_created", briefing_id)
-    ]
 
 
 def test_memory_lifecycle_changes_cover_all_trigger_branches(clean_db):
@@ -179,6 +121,44 @@ def test_memory_lifecycle_changes_cover_all_trigger_branches(clean_db):
     assert ("memory_reanchored", replacement["id"]) in changes
     assert ("memory_pin_changed", replacement["id"]) in changes
     assert ("memory_retracted", retracted["id"]) in changes
+
+
+def test_unattended_reconfirm_does_not_emit_workspace_change(clean_db):
+    record, error = memory_service.write_memory(
+        "Verified fact", "fact", "workspace:quiet-confirm", topic="quiet",
+        subject_anchor="repo:app/schema.py",
+    )
+    assert error is None
+
+    def confirm_changes():
+        with get_db() as conn:
+            return conn.execute(
+                "SELECT COUNT(*) FROM workspace_changes WHERE memory_scope = "
+                "'workspace:quiet-confirm' AND change_type = 'memory_confirmed'"
+            ).fetchone()[0]
+
+    assert memory_service.confirm_memory(
+        record["id"], "anchor check: file exists", "verification-pass"
+    )
+    assert confirm_changes() == 0
+
+    assert memory_service.confirm_memory(
+        record["id"], "Read app/schema.py", "test-agent"
+    )
+    assert confirm_changes() == 1
+
+    # A pin change on a verifier-confirmed record still reports the pin.
+    assert memory_service.confirm_memory(
+        record["id"], "anchor check: file exists", "verification-pass"
+    )
+    assert memory_service.set_pinned(record["id"], True)
+    with get_db() as conn:
+        last = conn.execute(
+            "SELECT change_type FROM workspace_changes WHERE memory_scope = "
+            "'workspace:quiet-confirm' ORDER BY sequence DESC LIMIT 1"
+        ).fetchone()[0]
+    assert last == "memory_pin_changed"
+    assert confirm_changes() == 1
 
 
 def test_activity_lifecycle_changes_cover_trigger_branches(clean_db):

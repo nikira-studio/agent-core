@@ -38,33 +38,6 @@ async def get_current_session(
     return session
 
 
-async def get_current_user(
-    session: dict = Depends(get_current_session),
-) -> dict:
-    return session
-
-
-async def get_current_user_optional(
-    request: Request,
-    credentials: HTTPAuthorizationCredentials = Depends(security),
-) -> dict | None:
-    session_token = None
-    if credentials:
-        session_token = credentials.credentials
-    elif request.cookies.get("session_token"):
-        session_token = request.cookies.get("session_token")
-
-    if not session_token:
-        return None
-
-    session = validate_session(
-        session_token,
-        inactivity_minutes=settings.INACTIVITY_TIMEOUT_MINUTES,
-    )
-
-    return session
-
-
 async def require_admin(
     session: dict = Depends(get_current_session),
 ) -> dict:
@@ -100,8 +73,7 @@ async def get_request_context(
 ) -> EffectiveAuthority:
     if not credentials:
         session = await get_current_session(request, credentials)
-        authority = permanent_authority(build_user_context(session))
-        return _with_delegation(request, authority)
+        return permanent_authority(build_user_context(session))
 
     token = credentials.credentials
     if token.startswith("ac_sk_"):
@@ -112,12 +84,10 @@ async def get_request_context(
             raise APIError("INVALID_KEY", "Invalid or inactive agent API key", 401)
         from app.security.scope_enforcer import build_agent_context
 
-        authority = permanent_authority(build_agent_context(agent))
-        return _with_delegation(request, authority)
+        return permanent_authority(build_agent_context(agent))
     else:
         session = await get_current_session(request, credentials)
-        authority = permanent_authority(build_user_context(session))
-        return _with_delegation(request, authority)
+        return permanent_authority(build_user_context(session))
 
 
 async def get_mcp_request_context(
@@ -126,8 +96,7 @@ async def get_mcp_request_context(
 ) -> EffectiveAuthority:
     if not credentials:
         session = await get_current_session(request, credentials)
-        authority = permanent_authority(build_user_context_for_connectors(session))
-        return _with_delegation(request, authority)
+        return permanent_authority(build_user_context_for_connectors(session))
 
     token = credentials.credentials
     if token.startswith("ac_sk_"):
@@ -138,11 +107,9 @@ async def get_mcp_request_context(
             raise APIError("INVALID_KEY", "Invalid or inactive agent API key", 401)
         from app.security.scope_enforcer import build_agent_context
 
-        authority = permanent_authority(build_agent_context(agent))
-        return _with_delegation(request, authority)
+        return permanent_authority(build_agent_context(agent))
     session = await get_current_session(request, credentials)
-    authority = permanent_authority(build_user_context_for_connectors(session))
-    return _with_delegation(request, authority)
+    return permanent_authority(build_user_context_for_connectors(session))
 
 
 def require_capability(capability: str):
@@ -159,11 +126,3 @@ def require_capability(capability: str):
         return authority
     return dependency
 
-
-def _with_delegation(request: Request, authority: EffectiveAuthority) -> EffectiveAuthority:
-    from app.services.delegation_service import GRANT_HEADER, build_delegated_authority
-
-    value = request.headers.get(GRANT_HEADER)
-    if not value:
-        return authority
-    return build_delegated_authority(authority.context, value)

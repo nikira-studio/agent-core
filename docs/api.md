@@ -73,7 +73,7 @@ Agent API keys start with `ac_sk_`. Broker credentials start with `ac_broker_`. 
 | `POST` | `/api/auth/otp/confirm` | Session | Confirm the first TOTP code and enable OTP |
 | `POST` | `/api/auth/otp/verify` | Pending session | Verify OTP during login |
 | `POST` | `/api/auth/otp/disable` | Session + password + OTP | Disable OTP on the account |
-| `GET` | `/api/auth/effective-authority` | Session or agent | The caller's current effective authority: permanent scopes, or the grant's permissions when a delegated request presents a grant header |
+| `GET` | `/api/auth/effective-authority` | Session or agent | The caller's current effective authority: identity, read and write scopes, workspaces, and capabilities |
 | `POST` | `/api/auth/users` | Admin session | Create a new user account |
 | `PUT` | `/api/auth/users/{user_id}` | Admin session | Update user metadata, role, or `is_active` status |
 | `DELETE` | `/api/auth/users/{user_id}` | Admin session | Delete a user account |
@@ -177,7 +177,6 @@ Agent or session authentication accepted, with scope enforcement on every operat
 | Method | Path | Description |
 | --- | --- | --- |
 | `POST` | `/api/memory/write` | Write a memory record |
-| `POST` | `/api/memory/import` | Import curated notes into memory records |
 | `POST` | `/api/memory/search` | Search memory (FTS5 + optional semantic hybrid search) |
 | `POST` | `/api/memory/get` | List records by scope |
 | `POST` | `/api/memory/confirm` | Confirm a record with evidence |
@@ -212,32 +211,13 @@ Choosing `memory_class`: a **fact** is settled by checking (someone could verify
 Optional memory metadata:
 
 - `subject_anchor` names what would confirm a fact: `repo:<path>`, `host:<name-or-ip>`, or `service:<binding_id>`. Repo paths are **relative to the workspace root**, never absolute: the same directory has a different absolute path in every agent's container. Omit it when nothing could verify the record, which is normal for a decision.
-- `pinned` marks a record as standing context: returned by `memory_pinned` at session start rather than having to win a search, included in every handoff briefing, and skipped by the clean-up rules. **Agents request pinning rather than performing it.** `memory_pin` queues the request for operator review, because standing context reaches every session in the scope including other agents', which makes it the most influential thing an agent could write. Capped per scope (10 by default, `max_pinned_per_scope`) so the list stays short enough to read in full. Only `fact`, `decision` and `preference` records can be pinned.
+- `pinned` marks a record as standing context: returned by `memory_pinned` at session start rather than having to win a search, included in every session context, and skipped by the clean-up rules. **Agents request pinning rather than performing it.** `memory_pin` queues the request for operator review, because standing context reaches every session in the scope including other agents', which makes it the most influential thing an agent could write. Capped per scope (10 by default, `max_pinned_per_scope`) so the list stays short enough to read in full. Only `fact`, `decision` and `preference` records can be pinned.
 - `slot_key` is for preference records when you want one active value per slot. A new preference with the same `scope + slot_key` supersedes the previous active one.
 - `last_confirmed_at` means the record was checked **against the world**. It is set by `memory_confirm` (which requires evidence naming what was checked) or by the verification pass, not by writing the record. Search results report `days_since_confirmed` so a caller can tell a fact verified today from one nobody has checked in months.
 - `valid_from` and `valid_to` bound **when the content was true in the world**, which is not the same question as when the system learned it (`created_at`, `status_changed_at`). Keeping the two apart is what lets the corpus answer "what was true in March" rather than only "what do we believe now". Left unset, a record is taken to start when it was written, so nothing silently claims to have always been true. Supersession closes the old record's `valid_to` automatically, at the successor's `valid_from` when one is given, otherwise at the moment of supersession, and never overwrites an end date the writer set deliberately.
 - `expires_at` is an ISO datetime after which the record is excluded from search results and swept on the next maintenance run. Useful for time-bounded facts or temporary scratchpad context.
 - `confidence` and `importance` are caller-assigned. Ranking uses observed evidence: how often a record is recalled, whether callers said it helped, and how long since it was confirmed. So there is no need to tune them.
 - `provenance` is server-generated on write and records who wrote the memory, from which channel, and which activity was open at the time; clients do not supply it directly.
-
-Import:
-```json
-{
-  "scope": "workspace:example",
-  "memory_class": "fact",
-  "topic": null,
-  "sources": [
-    {
-      "filename": "memory.md",
-      "content": "# Project Notes\n- Workspace: example\n- Decision: use workspace:example for durable memory\n- Fact: keep imports concise and specific"
-    }
-  ]
-}
-```
-
-Imports are explicit, manual writes into the existing memory table. The server splits markdown/text into deterministic chunks, writes them with `source_kind: "external_import"`, and stamps provenance with `/api/memory/import`, source filename, and chunk number. Import provenance is generated server-side; raw credential values are never accepted as metadata. The import path is intended for curated notes, handoffs, and memory-shaped summaries, not for raw repository instruction files unless you have already distilled the durable facts you want to keep.
-
-For files that are mostly instructions, such as `CLAUDE.md` or `AGENTS.md`, an AI-assisted extract-and-review flow is often a better fit than literal import. That keeps the memory table focused on durable facts, decisions, and preferences instead of recreating repo guidance verbatim.
 
 Search:
 ```json
@@ -256,9 +236,25 @@ Search:
 
 `as_of` asks the corpus what it held to be true at a given moment instead of now. A record is returned when the instant falls inside its validity window, so a fact that has since been replaced comes back for dates before the replacement and its successor comes back for dates after: useful when reconstructing why a past decision looked right at the time. Superseded records are eligible under `as_of` (that is the point); retracted records never are, because retraction says the record should not have been written rather than that it stopped being true. A value that is not a parseable timestamp is rejected with `INVALID_INPUT`.
 
-`activity_id` filters to records written during one piece of work. Every write already cites the activity that was open at the time, stamped server-side; this is the traversal back the other way. `activity_get` returns the same set as `produced_records`, and a handoff briefing includes it: picking up someone else's work shows what it concluded, not only what it was attempting.
+`activity_id` filters to records written during one piece of work. Every write already cites the activity that was open at the time, stamped server-side; this is the traversal back the other way. `activity_get` returns the same set as `produced_records`: picking up someone else's work shows what it concluded, not only what it was attempting.
 
 **Search results are a lean projection**: `id`, `content`, `memory_class`, `scope`, `topic`, `subject_anchor`, `created_at`, `last_confirmed_at`, `record_status`, and a derived `days_since_confirmed`. Lifecycle columns and caller-assigned scores are omitted because a result is for deciding what is relevant, and on a full page that bookkeeping cost more context than the content it surrounded. Pass `"view": "full"` for every column, or use `memory_get` / `GET /api/memory/{id}` to inspect one record.
+
+Keyword candidates use FTS5 BM25 relevance over content and topic. A bounded lexical contribution survives the final merge with optional semantic results and the existing confirmation/usefulness signals. Matching still requires every sanitized query token. Current records retain priority, and age penalties apply to facts rather than decisions. `limit` defaults to 20 and positive limits are capped at 100. `offset` selects a later page after ranking eligible records. Ranking reads only metadata; complete records are loaded for the selected page. Semantic search ignores stored vectors from a different model or with incompatible dimensions. Switching models preserves keyword recall of existing records but does not regenerate their embeddings automatically.
+
+Both `memory_search` and `POST /api/memory/search` accept optional `max_response_chars`. On REST, omitted or null preserves the existing response shape. On MCP, omitted or null defaults the budget to `AGENT_CORE_TOOL_RESULT_SPILL_THRESHOLD`, so an oversized search returns its best whole records inline instead of being offloaded to a `result_fetch` handle, and recall is counted only for records actually delivered. Otherwise, pass a positive integer to bound the logical JSON `data` object after projection and pagination. The exact count is `len(json.dumps(data, indent=2, default=str))`, with Python's default ASCII escaping. This matches JSON-RPC tool text; REST uses the same budget convention even though its HTTP JSON is compact. Headers and transport wrappers are outside the budget. This is a character bound, not a model-specific token count.
+
+Budgeted responses add `response_limited`. When true, the response contains the longest whole-record prefix that fits. Records are never clipped or skipped to pack in lower-ranked results. `total` remains the number of returned records. To continue, advance `offset` by that number; when the page is empty because its first record is too large, raise the budget instead.
+
+If the first matching record does not fit, the response contains an empty list and a `warnings` entry with code `RESPONSE_BUDGET_TOO_SMALL`. That warning also consumes the budget. If the required metadata and warning cannot fit, the request fails with HTTP 400 and that code. Invalid budget types or values fail REST model validation with HTTP 422; MCP returns HTTP 400 with `INVALID_RESPONSE_BUDGET`. Error responses are outside the success-response budget.
+
+Recall counts and audit result counts cover only selected records. For a spilled MCP response, selected records receive recall credit once when the logical response is produced; fetching its chunks does not increment counts again. Budgets below the configured spill threshold remain inline. Larger allowed results retain the existing spill behavior.
+
+Example MCP arguments:
+
+```json
+{"query": "retry policy", "limit": 20, "offset": 0, "max_response_chars": 6000}
+```
 
 Get (list by scope):
 ```json
@@ -273,11 +269,11 @@ Get (list by scope):
 
 **Valid source kinds:** `operator_authored`, `human_direct`, `tool_output`, `agent_inference`, `episodic_inference`, `semantic_inference`, `external_import`
 
-`last_confirmed_at` is read-only on ordinary writes. Confirm after writing by calling `memory_confirm` or `POST /api/memory/confirm` with `{"record_id": "...", "evidence": "what was checked"}`. Agent-authenticated callers cannot claim `operator_authored` or `human_direct`, and `external_import` is reserved for the import and merge paths.
+`last_confirmed_at` is read-only on ordinary writes. Confirm after writing by calling `memory_confirm` or `POST /api/memory/confirm` with `{"record_id": "...", "evidence": "what was checked"}`. Agent-authenticated callers cannot claim `operator_authored` or `human_direct`, and `external_import` cannot be written; it only labels records brought in by import paths that have since been removed.
 
 A successful write can include advisory `warnings`. `POSSIBLE_DUPLICATE` identifies similar active records, while `PREVIOUSLY_RETRACTED` identifies similar retracted records so the caller can decide whether the new assertion is intentional. These warnings never block the write. Semantic candidates are evaluated independently for active and retracted records; when embeddings are unavailable, normalized prefix matching still supplies retraction awareness.
 
-Writes and imports to `shared` are rejected if the content looks like PII or credentials. Very short, noisy, or credential-like search queries are also rejected.
+Writes to `shared` are rejected if the content looks like PII or credentials. Very short, noisy, or credential-like search queries are also rejected.
 
 ---
 
@@ -291,7 +287,6 @@ Admin only. These endpoints suggest and record decisions about what to retract o
 | `POST` | `/api/memory/proposals/generate` | Run the mechanical rules and queue what they find |
 | `POST` | `/api/memory/proposals/{id}/decide` | Record a verdict, applying the action on accept |
 | `POST` | `/api/memory/proposals/{id}/reanchor` | Repoint a record at what actually describes it |
-| `POST` | `/api/memory/proposals/review-usefulness` | Ask the configured review model which records are not actionable |
 | `GET` | `/api/memory/proposals/stats` | Per-rule verdict history: how often each rule has been right |
 
 Proposals come from two places. **Generation rules** are mechanical. They run during the configured maintenance interval when `consolidation_scan_enabled` is on, and on demand from the dashboard's review page or `POST /api/memory/proposals/generate`:
@@ -304,7 +299,7 @@ Proposals come from two places. **Generation rules** are mechanical. They run du
 | `stale_volatile` | Facts nobody has confirmed in a long time (facts only, a decision does not go stale because time passed) |
 | `unconfirmed_inference` | Non-human facts that have never been confirmed and are older than `unconfirmed_inference_days` |
 
-**Event-driven proposals** are queued as things happen: `anchor_missing` when verification finds the subject gone, `pin_request` when an agent calls `memory_pin`, and `low_value` when the usefulness review finds nothing a future session could act on.
+**Event-driven proposals** are queued as things happen: `anchor_missing` when verification finds the subject gone and `pin_request` when an agent calls `memory_pin`.
 
 Generate:
 ```json
@@ -319,8 +314,6 @@ Decide:
 `verdict` is `accepted` or `rejected`. `outcome` applies to confirm-style proposals, where both answers are accepts because the rule was right to ask either way: `still_current` resolves the question without claiming the record was independently verified, while `no_longer_current` retracts it. Use **Confirm with evidence** in the dashboard, `memory_confirm`, or `POST /api/memory/confirm` to set `last_confirmed_at`. Confirming from a proposal card confirms the record first and then resolves that proposal as `still_current`.
 
 Accepting a retraction is reversible with `POST /api/memory/restore`. That is deliberate, a review that cannot be wrong cheaply is a review nobody will run.
-
-`low_value` proposals can never be applied automatically, whatever their accept rate. The others could earn automation from a good enough record; a judgement about worth cannot, because the cost of a wrong call is deleting a constraint someone depended on.
 
 Every decision is written to the audit log with the rule, verdict, outcome, and the records affected.
 
@@ -399,7 +392,13 @@ Restore a previous key (use to recover from a bad rotation, with a key from a ba
 {"key_base64": "<base64-encoded-fernet-key>"}
 ```
 
+Restoration is rejected if any stored encrypted entry cannot be decrypted with the supplied key. For data encrypted under multiple keys, restore a full backup with its matching keyring. See [key restoration](security.md#rotating-the-credential-encryption-key).
+
 ---
+
+### Credential requests
+
+An agent calls the MCP `credential_request` tool. People see open requests at `GET /api/credentials/requests` and fill one with `POST /api/credentials/requests/{id}/fulfill` (`value`, optional `label` and `expires_at`) or decline it with `POST /api/credentials/requests/{id}/cancel`. Both need a human session with write access to the scope.
 
 ## Connector types
 
@@ -551,9 +550,15 @@ The broker credential authenticates the request. The `agent_id` must come from t
 
 ---
 
+## Session context
+
+`POST /api/session-context` (agent key) returns `{memory_scope, resolved_by, execution_id, context, chars, reductions, memory_ids, activity_ids}`. Body: optional `memory_scope`, `cwd`, `host_session_ref`, `source`, `max_chars` (1,000 to 50,000, default 9,000). Without `memory_scope`, `cwd` is matched against the `workspace_repo_roots` setting, deepest root first. `context` is fitted to `max_chars` by dropping whole items, cheapest first: the record index, then changes, then result detail. An execution is opened (or reused for the same `host_session_ref`) with its cursor at the newest change. Each call is audited as `context_injected`.
+
+`POST /api/session-context/handoff-check` with `{host_session_ref}` returns `{nudge: false}` or `{nudge: true, activity_id, reason}`. It is used by the Claude Code Stop hook, and asks at most once per activity.
+
 ## Workspace synchronization
 
-These routes require agent authentication and workspace memory read access. Delegated calls cannot create or use execution cursors.
+These routes require agent authentication and workspace memory read access.
 
 | Method | Path | Description |
 | --- | --- | --- |
@@ -561,7 +566,7 @@ These routes require agent authentication and workspace memory read access. Dele
 | `POST` | `/api/workspace-sync/ack` | Advance the acknowledged cursor after processing a delivered page |
 | `POST` | `/api/workspace-sync/end` | Mark an execution as ended |
 
-The first sync omits `execution_id`. The response returns a new execution ID, pinned records, assigned activities, and changes grouped into `memory_changes`, `activity_changes`, and `briefing_changes`. `other_session_changes` repeats changes whose `source_execution_id` belongs to another execution. Deduplicate those entries by their stable change ID.
+The first sync omits `execution_id`. The response returns a new execution ID, pinned records, assigned activities, and changes grouped into `memory_changes` and `activity_changes`. `other_session_changes` lists the IDs of changes whose `source_execution_id` belongs to another execution. The changes themselves appear once, in their resource groups.
 
 Keep the execution ID for one host session. Pass it to later sync calls and supported write operations for source attribution. Acknowledge `next_cursor` only after processing or intentionally skipping the page. An acknowledgement cannot move past the highest cursor that the server delivered to that execution.
 
@@ -580,7 +585,7 @@ If retention removes changes before an execution reads them, the next response s
 | `PUT` | `/api/activity/{activity_id}` | Agent/session | Update status, metadata, or task result |
 | `POST` | `/api/activity/{activity_id}/heartbeat` | Agent/session | Refresh heartbeat timestamp |
 | `DELETE` | `/api/activity/{activity_id}` | Agent/session | Cancel activity |
-| `POST` | `/api/activity/{activity_id}/recovery` | Admin | Reassign stale activity and generate briefing |
+| `POST` | `/api/activity/{activity_id}/recovery` | Admin | Recover a stale activity: complete, cancel, resume, or reassign it |
 
 Create:
 ```json
@@ -595,7 +600,11 @@ Create:
 
 Only the owning agent or an admin can update, heartbeat, cancel, or reassign an activity.
 
-For the MCP `activity_update` tool, creating a fresh activity in a readable `workspace:*` scope can add a best-effort `since_last_active` object beside `activity`. It summarizes changes since that agent's prior non-briefing activity using workspace change-sequence boundaries. A first activity uses `baseline: "retained_tail"`; the response also reports `total_available`, `truncated`, and `oldest_available_at` so clients do not infer completeness beyond retained history. The key is omitted when the feature is disabled, the caller cannot read the scope, digest computation fails, or the supplied `execution_id` is already caught up. REST activity creation is unchanged.
+For the MCP `activity_update` tool, creating a fresh activity in a readable `workspace:*` scope can add a best-effort `since_last_active` object beside `activity`. It summarizes changes since that agent's prior activity using workspace change-sequence boundaries. A first activity uses `baseline: "retained_tail"`; the response also reports `total_available`, `truncated`, and `oldest_available_at` so clients do not infer completeness beyond retained history. The key is omitted when the feature is disabled, the caller cannot read the scope, digest computation fails, or the supplied `execution_id` is already caught up. REST activity creation is unchanged.
+
+### Handoffs
+
+`PUT /api/activity/{id}` accepts `handoff` with `completed` (string), `next_steps` and `open_questions` (lists of strings) and `needs_human` (string), up to 4,000 characters. The next session context shows them. `POST /api/activity/{id}/handoff/resolve` (a person only) marks a `needs_human` request as dealt with.
 
 ### Activity pickup
 
@@ -624,84 +633,6 @@ Response when nothing is waiting:
 ```
 
 The pickup is workspace-aware: an agent configured with `workspace:proj-a` in its read scopes will only claim activities whose `memory_scope` is `workspace:proj-a`. It will never see activities assigned to a different agent or scoped to a workspace it cannot read. Activity records are a mailroom-style handoff board, not orchestration: they store work, status, and ownership, but the agent runtime still has to explicitly check for and claim work.
-
----
-
-## Briefings
-
-| Method | Path | Description |
-| --- | --- | --- |
-| `POST` | `/api/briefings/handoff` | Generate briefing for an activity |
-| `POST` | `/api/briefings/handoff/prd` | Generate a PRD-shaped briefing from one agent to another |
-| `GET` | `/api/briefings/{briefing_id}` | Get briefing |
-
-Standard handoff (based on an active activity):
-```json
-{"activity_id": "<activity-id>"}
-```
-
-PRD-shaped handoff (agent-to-agent transition):
-```json
-{
-  "from_agent_id": "coding-agent",
-  "to_agent_id": "review-agent",
-  "user_id": "admin"
-}
-```
-
-Briefings include authorized decision, fact, and preference memory linked to the activity scope, plus the source activity's task result when one was recorded.
-
----
-
-## Delegations
-
-Short-lived, narrowed authority that one actor lends to a recipient agent; see [Delegated Authorization](delegated-authorization-integration.md) for the permission model, lifecycle rules, and error codes. Delegated requests authenticate with the recipient's normal API key plus the one-time-claimed grant credential in a dedicated header:
-
-```http
-Authorization: Bearer ac_sk_<recipient-agent-key>
-X-Agent-Core-Grant: ac_dg_<grant-id>.<opaque-secret>
-```
-
-### Direct grants
-
-| Method | Path | Auth | Description |
-| --- | --- | --- | --- |
-| `POST` | `/api/delegations` | Session, or agent with `can_delegate` | Issue a grant. Permissions must be a subset of the issuer's current authority; `ttl_seconds` ≤ 3600 |
-| `GET` | `/api/delegations` | Session or agent | List grants visible to the caller |
-| `GET` | `/api/delegations/{grant_id}` | Session or agent | One grant |
-| `POST` | `/api/delegations/{grant_id}/claim` | Recipient agent key, no grant header | One-time claim. Returns `grant_secret` exactly once and activates the grant. REST-only by design, a secret returned as an MCP tool result would be model-visible |
-| `POST` | `/api/delegations/{grant_id}/revoke` | Issuer, recipient, or admin | Revoke the grant; optional `reason` |
-
-Create a grant:
-
-```json
-{
-  "recipient_agent_id": "worker-agent",
-  "purpose": "Summarize this week's workspace decisions",
-  "ttl_seconds": 900,
-  "scope_permissions": [
-    {"resource_type": "memory", "operation": "read", "scope": "workspace:my-project"}
-  ],
-  "resource_permissions": [],
-  "binding_actions": []
-}
-```
-
-`resource_permissions` name exact resources (`resource_type`, `operation`, `resource_id`; activities are exact-resource only). `binding_actions` name an exact connector `binding_id` and `action`. Optional fields: `coordinator_agent_id`, `activity_id`, `correlation_id`.
-
-### Delegation requests
-
-An actor without authority can ask for it. Approval produces an `approved_unclaimed` grant that goes through the normal claim flow; approval never returns a secret. Pending requests are also reviewable on the dashboard's **Delegation** page.
-
-| Method | Path | Auth | Description |
-| --- | --- | --- | --- |
-| `POST` | `/api/delegation-requests` | Session or agent | Record a pending request (same body shape as grant creation, minus `coordinator_agent_id`, coordinator attribution is server-derived) |
-| `GET` | `/api/delegation-requests` | Session or agent | List requests visible to the caller |
-| `GET` | `/api/delegation-requests/{request_id}` | Session or agent | One request |
-| `POST` | `/api/delegation-requests/{request_id}/approve` | Eligible human, or agent with `can_delegate` | Approve, optionally replacing any permission list with a strict subset |
-| `POST` | `/api/delegation-requests/{request_id}/deny` | Eligible human, or agent with `can_delegate` | Deny with an optional `reason` |
-
-Decisions are one-time. All lifecycle transitions are written to the audit log (`delegation_grant_created`, `delegation_grant_claimed`, `delegation_grant_revoked`, `delegation_request_created`, `delegation_request_approved`, `delegation_request_denied`).
 
 ---
 
@@ -742,22 +673,16 @@ Dispatch:
 | `memory_pin` | Request that a record become (or stop being) standing context; queues the request for operator review |
 | `credential_get` | Get an `AC_SECRET_*` reference for a credential entry |
 | `credential_list` | List credential metadata and references in authorized scopes |
+| `credential_request` | Ask a person for a missing secret; returns the reference once they fill it on the Credentials page |
+| `session_context` | One budgeted session-start block (rules, waiting and unfinished work, recent results with next steps, changes, key-record index) plus the session's `execution_id` |
 | `workspace_sync` | Start or continue an execution and return current context plus workspace changes after its cursor |
 | `workspace_sync_ack` | Advance an execution's acknowledged cursor after processing a delivered page |
-| `activity_update` | Create or update an activity record in the supplied `memory_scope`, including progress notes and completion result; it never moves an activity across scopes |
+| `activity_update` | Create or update an activity record in the supplied `memory_scope`, including progress notes, completion result and a structured `handoff` (`completed`, `next_steps`, `open_questions`, `needs_human`); it never moves an activity across scopes |
 | `activity_get` | Get an activity record |
 | `activity_list` | List activities visible to the current caller |
 | `activity_pickup` | Claim the next active work item assigned to this agent in authorized scopes |
 | `activity_search` | Full-text search the activity trail: what agents worked on, per task, with results. Use for "what did we do on X"; use `memory_search` for durable facts and decisions |
-| `get_briefing` | Fetch a briefing |
-| `briefing_list` | List briefings visible to the current caller |
-| `effective_authority` | Report the caller's current effective authority, permanent scopes, or the grant's permissions on a delegated call |
-| `delegations_list` | List delegated grants visible to the caller |
-| `delegation_request` | Record a pending request for narrowed, short-lived authority |
-| `delegation_requests_list` | List delegation requests visible to the caller |
-| `delegation_request_approve` | Approve a request, optionally narrowing it to a strict subset; never returns a secret |
-| `delegation_request_deny` | Deny a request with an optional reason |
-| `delegation_revoke` | Revoke a delegated grant |
+| `effective_authority` | Report the caller's current effective authority: identity, read and write scopes, workspaces, and capabilities |
 | `connectors_list` | List installed connector types as lean summaries (id, name, auth/backend type, action_count; no full specs). Supports `limit`/`offset`; use `connectors_actions_list` for a type's actions |
 | `connectors_bindings_list` | List connector bindings in authorized scopes |
 | `connectors_bindings_test` | Test a binding using its stored credential |
@@ -766,8 +691,6 @@ Dispatch:
 | `connectors_run` | Run one connector action server-side using a binding |
 | `connectors_resolve` | Deterministically resolve a connector type (plus optional alias, scope, and action) to a single authorized binding |
 | `result_fetch` | Retrieve a slice of a previously offloaded large tool result by handle |
-
-Claiming a delegated grant is intentionally REST-only (`POST /api/delegations/{grant_id}/claim`): the one-time secret must never appear in a tool result a model can read. On delegated MCP calls, send the recipient's API key and the `X-Agent-Core-Grant` header on every request; the stateless `/mcp` transport rebuilds authority each time.
 
 ### Large tool results (offloading)
 
@@ -784,7 +707,7 @@ When any MCP tool's output exceeds `AGENT_CORE_TOOL_RESULT_SPILL_THRESHOLD` char
 }
 ```
 
-Call `result_fetch` with the handle to read the full payload in chunks, following `next_offset` until `has_more` is false. Handles are scoped to the agent that made the original call and expire after `AGENT_CORE_TOOL_RESULT_SPILL_TTL_HOURS` (default 24h).
+Call `result_fetch` with the handle to read the full payload in chunks, following `next_offset` until `has_more` is false. Each fetch is audited as `tool_result_fetched` against the handle, so `scripts/value_report.py` can report how many offloaded results agents actually read. Handles are scoped to the agent that made the original call and expire after `AGENT_CORE_TOOL_RESULT_SPILL_TTL_HOURS` (default 24h).
 
 ### Image data-URL artifacts (connector output)
 
@@ -813,7 +736,7 @@ Session authentication required. Global overview and audit routes require admin.
 
 | Method | Path | Description |
 | --- | --- | --- |
-| `POST` | `/api/dashboard/search` | Search memory, activities, briefings, and connector visibility |
+| `POST` | `/api/dashboard/search` | Search memory, activities, and connector visibility |
 | `GET` | `/api/dashboard/overview` | Counts and recent activity |
 | `GET` | `/api/dashboard/memory` | Dashboard memory list |
 | `GET` | `/api/dashboard/credentials` | Dashboard credential list |
@@ -825,7 +748,7 @@ Session authentication required. Global overview and audit routes require admin.
 | `POST` | `/api/dashboard/system-settings` | Update system settings (admin only) |
 | `POST` | `/api/dashboard/vector-settings` | Update vector search settings (admin only) |
 | `POST` | `/api/dashboard/vector-settings/test` | Test the vector search endpoint (admin only) |
-| `GET` | `/api/dashboard/ollama-models?url=` | List the models an Ollama-compatible endpoint has installed; used by both the embedding and review-model settings cards (admin only) |
+| `GET` | `/api/dashboard/ollama-models?url=` | List the models an Ollama-compatible endpoint has installed; used by the embedding settings card (admin only) |
 | `POST` | `/api/dashboard/broker/rotate` | Rotate broker credential (admin only) |
 
 ---
@@ -837,6 +760,8 @@ Session authentication required (cookie-based only; agent tokens are not accepte
 | Method | Path | Description |
 | --- | --- | --- |
 | `GET` | `/api/events` | Open a live SSE stream for dashboard events |
+
+Non-admin users receive activity events for their own activities, and connector events from currently readable scopes. Admins can receive all of these events. Visibility is checked before each delivery; deleting or expiring the session stops further event delivery.
 
 The events endpoint returns a persistent `text/event-stream` response. Each message is a named SSE event with a JSON payload:
 
@@ -855,13 +780,8 @@ data: {"type": "activity_created", "timestamp": "2026-05-18T12:34:56.789Z", "dat
 | `activity_cancelled` | An activity is cancelled |
 | `activity_recovered` | A stale activity is reassigned or recovered |
 | `connector_executed` | A connector binding action completes |
-| `delegation_request_created` | An actor asks for short-lived delegated authority |
-| `delegation_request_approved` | A delegation request is approved and produces an unclaimed grant |
-| `delegation_request_denied` | A delegation request is denied |
 
 The `connector_executed` payload includes `binding_id`, `binding_name`, `scope`, `connector_type_id`, `connector_type_name`, `action`, `success`, `duration_ms`, `status`, and `error_message`.
-
-The `delegation_request_*` payloads include `request_id`, `status`, requester and recipient identity, `purpose`, `ttl_seconds`, permission counts, and the decision fields (`decided_by_actor_id`, `decision_reason`, `grant_id`). They never include permission details or grant secrets.
 
 The stream sends an SSE comment (`: heartbeat`) every 15 seconds to keep the connection alive through proxies. The browser's built-in `EventSource` API reconnects automatically on disconnect; Agent Core's dashboard client uses exponential backoff (1 s → 2 s → … → 30 s max).
 
@@ -887,7 +807,7 @@ Session authentication required. These routes power the setup page that generate
 | Method | Path | Auth | Description |
 | --- | --- | --- | --- |
 | `POST` | `/api/backup/export` | Admin | Download encrypted full backup archive and one-time backup key header |
-| `POST` | `/api/backup/restore` | Admin | Restore an encrypted backup ZIP (`mode=replace_all` or `mode=merge`) |
+| `POST` | `/api/backup/restore` | Admin | Restore an encrypted backup ZIP, replacing all current data (`mode=replace_all`) |
 | `GET` | `/api/backup/export/memory?fmt=jsonl` | Session | Export authorized memory as JSONL or CSV |
 | `GET` | `/api/backup/export/credentials` | Session | Export credential metadata only (no raw values) |
 | `GET` | `/api/backup/export/audit?fmt=csv` | Admin | Export audit log as CSV |
@@ -907,7 +827,7 @@ curl -X POST http://localhost:3500/api/backup/restore \
   -F "mode=replace_all"
 ```
 
-Use `mode=merge` to add records from the backup without overwriting existing records. Existing records (by primary key) are preserved.
+`replace_all` is the only mode, and the default. Any other value is rejected with `400 INVALID_MODE`.
 
 ---
 
@@ -1131,7 +1051,7 @@ The secret is write-only. It is never returned in list or get responses.
 
 ### Supported event types
 
-`activity_created`, `activity_updated`, `activity_heartbeat`, `activity_cancelled`, `activity_recovered`, `connector_executed`, `delegation_request_created`, `delegation_request_approved`, `delegation_request_denied`
+`activity_created`, `activity_updated`, `activity_heartbeat`, `activity_cancelled`, `activity_recovered`, `connector_executed`
 
 ### Delivery payload
 
@@ -1186,31 +1106,6 @@ Every delivery is a signed HTTP POST. The envelope is the same for all event typ
 ```
 
 `error_message` is non-null on failure.
-
-**Delegation event `data` fields** (`delegation_request_created`, `delegation_request_approved`, `delegation_request_denied`):
-
-```json
-{
-  "request_id": "req123",
-  "status": "approved",
-  "requester_actor_type": "agent",
-  "requester_actor_id": "coordinator-agent",
-  "recipient_agent_id": "worker-agent",
-  "target_user_id": "admin",
-  "purpose": "Summarize this week's workspace decisions",
-  "ttl_seconds": 900,
-  "scope_permission_count": 1,
-  "resource_permission_count": 0,
-  "binding_action_count": 0,
-  "decided_by_actor_id": "admin",
-  "decision_reason": null,
-  "grant_id": "grant123",
-  "created_at": "2026-05-18T09:00:00+00:00",
-  "decided_at": "2026-05-18T09:05:00+00:00"
-}
-```
-
-Decision fields are null on `delegation_request_created`; `grant_id` is set only on approval; `decision_reason` only on denial when a reason was given. Payloads carry permission counts, never permission details, and never any grant secret.
 
 Signature header: `X-Agent-Core-Signature: sha256=<hex>` (HMAC-SHA256 of raw body with webhook secret).
 

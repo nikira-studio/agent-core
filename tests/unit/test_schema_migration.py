@@ -219,7 +219,18 @@ def test_create_schema_records_and_skips_applied_revision(monkeypatch):
         {"revision": 3, "name": "agent-capabilities-and-webhook-queue"},
         {"revision": 4, "name": "system-settings-default-rows"},
         {"revision": 5, "name": "unconfirmed-inference-importance-gate"},
+        {"revision": 6, "name": "credential-consumer-explicit-write-grants"},
+        {"revision": 7, "name": "credential-resolution-audit-retention"},
+        {"revision": 8, "name": "quiet-unattended-confirm-changes"},
+        {"revision": 9, "name": "execution-log-without-response-bodies"},
+        {"revision": 10, "name": "anchor-checks-are-not-confirmations"},
+        {"revision": 11, "name": "drop-delegation-tables"},
+        {"revision": 12, "name": "structured-activity-handoffs"},
+        {"revision": 13, "name": "remove-handoff-briefings"},
     ]
+    assert conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='credential_resolution_daily'"
+    ).fetchone()
 
     def unexpected_rerun(_conn):
         raise AssertionError("an applied migration ran again")
@@ -305,3 +316,138 @@ def test_legacy_id_keyed_system_settings_are_rebuilt_for_current_writes(
         ).fetchone()["value"]
         == "test-model"
     )
+
+
+def test_migration_10_moves_verifier_stamps_to_anchor_checked_at():
+    import sqlite3
+
+    from app.schema import _migrate_010_anchor_checked_at
+
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    conn.executescript(
+        """
+        CREATE TABLE memory_records (id TEXT, last_confirmed_at TEXT, provenance_json TEXT);
+        CREATE TABLE audit_log (action TEXT, resource_id TEXT, timestamp TEXT);
+        INSERT INTO memory_records VALUES
+          ('auto', '2026-10-20', '{"verified":{"by":"verification-pass"}}'),
+          ('auto-after-human', '2026-10-21', '{"verified":{"by":"verification-pass"}}'),
+          ('human', '2026-10-22', '{"verified":{"by":"codex"}}');
+        INSERT INTO audit_log VALUES ('memory_confirmed', 'auto-after-human', '2026-09-01 10:00:00');
+        """
+    )
+    _migrate_010_anchor_checked_at(conn)
+    rows = {
+        r["id"]: (r["last_confirmed_at"], r["anchor_checked_at"])
+        for r in conn.execute("SELECT * FROM memory_records")
+    }
+    assert rows["auto"] == (None, "2026-10-20")
+    assert rows["auto-after-human"] == ("2026-09-01 10:00:00", "2026-10-21")
+    assert rows["human"] == ("2026-10-22", None)
+
+
+DELEGATION_TABLES = (
+    "delegated_grants",
+    "delegated_grant_scope_permissions",
+    "delegated_grant_resource_permissions",
+    "delegated_grant_actions",
+    "delegation_requests",
+    "delegation_request_scope_permissions",
+    "delegation_request_resource_permissions",
+    "delegation_request_actions",
+)
+
+
+def _table_names(conn) -> set[str]:
+    return {
+        row["name"]
+        for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")
+    }
+
+
+def test_a_fresh_schema_has_no_delegation_tables():
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    create_schema(conn)
+    assert not _table_names(conn) & set(DELEGATION_TABLES)
+
+
+def test_migration_11_drops_delegation_tables_from_an_existing_install():
+    from app.schema import _migrate_011_drop_delegation_tables
+
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys = ON")
+    conn.executescript(
+        """
+        CREATE TABLE delegated_grants (id TEXT PRIMARY KEY);
+        CREATE TABLE delegated_grant_scope_permissions (
+            grant_id TEXT REFERENCES delegated_grants(id) ON DELETE CASCADE);
+        CREATE TABLE delegated_grant_resource_permissions (
+            grant_id TEXT REFERENCES delegated_grants(id) ON DELETE CASCADE);
+        CREATE TABLE delegated_grant_actions (
+            grant_id TEXT REFERENCES delegated_grants(id) ON DELETE CASCADE);
+        CREATE TABLE delegation_requests (
+            id TEXT PRIMARY KEY,
+            grant_id TEXT REFERENCES delegated_grants(id) ON DELETE SET NULL);
+        CREATE TABLE delegation_request_scope_permissions (
+            request_id TEXT REFERENCES delegation_requests(id) ON DELETE CASCADE);
+        CREATE TABLE delegation_request_resource_permissions (
+            request_id TEXT REFERENCES delegation_requests(id) ON DELETE CASCADE);
+        CREATE TABLE delegation_request_actions (
+            request_id TEXT REFERENCES delegation_requests(id) ON DELETE CASCADE);
+        INSERT INTO delegated_grants VALUES ('g');
+        INSERT INTO delegated_grant_actions VALUES ('g');
+        INSERT INTO delegation_requests VALUES ('r', 'g');
+        INSERT INTO delegation_request_actions VALUES ('r');
+        """
+    )
+    _migrate_011_drop_delegation_tables(conn)
+    assert not _table_names(conn) & set(DELEGATION_TABLES)
+    # Safe to run on a database that never had them.
+    _migrate_011_drop_delegation_tables(conn)
+
+
+def test_migration_13_removes_briefing_rows_and_their_changes():
+    from app.schema import _migrate_013_remove_handoff_briefings
+
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    create_schema(conn)
+    rows = (
+        ("real", None),
+        ("keyed", '{"briefing": {"id": "keyed"}}'),
+        ("typed", '{"type": "handoff_briefing"}'),
+        ("other-type", '{"type": "something_else"}'),
+    )
+    for activity_id, metadata in rows:
+        conn.execute(
+            "INSERT INTO agent_activity (id, agent_id, user_id, task_description, "
+            "memory_scope, started_at, metadata_json) "
+            "VALUES (?, 'a1', 'u1', 'task', 'workspace:w', '2026-01-01', ?)",
+            (activity_id, metadata),
+        )
+    conn.execute(
+        "INSERT INTO workspace_changes (id, memory_scope, sequence, change_type, "
+        "resource_type, resource_id, summary_json) "
+        "VALUES ('legacy', 'workspace:w', 100, 'briefing_created', 'briefing', 'keyed', '{}')"
+    )
+
+    _migrate_013_remove_handoff_briefings(conn)
+
+    remaining = {row["id"] for row in conn.execute("SELECT id FROM agent_activity")}
+    assert remaining == {"real", "other-type"}
+    assert not conn.execute(
+        "SELECT 1 FROM workspace_changes WHERE resource_type = 'briefing'"
+    ).fetchone()
+    # The recreated trigger stamps every activity as an activity.
+    conn.execute(
+        "INSERT INTO agent_activity (id, agent_id, user_id, task_description, "
+        "memory_scope, started_at, metadata_json) "
+        "VALUES ('later', 'a1', 'u1', 'task', 'workspace:w', '2026-01-02', "
+        "'{\"type\": \"handoff_briefing\"}')"
+    )
+    change = conn.execute(
+        "SELECT change_type, resource_type FROM workspace_changes WHERE resource_id = 'later'"
+    ).fetchone()
+    assert dict(change) == {"change_type": "activity_created", "resource_type": "activity"}

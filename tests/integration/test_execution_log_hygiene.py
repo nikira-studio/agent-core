@@ -1,3 +1,5 @@
+import json
+
 from app.database import get_db
 from app.services import backup_service, connector_service, system_settings_service
 
@@ -44,21 +46,13 @@ def _stored_body(execution_id):
 # --- write-time cap --------------------------------------------------------
 
 
-def test_large_response_bodies_are_truncated(clean_db):
+def test_response_bodies_are_not_stored_only_their_size(clean_db):
     binding = _binding()
-    execution_id = _log(binding["id"], "list_issues", body="x" * 500_000)
+    execution_id = _log(binding["id"], "list_accounts", body='{"accounts": ["secret"]}' * 1000)
 
     stored = _stored_body(execution_id)
-    assert len(stored) < 20_000, "a 500 KB response must not be stored whole"
-    assert "execution log truncated" in stored
-    assert stored.startswith("xxx"), "the head of the response is what is worth keeping"
-
-
-def test_small_bodies_are_stored_untouched(clean_db):
-    binding = _binding()
-    body = '{"ok": true, "items": []}'
-    execution_id = _log(binding["id"], "get_me", body=body)
-    assert _stored_body(execution_id) == body
+    assert "secret" not in stored
+    assert json.loads(stored) == {"response_chars": 24000}
 
 
 def test_missing_body_stays_none(clean_db):

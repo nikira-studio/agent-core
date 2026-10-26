@@ -317,3 +317,26 @@ def test_expires_at_via_rest_api(test_client, agent_token):
     assert r.status_code == 201, r.json()
     record = r.json()["data"]["record"]
     assert record.get("expires_at") is not None
+
+
+def test_maintenance_keeps_superseded_history_but_purges_old_retractions(clean_db):
+    from datetime import timedelta
+
+    from app.database import get_db
+    from app.services import backup_service, memory_service
+    from app.time_utils import utc_now
+
+    old, _ = memory_service.write_memory("Old value.", "fact", "workspace:hist", topic="h")
+    memory_service.write_memory("New value.", "fact", "workspace:hist", topic="h", supersedes_id=old["id"])
+    wrong, _ = memory_service.write_memory("Wrong.", "fact", "workspace:hist", topic="w")
+    memory_service.retract_memory(wrong["id"])
+    long_ago = (utc_now() - timedelta(days=400)).isoformat()
+    with get_db() as conn:
+        conn.execute("UPDATE memory_records SET status_changed_at = ? WHERE id IN (?, ?)",
+                     (long_ago, old["id"], wrong["id"]))
+        conn.commit()
+
+    backup_service.run_scheduled_maintenance()
+
+    assert memory_service.get_memory_record(old["id"])["record_status"] == "superseded"
+    assert memory_service.get_memory_record(wrong["id"]) is None

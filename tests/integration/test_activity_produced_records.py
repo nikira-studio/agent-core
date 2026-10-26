@@ -125,27 +125,6 @@ def test_retracted_records_are_left_out_unless_asked_for(test_client, agent_toke
     ] == [record_id]
 
 
-def test_a_handoff_briefing_says_what_the_session_concluded(test_client, agent_token):
-    """The point of the feature: a briefing that carries findings, not just intent."""
-    from app.services import briefing_service
-
-    activity_id = _open_activity(test_client, agent_token, "Diagnose the failing deploy")
-    _write(test_client, agent_token, "Root cause: the runner image lacked libpq-dev.")
-    activity_service.update_activity(
-        activity_id, status="completed", task_result="Diagnosed and fixed."
-    )
-
-    briefing = briefing_service.generate_handoff_briefing(
-        activity_id,
-        requesting_agent_id="testagent",
-        requesting_user_id="admin",
-        authorized_scopes=["agent:testagent"],
-        is_admin=True,
-    )
-    contents = [r["content"] for r in briefing["produced_records"]]
-    assert any("libpq-dev" in c for c in contents)
-
-
 def test_the_lookup_uses_the_index(clean_db):
     """A JSON scan over every record would not survive a large corpus."""
     with get_db() as conn:

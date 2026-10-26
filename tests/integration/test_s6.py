@@ -4,7 +4,6 @@ import sqlite3
 import zipfile
 from io import BytesIO
 from pathlib import Path
-from unittest.mock import patch
 
 from cryptography.fernet import Fernet
 from app.branding import CREDENTIAL_PREFIX, DB_FILENAME, MANIFEST_VERSION_KEY
@@ -106,137 +105,26 @@ def test_spec_includes_connector_endpoints(test_client, admin_token):
     assert "/api/connector-bindings/{binding_id}/run" in prefixes
 
 
-def test_spec_backup_restore_documents_merge_mode(test_client, admin_token):
+def test_spec_backup_restore_documents_replace_all_only(test_client, admin_token):
     r = test_client.get(
         "/spec",
         headers={"Authorization": f"Bearer {admin_token}"},
     )
     assert r.status_code == 200
     br = r.json()["data"]["backup_restore"]
+    assert br["restore_modes"] == ["replace_all"]
     assert "replace_all" in br
-    assert "merge" in br["restore_modes"]
-    assert "conflict_behavior" in br
-    assert "existing record wins" in br["conflict_behavior"]
-    assert "re-encrypts imported credential entries" in br["credential_key_handling"]
+    assert "merge" not in br
 
 
-def test_prd_handoff_endpoint_rejects_unreadable_user_scope(test_client, admin_token):
-    from app.services import agent_service
-    from app.database import get_db
-
-    with get_db() as conn:
-        conn.execute(
-            "INSERT INTO users (id, email, password_hash, display_name, role) VALUES (?, ?, ?, ?, ?)",
-            ("victim", "victim@test.local", "unused", "Victim", "user"),
-        )
-        conn.commit()
-
-    from_agent, from_key = agent_service.create_agent(
-        agent_id="fromagent",
-        display_name="From Agent",
-        owner_user_id="admin",
-        read_scopes=["agent:fromagent", "user:admin"],
-        write_scopes=["agent:fromagent"],
-    )
-    agent_service.create_agent(
-        agent_id="toagent",
-        display_name="To Agent",
-        owner_user_id="admin",
-        read_scopes=["agent:toagent", "user:admin"],
-        write_scopes=["agent:toagent"],
-    )
-
+def test_backup_restore_rejects_merge_mode(test_client, admin_token):
     r = test_client.post(
-        "/api/briefings/handoff/prd",
-        headers={"Authorization": f"Bearer {from_key}"},
-        json={
-            "from_agent_id": "fromagent",
-            "to_agent_id": "toagent",
-            "user_id": "victim",
-        },
+        "/api/backup/restore",
+        headers={"Authorization": f"Bearer {admin_token}"},
+        data={"mode": "merge"},
     )
-    assert r.status_code == 403
-
-
-def test_prd_handoff_returns_prd_shape(test_client, admin_token):
-    from app.services import agent_service, activity_service, memory_service
-
-    agent_service.create_agent(
-        agent_id="agent1",
-        display_name="Agent One",
-        owner_user_id="admin",
-        read_scopes=["agent:agent1", "user:admin"],
-        write_scopes=["agent:agent1"],
-    )
-    agent_service.create_agent(
-        agent_id="agent2",
-        display_name="Agent Two",
-        owner_user_id="admin",
-        read_scopes=["agent:agent2", "user:admin"],
-        write_scopes=["agent:agent2"],
-    )
-    activity_service.create_activity(
-        agent_id="agent1",
-        user_id="admin",
-        task_description="Test task",
-        memory_scope="agent:agent1",
-    )
-    memory_service.write_memory(
-        content="Use deterministic restore validation",
-        memory_class="decision",
-        scope="agent:agent1",
-    )
-    memory_service.write_memory(
-        content="Admin context for handoff",
-        memory_class="fact",
-        scope="user:admin",
-    )
-
-    with patch(
-        "app.services.briefing_service.activity_service.get_active_activity_for_agent"
-    ) as mock_active:
-        mock_active.return_value = {
-            "id": "activity-123",
-            "task_description": "Test task",
-            "started_at": "2026-04-27T08:00:00Z",
-        }
-        r = test_client.post(
-            "/api/briefings/handoff/prd",
-            headers={"Authorization": f"Bearer {admin_token}"},
-            json={
-                "from_agent_id": "agent1",
-                "to_agent_id": "agent2",
-                "user_id": "admin",
-            },
-        )
-    assert r.status_code in (200, 201)
-    data = r.json()["data"]["briefing"]
-    assert data["from_agent"] == "agent1"
-    assert data["to_agent"] == "agent2"
-    assert data["user"] == "admin"
-    assert "active_task" in data
-    assert "recent_completed" in data
-    assert "key_decisions" in data
-    assert "active_context" in data
-
-
-def test_backup_restore_accepts_merge_mode(test_client, admin_token):
-    with patch("app.services.backup_service.merge_restore_from_zip") as mock_merge:
-        mock_merge.return_value = (
-            True,
-            "",
-            {
-                "exported_by": "admin",
-                "exported_at": "2026-04-27T00:00:00Z",
-                MANIFEST_VERSION_KEY: "1.0.0",
-            },
-        )
-        r = test_client.post(
-            "/api/backup/restore",
-            headers={"Authorization": f"Bearer {admin_token}"},
-            data={"mode": "merge"},
-        )
-        assert r.status_code in (200, 400, 415)
+    assert r.status_code == 400
+    assert r.json()["error"]["code"] == "INVALID_MODE"
 
 
 def _build_test_backup(
@@ -245,16 +133,12 @@ def _build_test_backup(
     backup_db = tmp_path / "backup.db"
     con = sqlite3.connect(backup_db)
     con.executescript(SCHEMA_SQL)
-    # Simulate a backup taken before event_time was retired: an older archive
-    # carries columns the current schema no longer has, and restore must ignore
-    # them rather than fail.
-    con.execute("ALTER TABLE memory_records ADD COLUMN event_time TEXT")
     encrypted = Fernet(backup_key).encrypt(b"backup-secret").decode()
     con.execute(
         """
         INSERT INTO memory_records
-        (id, content, memory_class, scope, confidence, importance, source_kind, event_time, created_at, record_status)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        (id, content, memory_class, scope, confidence, importance, source_kind, created_at, record_status)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             "backup-memory",
@@ -264,7 +148,6 @@ def _build_test_backup(
             0.9,
             0.8,
             "operator_authored",
-            "2026-04-30T00:00:00",
             "2026-04-30T00:00:00",
             "active",
         ),
@@ -314,54 +197,14 @@ def _build_test_backup(
     return buf
 
 
-def test_merge_restore_imports_missing_rows_and_preserves_current_credential_key(
-    clean_db, tmp_path
-):
-    from app.config import settings
-    from app.database import get_db
-    from app.security import encryption
-    from app.services import backup_service, credential_service
-
-    encryption._fernet = None
-    encryption.encrypt_value("current-secret")
-    current_key = settings.credential_key_path.read_bytes()
-    backup_key = Fernet.generate_key()
-    assert backup_key != current_key
-
-    ok, msg, manifest = backup_service.merge_restore_from_zip(
-        _build_test_backup(tmp_path, backup_key),
-        str(clean_db),
-        str(settings.credential_key_path),
-    )
-    assert ok, msg
-    assert settings.credential_key_path.read_bytes() == current_key
-    assert manifest["merge"]["inserted_counts"]["memory_records"] == 1
-    assert manifest["merge"]["inserted_counts"]["credentials"] == 1
-
-    with get_db() as conn:
-        memory = conn.execute(
-            "SELECT content FROM memory_records WHERE id = ?", ("backup-memory",)
-        ).fetchone()
-        credential = conn.execute(
-            "SELECT reference_name FROM credentials WHERE id = ?",
-            ("backup-credential",),
-        ).fetchone()
-    assert memory["content"] == "Backup memory content"
-    assert credential["reference_name"] == f"{CREDENTIAL_PREFIX}BACKUP_TOKEN_ABCD"
-    assert (
-        credential_service.resolve_reference(f"{CREDENTIAL_PREFIX}BACKUP_TOKEN_ABCD")
-        == "backup-secret"
-    )
-
-
-def test_merge_restore_rejects_checksum_mismatch(clean_db, tmp_path):
+def test_restore_rejects_checksum_mismatch(clean_db, tmp_path):
     from app.config import settings
     from app.security import encryption
     from app.services import backup_service
 
     encryption._fernet = None
     encryption.encrypt_value("current-secret")
-    ok, msg, manifest = backup_service.merge_restore_from_zip(
+    ok, msg, manifest = backup_service.restore_from_zip(
         _build_test_backup(tmp_path, Fernet.generate_key(), tamper_manifest=True),
         str(clean_db),
         str(settings.credential_key_path),

@@ -1,5 +1,4 @@
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel
 
 from app.security.dependencies import get_request_context
 from app.security.context import RequestContext
@@ -10,23 +9,6 @@ from app.models.enums import MEMORY_CLASSES, SOURCE_KINDS
 
 
 router = APIRouter()
-
-
-class SpecResponse(BaseModel):
-    version: str
-    base_url: str
-    mcp_endpoint: str
-    rest_api_prefix: str
-    auth_methods: list[str]
-    session_duration_hours: int
-    inactivity_timeout_minutes: int
-    scope_model: dict
-    rest_endpoints: list[dict]
-    mcp_tools: list[dict]
-    broker_behavior: dict
-    rate_limits: dict
-    backup_restore: dict
-    feature_flags: dict
 
 
 @router.get("/spec")
@@ -42,6 +24,7 @@ def spec(
     }
 
     rest_endpoints = [
+        {"prefix": "/api/credential-consumers", "methods": ["POST", "GET", "DELETE"], "description": "Human-admin exact-entry grants and HTTPS agent-key resolve/status; explicit credentials_resolve capability"},
         {
             "prefix": "/api/auth",
             "methods": ["POST"],
@@ -98,11 +81,6 @@ def spec(
             "description": "Run a connector action through a stored binding",
         },
         {
-            "prefix": "/api/briefings",
-            "methods": ["POST", "GET"],
-            "description": "Briefing generate and retrieve",
-        },
-        {
             "prefix": "/api/backup",
             "methods": ["GET", "POST"],
             "description": "Backup export/restore, partial exports",
@@ -134,8 +112,9 @@ def spec(
         },
         {
             "name": "memory_get",
-            "description": "Get memory records by scope or list active records; view='compact' surveys a scope (metadata + preview), defaults compact for large pages",
+            "description": "Get memory records by id (ids), by scope, or list active records; view='compact' surveys a scope (metadata + preview), defaults compact for large pages",
             "inputSchema": {
+                "ids": "string[]?",
                 "scope": "string?",
                 "record_status": "string?",
                 "view": "string?",
@@ -180,6 +159,11 @@ def spec(
             "name": "credential_list",
             "description": "List credential references in authorized scopes",
             "inputSchema": {"scope": "string?", "limit": "integer?"},
+        },
+        {
+            "name": "credential_request",
+            "description": "Ask a person to supply a secret on the Credentials page; returns the AC_SECRET reference once filled",
+            "inputSchema": {"scope": "string", "name": "string", "purpose": "string"},
         },
         {
             "name": "activity_update",
@@ -272,6 +256,16 @@ def spec(
             },
         },
         {
+            "name": "session_context",
+            "description": "One budgeted session-start block: standing rules, unfinished and handed-off work, recent results, changes since your last session, an index of key records, and the execution_id",
+            "inputSchema": {
+                "memory_scope": "string?",
+                "cwd": "string?",
+                "host_session_ref": "string?",
+                "max_chars": "integer?",
+            },
+        },
+        {
             "name": "workspace_sync_ack",
             "description": "Acknowledge a delivered workspace synchronization cursor",
             "inputSchema": {
@@ -291,49 +285,19 @@ def spec(
             "inputSchema": {"connector_type_id": "string", "logical_alias": "string?", "scope": "string?", "action": "string?"},
         },
         {
-            "name": "delegation_request",
-            "description": "Request narrowly scoped authority for a recipient agent",
-            "inputSchema": {"recipient_agent_id": "string", "purpose": "string", "ttl_seconds": "integer", "scope_permissions": "array?", "resource_permissions": "array?", "binding_actions": "array?"},
-        },
-        {
             "name": "effective_authority",
             "description": "Inspect non-secret effective authority",
             "inputSchema": {},
         },
         {
-            "name": "delegations_list",
-            "description": "List visible non-secret delegated grants",
-            "inputSchema": {},
-        },
-        {
-            "name": "delegation_requests_list",
-            "description": "List visible delegation requests",
-            "inputSchema": {},
-        },
-        {
-            "name": "delegation_request_approve",
-            "description": "Approve and optionally narrow a pending delegation request",
-            "inputSchema": {"request_id": "string", "scope_permissions": "array?", "resource_permissions": "array?", "binding_actions": "array?"},
-        },
-        {
-            "name": "delegation_request_deny",
-            "description": "Deny a pending delegation request",
-            "inputSchema": {"request_id": "string", "reason": "string?"},
-        },
-        {
-            "name": "delegation_revoke",
-            "description": "Immediately revoke an issued or received grant",
-            "inputSchema": {"grant_id": "string", "reason": "string?"},
-        },
-        {
             "name": "connectors_summary",
-            "description": "Summarize visible connector types, bindings, credentials, actions, and health state for the current caller",
-            "inputSchema": {"scope": "string?", "connector_type_id": "string?", "enabled_only": "boolean?"},
+            "description": "Summarize visible connector types and bindings: usable, health and failing actions per binding; view='full' adds credential and health detail",
+            "inputSchema": {"scope": "string?", "connector_type_id": "string?", "enabled_only": "boolean?", "view": "string?"},
         },
         {
             "name": "connectors_actions_list",
-            "description": "List actions available for a connector type",
-            "inputSchema": {"connector_type_id": "string"},
+            "description": "List a connector type's actions compactly; pass action for one action's full input schema",
+            "inputSchema": {"connector_type_id": "string", "action": "string?", "query": "string?", "view": "string?", "limit": "integer?", "offset": "integer?"},
         },
         {
             "name": "connectors_bindings_list",
@@ -349,16 +313,6 @@ def spec(
             "name": "connectors_run",
             "description": "Execute a connector action through a stored binding",
             "inputSchema": {"binding_id": "string", "action": "string", "params": "object?"},
-        },
-        {
-            "name": "get_briefing",
-            "description": "Get a handoff briefing by ID",
-            "inputSchema": {"briefing_id": "string"},
-        },
-        {
-            "name": "briefing_list",
-            "description": "List generated briefings visible to the current agent or user",
-            "inputSchema": {"agent_id": "string?", "limit": "integer?", "offset": "integer?"},
         },
         {
             "name": "result_fetch",
@@ -385,13 +339,10 @@ def spec(
 
     backup_restore = {
         "export_requires": "admin session",
-        "restore_modes": ["replace_all", "merge"],
+        "restore_modes": ["replace_all"],
         "replace_all": "Decrypts the uploaded backup archive with the one-time backup key, then wipes current database and encryption key and replaces them with backup contents",
-        "merge": "Adds missing records, skips records with conflicting primary keys (no overwrite)",
-        "merge_preserves": "All existing records not present in backup remain intact",
-        "conflict_behavior": "Primary key collision: existing record wins; backup record is skipped",
         "audit_logged": "backup_restore event written with exported_by and exported_at from manifest",
-        "credential_key_handling": "replace_all decrypts the encrypted archive using the backup key; merge preserves the current encryption key and re-encrypts imported credential entries when the backup key differs",
+        "credential_key_handling": "replace_all decrypts the encrypted archive using the backup key; when AGENT_CORE_ENCRYPTION_KEY is configured, restored credential entries are re-encrypted under that key",
     }
 
     feature_flags = {

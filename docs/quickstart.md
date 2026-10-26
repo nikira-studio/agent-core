@@ -11,7 +11,7 @@ Agent Core is a local capability layer for agents: memory, credentials, connecto
 3. Store a credential only when a local tool or external service needs one.
 4. Add a connector binding only when Agent Core should call that service itself.
 
-Activities, workspaces, handoffs, delegation, webhooks, and backup are available later. They do not block the first memory workflow.
+Activities, workspaces, handoffs, webhooks, and backup are available later. They do not block the first memory workflow.
 
 ---
 
@@ -256,5 +256,4 @@ This keeps ownership and attribution separate from collaboration. The shared wor
 - [Configuration](configuration.md): customize port, data path, session timeouts, and more
 - [Credential Broker](credential-broker.md): inject real credential values at runtime without exposing them to models
 - [Security](security.md): understand the scope model and deployment checklist
-- [Delegated Authorization](delegated-authorization-integration.md): lend an agent a short-lived, narrowed slice of authority for one task
 - [API reference](api.md): full endpoint documentation

@@ -1,9 +1,8 @@
-import asyncio
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from typing import Optional
 
-from app.services import activity_service, audit_service, briefing_service
+from app.services import activity_service, audit_service
 from app.security.dependencies import get_request_context, require_capability
 from app.security.effective_authority import EffectiveAuthority
 from app.security.scope_enforcer import ScopeEnforcer
@@ -28,6 +27,7 @@ class UpdateActivityRequest(BaseModel):
     task_result: Optional[str] = None
     metadata_json: Optional[str] = None
     execution_id: Optional[str] = None
+    handoff: Optional[dict] = None
 
 
 class RecoveryRequest(BaseModel):
@@ -37,8 +37,6 @@ class RecoveryRequest(BaseModel):
 
 
 def _can_activity(ctx: EffectiveAuthority, activity: dict, operation: str) -> bool:
-    if ctx.is_delegated:
-        return ctx.can_resource("activity", operation, activity["id"])
     if ctx.is_admin:
         return True
     if ctx.actor_type == "agent":
@@ -52,8 +50,6 @@ def create_activity(
     body: CreateActivityRequest,
     ctx: EffectiveAuthority = Depends(get_request_context),
 ):
-    if ctx.is_delegated:
-        return error_response("FORBIDDEN", "Delegated activity creation is unsupported", 403)
     if ctx.agent_id:
         effective_agent_id = ctx.agent_id
     elif ctx.is_admin and body.assigned_agent_id:
@@ -118,8 +114,6 @@ def create_activity(
 def pickup_activity(
     ctx: EffectiveAuthority = Depends(get_request_context),
 ):
-    if ctx.is_delegated:
-        return error_response("FORBIDDEN", "Delegated activity pickup is unsupported", 403)
     if not ctx.agent_id:
         return error_response("AGENT_REQUIRED", "Pickup requires an agent context", 400)
 
@@ -184,17 +178,8 @@ def search_activities(
     safe_offset = max(offset, 0)
     authorized_scopes = (
         None
-        if ctx.is_admin or ctx.is_delegated
+        if ctx.is_admin
         else enforcer.filter_readable_scopes(ctx.read_scopes)
-    )
-    authorized_ids = (
-        [
-            resource_id
-            for resource, operation, resource_id in ctx.resource_permissions
-            if resource == "activity" and operation == "read"
-        ]
-        if ctx.is_delegated
-        else None
     )
     activities = activity_service.search_activities(
         query,
@@ -204,7 +189,6 @@ def search_activities(
         memory_scope=memory_scope,
         since=since,
         authorized_scopes=authorized_scopes,
-        authorized_resource_ids=authorized_ids,
         limit=capped_limit,
         offset=safe_offset,
     )
@@ -253,6 +237,14 @@ def update_activity(
 
     if body.status and body.status not in ACTIVITY_STATUSES:
         return error_response("INVALID_STATUS", f"Invalid status: {body.status}", 400)
+    handoff = None
+    if body.handoff is not None:
+        from app.services.session_context_service import normalize_handoff
+
+        try:
+            handoff = normalize_handoff(body.handoff)
+        except ValueError as exc:
+            return error_response("INVALID_HANDOFF", str(exc), 400)
 
     if body.status in ("completed", "cancelled", "blocked") and activity[
         "status"
@@ -271,6 +263,8 @@ def update_activity(
     )
     if not success:
         return error_response("UPDATE_FAILED", "Activity update failed", 500)
+    if handoff:
+        activity_service.set_handoff(activity_id, handoff)
 
     updated = activity_service.get_activity(activity_id) or activity
     audit_service.write_event(
@@ -292,6 +286,30 @@ def update_activity(
     )
 
     return success_response({"activity": updated})
+
+
+@router.post("/{activity_id}/handoff/resolve")
+def resolve_handoff(activity_id: str, ctx: EffectiveAuthority = Depends(get_request_context)):
+    """A person marks a handoff's needs_human request as dealt with."""
+    if ctx.actor_type != "user":
+        return error_response("FORBIDDEN", "Only a person can resolve a handoff request", 403)
+    activity = activity_service.get_activity(activity_id)
+    if not activity:
+        return error_response("NOT_FOUND", "Activity not found", 404)
+    scope = activity.get("memory_scope") or ""
+    if not (ctx.is_admin or ctx.can("activity", "update", scope=scope)):
+        return error_response("FORBIDDEN", "Access denied", 403)
+    if not activity_service.resolve_handoff(activity_id):
+        return error_response("NOT_PENDING", "No unresolved handoff on this activity", 409)
+    audit_service.write_event(
+        actor_type=ctx.actor_type,
+        actor_id=ctx.actor_id,
+        action="handoff_resolved",
+        resource_type="activity",
+        resource_id=activity_id,
+        result="success",
+    )
+    return success_response({"activity": activity_service.get_activity(activity_id)})
 
 
 @router.post("/{activity_id}/heartbeat")
@@ -351,9 +369,7 @@ def list_activities(
         active_workspace_ids=ctx.active_workspace_ids,
     )
 
-    if ctx.is_delegated:
-        filter_agent_id = None
-    elif ctx.actor_type == "agent":
+    if ctx.actor_type == "agent":
         filter_agent_id = ctx.agent_id
     else:
         filter_agent_id = agent_id
@@ -367,15 +383,6 @@ def list_activities(
         user_id=ctx.user_id if ctx.actor_type == "user" else None,
         agent_id=filter_agent_id,
         status=status,
-        authorized_resource_ids=(
-            [
-                resource_id
-                for resource_type, action, resource_id in ctx.resource_permissions
-                if resource_type == "activity" and action == "read"
-            ]
-            if ctx.is_delegated
-            else None
-        ),
         limit=min(limit, 100),
         offset=offset,
     )
@@ -447,7 +454,6 @@ async def recover_activity(
         "mark_completed",
         "mark_cancelled",
         "resume_with_same_agent",
-        "create_handoff_briefing",
         "reassign_to_agent",
     )
     if body.action not in valid_actions:
@@ -480,30 +486,6 @@ async def recover_activity(
         activity_service.heartbeat_activity(activity_id)
         result_data["status"] = "active"
 
-    elif body.action == "create_handoff_briefing":
-        activity_for_briefing = activity_service.get_activity(activity_id)
-        requesting_agent = (
-            ctx.agent_id
-            if ctx.agent_id
-            else (
-                activity_for_briefing["assigned_agent_id"]
-                if activity_for_briefing
-                else None
-            )
-            or (activity_for_briefing["agent_id"] if activity_for_briefing else None)
-            or ""
-        )
-        briefing = await asyncio.to_thread(
-            briefing_service.generate_handoff_briefing,
-            activity_id=activity_id,
-            requesting_agent_id=requesting_agent,
-            requesting_user_id=ctx.user_id or "",
-        )
-        if not briefing:
-            return error_response("BRIEFING_FAILED", "Could not generate briefing", 500)
-        result_data["briefing_id"] = briefing["id"]
-        result_data["status"] = "reassigned"
-
     elif body.action == "reassign_to_agent":
         if not body.new_agent_id:
             return error_response(
@@ -516,18 +498,9 @@ async def recover_activity(
         if not updated:
             return error_response("REASSIGN_FAILED", "Could not reassign activity", 500)
 
-        briefing = await asyncio.to_thread(
-            briefing_service.generate_handoff_briefing,
-            activity_id=activity_id,
-            requesting_agent_id=body.new_agent_id,
-            requesting_user_id=ctx.user_id or "",
-        )
-
         result_data["status"] = "reassigned"
         result_data["assigned_agent_id"] = body.new_agent_id
         result_data["reassigned_from"] = updated.get("reassigned_from_agent_id")
-        if briefing:
-            result_data["briefing_id"] = briefing["id"]
 
     audit_service.write_event(
         actor_type=ctx.actor_type,

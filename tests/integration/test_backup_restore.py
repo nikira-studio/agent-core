@@ -3,50 +3,9 @@ import io
 import json
 import zipfile
 import sqlite3
-import tempfile
-from pathlib import Path
 from io import BytesIO
 
 from app.branding import APP_SLUG
-
-
-def test_backup_snapshot_makes_delegated_grants_inert(clean_db):
-    from app.config import settings
-    from app.database import get_db
-    from app.services import backup_service
-
-    with get_db() as conn:
-        conn.execute(
-            "INSERT INTO users (id, email, password_hash, display_name) VALUES ('u', 'u@test', 'x', 'U')"
-        )
-        conn.execute(
-            """INSERT INTO agents
-               (id, display_name, owner_user_id, default_user_id, api_key_hash)
-               VALUES ('a', 'A', 'u', 'u', 'x')"""
-        )
-        conn.execute(
-            """INSERT INTO delegated_grants
-               (id, secret_hash, issuer_actor_type, issuer_actor_id, principal_user_id,
-                recipient_agent_id, purpose, status, issued_at, expires_at, claim_expires_at)
-               VALUES ('g', 'plaintext-would-be-hash', 'user', 'u', 'u', 'a', 'test',
-                       'active', '2026-01-01T00:00:00+00:00', '2099-01-01T00:00:00+00:00',
-                       '2099-01-01T00:00:00+00:00')"""
-        )
-        conn.commit()
-
-    archive = backup_service.build_backup_zip(
-        str(clean_db), str(settings.credential_key_path), "admin"
-    )
-    with zipfile.ZipFile(archive) as source:
-        db_bytes = source.read("agent-core.db")
-    extracted = Path(tempfile.mkdtemp()) / "snapshot.db"
-    extracted.write_bytes(db_bytes)
-    con = sqlite3.connect(extracted)
-    row = con.execute(
-        "SELECT secret_hash, status, revocation_reason FROM delegated_grants WHERE id = 'g'"
-    ).fetchone()
-    con.close()
-    assert row == (None, "revoked", "backup safety invalidation")
 
 
 def test_backup_restore_requires_admin(test_client, agent_token):
@@ -129,20 +88,27 @@ def test_backup_restore_accepts_legacy_manifest_key(
     assert r.json()["data"]["manifest"]["app_version"] == "1.0.0"
 
 
-def test_merge_restore_preserves_connector_tables(clean_db):
-    import tempfile
-    from pathlib import Path
-    import sqlite3
-    from cryptography.fernet import Fernet
-
-    from app.services import backup_service, connector_service
+def test_replace_all_restore_round_trips_data(clean_db):
+    """Back up, change everything, restore: the backup's state is what remains."""
     from app.config import settings
+    from app.services import (
+        backup_service,
+        connector_service,
+        credential_service,
+        memory_service,
+    )
 
-    settings.credential_key_path.write_bytes(Fernet.generate_key())
-
+    kept, _ = memory_service.write_memory(
+        content="The ingest route is POST /api/webhook/health.",
+        memory_class="fact",
+        scope="workspace:proj",
+    )
+    credential = credential_service.create_credential(
+        scope="workspace:proj", name="round_trip", value_plaintext="round-trip-secret"
+    )
     connector_service.create_connector_type(
-        connector_type_id="merge-mcp",
-        display_name="Merge MCP",
+        connector_type_id="round-trip-mcp",
+        display_name="Round Trip MCP",
         provider_type="mcp",
         auth_type="none",
         supported_actions=["tools/list"],
@@ -152,37 +118,46 @@ def test_merge_restore_preserves_connector_tables(clean_db):
         tool_snapshot_json='{"tools":[{"name":"tools/list"}]}',
     )
     connector_service.create_binding(
-        connector_type_id="merge-mcp",
-        name="merge-binding",
-        scope="workspace:test",
+        connector_type_id="round-trip-mcp",
+        name="round-trip-binding",
+        scope="workspace:proj",
         enabled=True,
     )
 
-    plain_buf = backup_service.build_backup_zip(
-        str(clean_db),
-        str(settings.credential_key_path),
-        "admin",
+    archive = backup_service.build_backup_zip(
+        str(clean_db), str(settings.credential_key_path), "admin"
     )
 
-    tmpdir = Path(tempfile.mkdtemp())
-    backup_zip = tmpdir / "backup.zip"
-    backup_zip.write_bytes(plain_buf.getvalue())
+    later, _ = memory_service.write_memory(
+        content="Written after the backup and gone once it is restored.",
+        memory_class="fact",
+        scope="workspace:proj",
+    )
+    with sqlite3.connect(clean_db) as conn:
+        conn.execute("DELETE FROM memory_records WHERE id = ?", (kept["id"],))
+        conn.execute(
+            "DELETE FROM connector_bindings WHERE connector_type_id = 'round-trip-mcp'"
+        )
+        conn.execute("DELETE FROM credentials WHERE id = ?", (credential["id"],))
+        conn.commit()
 
-    ok, msg, manifest = backup_service.merge_restore_from_zip(
-        BytesIO(backup_zip.read_bytes()),
-        str(clean_db),
-        str(settings.credential_key_path),
+    ok, msg, manifest = backup_service.restore_from_zip(
+        archive, str(clean_db), str(settings.credential_key_path)
     )
     assert ok, msg
-    assert "connector_types" in manifest["merge"]["inserted_counts"]
-    assert "connector_bindings" in manifest["merge"]["inserted_counts"]
-    assert "connector_executions" in manifest["merge"]["inserted_counts"]
+    assert manifest["exported_by"] == "admin"
 
     with sqlite3.connect(clean_db) as conn:
-        conn.row_factory = sqlite3.Row
-        assert conn.execute(
-            "SELECT COUNT(*) AS c FROM connector_types WHERE id = 'merge-mcp'"
-        ).fetchone()["c"] == 1
-        assert conn.execute(
-            "SELECT COUNT(*) AS c FROM connector_bindings WHERE connector_type_id = 'merge-mcp'"
-        ).fetchone()["c"] == 1
+        memory_ids = {
+            row[0] for row in conn.execute("SELECT id FROM memory_records").fetchall()
+        }
+        bindings = conn.execute(
+            "SELECT COUNT(*) FROM connector_bindings WHERE connector_type_id = 'round-trip-mcp'"
+        ).fetchone()[0]
+    assert kept["id"] in memory_ids
+    assert later["id"] not in memory_ids
+    assert bindings == 1
+    assert (
+        credential_service.resolve_reference(credential["reference_name"])
+        == "round-trip-secret"
+    )

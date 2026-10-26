@@ -163,11 +163,6 @@ def remove_workspace_collaborator(workspace_id: str, user_id: str) -> bool:
         return cursor.rowcount > 0
 
 
-def get_accessible_workspace_ids(user_id: str, workspace_ids: Iterable[str]) -> frozenset[str]:
-    """Compatibility wrapper for callers that need readable workspace IDs."""
-    return get_workspace_authority(user_id, workspace_ids)[0]
-
-
 def get_workspace_authority(
     user_id: str, workspace_ids: Iterable[str]
 ) -> tuple[frozenset[str], frozenset[str]]:

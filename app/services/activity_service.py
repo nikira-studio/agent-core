@@ -1,3 +1,4 @@
+import json
 import re
 import secrets
 from typing import Optional
@@ -64,12 +65,35 @@ def get_activity(activity_id: str) -> Optional[dict]:
             """
             SELECT id, agent_id, user_id, assigned_agent_id, reassigned_from_agent_id,
                    task_description, task_note, task_result, status, memory_scope, started_at, updated_at,
-                   heartbeat_at, ended_at, metadata_json
+                   heartbeat_at, ended_at, metadata_json, handoff_json, handoff_resolved_at
             FROM agent_activity WHERE id = ?
             """,
             (activity_id,),
         ).fetchone()
         return dict(row) if row else None
+
+
+def set_handoff(activity_id: str, handoff: dict) -> None:
+    """Store a validated structured handoff (see session_context_service)."""
+    with get_db() as conn:
+        conn.execute(
+            "UPDATE agent_activity SET handoff_json = ?, handoff_resolved_at = NULL, "
+            "updated_at = ? WHERE id = ?",
+            (json.dumps(handoff, separators=(",", ":")), utc_now_iso(), activity_id),
+        )
+        conn.commit()
+
+
+def resolve_handoff(activity_id: str) -> bool:
+    """A person dealt with what the handoff needed from them."""
+    with get_db() as conn:
+        cursor = conn.execute(
+            "UPDATE agent_activity SET handoff_resolved_at = ? "
+            "WHERE id = ? AND handoff_json IS NOT NULL AND handoff_resolved_at IS NULL",
+            (utc_now_iso(), activity_id),
+        )
+        conn.commit()
+        return cursor.rowcount > 0
 
 
 def heartbeat_activity(activity_id: str) -> bool:
@@ -144,7 +168,6 @@ def list_activities(
     status: Optional[str] = None,
     assigned_agent_id: Optional[str] = None,
     authorized_scopes: Optional[list[str]] = None,
-    authorized_resource_ids: Optional[list[str]] = None,
     limit: int = 50,
     offset: int = 0,
 ) -> list[dict]:
@@ -172,12 +195,6 @@ def list_activities(
             f"(memory_scope IS NULL AND ('agent:' || agent_id) IN ({placeholders})))"
         )
         params.extend([*authorized_scopes, *authorized_scopes])
-    if authorized_resource_ids is not None:
-        if not authorized_resource_ids:
-            return []
-        placeholders = ",".join("?" for _ in authorized_resource_ids)
-        conditions.append(f"id IN ({placeholders})")
-        params.extend(authorized_resource_ids)
 
     where = " AND ".join(conditions)
     params.extend([limit, offset])
@@ -272,7 +289,6 @@ def search_activities(
     memory_scope: Optional[str] = None,
     since: Optional[str] = None,
     authorized_scopes: Optional[list[str]] = None,
-    authorized_resource_ids: Optional[list[str]] = None,
     limit: int = 20,
     offset: int = 0,
 ) -> list[dict]:
@@ -317,12 +333,6 @@ def search_activities(
             f"(a.memory_scope IS NULL AND ('agent:' || a.agent_id) IN ({placeholders})))"
         )
         params.extend([*authorized_scopes, *authorized_scopes])
-    if authorized_resource_ids is not None:
-        if not authorized_resource_ids:
-            return []
-        placeholders = ",".join("?" for _ in authorized_resource_ids)
-        conditions.append(f"a.id IN ({placeholders})")
-        params.extend(authorized_resource_ids)
 
     where = " AND ".join(conditions)
     params.extend([max(limit, 0), max(offset, 0)])
@@ -507,51 +517,12 @@ def get_last_activity_in_scope(
     memory_scope: str,
     exclude_id: Optional[str] = None,
 ) -> Optional[dict]:
-    """Return the agent's most recent *real* activity in `memory_scope`.
-
-    A "real" activity is one whose `metadata_json` is NOT shaped like a
-    handoff briefing — `generate_handoff_briefing` (briefing_service.py:69)
-    inserts a briefing row as a regular `agent_activity` row, and its
-    `workspace_changes` entry is stamped `resource_type='briefing'`, not
-    `'activity'` (schema.py:876-878). Selecting a briefing as the prior
-    activity would make the cutoff lookup (which searches for
-    `resource_type='activity'`) find nothing and silently fall back to
-    `retained_tail` even when a real prior activity exists further back.
-
-    This filter mirrors the same shape check the `workspace_activity_ai`
-    trigger already uses (schema.py:871-872): exclude rows whose
-    `metadata_json.type == "handoff_briefing"` AND whose `metadata_json`
-    does NOT carry a `briefing` key. The first clause matches the
-    pre-update state (briefing metadata has been written but the briefing
-    payload has not yet been attached); the second is the broader catch-all
-    for any row shaped like a briefing.
-
-    Briefing-shaped changes are NOT excluded from the digest *content* —
-    only from the prior-activity *selection*. See planb.md Workstream 1.
-    """
+    """Return the agent's most recent activity in `memory_scope`."""
     conditions = ["agent_id = ?", "memory_scope = ?"]
     params: list = [agent_id, memory_scope]
     if exclude_id:
         conditions.append("id != ?")
         params.append(exclude_id)
-
-    # The trigger's gating differs from prior-activity selection. The
-    # trigger skips writing `resource_type='activity'` change rows for the
-    # *in-between* state where `type=='handoff_briefing'` but the payload
-    # hasn't been attached yet (so its change row is stamped 'briefing').
-    # For prior-activity *selection*, we want to exclude the briefing
-    # itself in either state — i.e. a row is a briefing if its metadata
-    # has either `type == "handoff_briefing"` OR a `briefing` key, which
-    # mirrors the trigger's combined shape check. See planb.md Workstream 1.
-    not_briefing_filter = (
-        "NOT ("
-        "COALESCE(json_extract(CASE WHEN json_valid(metadata_json) "
-        "  THEN metadata_json ELSE '{}' END, '$.type'), '') = 'handoff_briefing' "
-        "OR json_extract(CASE WHEN json_valid(metadata_json) "
-        "  THEN metadata_json ELSE '{}' END, '$.briefing') IS NOT NULL"
-        ")"
-    )
-    conditions.append(not_briefing_filter)
 
     with get_db() as conn:
         row = conn.execute(
