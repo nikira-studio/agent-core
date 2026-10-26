@@ -95,6 +95,7 @@ def workspaces_page(request: Request, session: dict = Depends(require_auth)):
 
     js = """
     <script>
+    const DELETE_ICON = __DELETE_ICON__;
     const WORKSPACE_AGENT_STATE = Object.fromEntries(
       __WORKSPACE_AGENT_STATE__.map(function(agent) { return [agent.id, agent]; })
     );
@@ -130,8 +131,10 @@ def workspaces_page(request: Request, session: dict = Depends(require_auth)):
       const collaboratorsEl = document.getElementById('ep-collaborators');
       const agentAccessEl = document.getElementById('ep-agent-access');
       idEl.textContent = id;
+      const repoRootEl = document.getElementById('ep-repo-root');
       nameEl.value = '';
       descriptionEl.value = '';
+      repoRootEl.value = '';
       if (collaboratorsEl) {
         collaboratorsEl.innerHTML = '<div class="text-muted">Loading collaborators...</div>';
       }
@@ -146,6 +149,7 @@ def workspaces_page(request: Request, session: dict = Depends(require_auth)):
         idEl.textContent = p.id;
         nameEl.value = p.name || '';
         descriptionEl.value = p.description || '';
+        repoRootEl.value = p.repo_root || '';
         renderWorkspaceCollaborators(p.id);
         renderWorkspaceAgentAccess(p.id);
       } catch (err) {
@@ -164,6 +168,7 @@ def workspaces_page(request: Request, session: dict = Depends(require_auth)):
       const body = {
         name: document.getElementById('ep-name').value,
         description: document.getElementById('ep-description').value,
+        repo_root: document.getElementById('ep-repo-root').value,
       };
       const j = await apiFetch('/api/workspaces/' + id, { method: 'PUT', body: JSON.stringify(body) });
       if (j.ok) { showToast('Workspace updated'); closeModal('edit-workspace-modal'); refreshProjects(); }
@@ -188,7 +193,7 @@ def workspaces_page(request: Request, session: dict = Depends(require_auth)):
         const rows = collaborators.map(function(c) {
           const canRemove = c.role !== 'owner';
           const removeButton = canRemove
-            ? '<button type="button" class="btn btn-sm btn-danger icon-delete-btn" data-workspace-collaborator-remove="true" data-workspace-id="' + escapeHtml(workspaceId) + '" data-user-id="' + escapeHtml(c.user_id || '') + '" title="Remove collaborator" aria-label="Remove collaborator">' + get_icon('delete') + '</button>'
+            ? '<button type="button" class="btn btn-sm btn-danger icon-delete-btn" data-workspace-collaborator-remove="true" data-workspace-id="' + escapeHtml(workspaceId) + '" data-user-id="' + escapeHtml(c.user_id || '') + '" title="Remove collaborator" aria-label="Remove collaborator">' + DELETE_ICON + '</button>'
             : '<span class="text-muted">owner</span>';
           return '<tr>' +
             '<td><code>' + escapeHtml(c.user_id || '') + '</code></td>' +
@@ -449,7 +454,7 @@ def workspaces_page(request: Request, session: dict = Depends(require_auth)):
     </script>""".replace(
         "__WORKSPACE_AGENT_STATE__",
         json.dumps(workspace_agent_access_data).replace("</", "<\\/"),
-    )
+    ).replace("__DELETE_ICON__", json.dumps(get_icon("delete")))
     return render_page(
         "Workspaces",
         f"""
@@ -503,6 +508,11 @@ def workspaces_page(request: Request, session: dict = Depends(require_auth)):
           <div class="form-group">
             <label>Description</label>
             <textarea id="ep-description" rows="2"></textarea>
+          </div>
+          <div class="form-group">
+            <label for="ep-repo-root">Repository folder</label>
+            <input type="text" id="ep-repo-root" placeholder="/srv/docker-data/projects/Apps/example">
+            <p class="form-hint">Absolute path of the checkout this workspace covers. Agent sessions started in this folder get this workspace's context automatically, and facts anchored to <code>repo:</code> paths are checked against it. Leave empty to unlink. Admin only.</p>
           </div>
           <div class="form-group">
             <div id="ep-collaborators"></div>

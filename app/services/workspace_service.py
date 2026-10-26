@@ -1,3 +1,4 @@
+import json
 from typing import Optional
 from collections.abc import Iterable
 
@@ -274,3 +275,44 @@ def delete_workspace_hard(workspace_id: str) -> bool:
         cursor = conn.execute("DELETE FROM workspaces WHERE id = ?", (normalized_id,))
         conn.commit()
         return cursor.rowcount > 0
+
+
+def get_repo_root(workspace_id: str) -> Optional[str]:
+    """The checkout folder linked to this workspace, if any.
+
+    Session context matches a session's working directory against these
+    folders, and the verifier checks repo: anchors under them.
+    """
+    key = f"workspace:{normalize_id(workspace_id)}"
+    with get_db() as conn:
+        row = conn.execute(
+            "SELECT json_extract(value, '$.\"' || ? || '\"') AS root FROM system_settings "
+            "WHERE key = 'workspace_repo_roots' AND json_valid(value)",
+            (key,),
+        ).fetchone()
+    return row["root"] if row and row["root"] else None
+
+
+def set_repo_root(workspace_id: str, path: Optional[str]) -> None:
+    """Link (or, with an empty path, unlink) the workspace's checkout folder."""
+    key = f"workspace:{normalize_id(workspace_id)}"
+    with get_db() as conn:
+        row = conn.execute(
+            "SELECT value FROM system_settings WHERE key = 'workspace_repo_roots'"
+        ).fetchone()
+        try:
+            roots = json.loads(row["value"]) if row and row["value"] else {}
+        except (TypeError, ValueError):
+            roots = {}
+        if not isinstance(roots, dict):
+            roots = {}
+        if path:
+            roots[key] = path
+        else:
+            roots.pop(key, None)
+        conn.execute(
+            "INSERT INTO system_settings (key, value) VALUES ('workspace_repo_roots', ?) "
+            "ON CONFLICT (key) DO UPDATE SET value = excluded.value",
+            (json.dumps(roots),),
+        )
+        conn.commit()

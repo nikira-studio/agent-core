@@ -1,5 +1,7 @@
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel
+import os
+
+from pydantic import BaseModel, Field
 from typing import Optional
 
 from app.services import audit_service, workspace_service
@@ -22,6 +24,8 @@ class UpdateWorkspaceRequest(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
     is_active: Optional[bool] = None
+    # Absolute path of the checkout this workspace covers; "" unlinks it.
+    repo_root: Optional[str] = Field(default=None, max_length=1024)
 
 
 class WorkspaceCollaboratorRequest(BaseModel):
@@ -111,7 +115,9 @@ def get_workspace(
     if not can_view:
         return error_response("FORBIDDEN", "Access denied", 403)
 
-    return success_response({"workspace": workspace})
+    return success_response(
+        {"workspace": {**workspace, "repo_root": workspace_service.get_repo_root(workspace_id)}}
+    )
 
 
 @router.put("/{workspace_id}")
@@ -126,6 +132,18 @@ def update_workspace(
 
     if not _can_manage_workspace(workspace, session):
         return error_response("FORBIDDEN", "Access denied", 403)
+
+    repo_root = None
+    if body.repo_root is not None:
+        repo_root = body.repo_root.strip()
+        if repo_root and (not os.path.isabs(repo_root) or "\x00" in repo_root):
+            return error_response("INVALID_PATH", "Repository folder must be an absolute path", 400)
+        repo_root = os.path.normpath(repo_root) if repo_root else ""
+        if repo_root != (workspace_service.get_repo_root(workspace_id) or ""):
+            # It decides which host folders the verifier reads, so only an admin sets it.
+            if session.get("role") != "admin":
+                return error_response("FORBIDDEN", "Only an admin can link a repository folder", 403)
+            workspace_service.set_repo_root(workspace_id, repo_root)
 
     workspace_service.update_workspace(
         workspace_id,

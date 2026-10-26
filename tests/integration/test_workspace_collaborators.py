@@ -258,3 +258,37 @@ def test_workspace_collaborator_listing_includes_owner_row(test_client, admin_to
 
     rows = list_workspace_collaborators("ownerproject")
     assert any(row["user_id"] == "owner3" and row["role"] == "owner" for row in rows)
+
+
+def test_admin_links_a_repository_folder_and_owners_cannot(test_client, admin_token):
+    from app.services import session_context_service
+
+    create_user("owner2", "owner2@test.local", "testpassword123", "Owner", "user")
+    owner = {"Authorization": f"Bearer {create_session('owner2')['session_id']}"}
+    admin = {"Authorization": f"Bearer {admin_token}"}
+    assert test_client.post("/api/workspaces", headers=owner, json={"id": "linked", "name": "Linked"}).status_code == 201
+
+    denied = test_client.put("/api/workspaces/linked", headers=owner, json={"repo_root": "/srv/x"})
+    assert denied.status_code == 403
+    relative = test_client.put("/api/workspaces/linked", headers=admin, json={"repo_root": "srv/x"})
+    assert relative.status_code == 400
+
+    assert test_client.put("/api/workspaces/linked", headers=admin, json={"repo_root": "/srv/x/"}).status_code == 200
+    fetched = test_client.get("/api/workspaces/linked", headers=owner).json()["data"]["workspace"]
+    assert fetched["repo_root"] == "/srv/x"
+    # The owner can still save other fields with the unchanged folder.
+    assert test_client.put("/api/workspaces/linked", headers=owner,
+                           json={"name": "Renamed", "repo_root": "/srv/x"}).status_code == 200
+    scope, _ = session_context_service.resolve_scope(["workspace:linked", "workspace:other"], None, "/srv/x/app")
+    assert scope == "workspace:linked"
+
+    assert test_client.put("/api/workspaces/linked", headers=admin, json={"repo_root": ""}).status_code == 200
+    assert test_client.get("/api/workspaces/linked", headers=owner).json()["data"]["workspace"]["repo_root"] is None
+
+
+def test_workspaces_page_script_does_not_call_server_helpers(test_client, admin_token):
+    test_client.cookies.set("session_token", admin_token)
+    page = test_client.get("/workspaces").text
+    test_client.cookies.clear()
+    assert "get_icon(" not in page
+    assert 'id="ep-repo-root"' in page
