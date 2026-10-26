@@ -1692,6 +1692,8 @@ async def _handle_custom_mcp_tool(body: dict, ctx: EffectiveAuthority):
     elif tool == "credential_request":
         from app.services import credential_request_service
 
+        if any(not isinstance(params.get(f) or "", str) for f in ("scope", "name", "purpose")):
+            return _mcp_error("INVALID_PARAMS", "scope, name and purpose must be strings", 400)
         scope = (params.get("scope") or "").strip()
         name = (params.get("name") or "").strip()
         purpose = (params.get("purpose") or "").strip()
@@ -1699,6 +1701,12 @@ async def _handle_custom_mcp_tool(body: dict, ctx: EffectiveAuthority):
             return _mcp_error("INVALID_PARAMS", "scope, name and purpose are required", 400)
         if len(name) > 100 or len(purpose) > 1000:
             return _mcp_error("INVALID_PARAMS", "name is limited to 100 and purpose to 1000 characters", 400)
+        from app.services.credential_service import normalize_scope
+
+        try:
+            scope = normalize_scope(scope)  # check write on the scope it will be stored in
+        except ValueError:
+            return _mcp_error("INVALID_SCOPE", "Malformed scope", 400)
         if not enforcer.can_write(scope):
             return _mcp_error("SCOPE_DENIED", "You cannot store credentials in this scope", 403)
         try:
@@ -1753,8 +1761,6 @@ async def _handle_custom_mcp_tool(body: dict, ctx: EffectiveAuthority):
         existing = activity_service.get_active_activity_for_agent(
             ctx.agent_id, ctx.user_id, memory_scope=memory_scope
         )
-        if existing and handoff:
-            activity_service.set_handoff(existing["id"], handoff)
         if existing:
             if params.get("status"):
                 if params["status"] in (
@@ -1787,6 +1793,8 @@ async def _handle_custom_mcp_tool(body: dict, ctx: EffectiveAuthority):
                 )
             else:
                 activity_service.heartbeat_activity(existing["id"])
+            if handoff:  # after the transition check, so a refused close writes nothing
+                activity_service.set_handoff(existing["id"], handoff)
             _updated = activity_service.get_activity(existing["id"]) or existing
             audit_service.write_event(
                 actor_type="agent",
@@ -2009,6 +2017,9 @@ async def _handle_custom_mcp_tool(body: dict, ctx: EffectiveAuthority):
         if not ctx.agent_id:
             return _mcp_error("AGENT_REQUIRED", "Session context requires an agent", 400)
         requested = params.get("memory_scope")
+        for field in ("memory_scope", "cwd", "host_session_ref"):
+            if params.get(field) is not None and not isinstance(params[field], str):
+                return _mcp_error("INVALID_PARAMS", f"{field} must be a string", 400)
         if requested and (
             not requested.startswith("workspace:") or not enforcer.can_read(requested)
         ):

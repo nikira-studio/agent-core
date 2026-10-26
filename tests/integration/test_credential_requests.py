@@ -69,3 +69,20 @@ def test_pending_requests_show_on_the_credentials_page(test_client, admin_token)
     _request(test_client, agent)
     page = test_client.get("/credentials", headers={"Authorization": f"Bearer {admin_token}"})
     assert "Requested by agents" in page.text and "Push release tags" in page.text
+
+
+def test_credential_added_directly_closes_the_pending_request(test_client, admin_token):
+    from app.services import credential_service
+
+    agent = _agent(admin_token)
+    admin = {"Authorization": f"Bearer {admin_token}"}
+    _request(test_client, agent)
+    credential_service.create_credential(scope=SCOPE, name="github-token", value_plaintext="v")
+    assert _request(test_client, agent).json()["data"]["status"] == "fulfilled"
+    assert test_client.get("/api/credentials/requests", headers=admin).json()["data"]["requests"] == []
+
+
+def test_malformed_request_params_are_400_not_429(test_client, admin_token):
+    agent = _agent(admin_token)
+    assert _request(test_client, agent, name=["x"]).status_code == 400
+    assert _request(test_client, agent, scope="workspace:Bad Scope!").status_code in (400, 403)

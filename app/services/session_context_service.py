@@ -127,8 +127,9 @@ def _recent(conn, scope: str, exclude_ids: set[str]) -> list[dict]:
     return [dict(r) for r in rows if r["id"] not in exclude_ids][:_RECENT_LIMIT]
 
 
-def _changes(scope: str, agent_id: str, shown_activity_ids: set[str]) -> list[dict]:
-    """Changes since this agent's last activity here, latest state per resource."""
+def _changes(scope: str, agent_id: str, shown_activity_ids: set[str]) -> tuple[list[dict], bool]:
+    """Changes since this agent's last activity here, latest state per resource,
+    and whether older changes fell past the digest limit."""
     from app.services import activity_service
 
     prior = activity_service.get_last_activity_in_scope(agent_id, scope)
@@ -141,7 +142,7 @@ def _changes(scope: str, agent_id: str, shown_activity_ids: set[str]) -> list[di
         if key in folded or change["resource_id"] in shown_activity_ids:
             continue
         folded[key] = change
-    return list(folded.values())
+    return list(folded.values()), bool(digest.get("truncated"))
 
 
 def _index(conn, scope: str, exclude_ids: set[str]) -> tuple[list[dict], int]:
@@ -212,8 +213,10 @@ def _render(scope: str, execution_id: str, parts: dict, limits: dict) -> str:
     pinned = parts["pinned"]
     if pinned:
         lines += ["", "## Standing rules (pinned)"]
-        for record in pinned:
+        for record in pinned[: limits["pinned"]]:
             lines.append(f"- {_one_line(record['content'], limits['pinned_chars'])}")
+        if len(pinned) > limits["pinned"]:
+            lines.append(f"- … {len(pinned) - limits['pinned']} more: memory_pinned lists them")
 
     waiting = parts.get("needs_human") or []
     if waiting:
@@ -269,8 +272,15 @@ def _render(scope: str, execution_id: str, parts: dict, limits: dict) -> str:
                 + (f" · {label}" if label else "")
                 + (f": {_one_line(preview, 140)}" if preview else "")
             )
-        if len(changes) > len(shown_changes):
-            lines.append(f"- … {len(changes) - len(shown_changes)} more: workspace_sync(execution_id) lists them")
+        # The session's cursor already starts past these, so workspace_sync will
+        # not repeat them: point at the searches that can still find them.
+        if len(changes) > len(shown_changes) or parts.get("changes_truncated"):
+            more = len(changes) - len(shown_changes)
+            lines.append(
+                f"- … {f'{more} more and ' if more else ''}"
+                f"{'older changes ' if parts.get('changes_truncated') else ''}not shown: "
+                "memory_search or activity_search to look them up"
+            )
 
     index = parts["index"][: limits["index"]]
     if parts["index_total"]:
@@ -305,6 +315,11 @@ def _reduce(limits: dict, parts: dict) -> Optional[dict]:
         return {**limits, "recent": limits["recent"] - 1}
     if limits["pinned_chars"] > 300:
         return {**limits, "pinned_chars": 300}
+    if limits["pinned_chars"] > 150:
+        return {**limits, "pinned_chars": 150}
+    # Last: fewer pinned rules, so waiting and unfinished work still show.
+    if limits["pinned"] > 5:
+        return {**limits, "pinned": max(5, limits["pinned"] // 2)}
     return None
 
 
@@ -316,6 +331,7 @@ def fit(scope: str, execution_id: str, parts: dict, budget: int) -> tuple[str, d
         "recent_chars": 220,
         "recent_lead_chars": 900,
         "pinned_chars": 1500,
+        "pinned": len(parts["pinned"]),
     }
     text = _render(scope, execution_id, parts, limits)
     reductions = 0
@@ -369,7 +385,7 @@ def build_session_context(
         recent = _recent(conn, scope, attention_ids)
         needs_human = _needs_human(conn, scope)
     shown_activity_ids = attention_ids | {a["id"] for a in recent}
-    changes = _changes(scope, agent_id, shown_activity_ids)
+    changes, changes_truncated = _changes(scope, agent_id, shown_activity_ids)
     # A record that just changed is already listed under the changes; the index
     # carries the rest rather than repeating it.
     changed_memory = {c["resource_id"] for c in changes if c["resource_type"] == "memory"}
@@ -383,13 +399,14 @@ def build_session_context(
         "attention": attention,
         "recent": recent,
         "changes": changes,
+        "changes_truncated": changes_truncated,
         "index": index,
         "index_total": index_total,
     }
     text, limits, reductions = fit(scope, execution["execution_id"], parts, budget)
 
     injected_memory = (
-        [p["id"] for p in pinned]
+        [p["id"] for p in pinned[: limits["pinned"]]]
         + [c["resource_id"] for c in changes[: limits["changes"]] if c["resource_type"] == "memory"]
         + [r["id"] for r in index[: limits["index"]]]
     )
@@ -473,8 +490,10 @@ def handoff_check(*, agent_id: str, user_id: str, host_session_ref: str) -> dict
     """Should this session be asked, once, to record a handoff before it stops?
 
     Looks for an open activity of this agent that belongs to the host session:
-    linked to one of its executions, or updated in the session's workspace since
-    the session began (agents do not always pass execution_id). Asks at most once
+    linked to one of its executions, or, when it carries no execution at all,
+    updated in the session's workspace since the session began (agents do not
+    always pass execution_id). An activity linked to another session's
+    execution belongs to that session. Asks at most once
     per activity: the request is stamped, and a stamped activity is never asked
     again, so a long conversation costs one extra turn per task at most.
     """
@@ -490,7 +509,10 @@ def handoff_check(*, agent_id: str, user_id: str, host_session_ref: str) -> dict
             return {"nudge": False}
         clauses, params = [], []
         for execution in executions:
-            clauses.append("source_execution_id = ? OR (memory_scope = ? AND updated_at >= ?)")
+            clauses.append(
+                "source_execution_id = ? OR (COALESCE(source_execution_id, '') = '' "
+                "AND memory_scope = ? AND updated_at >= ?)"
+            )
             params += [execution["id"], execution["memory_scope"], execution["started_at"]]
         activity = conn.execute(
             f"""SELECT id, task_description, memory_scope FROM agent_activity

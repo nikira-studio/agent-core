@@ -217,6 +217,36 @@ def test_hook_reads_connection_from_claude_mcp_config(tmp_path):
     assert hook.resolve_connection("/x", env={}, home=str(tmp_path / "none")) == (None, None)
 
 
+def test_hook_never_sends_the_env_key_to_a_project_supplied_url(tmp_path):
+    hook = _hook()
+    repo, home = tmp_path / "repo", tmp_path / "home"
+    repo.mkdir()
+    home.mkdir()
+    (repo / ".mcp.json").write_text(json.dumps({"mcpServers": {"agent-core": {
+        "url": "https://attacker.example/mcp",
+    }}}))
+    env = {"AGENT_CORE_API_KEY": "real-key"}
+    assert hook.resolve_connection(str(repo), env=env, home=str(home)) == (None, None)
+    # The user's own config may supply the URL for an env key.
+    (home / ".claude.json").write_text(json.dumps({"mcpServers": {"agent-core": {
+        "url": "https://core.example/mcp",
+    }}}))
+    assert hook.resolve_connection(str(repo), env=env, home=str(home)) == (
+        "https://core.example", "real-key",
+    )
+
+
+def test_hook_exits_cleanly_on_malformed_config_and_events(tmp_path):
+    hook = _hook()
+    (tmp_path / ".claude.json").write_text("[1, 2]")
+    assert hook.resolve_connection("/x", env={}, home=str(tmp_path)) == (None, None)
+    (tmp_path / ".claude.json").write_text(json.dumps({"mcpServers": {"agent-core": {
+        "url": "https://core.example/mcp", "headers": "nope"}}, "projects": []}))
+    assert hook.resolve_connection("/x", env={}, home=str(tmp_path)) == (None, None)
+    for stdin in ("[]", '"text"', "{not json"):
+        assert hook.main(stdin=io.StringIO(stdin), stdout=io.StringIO(), env={}) == 0
+
+
 def test_hook_injects_context_skips_resume_and_never_fails(monkeypatch):
     hook = _hook()
     env = {"AGENT_CORE_URL": "http://core", "AGENT_CORE_API_KEY": "k"}
@@ -353,3 +383,53 @@ def test_stop_hook_blocks_only_on_a_nudge_and_never_loops(monkeypatch):
     monkeypatch.setattr(hook, "post", failing)
     out = io.StringIO()
     assert hook.main(io.StringIO(json.dumps(event)), out, env) == 0 and out.getvalue() == ""
+
+
+def test_activity_and_audit_pagination_escape_query_values(test_client, admin_token):
+    from app.services.auth_service import create_session
+
+    with get_db() as conn:
+        owner_id = conn.execute("SELECT id FROM users LIMIT 1").fetchone()["id"]
+    test_client.cookies.set("session_token", create_session(owner_id, channel="dashboard")["session_id"])
+    payload = "'><img src=x onerror=alert(1)>"
+    activity = test_client.get("/activity", params={"status": payload}).text
+    audit = test_client.get("/audit", params={"resource_type": payload}).text
+    test_client.cookies.clear()
+    assert "<img src=x" not in activity and "<img src=x" not in audit
+
+
+def test_many_pinned_rules_cannot_push_out_waiting_work(test_client, admin_token):
+    headers = _setup(admin_token)
+    for index in range(10):  # the default pinned limit
+        rule, _ = memory_service.write_memory(f"Rule {index}: " + "always " * 300, "decision", SCOPE, topic=f"r{index}")
+        memory_service.set_pinned(rule["id"], True)
+    handed = activity_service.create_activity(
+        agent_id="other-agent", user_id="u", task_description="Finish the migration", memory_scope=SCOPE,
+    )
+    activity_service.reassign_activity(handed["id"], "ctx-agent")
+    text = _context(test_client, headers, memory_scope=SCOPE, max_chars=2000)["context"]
+    assert len(text) <= 2000
+    assert "Finish the migration" in text
+
+
+def test_reused_execution_keeps_its_cursor(test_client, admin_token):
+    headers = _setup(admin_token)
+    first = _context(test_client, headers, memory_scope=SCOPE, host_session_ref="s-r")
+    memory_service.write_memory("Written mid-session by someone else.", "fact", SCOPE, topic="mid")
+    _context(test_client, headers, memory_scope=SCOPE, host_session_ref="s-r", source="compact")
+    sync = test_client.post("/api/workspace-sync", headers=headers, json={
+        "memory_scope": SCOPE, "execution_id": first["execution_id"],
+    }).json()["data"]
+    assert [c["summary"]["topic"] for c in sync["memory_changes"]] == ["mid"]
+
+
+def test_resolved_handoff_request_stays_resolved_unless_it_changes(test_client, admin_token):
+    activity = activity_service.create_activity(
+        agent_id="a", user_id="u", task_description="t", memory_scope=SCOPE,
+    )
+    activity_service.set_handoff(activity["id"], {"needs_human": "Approve it."})
+    assert activity_service.resolve_handoff(activity["id"])
+    activity_service.set_handoff(activity["id"], {"needs_human": "Approve it.", "next_steps": ["x"]})
+    assert activity_service.get_activity(activity["id"])["handoff_resolved_at"]
+    activity_service.set_handoff(activity["id"], {"needs_human": "Sign the contract."})
+    assert not activity_service.get_activity(activity["id"])["handoff_resolved_at"]

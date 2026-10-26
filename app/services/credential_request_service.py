@@ -43,6 +43,14 @@ def request_credential(
     scope = credential_service.normalize_scope(scope)
     existing = _existing_credential(scope, name)
     if existing:
+        # A person may have added it directly; close the request it answers.
+        with get_db() as conn:
+            conn.execute(
+                """UPDATE credential_requests SET status = 'fulfilled', credential_id = ?,
+                resolved_at = ? WHERE scope = ? AND name = ? AND status = 'pending'""",
+                (existing["id"], utc_now_iso(), scope, name),
+            )
+            conn.commit()
         return {"status": "fulfilled", "scope": scope, "name": name,
                 "reference_name": existing["reference_name"]}
     with get_db() as conn:
@@ -145,7 +153,7 @@ def fulfill(
     with get_db() as conn:
         conn.execute(
             """UPDATE credential_requests SET status = 'fulfilled', credential_id = ?,
-            resolved_at = ?, resolved_by = ? WHERE id = ?""",
+            resolved_at = ?, resolved_by = ? WHERE id = ? AND status = 'pending'""",
             (entry["id"], utc_now_iso(), user_id, request_id),
         )
         conn.commit()

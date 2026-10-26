@@ -74,12 +74,23 @@ def get_activity(activity_id: str) -> Optional[dict]:
 
 
 def set_handoff(activity_id: str, handoff: dict) -> None:
-    """Store a validated structured handoff (see session_context_service)."""
+    """Store a validated structured handoff (see session_context_service).
+
+    A request a person already resolved stays resolved unless the new handoff
+    asks them for something different.
+    """
     with get_db() as conn:
         conn.execute(
-            "UPDATE agent_activity SET handoff_json = ?, handoff_resolved_at = NULL, "
-            "updated_at = ? WHERE id = ?",
-            (json.dumps(handoff, separators=(",", ":")), utc_now_iso(), activity_id),
+            "UPDATE agent_activity SET handoff_resolved_at = CASE "
+            "WHEN json_valid(handoff_json) AND json_extract(handoff_json, '$.needs_human') IS ? "
+            "THEN handoff_resolved_at ELSE NULL END, "
+            "handoff_json = ?, updated_at = ? WHERE id = ?",
+            (
+                handoff.get("needs_human"),
+                json.dumps(handoff, separators=(",", ":")),
+                utc_now_iso(),
+                activity_id,
+            ),
         )
         conn.commit()
 
@@ -106,6 +117,8 @@ def list_needs_human(user_id: Optional[str] = None, limit: int = 20) -> list[dic
         "json_valid(handoff_json)",
         "COALESCE(json_extract(handoff_json, '$.needs_human'), '') != ''",
         "handoff_resolved_at IS NULL",
+        # The same statuses session context shows them for.
+        "status IN ('blocked', 'completed', 'active', 'stale')",
     ]
     params: list = []
     if user_id:

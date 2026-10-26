@@ -89,11 +89,12 @@ def start_session_execution(
 ) -> dict:
     """Open (or reuse) the execution behind an injected session context.
 
-    The injected context already tells the agent what changed, so the cursor
-    starts at the newest change: a later workspace_sync then returns only what
-    happens during the session. A hook can fire more than once per host session
-    (clear, compact), so an active execution with the same host_session_ref is
-    reused instead of opening a second one.
+    The injected context already tells the agent what changed, so a new
+    execution's cursor starts at the newest change: a later workspace_sync then
+    returns only what happens during the session. A hook can fire more than once
+    per host session (clear, compact), so an active execution with the same
+    host_session_ref is reused instead of opening a second one, and keeps its
+    cursor: changes made during the session stay for workspace_sync to deliver.
     """
     now = utc_now_iso()
     with get_db() as conn:
@@ -116,14 +117,15 @@ def start_session_execution(
             "SELECT COALESCE(MAX(sequence), 0) AS seq FROM workspace_changes WHERE memory_scope = ?",
             (memory_scope,),
         ).fetchone()["seq"]
-        conn.execute(
-            """UPDATE execution_sync_state
-            SET acknowledged_sequence = MAX(acknowledged_sequence, ?),
-                highest_delivered_sequence = MAX(highest_delivered_sequence, ?),
-                updated_at = ?
-            WHERE execution_id = ? AND memory_scope = ?""",
-            (newest, newest, now, execution_id, memory_scope),
-        )
+        if not reused:
+            conn.execute(
+                """UPDATE execution_sync_state
+                SET acknowledged_sequence = MAX(acknowledged_sequence, ?),
+                    highest_delivered_sequence = MAX(highest_delivered_sequence, ?),
+                    updated_at = ?
+                WHERE execution_id = ? AND memory_scope = ?""",
+                (newest, newest, now, execution_id, memory_scope),
+            )
         conn.execute(
             "UPDATE agent_executions SET last_seen_at = ? WHERE id = ?",
             (now, execution_id),

@@ -12,10 +12,14 @@ Stop: when the session has an open activity without a structured handoff, it
 blocks the stop once with a request to record one. Agent Core remembers that it
 asked, so a task costs at most one extra turn, however many replies end.
 
-Configuration, first match wins:
-  AGENT_CORE_URL / AGENT_CORE_API_KEY  environment variables
+Configuration, first match wins; the URL and the key always come from the
+same place, so a repository's .mcp.json can never redirect a key it did not
+supply:
+  AGENT_CORE_URL and AGENT_CORE_API_KEY  environment variables, both set
   the Agent Core MCP server in .mcp.json (project) or ~/.claude.json (user):
   its URL and Authorization header, so a rotated key is picked up automatically.
+  AGENT_CORE_API_KEY alone pairs only with a URL from ~/.claude.json, which the
+  user controls, never with one from a project's .mcp.json.
   AGENT_CORE_MCP_NAME  MCP server name to look for (default: agent-core)
   AGENT_CORE_SCOPE     workspace scope; otherwise the server matches the cwd
                        against its configured workspace repo roots
@@ -39,16 +43,20 @@ DEFAULT_CHARS = 9000
 NETWORK_ERRORS = (OSError, ValueError, RuntimeError, urllib.error.URLError)
 
 
+def _dict(value):
+    return value if isinstance(value, dict) else {}
+
+
 def _mcp_server(config_path, name, project=None):
     try:
         with open(config_path, encoding="utf-8") as handle:
-            config = json.load(handle)
+            config = _dict(json.load(handle))
     except (OSError, ValueError):
         return None
-    servers = config.get("mcpServers") or {}
+    servers = _dict(config.get("mcpServers"))
     if project:
         # ~/.claude.json also keeps per-project servers under projects.<path>.
-        project_servers = ((config.get("projects") or {}).get(project) or {}).get("mcpServers") or {}
+        project_servers = _dict(_dict(_dict(config.get("projects")).get(project)).get("mcpServers"))
         servers = {**servers, **project_servers}
     server = servers.get(name)
     return server if isinstance(server, dict) else None
@@ -63,21 +71,24 @@ def resolve_connection(cwd, env=os.environ, home=None):
     name = env.get("AGENT_CORE_MCP_NAME", "agent-core")
     home = home or os.path.expanduser("~")
     project_dir = env.get("CLAUDE_PROJECT_DIR") or cwd
+    # (config file, project key, whether its URL may carry the env key)
     candidates = [
-        (os.path.join(project_dir, ".mcp.json"), None),
-        (os.path.join(home, ".claude.json"), project_dir),
+        (os.path.join(project_dir, ".mcp.json"), None, False),
+        (os.path.join(home, ".claude.json"), project_dir, True),
     ]
-    for path, project in candidates:
+    for path, project, trusted in candidates:
         server = _mcp_server(path, name, project)
-        if not server or not server.get("url"):
+        if not server or not isinstance(server.get("url"), str):
             continue
-        header = (server.get("headers") or {}).get("Authorization", "")
-        server_key = header[7:] if header.startswith("Bearer ") else ""
+        header = _dict(server.get("headers")).get("Authorization", "")
+        server_key = header[7:] if isinstance(header, str) and header.startswith("Bearer ") else ""
         server_url = server["url"].rstrip("/")
         if server_url.endswith("/mcp"):
             server_url = server_url[: -len("/mcp")]
-        if (url or server_url) and (key or server_key):
-            return url or server_url, key or server_key
+        if server_url and server_key:
+            return server_url, server_key
+        if server_url and key and trusted:
+            return server_url, key
     return None, None
 
 
@@ -90,9 +101,10 @@ def post(base_url, api_key, path, payload):
     )
     with urllib.request.urlopen(request, timeout=TIMEOUT_SECONDS) as response:
         body = json.loads(response.read().decode("utf-8"))
-    if not body.get("ok"):
-        raise RuntimeError((body.get("error") or {}).get("message", "request failed"))
-    return body.get("data") or {}
+    if not isinstance(body, dict) or not body.get("ok"):
+        error = body.get("error") if isinstance(body, dict) else None
+        raise RuntimeError(_dict(error).get("message") or str(error or "request failed"))
+    return _dict(body.get("data"))
 
 
 def session_start(event, base_url, api_key, env):
@@ -141,8 +153,17 @@ HANDLERS = {"SessionStart": session_start, "Stop": stop}
 
 def main(stdin=sys.stdin, stdout=sys.stdout, env=os.environ):
     try:
+        return _run(stdin, stdout, env)
+    except Exception:  # never fail the session, whatever went wrong
+        return 0
+
+
+def _run(stdin, stdout, env):
+    try:
         event = json.load(stdin)
     except ValueError:
+        return 0
+    if not isinstance(event, dict):
         return 0
     handler = HANDLERS.get(event.get("hook_event_name", "SessionStart"))
     if handler is None:

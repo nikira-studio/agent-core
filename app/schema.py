@@ -515,6 +515,7 @@ def _apply_schema_migrations(conn) -> None:
         (11, "drop-delegation-tables", _migrate_011_drop_delegation_tables),
         (12, "structured-activity-handoffs", _migrate_012_activity_handoffs),
         (13, "remove-handoff-briefings", _migrate_013_remove_handoff_briefings),
+        (14, "drop-removed-feature-settings", _migrate_014_drop_removed_feature_settings),
     )
     applied = {
         row["revision"]
@@ -1655,6 +1656,30 @@ def _migrate_012_activity_handoffs(conn) -> None:
     for column in ("handoff_json", "handoff_requested_at", "handoff_resolved_at"):
         if column not in columns:
             conn.execute(f"ALTER TABLE agent_activity ADD COLUMN {column} TEXT")
+
+
+REMOVED_FEATURE_SETTINGS = (
+    "usefulness_review_enabled",
+    "review_model_action",
+    "review_model_binding_id",
+    "review_model_name",
+    "review_model_provider",
+    "review_model_timeout_seconds",
+    "review_model_url",
+)
+
+
+def _migrate_014_drop_removed_feature_settings(conn) -> None:
+    """Delete settings rows of the removed usefulness review and its model.
+
+    Nothing reads them any more; left in place they only suggest a feature
+    that no longer exists.
+    """
+    placeholders = ",".join("?" for _ in REMOVED_FEATURE_SETTINGS)
+    conn.execute(
+        f"DELETE FROM system_settings WHERE key IN ({placeholders})",
+        REMOVED_FEATURE_SETTINGS,
+    )
 
 
 def _migrate_013_remove_handoff_briefings(conn) -> None:

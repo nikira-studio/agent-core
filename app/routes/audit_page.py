@@ -2,6 +2,7 @@
 
 import json
 from collections import Counter
+from urllib.parse import quote
 
 from fastapi import APIRouter, Request, Depends
 
@@ -146,7 +147,7 @@ def audit_page(request: Request, session: dict = Depends(require_auth)):
     result_options = build_options(RESULT_TYPES, result_filter)
 
     audit_extra_qs = "&amp;".join(
-        f"{k}={v}"
+        f"{k}={quote(v, safe='')}"
         for k, v in [
             ("actor_type", actor_filter),
             ("action", action_filter),

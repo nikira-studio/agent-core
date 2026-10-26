@@ -1,6 +1,7 @@
 """Activity dashboard page."""
 
 from collections import Counter
+from urllib.parse import quote
 
 from fastapi import APIRouter, Request, Depends
 
@@ -63,7 +64,7 @@ def activity_page(request: Request, session: dict = Depends(require_auth)):
     )
     agent_labels = {a["id"]: a.get("display_name") or a["id"] for a in all_agents}
     agent_options = "".join(
-        f'<option value="{a["id"]}">{a.get("display_name", a["id"])}</option>'
+        f'<option value="{escape_html(a["id"])}">{escape_html(a.get("display_name") or a["id"])}</option>'
         for a in all_agents
     )
     workspaces = (
@@ -121,7 +122,7 @@ def activity_page(request: Request, session: dict = Depends(require_auth)):
         _status_tab(s) for s in status_filters
     )
 
-    act_extra_qs = f"status={status_filter}" if status_filter else ""
+    act_extra_qs = f"status={quote(status_filter, safe='')}" if status_filter else ""
     activity_pagination_html = _build_pagination(page, total_pages, act_extra_qs)
     page_start_act = offset + 1 if total_activities else 0
     page_end_act = offset + len(activities)

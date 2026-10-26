@@ -227,6 +227,7 @@ def test_create_schema_records_and_skips_applied_revision(monkeypatch):
         {"revision": 11, "name": "drop-delegation-tables"},
         {"revision": 12, "name": "structured-activity-handoffs"},
         {"revision": 13, "name": "remove-handoff-briefings"},
+        {"revision": 14, "name": "drop-removed-feature-settings"},
     ]
     assert conn.execute(
         "SELECT 1 FROM sqlite_master WHERE type='table' AND name='credential_resolution_daily'"
@@ -451,3 +452,20 @@ def test_migration_13_removes_briefing_rows_and_their_changes():
         "SELECT change_type, resource_type FROM workspace_changes WHERE resource_id = 'later'"
     ).fetchone()
     assert dict(change) == {"change_type": "activity_created", "resource_type": "activity"}
+
+
+def test_migration_14_drops_only_removed_feature_settings():
+    from app.schema import _migrate_014_drop_removed_feature_settings
+
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    create_schema(conn)
+    conn.execute("INSERT OR REPLACE INTO system_settings (key, value) VALUES ('review_model_url', 'http://x')")
+    conn.execute("INSERT OR REPLACE INTO system_settings (key, value) VALUES ('usefulness_review_enabled', 'true')")
+    conn.execute("INSERT OR REPLACE INTO system_settings (key, value) VALUES ('vector_url', 'http://v')")
+
+    _migrate_014_drop_removed_feature_settings(conn)
+
+    keys = {row["key"] for row in conn.execute("SELECT key FROM system_settings")}
+    assert "vector_url" in keys
+    assert not keys & {"review_model_url", "usefulness_review_enabled"}

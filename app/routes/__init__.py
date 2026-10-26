@@ -29,6 +29,7 @@ from app.routes.settings_page import router as settings_page_router
 from app.routes.webhooks_page import router as webhooks_page_router
 from app.routes.events import router as events_router
 from app.routes.webhooks import router as webhooks_router
+from app.routes.credential_consumers import router as credential_consumers_router
 from app.routes.workspace_sync import router as workspace_sync_router
 from app.routes.session_context import router as session_context_router
 from app.routes.discovery import router as discovery_router
@@ -70,6 +71,5 @@ __all__ = [
     "session_context_router",
     "discovery_router",
     "guidance_router",
+    "credential_consumers_router",
 ]
-
-from app.routes.credential_consumers import router as credential_consumers_router
