@@ -1586,7 +1586,7 @@ Merge this into `~/.claude/settings.json` (all projects) or `.claude/settings.lo
 
 ## 3. Map repositories to workspaces
 
-The hook sends the session's working directory. {APP_NAME} matches it against the workspace repository roots configured in Settings, so the right workspace loads without per-repository setup. To pin a workspace instead, set `AGENT_CORE_SCOPE=workspace:<id>` in the environment Claude Code runs in.
+The hook sends the session's working directory. {APP_NAME} matches it against each workspace's repository folder (Workspaces → Edit Workspace, admin only), so the right workspace loads without per-repository setup. Sessions in a folder no workspace claims start normally, without context. To pin a workspace instead, set `AGENT_CORE_SCOPE=workspace:<id>` in the environment Claude Code runs in.
 
 ## Behavior
 
