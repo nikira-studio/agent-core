@@ -278,10 +278,22 @@ def test_handoff_is_recorded_and_shown_to_the_next_session(test_client, admin_to
     assert "next steps: Add retry on 429" in text and "open questions: Batch size?" in text
     assert "## Waiting on a person" in text and "Approve the vendor contract." in text
 
+    # The Activity page lists it with a control to resolve it.
+    from app.services.auth_service import create_session
+    with get_db() as conn:
+        owner_id = conn.execute("SELECT id FROM users LIMIT 1").fetchone()["id"]
+    test_client.cookies.set("session_token", create_session(owner_id, channel="dashboard")["session_id"])
+    page = test_client.get("/activity").text
+    assert "Waiting on you" in page and "Approve the vendor contract." in page
+    assert f"data-handoff-resolve='{activity_id}'" in page
+    test_client.cookies.clear()
+
     # Only a person resolves it; then it stops appearing.
     assert test_client.post(f"/api/activity/{activity_id}/handoff/resolve", headers=headers).status_code == 403
-    admin = {"Authorization": f"Bearer {admin_token}"}
-    assert test_client.post(f"/api/activity/{activity_id}/handoff/resolve", headers=admin).status_code == 200
+    test_client.cookies.set("session_token", create_session(owner_id, channel="dashboard")["session_id"])
+    assert test_client.post(f"/api/activity/{activity_id}/handoff/resolve").status_code == 200  # the button's call
+    assert "Waiting on you" not in test_client.get("/activity").text
+    test_client.cookies.clear()
     text = _context(test_client, headers, memory_scope=SCOPE, host_session_ref="s-3")["context"]
     assert "Approve the vendor contract." not in text
 

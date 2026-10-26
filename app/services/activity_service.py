@@ -96,6 +96,32 @@ def resolve_handoff(activity_id: str) -> bool:
         return cursor.rowcount > 0
 
 
+def list_needs_human(user_id: Optional[str] = None, limit: int = 20) -> list[dict]:
+    """Unresolved handoff requests for a person, newest first.
+
+    Each row carries the request text as `needs_human`. Pass user_id to limit
+    the list to that user's activities; None lists every user's.
+    """
+    conditions = [
+        "json_valid(handoff_json)",
+        "COALESCE(json_extract(handoff_json, '$.needs_human'), '') != ''",
+        "handoff_resolved_at IS NULL",
+    ]
+    params: list = []
+    if user_id:
+        conditions.append("user_id = ?")
+        params.append(user_id)
+    with get_db() as conn:
+        rows = conn.execute(
+            "SELECT id, agent_id, memory_scope, task_description, updated_at, "
+            "json_extract(handoff_json, '$.needs_human') AS needs_human "
+            f"FROM agent_activity WHERE {' AND '.join(conditions)} "
+            "ORDER BY updated_at DESC LIMIT ?",
+            [*params, limit],
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
 def heartbeat_activity(activity_id: str) -> bool:
     now = utc_now_iso()
     with get_db() as conn:

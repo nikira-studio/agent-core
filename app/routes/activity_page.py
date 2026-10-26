@@ -132,6 +132,26 @@ def activity_page(request: Request, session: dict = Depends(require_auth)):
         else ""
     )
 
+    waiting = activity_service.list_needs_human(user_id=scope_user_id)
+    waiting_rows = "".join(
+        f"<tr><td>{escape_html(w.get('needs_human') or '')}"
+        f"<div class='text-muted' style='font-size:0.8rem'>From {escape_html(agent_labels.get(w['agent_id'], w['agent_id']))}"
+        f" · {escape_html(w.get('task_description', '')[:100])}</div></td>"
+        f"<td><code>{escape_html((w.get('memory_scope') or '').replace('workspace:', '')) or '—'}</code></td>"
+        f"<td>{local_dt(w.get('updated_at'), style='date')}</td>"
+        f"<td><button type='button' class='btn btn-sm' data-handoff-resolve='{escape_html(w['id'])}'>Mark resolved</button></td></tr>"
+        for w in waiting
+    )
+    waiting_card = (
+        "<div class='card'><h3>Waiting on you</h3>"
+        "<p class='text-muted' style='font-size:0.85rem'>Agents flagged these in a handoff as needing a person. "
+        "Each one appears at the top of every agent session in its workspace until you mark it resolved.</p>"
+        "<div style='overflow-x:auto'><table><thead><tr><th>Request</th><th>Scope</th><th>Since</th><th></th></tr></thead>"
+        f"<tbody>{waiting_rows}</tbody></table></div></div>"
+        if waiting
+        else ""
+    )
+
     rows = "".join(
         f"<tr class='activity-row' data-status='{escape_html(a.get('status', ''))}'>"
         f"<td class='activity-task-cell'>{escape_html(a.get('task_description', '')[:120])}</td>"
@@ -179,8 +199,16 @@ def activity_page(request: Request, session: dict = Depends(require_auth)):
       const done = ev.target.closest('[data-activity-done]');
       if (done) { ev.preventDefault(); updateActivity(done.dataset.activityDone, 'completed'); return; }
       const cancel = ev.target.closest('[data-activity-cancel]');
-      if (cancel) { ev.preventDefault(); cancelActivity(cancel.dataset.activityCancel); }
+      if (cancel) { ev.preventDefault(); cancelActivity(cancel.dataset.activityCancel); return; }
+      const resolve = ev.target.closest('[data-handoff-resolve]');
+      if (resolve) { ev.preventDefault(); resolveHandoff(resolve.dataset.handoffResolve); }
     });
+
+    async function resolveHandoff(id) {
+      const j = await apiFetch('/api/activity/' + id + '/handoff/resolve', { method: 'POST' });
+      if (j.ok) { showToast('Resolved'); refreshActivity(); }
+      else { showToast(j.error.message || 'Failed', 'danger'); }
+    }
 
     async function updateActivity(id, status) {
       const j = await apiFetch('/api/activity/' + id, { method: 'PUT', body: JSON.stringify({ status }) });
@@ -259,6 +287,7 @@ def activity_page(request: Request, session: dict = Depends(require_auth)):
         <button class="btn" onclick="openModal('create-activity-modal')">+ Assign Work</button>
         {activity_prune_button}
     </div></div>
+    {waiting_card}
     <div class="card">
       <h3>Workspace synchronization</h3>
       <p class="text-muted" style="font-size:0.85rem">Each row is one agent execution with an independent delivery cursor.</p>
