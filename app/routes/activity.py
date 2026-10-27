@@ -290,7 +290,11 @@ def update_activity(
 
 @router.post("/{activity_id}/handoff/resolve")
 def resolve_handoff(activity_id: str, ctx: EffectiveAuthority = Depends(get_request_context)):
-    """A person marks a handoff's needs_human request as dealt with."""
+    """A person marks a handoff's needs_human request as dealt with.
+
+    Person only. The agent that made the request resolves it through the MCP
+    activity_handoff_resolve tool instead, which records its reason.
+    """
     if ctx.actor_type != "user":
         return error_response("FORBIDDEN", "Only a person can resolve a handoff request", 403)
     activity = activity_service.get_activity(activity_id)
@@ -299,8 +303,12 @@ def resolve_handoff(activity_id: str, ctx: EffectiveAuthority = Depends(get_requ
     scope = activity.get("memory_scope") or ""
     if not (ctx.is_admin or ctx.can("activity", "update", scope=scope)):
         return error_response("FORBIDDEN", "Access denied", 403)
-    if not activity_service.resolve_handoff(activity_id):
-        return error_response("NOT_PENDING", "No unresolved handoff on this activity", 409)
+    resolution = activity_service.resolve_handoff(
+        activity_id, kind="person", resolved_by=ctx.actor_id
+    )
+    if not resolution:
+        return error_response("NOT_PENDING", "No unresolved handoff request on this activity", 409)
+    updated = activity_service.get_activity(activity_id) or activity
     audit_service.write_event(
         actor_type=ctx.actor_type,
         actor_id=ctx.actor_id,
@@ -308,8 +316,10 @@ def resolve_handoff(activity_id: str, ctx: EffectiveAuthority = Depends(get_requ
         resource_type="activity",
         resource_id=activity_id,
         result="success",
+        details=activity_service.audit_details(updated, kind="person", actor_type=ctx.actor_type),
     )
-    return success_response({"activity": activity_service.get_activity(activity_id)})
+    activity_service.notify("activity_updated", updated, handoff_resolution="person")
+    return success_response({"activity": updated, "resolution": resolution})
 
 
 @router.post("/{activity_id}/heartbeat")

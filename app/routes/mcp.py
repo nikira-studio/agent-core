@@ -65,6 +65,7 @@ _TOOL_CAPABILITIES = {
             "activity_list",
             "activity_search",
             "activity_pickup",
+            "activity_handoff_resolve",
             "workspace_sync",
             "workspace_sync_ack",
             "session_context",
@@ -428,7 +429,10 @@ MANIFEST = {
                         "type": "object",
                         "description": (
                             "Record when the task finishes or stops: what the next session needs. "
-                            "The next session start shows it."
+                            "The next session start shows it. A needs_human request replaces your older "
+                            "open requests in this scope; the response lists them as superseded_requests "
+                            "so you can restate any that still apply. With no open task, a handoff alone "
+                            "amends the one your latest task closed with."
                         ),
                         "properties": {
                             "completed": {"type": "string", "description": "One line on what got done."},
@@ -438,6 +442,25 @@ MANIFEST = {
                         },
                     },
                 },
+            },
+        },
+        {
+            "name": "activity_handoff_resolve",
+            "description": (
+                "Resolve one of your own handoff requests to a person (needs_human) once it has been "
+                "dealt with, so it leaves the waiting queue. Only for activities assigned to you."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "activity_id": {"type": "string", "description": "The activity whose handoff request is resolved."},
+                    "reason": {
+                        "type": "string",
+                        "maxLength": 500,
+                        "description": "How it was dealt with, in one line. Shown to people and audited.",
+                    },
+                },
+                "required": ["activity_id", "reason"],
             },
         },
         {
@@ -1103,6 +1126,76 @@ async def _handle_mcp_jsonrpc(body: dict, request: Request, ctx: EffectiveAuthor
         )
 
     return _jsonrpc_error(request_id, -32601, f"Method not found: {method}")
+
+
+HANDOFF_RESOLVE_REASON_MAX = 500
+
+
+def _supersede_requests(ctx: EffectiveAuthority, activity: dict, handoff: Optional[dict]) -> list[dict]:
+    """A needs_human handoff supersedes the agent's older open requests in the
+    scope. Audits and announces each one; returns them with their asks."""
+    if not handoff or not handoff.get("needs_human"):
+        return []
+    rows = activity_service.supersede_open_requests(activity, resolved_by=ctx.agent_id)
+    for row in rows:
+        summary = activity_service.request_summary(row)
+        audit_service.write_event(
+            actor_type="agent",
+            actor_id=ctx.agent_id,
+            action="handoff_superseded",
+            resource_type="activity",
+            resource_id=row["id"],
+            result="success",
+            details=activity_service.audit_details(
+                row,
+                kind="superseded",
+                actor_type="agent",
+                superseded_by=activity["id"],
+                needs_human=summary.get("needs_human"),
+            ),
+        )
+        activity_service.notify(
+            "activity_updated",
+            activity_service.get_activity(row["id"]) or row,
+            handoff_resolution="superseded",
+            superseded_by=activity["id"],
+        )
+    return [activity_service.request_summary(row) for row in rows]
+
+
+def _superseded_warning(superseded: list[dict], scope: str) -> dict:
+    return {
+        "code": "HANDOFF_REQUESTS_SUPERSEDED",
+        "message": (
+            f"This handoff replaced {len(superseded)} older open request(s) of yours in {scope}, "
+            "listed in superseded_requests; they are no longer waiting on a person. If any still "
+            "applies, restate it in needs_human now: call activity_update with this scope and the "
+            "full handoff again, including the restated request."
+        ),
+    }
+
+
+def _open_requests_reminder(ctx: EffectiveAuthority, activity: dict) -> list[dict]:
+    if not activity.get("memory_scope"):
+        return []
+    rows = activity_service.list_open_requests_for_agent(
+        ctx.agent_id,
+        activity["memory_scope"],
+        user_id=activity.get("user_id") or "",
+        exclude_id=activity["id"],
+    )
+    return [activity_service.request_summary(row) for row in rows]
+
+
+def _open_requests_warning(still_open: list[dict]) -> dict:
+    return {
+        "code": "OPEN_HANDOFF_REQUESTS",
+        "message": (
+            f"You have {len(still_open)} open request(s) to a person in this scope, listed in "
+            "open_requests: resolve each one that has been dealt with using "
+            "activity_handoff_resolve(activity_id, reason), or restate it in a handoff."
+        ),
+    }
 
 
 async def _handle_custom_mcp_tool(body: dict, ctx: EffectiveAuthority):
@@ -1832,14 +1925,56 @@ async def _handle_custom_mcp_tool(body: dict, ctx: EffectiveAuthority):
                 _event, _updated, previous_status=existing["status"]
             )
             data = {"activity": _updated}
+            warnings = []
             if _new_status in ("completed", "blocked") and not _updated.get("handoff_json"):
-                data["warnings"] = [
+                warnings.append(
                     {
                         "code": "HANDOFF_MISSING",
                         "message": "Closed without a handoff. Pass handoff={completed, next_steps, "
                         "open_questions, needs_human} so the next session can pick this up.",
                     }
-                ]
+                )
+            superseded = _supersede_requests(ctx, existing, handoff)
+            if superseded:
+                data["superseded_requests"] = superseded
+                warnings.append(_superseded_warning(superseded, memory_scope))
+            elif _new_status in ("completed", "blocked"):
+                still_open = _open_requests_reminder(ctx, existing)
+                if still_open:
+                    data["open_requests"] = still_open
+                    warnings.append(_open_requests_warning(still_open))
+            if warnings:
+                data["warnings"] = warnings
+            return JSONResponse(content={"ok": True, "data": data})
+        elif handoff and not any(
+            params.get(key) for key in ("task_description", "task_note", "task_result", "status")
+        ) and (
+            closed := activity_service.get_latest_closed_activity_for_agent(
+                ctx.agent_id, memory_scope, user_id=ctx.user_id or ""
+            )
+        ):
+            # A handoff on its own, with no open task: amend the handoff the
+            # agent just closed with, for example to restate a request that
+            # handoff superseded. Only the agent's latest task in this scope.
+            activity_service.set_handoff(closed["id"], handoff)
+            _updated = activity_service.get_activity(closed["id"]) or closed
+            audit_service.write_event(
+                actor_type="agent",
+                actor_id=ctx.agent_id,
+                action="activity_update",
+                resource_type="activity",
+                resource_id=closed["id"],
+                result="success",
+                details=activity_service.audit_details(
+                    _updated, action="handoff_amended", memory_scope=closed.get("memory_scope")
+                ),
+            )
+            activity_service.notify("activity_updated", _updated, previous_status=closed["status"])
+            data = {"activity": _updated, "handoff_amended": True}
+            superseded = _supersede_requests(ctx, closed, handoff)
+            if superseded:
+                data["superseded_requests"] = superseded
+                data["warnings"] = [_superseded_warning(superseded, memory_scope)]
             return JSONResponse(content={"ok": True, "data": data})
         else:
             if not params.get("task_description"):
@@ -1893,6 +2028,46 @@ async def _handle_custom_mcp_tool(body: dict, ctx: EffectiveAuthority):
                 if digest is not None:
                     payload["since_last_active"] = digest
             return JSONResponse(content={"ok": True, "data": payload}, status_code=201)
+
+    elif tool == "activity_handoff_resolve":
+        reason = " ".join(str(params.get("reason") or "").split())
+        if not reason:
+            return _mcp_error("INVALID_PARAMS", "reason is required: say how the request was dealt with", 400)
+        if len(reason) > HANDOFF_RESOLVE_REASON_MAX:
+            return _mcp_error(
+                "INVALID_PARAMS", f"reason is limited to {HANDOFF_RESOLVE_REASON_MAX} characters", 400
+            )
+        activity = activity_service.get_activity(params["activity_id"])
+        if not activity:
+            return _mcp_error("NOT_FOUND", "Activity not found", 404)
+        # The agent rule of the REST _can_activity check: only the agent the
+        # activity is assigned to, and only in a scope it can write.
+        scope = activity.get("memory_scope") or f"agent:{activity.get('agent_id')}"
+        if activity.get("assigned_agent_id") != ctx.agent_id or not enforcer.can_write(scope):
+            return _mcp_error(
+                "FORBIDDEN", "You can resolve only your own handoff requests, in scopes you can write", 403
+            )
+        resolution = activity_service.resolve_handoff(
+            activity["id"], kind="agent", resolved_by=ctx.agent_id, reason=reason
+        )
+        if not resolution:
+            return _mcp_error("NOT_PENDING", "No unresolved handoff request on this activity", 409)
+        _updated = activity_service.get_activity(activity["id"]) or activity
+        audit_service.write_event(
+            actor_type="agent",
+            actor_id=ctx.agent_id,
+            action="handoff_resolved",
+            resource_type="activity",
+            resource_id=activity["id"],
+            result="success",
+            details=activity_service.audit_details(
+                _updated, kind="agent", actor_type="agent", reason=reason
+            ),
+        )
+        activity_service.notify("activity_updated", _updated, handoff_resolution="agent")
+        return JSONResponse(
+            content={"ok": True, "data": {"activity": _updated, "resolution": resolution}}
+        )
 
     elif tool == "activity_get":
         activity = activity_service.get_activity(params["activity_id"])

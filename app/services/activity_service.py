@@ -73,38 +73,197 @@ def get_activity(activity_id: str) -> Optional[dict]:
         return dict(row) if row else None
 
 
+# Statuses whose needs_human request counts as open: the same ones session
+# context and the Activity page list them for.
+OPEN_REQUEST_STATUSES = ("blocked", "completed", "active", "stale")
+HANDOFF_RESOLUTION_KINDS = ("person", "agent", "superseded")
+REQUEST_SUMMARY_CHARS = 200
+
+
+def _load_handoff(raw) -> dict:
+    try:
+        value = json.loads(raw or "{}")
+    except (TypeError, ValueError):
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
 def set_handoff(activity_id: str, handoff: dict) -> None:
     """Store a validated structured handoff (see session_context_service).
 
-    A request a person already resolved stays resolved unless the new handoff
-    asks them for something different.
+    A request already resolved stays resolved unless the new handoff asks a
+    person for something different; when it stays resolved, the recorded
+    resolution is carried over. The caller's handoff never carries a
+    resolution of its own: normalize_handoff rejects the field.
     """
     with get_db() as conn:
+        row = conn.execute(
+            "SELECT handoff_json, handoff_resolved_at FROM agent_activity WHERE id = ?",
+            (activity_id,),
+        ).fetchone()
+        if not row:
+            return
+        stored = dict(handoff)
+        stored.pop("resolution", None)
+        resolved_at = None
+        if row["handoff_resolved_at"] and row["handoff_json"] is not None:
+            previous = _load_handoff(row["handoff_json"])
+            if previous.get("needs_human") == handoff.get("needs_human"):
+                resolved_at = row["handoff_resolved_at"]
+                if isinstance(previous.get("resolution"), dict):
+                    stored["resolution"] = previous["resolution"]
         conn.execute(
-            "UPDATE agent_activity SET handoff_resolved_at = CASE "
-            "WHEN json_valid(handoff_json) AND json_extract(handoff_json, '$.needs_human') IS ? "
-            "THEN handoff_resolved_at ELSE NULL END, "
-            "handoff_json = ?, updated_at = ? WHERE id = ?",
-            (
-                handoff.get("needs_human"),
-                json.dumps(handoff, separators=(",", ":")),
-                utc_now_iso(),
-                activity_id,
-            ),
+            "UPDATE agent_activity SET handoff_json = ?, handoff_resolved_at = ?, updated_at = ? "
+            "WHERE id = ?",
+            (json.dumps(stored, separators=(",", ":")), resolved_at, utc_now_iso(), activity_id),
         )
         conn.commit()
 
 
-def resolve_handoff(activity_id: str) -> bool:
-    """A person dealt with what the handoff needed from them."""
+def _resolve_in_connection(
+    conn,
+    activity_id: str,
+    *,
+    kind: str,
+    resolved_by: Optional[str],
+    reason: Optional[str] = None,
+    superseded_by: Optional[str] = None,
+    at: Optional[str] = None,
+) -> Optional[dict]:
+    if kind not in HANDOFF_RESOLUTION_KINDS:
+        raise ValueError(f"unknown resolution kind: {kind}")
+    at = at or utc_now_iso()
+    resolution = {"kind": kind, "at": at, "resolved_by": resolved_by}
+    if reason:
+        resolution["reason"] = reason
+    if superseded_by:
+        resolution["superseded_by"] = superseded_by
+    cursor = conn.execute(
+        "UPDATE agent_activity SET handoff_resolved_at = ?, "
+        "handoff_json = json_set(handoff_json, '$.resolution', json(?)) "
+        "WHERE id = ? AND json_valid(handoff_json) "
+        "AND COALESCE(json_extract(handoff_json, '$.needs_human'), '') != '' "
+        "AND handoff_resolved_at IS NULL",
+        (at, json.dumps(resolution, separators=(",", ":")), activity_id),
+    )
+    return resolution if cursor.rowcount > 0 else None
+
+
+def resolve_handoff(
+    activity_id: str,
+    *,
+    kind: str = "person",
+    resolved_by: Optional[str] = None,
+    reason: Optional[str] = None,
+) -> Optional[dict]:
+    """Mark a handoff's needs_human request as dealt with.
+
+    kind is who settled it: "person" (the Activity page) or "agent" (the agent
+    that asked, through activity_handoff_resolve). The resolution is stored in
+    handoff_json under "resolution" beside handoff_resolved_at. Returns the
+    resolution, or None when there was no open request to resolve.
+    """
     with get_db() as conn:
-        cursor = conn.execute(
-            "UPDATE agent_activity SET handoff_resolved_at = ? "
-            "WHERE id = ? AND handoff_json IS NOT NULL AND handoff_resolved_at IS NULL",
-            (utc_now_iso(), activity_id),
+        resolution = _resolve_in_connection(
+            conn, activity_id, kind=kind, resolved_by=resolved_by, reason=reason
         )
         conn.commit()
-        return cursor.rowcount > 0
+        return resolution
+
+
+def request_summary(row: dict) -> dict:
+    """An open or superseded request as an agent sees it: enough to restate it."""
+    handoff = _load_handoff(row.get("handoff_json"))
+    description = " ".join((row.get("task_description") or "").split())
+    if len(description) > REQUEST_SUMMARY_CHARS:
+        description = description[: REQUEST_SUMMARY_CHARS - 1].rstrip() + "…"
+    summary = {
+        "activity_id": row["id"],
+        "summary": description,
+        "status": row.get("status"),
+        "needs_human": handoff.get("needs_human"),
+        "requested_at": row.get("updated_at"),
+    }
+    if handoff.get("open_questions"):
+        summary["open_questions"] = handoff["open_questions"]
+    return summary
+
+
+def _open_requests_query(conn, *, agent_id: str, user_id: Optional[str], memory_scope: str,
+                         exclude_id: Optional[str]) -> list[dict]:
+    conditions = [
+        "assigned_agent_id = ?",
+        "memory_scope = ?",
+        "json_valid(handoff_json)",
+        "COALESCE(json_extract(handoff_json, '$.needs_human'), '') != ''",
+        "handoff_resolved_at IS NULL",
+        f"status IN ({', '.join('?' for _ in OPEN_REQUEST_STATUSES)})",
+    ]
+    params: list = [agent_id, memory_scope, *OPEN_REQUEST_STATUSES]
+    if user_id is not None:
+        conditions.append("user_id = ?")
+        params.append(user_id)
+    if exclude_id:
+        conditions.append("id != ?")
+        params.append(exclude_id)
+    rows = conn.execute(
+        "SELECT id, agent_id, assigned_agent_id, user_id, memory_scope, task_description, "
+        "status, updated_at, handoff_json "
+        f"FROM agent_activity WHERE {' AND '.join(conditions)} ORDER BY updated_at DESC",
+        params,
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def list_open_requests_for_agent(
+    agent_id: str,
+    memory_scope: str,
+    user_id: Optional[str] = None,
+    exclude_id: Optional[str] = None,
+) -> list[dict]:
+    """This agent's own unresolved needs_human requests in one scope, newest first."""
+    with get_db() as conn:
+        return _open_requests_query(
+            conn, agent_id=agent_id, user_id=user_id, memory_scope=memory_scope, exclude_id=exclude_id
+        )
+
+
+def supersede_open_requests(activity: dict, *, resolved_by: Optional[str]) -> list[dict]:
+    """A new needs_human handoff on `activity` replaces the older open requests.
+
+    Superseded: requests of activities with the same assigned agent, the same
+    user and the same memory scope, other than `activity` itself. They are
+    resolved with kind "superseded" pointing at `activity`, and returned (with
+    their asks) so the agent can restate any that still apply. Nothing crosses
+    a scope or a user.
+    """
+    agent_id = activity.get("assigned_agent_id")
+    scope = activity.get("memory_scope")
+    if not agent_id or not scope:
+        return []
+    superseded = []
+    with get_db() as conn:
+        rows = _open_requests_query(
+            conn,
+            agent_id=agent_id,
+            user_id=activity.get("user_id") or "",
+            memory_scope=scope,
+            exclude_id=activity["id"],
+        )
+        at = utc_now_iso()
+        for row in rows:
+            resolution = _resolve_in_connection(
+                conn,
+                row["id"],
+                kind="superseded",
+                resolved_by=resolved_by,
+                superseded_by=activity["id"],
+                at=at,
+            )
+            if resolution:
+                superseded.append({**row, "resolution": resolution})
+        conn.commit()
+    return superseded
 
 
 def list_needs_human(user_id: Optional[str] = None, limit: int = 20) -> list[dict]:
@@ -130,6 +289,33 @@ def list_needs_human(user_id: Optional[str] = None, limit: int = 20) -> list[dic
             "json_extract(handoff_json, '$.needs_human') AS needs_human "
             f"FROM agent_activity WHERE {' AND '.join(conditions)} "
             "ORDER BY updated_at DESC LIMIT ?",
+            [*params, limit],
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def list_superseded_requests(user_id: Optional[str] = None, limit: int = 20) -> list[dict]:
+    """Requests a later handoff replaced, newest first, for the Activity page.
+
+    They left the waiting queue but stay visible, so a person can see what an
+    agent stopped asking for and which handoff replaced it.
+    """
+    conditions = [
+        "json_valid(handoff_json)",
+        "handoff_resolved_at IS NOT NULL",
+        "json_extract(handoff_json, '$.resolution.kind') = 'superseded'",
+    ]
+    params: list = []
+    if user_id:
+        conditions.append("user_id = ?")
+        params.append(user_id)
+    with get_db() as conn:
+        rows = conn.execute(
+            "SELECT id, agent_id, memory_scope, task_description, handoff_resolved_at, "
+            "json_extract(handoff_json, '$.needs_human') AS needs_human, "
+            "json_extract(handoff_json, '$.resolution.superseded_by') AS superseded_by "
+            f"FROM agent_activity WHERE {' AND '.join(conditions)} "
+            "ORDER BY handoff_resolved_at DESC LIMIT ?",
             [*params, limit],
         ).fetchall()
     return [dict(r) for r in rows]
@@ -549,6 +735,33 @@ def get_active_activity_for_agent(
             params,
         ).fetchone()
         return dict(row) if row else None
+
+
+def get_latest_closed_activity_for_agent(
+    agent_id: str,
+    memory_scope: str,
+    user_id: Optional[str] = None,
+) -> Optional[dict]:
+    """The agent's most recent task in `memory_scope`, if it is closed.
+
+    Lets an agent amend the handoff it just closed with, for example to
+    restate a request its new handoff superseded. Only the latest task
+    qualifies, and only while it is completed or blocked.
+    """
+    conditions = ["assigned_agent_id = ?", "memory_scope = ?"]
+    params: list = [agent_id, memory_scope]
+    if user_id is not None:
+        conditions.append("user_id = ?")
+        params.append(user_id)
+    with get_db() as conn:
+        row = conn.execute(
+            f"SELECT id, status FROM agent_activity WHERE {' AND '.join(conditions)} "
+            "ORDER BY started_at DESC LIMIT 1",
+            params,
+        ).fetchone()
+    if not row or row["status"] not in ("completed", "blocked"):
+        return None
+    return get_activity(row["id"])
 
 
 def get_last_activity_in_scope(

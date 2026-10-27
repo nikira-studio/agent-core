@@ -55,6 +55,7 @@ AUDIT_ACTIONS = (
     "memory_fetched",
     "handoff_requested",
     "handoff_resolved",
+    "handoff_superseded",
     "credential_requested",
     "credential_request_fulfilled",
     "activity_update",
