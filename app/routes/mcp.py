@@ -1082,6 +1082,7 @@ async def _handle_mcp_jsonrpc(body: dict, request: Request, ctx: EffectiveAuthor
                     "At the start of every non-trivial task: call activity_update (status=active, memory_scope=workspace:<your-scope>), "
                     "then run 2-3 memory_search queries for relevant context. "
                     "Send activity_update heartbeats or task_note progress updates every 1-2 minutes while working; when finishing or stopping, set status completed or blocked with task_result and a handoff (completed, next_steps, open_questions, needs_human). "
+                    "When a needs_human request you made has been dealt with, resolve it with activity_handoff_resolve. "
                     f"Use credential_get for {CREDENTIAL_PREFIX}* references — never ask the user for raw secrets; use credential_request when one is missing. "
                     "If tools appear unavailable, your host may defer MCP schemas — run the host's tool discovery or schema-load step first."
                 ),

@@ -604,7 +604,35 @@ For the MCP `activity_update` tool, creating a fresh activity in a readable `wor
 
 ### Handoffs
 
-`PUT /api/activity/{id}` accepts `handoff` with `completed` (string), `next_steps` and `open_questions` (lists of strings) and `needs_human` (string), up to 4,000 characters. The next session context shows them. `POST /api/activity/{id}/handoff/resolve` (a person only) marks a `needs_human` request as dealt with.
+`PUT /api/activity/{id}` and the MCP `activity_update` tool accept `handoff` with `completed` (string), `next_steps` and `open_questions` (lists of strings) and `needs_human` (string), up to 4,000 characters. Any other field, including `resolution`, is rejected with `INVALID_HANDOFF`. The next session context shows them.
+
+A `needs_human` request waits on a person: it is listed under "Waiting on a person" in session context and under **Waiting on you** on the Activity page until one of these resolves it:
+
+- **A person** calls `POST /api/activity/{id}/handoff/resolve` (the **Mark resolved** button). The route is for people only; an agent key gets `403`. It returns `{activity, resolution}`, and `409 NOT_PENDING` when the activity has no open request.
+- **The agent that asked** calls the MCP `activity_handoff_resolve` tool with `activity_id` and a `reason` (required, up to 500 characters). Only the agent the activity is assigned to can call it, and only in a scope it can write; any other agent gets `403`.
+- **A newer request from the same agent** supersedes it. When `activity_update` records a handoff with a non-empty `needs_human` on the agent's current activity, every other open request of activities with the same assigned agent, the same user and the same `memory_scope` is resolved as superseded. Requests in other scopes, of other users or of other agents are left alone. Superseded requests leave the queue and session context but stay listed, collapsed, under **Superseded by a later handoff** on the Activity page.
+
+Each resolution is stored in the activity's `handoff_json` under `resolution`, beside `handoff_resolved_at`:
+
+```json
+{
+  "kind": "person | agent | superseded",
+  "at": "2026-10-27T12:00:00+00:00",
+  "resolved_by": "user id (person) or agent id (agent, superseded)",
+  "reason": "agent resolutions only",
+  "superseded_by": "the activity whose handoff replaced it (superseded only)"
+}
+```
+
+A resolved request stays resolved when a later handoff on the same activity repeats the same `needs_human` text, and keeps its `resolution`; a different `needs_human` reopens it. Resolutions are audited as `handoff_resolved` (details include `kind`, `actor_type` and, for agents, `reason`) and `handoff_superseded` (details include `superseded_by` and the request text), and announced as `activity_updated` events with `handoff_resolution`.
+
+The MCP `activity_update` response can carry these fields beside `activity`:
+
+| Field | When |
+| --- | --- |
+| `superseded_requests` | The handoff's `needs_human` superseded older requests. One entry per request: `activity_id`, `summary` (the task description, up to 200 characters), `status`, `needs_human`, `open_questions` (when the old handoff had any) and `requested_at`. A `HANDOFF_REQUESTS_SUPERSEDED` warning asks the agent to restate any that still apply. |
+| `open_requests` | The call closed the activity (`completed` or `blocked`) without a `needs_human` request while the agent has other open requests in the scope. Same entry shape. An `OPEN_HANDOFF_REQUESTS` warning reminds the agent to resolve them with `activity_handoff_resolve` or restate them. Nothing is resolved. |
+| `handoff_amended` | `true` when the call carried only a `handoff`, the agent had no open activity in the scope, and the handoff was applied to the agent's latest activity in the scope because it is `completed` or `blocked`. This is how an agent restates a superseded request after closing with one call. Without such an activity the call still needs `task_description`. |
 
 ### Activity pickup
 
@@ -677,7 +705,8 @@ Dispatch:
 | `session_context` | One budgeted session-start block (rules, waiting and unfinished work, recent results with next steps, changes, key-record index) plus the session's `execution_id` |
 | `workspace_sync` | Start or continue an execution and return current context plus workspace changes after its cursor |
 | `workspace_sync_ack` | Advance an execution's acknowledged cursor after processing a delivered page |
-| `activity_update` | Create or update an activity record in the supplied `memory_scope`, including progress notes, completion result and a structured `handoff` (`completed`, `next_steps`, `open_questions`, `needs_human`); it never moves an activity across scopes |
+| `activity_update` | Create or update an activity record in the supplied `memory_scope`, including progress notes, completion result and a structured `handoff` (`completed`, `next_steps`, `open_questions`, `needs_human`); it never moves an activity across scopes. A `needs_human` request supersedes the agent's older open requests in the scope and lists them in `superseded_requests` (see [Handoffs](#handoffs)) |
+| `activity_handoff_resolve` | Resolve one of the caller's own `needs_human` requests once it has been dealt with. `activity_id` and `reason` (up to 500 characters) are required; only the agent the activity is assigned to may call it |
 | `activity_get` | Get an activity record |
 | `activity_list` | List activities visible to the current caller |
 | `activity_pickup` | Claim the next active work item assigned to this agent in authorized scopes |

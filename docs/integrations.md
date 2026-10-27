@@ -92,7 +92,8 @@ Once connected, these tools are available in any session:
 | `credential_list` | List credential entries the agent can access (metadata and references only, no raw values) |
 | `workspace_sync` | Start or continue an execution and receive pinned context, assigned activities, and workspace changes after its cursor |
 | `workspace_sync_ack` | Advance an execution's acknowledged cursor after processing a delivered page |
-| `activity_update` | Create or update an activity record in the supplied `memory_scope`, including progress notes and a completion result; it never moves an activity across scopes |
+| `activity_update` | Create or update an activity record in the supplied `memory_scope`, including progress notes, a completion result and a `handoff`; it never moves an activity across scopes |
+| `activity_handoff_resolve` | Resolve one of your own `needs_human` handoff requests once it has been dealt with, with a short `reason` |
 | `activity_get` | Get one activity, together with the memory records written during it |
 | `activity_list` | List activities visible to the current agent or user |
 | `activity_pickup` | Claim the next active work item a human assigned to this agent in authorized scopes |
@@ -796,6 +797,8 @@ The practical flow is:
 2. It writes durable decisions, facts, and handoff notes to memory when something should survive beyond the current session.
 3. When it finishes or stops, it calls `activity_update` with `status` completed or blocked, a `task_result`, and `handoff={completed, next_steps, open_questions, needs_human}`.
 4. The next session's context shows that work with its next steps and open questions. Older history is available through `activity_search` and `activity_get`.
+
+A `needs_human` request waits on a person until a person marks it resolved, the agent that asked resolves it with `activity_handoff_resolve`, or a newer `needs_human` request from that agent in the same workspace replaces it. When one replaces older requests, the `activity_update` response lists them in `superseded_requests` so the agent can restate any that still apply. When an agent closes a task without a request while older ones are open, the response lists them in `open_requests` as a reminder and resolves nothing.
 
 This isn't automatic orchestration; it's a durable handoff trail and mailroom. A different agent picks up where the last one stopped, with full context, instead of starting blind.
 

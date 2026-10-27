@@ -163,7 +163,7 @@ Sync is an explicit pull, not a background process. Each session has its own exe
 
 ## Activity and handoffs
 
-The activity dashboard lists active agent tasks, flags sessions that have gone stale (no heartbeat for more than the configured threshold), and surfaces pending handoffs with options to reassign. It also reports what share of workspace activities were linked to a workspace-sync execution, for both the installation lifetime and the last 30 days. When an agent finishes or stops a task, it records a structured handoff on the activity (`completed`, `next_steps`, `open_questions`, `needs_human`), and the next session's context shows it.
+The activity dashboard lists active agent tasks, flags sessions that have gone stale (no heartbeat for more than the configured threshold), and surfaces pending handoffs with options to reassign. It also reports what share of workspace activities were linked to a workspace-sync execution, for both the installation lifetime and the last 30 days. When an agent finishes or stops a task, it records a structured handoff on the activity (`completed`, `next_steps`, `open_questions`, `needs_human`), and the next session's context shows it. A `needs_human` request waits on a person until someone marks it resolved, the agent that asked resolves it with `activity_handoff_resolve`, or a newer request from that agent in the same workspace replaces it.
 
 Activity tracking is self-reported. There is no automatic detection of agent work: a working agent must call `activity_update` at the start of a task and periodically as a heartbeat. Without that, nothing appears in the dashboard and no handoff is recorded.
 
