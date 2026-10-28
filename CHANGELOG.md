@@ -4,6 +4,8 @@ Notable changes to Agent Core are documented here. The format follows [Keep a Ch
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-10-28
+
 ### Added
 
 - Credential requests: the MCP `credential_request(scope, name, purpose)` tool lets an agent ask for a secret it needs without the value passing through it. A person fills or declines the request under **Requested by agents** on the Credentials page (`GET /api/credentials/requests`, `POST /api/credentials/requests/{id}/fulfill` and `/cancel`, human sessions only), and the agent receives the AC_SECRET reference by calling the tool again. Requests are idempotent per scope and name, a declined request is not reopened by asking again, and each agent can have at most 20 open.

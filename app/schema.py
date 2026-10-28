@@ -266,7 +266,7 @@ CREATE TABLE IF NOT EXISTS system_settings (
 -- Insert initial system settings
 INSERT OR IGNORE INTO system_settings (key, value) VALUES ('scratchpad_retention_days', '7');
 INSERT OR IGNORE INTO system_settings (key, value) VALUES ('solo_mode_enabled', 'true');
-INSERT OR IGNORE INTO system_settings (key, value) VALUES ('installed_version', '1.0.0');
+INSERT OR IGNORE INTO system_settings (key, value) VALUES ('installed_version', '1.1.0');
 INSERT OR IGNORE INTO system_settings (key, value) VALUES ('vector_search_enabled', 'false');
 INSERT OR IGNORE INTO system_settings (key, value) VALUES ('vector_provider', 'ollama');
 INSERT OR IGNORE INTO system_settings (key, value) VALUES ('vector_model', 'nomic-embed-text');

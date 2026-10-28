@@ -5,7 +5,7 @@ import zipfile
 import sqlite3
 from io import BytesIO
 
-from app.branding import APP_SLUG
+from app.branding import APP_SLUG, APP_VERSION
 
 
 def test_backup_restore_requires_admin(test_client, agent_token):
@@ -85,7 +85,7 @@ def test_backup_restore_accepts_legacy_manifest_key(
     )
 
     assert r.status_code == 200, r.text
-    assert r.json()["data"]["manifest"]["app_version"] == "1.0.0"
+    assert r.json()["data"]["manifest"]["app_version"] == APP_VERSION
 
 
 def test_replace_all_restore_round_trips_data(clean_db):

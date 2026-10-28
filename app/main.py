@@ -7,7 +7,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse
 from starlette.middleware.cors import CORSMiddleware
 
-from app.branding import APP_NAME, ENV_PREFIX
+from app.branding import APP_NAME, APP_VERSION, ENV_PREFIX
 from app.config import settings
 from app.routes import (
     health_router,
@@ -91,7 +91,7 @@ async def _lifespan(app: FastAPI):
 def create_app() -> FastAPI:
     app = FastAPI(
         title=APP_NAME,
-        version="1.0.0",
+        version=APP_VERSION,
         description=f"{APP_NAME} local-first AI agent control layer",
         lifespan=_lifespan,
     )
