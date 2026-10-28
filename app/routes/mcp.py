@@ -1,5 +1,6 @@
 import asyncio
 import json
+import time
 import logging
 from typing import Optional
 
@@ -8,6 +9,8 @@ from fastapi.responses import JSONResponse, Response
 from jsonschema import Draft202012Validator
 
 from app.security.dependencies import get_mcp_request_context
+from app.security.rate_limiter import CSG, RL
+from app.security.response_helpers import rate_limited_response
 from app.security.scope_enforcer import ScopeEnforcer
 from app.security.effective_authority import EffectiveAuthority
 from app.branding import APP_NAME, CREDENTIAL_PREFIX, MCP_SERVER_DESCRIPTION
@@ -430,7 +433,7 @@ MANIFEST = {
                         "type": "string",
                         "description": (
                             "The task in another system that this work belongs to, as '<system>:<id>' "
-                            "(e.g. 'openagents:123', 'foundry:<objective>'). Stored as metadata.task_ref."
+                            "(e.g. 'jira:PROJ-123', 'github:owner/repo#42'). Stored as metadata.task_ref."
                         ),
                     },
                     "handoff": {
@@ -1165,7 +1168,32 @@ async def _handle_mcp_jsonrpc(body: dict, request: Request, ctx: EffectiveAuthor
 HANDOFF_RESOLVE_REASON_MAX = 500
 
 
+# The per-agent limits REST applies to memory writes and searches (see
+# docs/security.md). They count against the same buckets, so an agent cannot
+# double its budget by switching transport.
+_RATE_LIMITED_TOOLS = ("memory_write", "memory_search")
+
+
 async def _handle_custom_mcp_tool(body: dict, ctx: EffectiveAuthority):
+    tool = body.get("tool")
+    if tool in _RATE_LIMITED_TOOLS and ctx.agent_id:
+        allowed, info = RL.check("agent", ctx.agent_id, tool)
+        if not allowed:
+            wait = max(0, int(info["reset"] - time.time()))
+            return rate_limited_response(
+                "RATE_LIMITED", f"{tool} rate limit exceeded; retry in about {wait}s", **info
+            )
+    if tool == "memory_search" and ctx.agent_id:
+        if not CSG.acquire(ctx.agent_id):
+            return _mcp_error("CONCURRENT_LIMIT", "Too many concurrent searches", 429)
+        try:
+            return await _run_custom_mcp_tool(body, ctx)
+        finally:
+            CSG.release(ctx.agent_id)
+    return await _run_custom_mcp_tool(body, ctx)
+
+
+async def _run_custom_mcp_tool(body: dict, ctx: EffectiveAuthority):
     enforcer = ScopeEnforcer(
         ctx.read_scopes,
         ctx.write_scopes,

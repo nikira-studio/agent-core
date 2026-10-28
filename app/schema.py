@@ -140,7 +140,7 @@ CREATE TABLE IF NOT EXISTS memory_records (
     importance REAL NOT NULL DEFAULT 0.5 CHECK (importance >= 0.0 AND importance <= 1.0),
     source_kind TEXT NOT NULL DEFAULT 'agent_inference' CHECK (source_kind IN ('operator_authored', 'human_direct', 'tool_output', 'agent_inference', 'episodic_inference', 'semantic_inference', 'external_import')),
     created_at TEXT NOT NULL,
-    record_status TEXT NOT NULL DEFAULT 'active' CHECK (record_status IN ('active', 'superseded', 'retracted', 'held')),
+    record_status TEXT NOT NULL DEFAULT 'active' CHECK (record_status IN ('active', 'superseded', 'retracted')),
     superseded_by_id TEXT,
     supersedes_id TEXT,
     provenance_json TEXT,

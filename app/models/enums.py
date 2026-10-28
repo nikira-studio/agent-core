@@ -34,7 +34,7 @@ SOURCE_KINDS = (
     "external_import",
 )
 
-RECORD_STATUSES = ("active", "superseded", "retracted", "held")
+RECORD_STATUSES = ("active", "superseded", "retracted")
 
 ACTIVITY_STATUSES = (
     "active",
