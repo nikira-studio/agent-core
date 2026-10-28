@@ -264,7 +264,7 @@ def _open_requests_query(conn, *, agent_id: str, user_id: Optional[str], memory_
         params.append(exclude_id)
     rows = conn.execute(
         "SELECT id, agent_id, assigned_agent_id, user_id, memory_scope, task_description, "
-        "status, updated_at, ended_at, handoff_requested_at, handoff_json "
+        "status, updated_at, ended_at, handoff_requested_at, handoff_json, metadata_json "
         f"FROM agent_activity WHERE {' AND '.join(conditions)} ORDER BY updated_at DESC",
         params,
     ).fetchall()
@@ -284,6 +284,26 @@ def _request_time(row: dict):
             except (TypeError, ValueError):
                 continue
     return None
+
+
+def task_ref(activity: dict) -> Optional[str]:
+    """The caller's own task identifier, metadata.task_ref (for example
+    "foundry:<objective_id>"), or None when the activity has none."""
+    metadata = load_handoff(activity.get("metadata_json"))  # any JSON object
+    value = metadata.get("task_ref")
+    return value.strip() if isinstance(value, str) and value.strip() else None
+
+
+def _same_task(rows: list[dict], ref: Optional[str]) -> list[dict]:
+    """Requests that belong to the same task stream as `ref`.
+
+    Tools that run several tasks as one agent in one scope (Foundry's
+    objectives, OpenAgents specialists) tag each activity with
+    metadata.task_ref; one task's request must not replace another's. Two
+    activities without a task_ref (ordinary terminal sessions) count as the
+    same stream; a task_ref'd one and an untagged one never do.
+    """
+    return [row for row in rows if task_ref(row) == ref]
 
 
 def _made_before(rows: list[dict], cutoff: Optional[str]) -> list[dict]:
@@ -306,13 +326,17 @@ def list_open_requests_for_agent(
     user_id: Optional[str] = None,
     exclude_id: Optional[str] = None,
     made_before: Optional[str] = None,
+    same_task_as: Optional[dict] = None,
 ) -> list[dict]:
     """This agent's own unresolved needs_human requests in one scope, newest
-    first; with made_before, only those made before that time."""
+    first; with made_before, only those made before that time; with
+    same_task_as, only those with that activity's task_ref."""
     with get_db() as conn:
         rows = _open_requests_query(
             conn, agent_id=agent_id, user_id=user_id, memory_scope=memory_scope, exclude_id=exclude_id
         )
+    if same_task_as is not None:
+        rows = _same_task(rows, task_ref(same_task_as))
     return _made_before(rows, made_before)
 
 
@@ -321,8 +345,9 @@ def supersede_open_requests(activity: dict, *, resolved_by: Optional[str]) -> li
 
     Superseded: requests of activities with the same assigned agent, the same
     user and the same memory scope, other than `activity` itself, made before
-    `activity` started. A request a parallel session made after this one
-    started is left alone. They are resolved with kind "superseded" pointing
+    `activity` started, and with the same metadata.task_ref (both absent
+    counts as the same). A request a parallel session made after this one
+    started, or one of a different task, is left alone. They are resolved with kind "superseded" pointing
     at `activity`, and returned (with their asks) so the agent can restate any
     that still apply. Nothing crosses a scope or a user.
     """
@@ -333,12 +358,15 @@ def supersede_open_requests(activity: dict, *, resolved_by: Optional[str]) -> li
     superseded = []
     with get_db() as conn:
         rows = _made_before(
-            _open_requests_query(
-                conn,
-                agent_id=agent_id,
-                user_id=activity.get("user_id") or "",
-                memory_scope=scope,
-                exclude_id=activity["id"],
+            _same_task(
+                _open_requests_query(
+                    conn,
+                    agent_id=agent_id,
+                    user_id=activity.get("user_id") or "",
+                    memory_scope=scope,
+                    exclude_id=activity["id"],
+                ),
+                task_ref(activity),
             ),
             activity.get("started_at"),
         )
@@ -438,6 +466,7 @@ def handoff_followups(
             user_id=activity.get("user_id") or "",
             exclude_id=activity["id"],
             made_before=activity.get("started_at"),
+            same_task_as=activity,
         )
         if rows:
             extra["open_requests"] = [request_summary(row) for row in rows]

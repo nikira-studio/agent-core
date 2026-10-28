@@ -450,3 +450,55 @@ def test_rest_handoff_on_a_closed_task_adds_asks(test_client, admin_token):
     response = _put(test_client, headers, closed["id"], handoff={"needs_human": "Second ask."})
     assert response.status_code == 200, response.json()  # a handoff alone used to fail with a 500
     assert _handoff(closed["id"])[0]["needs_human"] == "First ask.\n\nSecond ask."
+
+
+def _tagged(owner_id, description, ref=None):
+    return activity_service.create_activity(
+        agent_id="h-agent", user_id=owner_id, task_description=description, memory_scope=SCOPE,
+        metadata_json=json.dumps({"task_ref": ref}) if ref else None,
+    )
+
+
+def _close_with_request(client, headers, activity, ask):
+    response = _put(client, headers, activity["id"], status="completed", handoff={"needs_human": ask})
+    assert response.status_code == 200, response.json()
+    return response.json()["data"]
+
+
+def test_superseding_is_per_task_ref(test_client, admin_token):
+    owner_id, headers, _ = _setup()
+    a = _tagged(owner_id, "Objective A", "foundry:A")
+    _close_with_request(test_client, headers, a, "A needs a decision.")
+    b = _tagged(owner_id, "Objective B", "foundry:B")  # started after A's request
+    data = _close_with_request(test_client, headers, b, "B needs a decision.")
+    assert "superseded_requests" not in data
+    assert {w["id"] for w in activity_service.list_needs_human()} == {a["id"], b["id"]}
+
+    # Closing another objective without a request reminds only of its own task's requests.
+    c = _tagged(owner_id, "Objective C", "foundry:C")
+    data = _put(test_client, headers, c["id"], status="completed", task_result="done").json()["data"]
+    assert "open_requests" not in data
+
+    # A later session of objective A replaces A's earlier request, and only that.
+    a2 = _tagged(owner_id, "Objective A, again", "foundry:A")
+    data = _close_with_request(test_client, headers, a2, "A needs a second decision.")
+    assert [r["activity_id"] for r in data["superseded_requests"]] == [a["id"]]
+    assert _handoff(a["id"])[1] and not _handoff(b["id"])[1]
+
+
+def test_tagged_and_untagged_tasks_never_supersede_each_other(test_client, admin_token):
+    owner_id, headers, _ = _setup()
+    tagged = _tagged(owner_id, "Tagged", "openagents:42")
+    _close_with_request(test_client, headers, tagged, "Tagged ask.")
+    untagged = _tagged(owner_id, "Untagged")
+    data = _close_with_request(test_client, headers, untagged, "Untagged ask.")
+    assert "superseded_requests" not in data and not _handoff(tagged["id"])[1]
+
+    tagged2 = _tagged(owner_id, "Tagged, other task", "openagents:43")
+    data = _close_with_request(test_client, headers, tagged2, "Another tagged ask.")
+    assert "superseded_requests" not in data and not _handoff(untagged["id"])[1]
+
+    # Untagged terminal sessions still supersede each other.
+    data = _task(test_client, headers, "Terminal session", {"needs_human": "Terminal ask."})
+    assert [r["activity_id"] for r in data["superseded_requests"]] == [untagged["id"]]
+    assert not _handoff(tagged["id"])[1] and not _handoff(tagged2["id"])[1]
