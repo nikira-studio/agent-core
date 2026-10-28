@@ -65,7 +65,7 @@ def get_activity(activity_id: str) -> Optional[dict]:
             """
             SELECT id, agent_id, user_id, assigned_agent_id, reassigned_from_agent_id,
                    task_description, task_note, task_result, status, memory_scope, started_at, updated_at,
-                   heartbeat_at, ended_at, metadata_json, handoff_json, handoff_resolved_at
+                   heartbeat_at, ended_at, metadata_json, handoff_json, handoff_requested_at, handoff_resolved_at
             FROM agent_activity WHERE id = ?
             """,
             (activity_id,),
@@ -80,7 +80,7 @@ HANDOFF_RESOLUTION_KINDS = ("person", "agent", "superseded")
 REQUEST_SUMMARY_CHARS = 200
 
 
-def _load_handoff(raw) -> dict:
+def load_handoff(raw) -> dict:
     try:
         value = json.loads(raw or "{}")
     except (TypeError, ValueError):
@@ -88,36 +88,92 @@ def _load_handoff(raw) -> dict:
     return value if isinstance(value, dict) else {}
 
 
-def set_handoff(activity_id: str, handoff: dict) -> None:
+def split_asks(text: Optional[str]) -> list[str]:
+    """The separate asks in a needs_human text: its blank-line paragraphs."""
+    return [part.strip() for part in re.split(r"\n\s*\n", text or "") if part.strip()]
+
+
+def merge_handoff(previous: dict, new: dict, *, previous_resolved: bool) -> dict:
+    """An amendment to a closed task's handoff: it adds, it does not replace.
+
+    needs_human stays one string (every reader treats it as text); each ask
+    is a paragraph, and the amendment's asks are appended as new paragraphs
+    unless the same paragraph is already there. A request that was already
+    resolved is no longer an ask, so new asks start a fresh request. The
+    next_steps and open_questions lists gain the new items they lack;
+    completed is replaced when the amendment gives one. Nothing is removed:
+    an ask leaves only through activity_handoff_resolve or a person.
+    """
+    from app.services.session_context_service import HANDOFF_MAX_CHARS
+
+    merged = {k: v for k, v in previous.items() if k != "resolution"}
+    if new.get("completed"):
+        merged["completed"] = new["completed"]
+    for key in ("next_steps", "open_questions"):
+        items = list(merged.get(key) or [])
+        items += [item for item in new.get(key) or [] if item not in items]
+        if items:
+            merged[key] = items
+    if new.get("needs_human"):
+        asks = [] if previous_resolved else split_asks(previous.get("needs_human"))
+        asks += [ask for ask in split_asks(new["needs_human"]) if ask not in asks]
+        merged["needs_human"] = "\n\n".join(asks)
+    if len(json.dumps(merged)) > HANDOFF_MAX_CHARS:
+        raise ValueError(
+            f"the amended handoff would be over {HANDOFF_MAX_CHARS} characters; "
+            "resolve asks that are done with activity_handoff_resolve first"
+        )
+    return merged
+
+
+def set_handoff(activity_id: str, handoff: dict, *, amend: bool = False) -> Optional[dict]:
     """Store a validated structured handoff (see session_context_service).
+
+    With amend=True the handoff is merged into the stored one (merge_handoff)
+    instead of replacing it; that is how a closed task's handoff is changed.
 
     A request already resolved stays resolved unless the new handoff asks a
     person for something different; when it stays resolved, the recorded
     resolution is carried over. The caller's handoff never carries a
     resolution of its own: normalize_handoff rejects the field.
+
+    handoff_requested_at is set to now whenever a needs_human request is
+    recorded or changes. Before a handoff exists, the column is the Stop
+    hook's "already asked" stamp; once one exists nothing reads it for that,
+    so it becomes the time the request was made, which superseding compares
+    against session start. Returns the stored handoff, or None if there is
+    no such activity. Raises ValueError when an amendment is too large.
     """
+    now = utc_now_iso()
     with get_db() as conn:
         row = conn.execute(
-            "SELECT handoff_json, handoff_resolved_at FROM agent_activity WHERE id = ?",
+            "SELECT handoff_json, handoff_resolved_at, handoff_requested_at FROM agent_activity WHERE id = ?",
             (activity_id,),
         ).fetchone()
         if not row:
-            return
-        stored = dict(handoff)
-        stored.pop("resolution", None)
+            return None
+        previous = load_handoff(row["handoff_json"]) if row["handoff_json"] is not None else {}
+        was_resolved = bool(row["handoff_resolved_at"]) and row["handoff_json"] is not None
+        if amend:
+            stored = merge_handoff(previous, handoff, previous_resolved=was_resolved)
+        else:
+            stored = {k: v for k, v in handoff.items() if k != "resolution"}
+        same_request = previous.get("needs_human") == stored.get("needs_human")
         resolved_at = None
-        if row["handoff_resolved_at"] and row["handoff_json"] is not None:
-            previous = _load_handoff(row["handoff_json"])
-            if previous.get("needs_human") == handoff.get("needs_human"):
-                resolved_at = row["handoff_resolved_at"]
-                if isinstance(previous.get("resolution"), dict):
-                    stored["resolution"] = previous["resolution"]
+        if was_resolved and same_request:
+            resolved_at = row["handoff_resolved_at"]
+            if isinstance(previous.get("resolution"), dict):
+                stored["resolution"] = previous["resolution"]
+        requested_at = row["handoff_requested_at"]
+        if stored.get("needs_human") and not same_request:
+            requested_at = now
         conn.execute(
-            "UPDATE agent_activity SET handoff_json = ?, handoff_resolved_at = ?, updated_at = ? "
-            "WHERE id = ?",
-            (json.dumps(stored, separators=(",", ":")), resolved_at, utc_now_iso(), activity_id),
+            "UPDATE agent_activity SET handoff_json = ?, handoff_resolved_at = ?, "
+            "handoff_requested_at = ?, updated_at = ? WHERE id = ?",
+            (json.dumps(stored, separators=(",", ":")), resolved_at, requested_at, now, activity_id),
         )
         conn.commit()
+        return stored
 
 
 def _resolve_in_connection(
@@ -173,7 +229,7 @@ def resolve_handoff(
 
 def request_summary(row: dict) -> dict:
     """An open or superseded request as an agent sees it: enough to restate it."""
-    handoff = _load_handoff(row.get("handoff_json"))
+    handoff = load_handoff(row.get("handoff_json"))
     description = " ".join((row.get("task_description") or "").split())
     if len(description) > REQUEST_SUMMARY_CHARS:
         description = description[: REQUEST_SUMMARY_CHARS - 1].rstrip() + "…"
@@ -208,11 +264,40 @@ def _open_requests_query(conn, *, agent_id: str, user_id: Optional[str], memory_
         params.append(exclude_id)
     rows = conn.execute(
         "SELECT id, agent_id, assigned_agent_id, user_id, memory_scope, task_description, "
-        "status, updated_at, handoff_json "
+        "status, updated_at, ended_at, handoff_requested_at, handoff_json "
         f"FROM agent_activity WHERE {' AND '.join(conditions)} ORDER BY updated_at DESC",
         params,
     ).fetchall()
     return [dict(r) for r in rows]
+
+
+def _request_time(row: dict):
+    """When a request was made. handoff_requested_at is stamped when one is
+    recorded; legacy rows (from before that) may lack it, and then the end of
+    the task, or failing that its last update, stands in. A legacy row whose
+    column holds the Stop hook's earlier stamp reads as slightly older than
+    it is, which only matters for a session that overlapped it."""
+    for value in (row.get("handoff_requested_at"), row.get("ended_at"), row.get("updated_at")):
+        if value:
+            try:
+                return parse_utc_datetime(value)
+            except (TypeError, ValueError):
+                continue
+    return None
+
+
+def _made_before(rows: list[dict], cutoff: Optional[str]) -> list[dict]:
+    """Requests made before `cutoff` (a session's start). A parallel session's
+    request made after this one started is that session's business."""
+    if not cutoff:
+        return rows
+    limit = parse_utc_datetime(cutoff)
+    kept = []
+    for row in rows:
+        made = _request_time(row)
+        if made is not None and made < limit:
+            kept.append(row)
+    return kept
 
 
 def list_open_requests_for_agent(
@@ -220,22 +305,26 @@ def list_open_requests_for_agent(
     memory_scope: str,
     user_id: Optional[str] = None,
     exclude_id: Optional[str] = None,
+    made_before: Optional[str] = None,
 ) -> list[dict]:
-    """This agent's own unresolved needs_human requests in one scope, newest first."""
+    """This agent's own unresolved needs_human requests in one scope, newest
+    first; with made_before, only those made before that time."""
     with get_db() as conn:
-        return _open_requests_query(
+        rows = _open_requests_query(
             conn, agent_id=agent_id, user_id=user_id, memory_scope=memory_scope, exclude_id=exclude_id
         )
+    return _made_before(rows, made_before)
 
 
 def supersede_open_requests(activity: dict, *, resolved_by: Optional[str]) -> list[dict]:
     """A new needs_human handoff on `activity` replaces the older open requests.
 
     Superseded: requests of activities with the same assigned agent, the same
-    user and the same memory scope, other than `activity` itself. They are
-    resolved with kind "superseded" pointing at `activity`, and returned (with
-    their asks) so the agent can restate any that still apply. Nothing crosses
-    a scope or a user.
+    user and the same memory scope, other than `activity` itself, made before
+    `activity` started. A request a parallel session made after this one
+    started is left alone. They are resolved with kind "superseded" pointing
+    at `activity`, and returned (with their asks) so the agent can restate any
+    that still apply. Nothing crosses a scope or a user.
     """
     agent_id = activity.get("assigned_agent_id")
     scope = activity.get("memory_scope")
@@ -243,12 +332,15 @@ def supersede_open_requests(activity: dict, *, resolved_by: Optional[str]) -> li
         return []
     superseded = []
     with get_db() as conn:
-        rows = _open_requests_query(
-            conn,
-            agent_id=agent_id,
-            user_id=activity.get("user_id") or "",
-            memory_scope=scope,
-            exclude_id=activity["id"],
+        rows = _made_before(
+            _open_requests_query(
+                conn,
+                agent_id=agent_id,
+                user_id=activity.get("user_id") or "",
+                memory_scope=scope,
+                exclude_id=activity["id"],
+            ),
+            activity.get("started_at"),
         )
         at = utc_now_iso()
         for row in rows:
@@ -264,6 +356,104 @@ def supersede_open_requests(activity: dict, *, resolved_by: Optional[str]) -> li
                 superseded.append({**row, "resolution": resolution})
         conn.commit()
     return superseded
+
+
+def handoff_followups(
+    activity: dict,
+    handoff: Optional[dict],
+    *,
+    closing: bool,
+    actor_type: str,
+    actor_id: Optional[str],
+) -> dict:
+    """What an update that carried a handoff, or closed a task, does to the
+    assigned agent's other requests. Shared by MCP activity_update and REST
+    PUT /api/activity/{id}, so both answer with the same fields.
+
+    - A needs_human request supersedes the agent's earlier open requests in
+      the scope (supersede_open_requests): returned as superseded_requests,
+      each audited as handoff_superseded and announced.
+    - Otherwise, closing (completed or blocked) lists the agent's earlier open
+      requests as open_requests with a reminder, and resolves nothing.
+
+    `activity` is the updated activity. Returns response fields to merge:
+    superseded_requests or open_requests, and warnings.
+    """
+    from app.services import audit_service
+
+    extra: dict = {}
+    warnings: list[dict] = []
+    if closing and not activity.get("handoff_json"):
+        warnings.append(
+            {
+                "code": "HANDOFF_MISSING",
+                "message": "Closed without a handoff. Pass handoff={completed, next_steps, "
+                "open_questions, needs_human} so the next session can pick this up.",
+            }
+        )
+    scope = activity.get("memory_scope")
+    if handoff and handoff.get("needs_human"):
+        rows = supersede_open_requests(activity, resolved_by=actor_id)
+        for row in rows:
+            summary = request_summary(row)
+            audit_service.write_event(
+                actor_type=actor_type,
+                actor_id=actor_id,
+                action="handoff_superseded",
+                resource_type="activity",
+                resource_id=row["id"],
+                result="success",
+                details=audit_details(
+                    row,
+                    kind="superseded",
+                    actor_type=actor_type,
+                    superseded_by=activity["id"],
+                    needs_human=summary.get("needs_human"),
+                ),
+            )
+            notify(
+                "activity_updated",
+                get_activity(row["id"]) or row,
+                handoff_resolution="superseded",
+                superseded_by=activity["id"],
+            )
+        if rows:
+            extra["superseded_requests"] = [request_summary(row) for row in rows]
+            warnings.append(
+                {
+                    "code": "HANDOFF_REQUESTS_SUPERSEDED",
+                    "message": (
+                        f"This handoff replaced {len(rows)} earlier open request(s) of this agent in "
+                        f"{scope}, listed in superseded_requests; they are no longer waiting on a "
+                        "person. If any still applies, restate it now: while the task is open, include "
+                        "it in the full handoff; once the task is closed, send a handoff with only the "
+                        "restated ask and it is added to the asks already there."
+                    ),
+                }
+            )
+    elif closing and scope and activity.get("assigned_agent_id"):
+        rows = list_open_requests_for_agent(
+            activity["assigned_agent_id"],
+            scope,
+            user_id=activity.get("user_id") or "",
+            exclude_id=activity["id"],
+            made_before=activity.get("started_at"),
+        )
+        if rows:
+            extra["open_requests"] = [request_summary(row) for row in rows]
+            warnings.append(
+                {
+                    "code": "OPEN_HANDOFF_REQUESTS",
+                    "message": (
+                        f"This agent has {len(rows)} earlier open request(s) to a person in this scope, "
+                        "listed in open_requests: resolve each one that has been dealt with using "
+                        "activity_handoff_resolve(activity_id, reason), or restate it in a handoff."
+                    ),
+                }
+            )
+    if warnings:
+        extra["warnings"] = warnings
+    return extra
 
 
 def list_needs_human(user_id: Optional[str] = None, limit: int = 20) -> list[dict]:

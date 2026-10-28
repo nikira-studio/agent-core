@@ -253,6 +253,19 @@ def update_activity(
             "INVALID_TRANSITION", "Cannot close a non-active activity", 400
         )
 
+    # A closed task's handoff is amended, not replaced: its asks to a person
+    # leave only through a resolution (see activity_service.merge_handoff).
+    amend = activity["status"] in ("completed", "blocked")
+    if handoff and amend:
+        try:
+            activity_service.merge_handoff(
+                activity_service.load_handoff(activity.get("handoff_json")),
+                handoff,
+                previous_resolved=bool(activity.get("handoff_resolved_at")),
+            )
+        except ValueError as exc:  # checked before anything is written
+            return error_response("INVALID_HANDOFF", str(exc), 400)
+
     success = activity_service.update_activity(
         activity_id,
         status=body.status,
@@ -261,10 +274,10 @@ def update_activity(
         metadata_json=body.metadata_json,
         source_execution_id=body.execution_id,
     )
-    if not success:
+    if not success and not handoff:  # a handoff alone is an update too
         return error_response("UPDATE_FAILED", "Activity update failed", 500)
     if handoff:
-        activity_service.set_handoff(activity_id, handoff)
+        activity_service.set_handoff(activity_id, handoff, amend=amend)
 
     updated = activity_service.get_activity(activity_id) or activity
     audit_service.write_event(
@@ -285,7 +298,14 @@ def update_activity(
         "activity_updated", updated, previous_status=activity["status"]
     )
 
-    return success_response({"activity": updated})
+    followups = activity_service.handoff_followups(
+        updated,
+        handoff,
+        closing=body.status in ("completed", "blocked") and activity["status"] in ("active", "stale"),
+        actor_type=ctx.actor_type,
+        actor_id=ctx.actor_id,
+    )
+    return success_response({"activity": updated, **followups})
 
 
 @router.post("/{activity_id}/handoff/resolve")

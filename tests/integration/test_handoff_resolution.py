@@ -118,25 +118,29 @@ def test_new_request_supersedes_older_ones_and_agent_restates_one(test_client, a
 
     # The contract still needs a person: the agent restates it in the same
     # session by amending the handoff it just closed with.
+    # It sends only the restated ask; the amendment adds it to the asks there.
     restated = _mcp(test_client, headers, "activity_update", memory_scope=SCOPE, handoff={
-        "completed": "Release branch cut.",
-        "needs_human": "Review the release notes. Still open from earlier: approve the vendor contract.",
+        "needs_human": "Approve the vendor contract.",
     })
     assert restated.status_code == 200, restated.json()
     assert restated.json()["data"]["handoff_amended"] is True
     assert restated.json()["data"]["activity"]["id"] == third["id"]
     assert "superseded_requests" not in restated.json()["data"]
 
+    handoff, resolved_at = _handoff(third["id"])
+    assert handoff["needs_human"] == "Review the release notes.\n\nApprove the vendor contract."
+    assert handoff["completed"] == "Release branch cut." and not resolved_at
     waiting = activity_service.list_needs_human()
     assert [w["id"] for w in waiting] == [third["id"]]
-    assert "approve the vendor contract" in waiting[0]["needs_human"]
+    assert "Review the release notes." in waiting[0]["needs_human"]
+    assert "Approve the vendor contract." in waiting[0]["needs_human"]
     assert _handoff(second["id"])[1]  # the key rotation stays superseded
 
     _as_person(test_client, owner_id)
     page = test_client.get("/activity").text
     test_client.cookies.clear()
     queue, superseded_group = page.split("<details class='handoff-superseded'", 1)
-    assert "approve the vendor contract" in queue
+    assert "Approve the vendor contract." in queue and "Review the release notes." in queue
     assert f"data-handoff-resolve='{third['id']}'" in queue
     assert "Rotate the API key in the provider console." not in queue
     assert "Superseded by a later handoff (2)" in superseded_group
@@ -341,3 +345,108 @@ def test_session_context_shows_the_agent_its_own_open_requests(test_client, admi
                              json={"memory_scope": SCOPE}).json()["data"]["context"]
     assert "My own request." not in other  # past the scope-wide limit, and not theirs
     assert "activity_handoff_resolve" not in other
+
+
+def test_an_amendment_adds_asks_and_never_drops_one(test_client, admin_token):
+    _, headers, _ = _setup()
+    closed = _task(test_client, headers, "Ship it", {
+        "completed": "Built.", "next_steps": ["Tag"], "open_questions": ["When?"],
+        "needs_human": "Approve the release.\n\nBook the window.",
+    }, status="blocked")["activity"]
+
+    def amend(**handoff):
+        response = _mcp(test_client, headers, "activity_update", memory_scope=SCOPE, handoff=handoff)
+        assert response.status_code == 200, response.json()
+        return _handoff(closed["id"])
+
+    # A different request, a repeated ask and list items: all added, none removed.
+    handoff, _ = amend(needs_human="Book the window.\n\nSign the change form.",
+                       next_steps=["Announce", "Tag"], completed="Built and staged.")
+    assert handoff["needs_human"] == "Approve the release.\n\nBook the window.\n\nSign the change form."
+    assert handoff["next_steps"] == ["Tag", "Announce"] and handoff["open_questions"] == ["When?"]
+    assert handoff["completed"] == "Built and staged."
+    requested = activity_service.get_activity(closed["id"])["handoff_requested_at"]
+
+    # No ask in the amendment: the request is untouched and keeps its time.
+    handoff, resolved_at = amend(open_questions=["Which region?"])
+    assert handoff["needs_human"].startswith("Approve the release.") and not resolved_at
+    assert handoff["open_questions"] == ["When?", "Which region?"]
+    assert activity_service.get_activity(closed["id"])["handoff_requested_at"] == requested
+
+    # Only a resolution removes asks; a later ask then starts a fresh request.
+    _mcp(test_client, headers, "activity_handoff_resolve", activity_id=closed["id"], reason="All done.")
+    handoff, resolved_at = amend(next_steps=["Close the ticket"])
+    assert resolved_at and handoff["resolution"]["kind"] == "agent"
+    handoff, resolved_at = amend(needs_human="Confirm the rollback plan.")
+    assert handoff["needs_human"] == "Confirm the rollback plan." and not resolved_at
+    assert "resolution" not in handoff
+
+    # An amendment that would overflow the size limit is refused whole.
+    response = _mcp(test_client, headers, "activity_update", memory_scope=SCOPE,
+                    handoff={"needs_human": "x" * 3900})
+    assert response.status_code == 400 and response.json()["error"]["code"] == "INVALID_HANDOFF"
+    assert _handoff(closed["id"])[0]["needs_human"] == "Confirm the rollback plan."
+
+
+def _put(client, headers, activity_id, **body):
+    return client.put(f"/api/activity/{activity_id}", headers=headers, json=body)
+
+
+def test_parallel_sessions_do_not_supersede_each_other(test_client, admin_token):
+    owner_id, headers, _ = _setup()
+    first = activity_service.create_activity(
+        agent_id="h-agent", user_id=owner_id, task_description="Session A", memory_scope=SCOPE,
+    )
+    second = activity_service.create_activity(
+        agent_id="h-agent", user_id=owner_id, task_description="Session B", memory_scope=SCOPE,
+    )
+    a = _put(test_client, headers, first["id"], status="completed", handoff={"needs_human": "A's ask."})
+    b = _put(test_client, headers, second["id"], status="completed", handoff={"needs_human": "B's ask."})
+    assert a.status_code == 200 and b.status_code == 200, (a.json(), b.json())
+    # A started before B, but its request was made after B started.
+    assert "superseded_requests" not in a.json()["data"]
+    assert "superseded_requests" not in b.json()["data"]
+    assert {w["id"] for w in activity_service.list_needs_human()} == {first["id"], second["id"]}
+
+    # A later session still clears both.
+    later = _task(test_client, headers, "Session C", {"needs_human": "C's ask."})
+    assert {r["activity_id"] for r in later["superseded_requests"]} == {first["id"], second["id"]}
+
+
+def test_rest_update_supersedes_and_reminds_like_mcp(test_client, admin_token):
+    owner_id, headers, _ = _setup()
+    old = _closed_request(owner_id, "Old task", {"needs_human": "Old ask.", "open_questions": ["Q?"]})
+    current = activity_service.create_activity(
+        agent_id="h-agent", user_id=owner_id, task_description="REST task", memory_scope=SCOPE,
+    )
+    response = _put(test_client, headers, current["id"], status="completed",
+                    handoff={"needs_human": "New ask."})
+    assert response.status_code == 200, response.json()
+    data = response.json()["data"]
+    assert [r["activity_id"] for r in data["superseded_requests"]] == [old["id"]]
+    assert data["superseded_requests"][0]["needs_human"] == "Old ask."
+    assert data["superseded_requests"][0]["open_questions"] == ["Q?"]
+    assert [w["code"] for w in data["warnings"]] == ["HANDOFF_REQUESTS_SUPERSEDED"]
+    assert _handoff(old["id"])[0]["resolution"]["superseded_by"] == current["id"]
+    audit = _audit("handoff_superseded")
+    assert [a["resource_id"] for a in audit] == [old["id"]] and audit[0]["actor_id"] == "h-agent"
+
+    # Closing another task over REST without a request reminds and resolves nothing.
+    another = activity_service.create_activity(
+        agent_id="h-agent", user_id=owner_id, task_description="Another", memory_scope=SCOPE,
+    )
+    data = _put(test_client, headers, another["id"], status="completed", task_result="done").json()["data"]
+    assert [r["activity_id"] for r in data["open_requests"]] == [current["id"]]
+    assert [w["code"] for w in data["warnings"]] == ["HANDOFF_MISSING", "OPEN_HANDOFF_REQUESTS"]
+    assert not _handoff(current["id"])[1]
+
+
+def test_rest_handoff_on_a_closed_task_adds_asks(test_client, admin_token):
+    owner_id, headers, _ = _setup()
+    closed = activity_service.create_activity(
+        agent_id="h-agent", user_id=owner_id, task_description="Closed", memory_scope=SCOPE,
+    )
+    _put(test_client, headers, closed["id"], status="completed", handoff={"needs_human": "First ask."})
+    response = _put(test_client, headers, closed["id"], handoff={"needs_human": "Second ask."})
+    assert response.status_code == 200, response.json()  # a handoff alone used to fail with a 500
+    assert _handoff(closed["id"])[0]["needs_human"] == "First ask.\n\nSecond ask."
