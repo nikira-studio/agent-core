@@ -103,22 +103,47 @@ def _hermes_config_path() -> Optional[str]:
     return None
 
 
+def _load_yaml(path: str) -> Any:
+    """Parse a YAML file with whichever parser this Python has.
+
+    Hermes environments differ: some ship PyYAML, others only ruamel.yaml.
+    Raises ImportError when neither is installed.
+    """
+    with open(path, encoding="utf-8") as f:
+        text = f.read()
+    try:
+        import yaml
+    except ImportError:
+        yaml = None
+    if yaml is not None:
+        return yaml.safe_load(text)
+    from ruamel.yaml import YAML  # raises ImportError when absent too
+
+    return YAML(typ="safe").load(text)
+
+
 def _agent_core_mcp_block() -> Dict[str, Any]:
     """Read ``mcp_servers.agent_core`` (or ``agent-core``) from the Hermes config.
 
     Lets the provider reuse the existing Agent Core MCP server's URL + bearer as
-    a single source of truth instead of duplicating the secret. Returns {} on any
-    problem (missing file, no yaml, no block) — the caller then falls back to
-    env/defaults and, if still no token, is_available() returns False.
+    a single source of truth instead of duplicating the secret. Returns {} when
+    there is no config file or no such block; the caller then falls back to
+    env/defaults and, if still no token, is_available() returns False. A config
+    that exists but cannot be read logs one warning, so a missing YAML parser
+    or a broken file does not look like "not configured".
     """
     path = _hermes_config_path()
     if not path:
         return {}
     try:
-        import yaml  # PyYAML ships with Hermes
-        with open(path, encoding="utf-8") as f:
-            cfg = yaml.safe_load(f) or {}
-    except Exception:
+        cfg = _load_yaml(path) or {}
+    except ImportError:
+        logger.warning(
+            "agent_core provider: cannot read %s: neither PyYAML nor ruamel.yaml is installed", path
+        )
+        return {}
+    except Exception as exc:
+        logger.warning("agent_core provider: cannot parse %s (%s)", path, type(exc).__name__)
         return {}
     servers = cfg.get("mcp_servers") if isinstance(cfg, dict) else None
     if not isinstance(servers, dict):

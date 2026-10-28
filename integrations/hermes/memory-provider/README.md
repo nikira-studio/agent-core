@@ -63,6 +63,10 @@ The URL and bearer are resolved in this order (first match wins):
    is not set, the provider logs one warning naming the variable (never a
    value) and stays unavailable instead of sending the placeholder as a token.
 
+The config is read with PyYAML, or with ruamel.yaml where Hermes ships that instead;
+if neither is installed, or the file cannot be parsed, the provider logs one warning
+and stays unavailable.
+
 So in a deployment where Agent Core is already an MCP server, **no extra config
 is needed** — the provider reuses that single source of truth for the secret.
 

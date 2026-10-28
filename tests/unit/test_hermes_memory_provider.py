@@ -113,3 +113,54 @@ def test_handoff_paragraph_is_generic_and_can_be_turned_off(monkeypatch):
 
     monkeypatch.setenv("AGENT_CORE_HANDOFF_PROMPT", "0")
     assert "attention_list" not in module.AgentCoreMemoryProvider().system_prompt_block()
+
+
+def _only_ruamel(monkeypatch):
+    """A Hermes venv with ruamel.yaml and no PyYAML (the config is written as
+    JSON, which is valid YAML, so the stand-in parser can use json)."""
+    import json
+
+    ruamel = types.ModuleType("ruamel")
+    ruamel_yaml = types.ModuleType("ruamel.yaml")
+
+    class YAML:
+        def __init__(self, typ=None):
+            assert typ == "safe"
+
+        def load(self, text):
+            return json.loads(text)
+
+    ruamel_yaml.YAML = YAML
+    monkeypatch.setitem(sys.modules, "yaml", None)
+    monkeypatch.setitem(sys.modules, "ruamel", ruamel)
+    monkeypatch.setitem(sys.modules, "ruamel.yaml", ruamel_yaml)
+
+
+def test_provider_reads_the_config_with_ruamel_when_pyyaml_is_missing(monkeypatch, tmp_path):
+    import json
+
+    _clear_env(monkeypatch, tmp_path)
+    (tmp_path / "config.yaml").write_text(json.dumps({"mcp_servers": {"agent_core": {
+        "url": "https://core.example/mcp", "headers": {"Authorization": "Bearer ac_sk_ruamel"}}}}))
+    _only_ruamel(monkeypatch)
+    module = _load_provider(monkeypatch)
+
+    provider = module.AgentCoreMemoryProvider()
+
+    assert provider._token == "ac_sk_ruamel" and provider._url == "https://core.example"
+
+
+def test_provider_without_any_yaml_parser_warns_once(monkeypatch, tmp_path, caplog):
+    _clear_env(monkeypatch, tmp_path)
+    _write_config(tmp_path, '"Bearer ac_sk_unread"')
+    monkeypatch.setitem(sys.modules, "yaml", None)
+    monkeypatch.setitem(sys.modules, "ruamel", None)
+    monkeypatch.setitem(sys.modules, "ruamel.yaml", None)
+    module = _load_provider(monkeypatch)
+
+    with caplog.at_level("WARNING"):
+        provider = module.AgentCoreMemoryProvider()
+
+    assert not provider.is_available()
+    warnings = [r.getMessage() for r in caplog.records if r.levelname == "WARNING"]
+    assert len(warnings) == 1 and "PyYAML" in warnings[0] and "ac_sk_unread" not in caplog.text
