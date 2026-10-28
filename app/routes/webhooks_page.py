@@ -138,7 +138,7 @@ Content-Type: application/json
 <!-- Outbound section -->
 <h2 style="margin-bottom:0.75rem">Outbound Notifications</h2>
 <div class="card" style="margin-bottom:1.5rem">
-  <p>Outbound webhook notifications let external systems react to {APP_NAME} events. Each registered endpoint receives a signed HTTP POST when a subscribed event occurs. Webhooks are admin-only and fire-and-log — no retries, no orchestration.</p>
+  <p>Outbound webhook notifications let external systems react to {APP_NAME} events. Each registered endpoint receives a signed HTTP POST when a subscribed event occurs. Webhooks are admin-only. Failed deliveries are retried with backoff and every attempt is logged; webhooks notify, they do not orchestrate.</p>
   <p><strong>Signing:</strong> Every delivery includes <code>X-Agent-Core-Signature: sha256=&lt;hex&gt;</code> so receivers can verify authenticity using HMAC-SHA256 with the stored secret.</p>
 </div>
 <div class="card">

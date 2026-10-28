@@ -66,7 +66,7 @@ is needed** — the provider reuses that single source of truth for the secret.
 |---|---|---|---|
 | `AGENT_CORE_API_KEY` | no¹ | from `mcp_servers.agent_core` | Bearer token. `AGENT_CORE_BEARER` is an alias. |
 | `AGENT_CORE_URL` | no | from `mcp_servers.agent_core.url`, else `http://localhost:3500` | Base URL of the Agent Core instance. |
-| `AGENT_CORE_SCOPE` | no | unset | **Reserved for v2 write-back only.** Not used for recall. Agent Core applies the key's default recall scopes. |
+| `AGENT_CORE_SCOPE` | no | unset | Not used. Recall uses the key's default recall scopes; writes name their scope per call. |
 | `AGENT_CORE_LIMIT` | no | `5` | Max records injected per turn. |
 | `AGENT_CORE_MAX_CONTEXT_CHARS` | no | `12000` | Max characters injected per turn (range: 512-50000). |
 | `AGENT_CORE_TIMEOUT` | no | `4` | HTTP timeout (seconds). |
@@ -107,9 +107,15 @@ and the relevant record (e.g. the inbox-cron record) appears in the output.
 - **Returns raw text, not a wrapped block.** `agent/conversation_loop.py` calls
   `build_memory_context_block()` once on the merged provider output, so the
   provider must return raw text (wrapping here would double-fence).
-- **Read path only (v1).** `sync_turn()` is a no-op; durable writes go through
-  the Agent Core MCP `memory_write` tool, so there's no recall gap. Write-back
-  is a clean v2 follow-up.
+- **Writes go through the ordinary Agent Core API.** `sync_turn()` is a no-op:
+  nothing is captured per turn. The provider's system prompt tells the agent to
+  record work it hands to another team with the Agent Core `activity_update`
+  tool (`task_ref` as `<system>:<id>`, and a `handoff` with `needs_human` when a
+  person must act), and to answer "what is waiting on me?" with
+  `attention_list`. Both are plain MCP/REST calls under the agent's own key, so
+  a different front end using the same identity leaves the same trail with no
+  Agent Core change. The key needs the `coordination` capability and write
+  access to the scopes it records in.
 - **Fails safe.** Any error in `prefetch()` returns `""` and logs at debug. A
   broken/unreachable Agent Core never breaks the agent loop.
 

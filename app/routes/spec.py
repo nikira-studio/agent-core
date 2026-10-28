@@ -241,6 +241,11 @@ def spec(
             },
         },
         {
+            "name": "attention_list",
+            "description": "Unresolved needs_human handoffs across readable scopes, newest first; read-only, for coordinators",
+            "inputSchema": {"scopes": "string[]?", "without_task_ref": "boolean?", "limit": "integer?"},
+        },
+        {
             "name": "activity_pickup",
             "description": "Claim the next active work item assigned to this agent in authorized scopes",
             "inputSchema": {},

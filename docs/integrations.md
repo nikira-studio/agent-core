@@ -904,6 +904,7 @@ Webhooks are **admin-only** and managed from the **Webhooks** page in the dashbo
 | `activity_heartbeat` | An agent sends a heartbeat on an active task |
 | `activity_cancelled` | An activity is cancelled |
 | `activity_recovered` | An activity is recovered (reassigned, resumed, closed) |
+| `activity_handoff_resolved` | A person marks a handoff's `needs_human` request as dealt with |
 | `connector_executed` | A connector binding action completes |
 
 ### Payload shape
@@ -918,7 +919,7 @@ Every delivery is an HTTP POST with `Content-Type: application/json`. The envelo
 }
 ```
 
-Activity events (`activity_created`, `activity_updated`, `activity_heartbeat`, `activity_cancelled`, `activity_recovered`) include the full activity context so receivers can act without a follow-up lookup:
+Activity events (`activity_created`, `activity_updated`, `activity_heartbeat`, `activity_cancelled`, `activity_recovered`, `activity_handoff_resolved`) include the full activity context so receivers can act without a follow-up lookup:
 
 ```json
 {
@@ -939,7 +940,7 @@ Activity events (`activity_created`, `activity_updated`, `activity_heartbeat`, `
 }
 ```
 
-`task_note` is optional and is typically populated for in-flight updates. `task_result` is optional and is typically populated when a task is completed. `previous_status` is present on `activity_updated` and `activity_cancelled`. `recovery_action` and `result` are present on `activity_recovered`.
+`task_note` is optional and is typically populated for in-flight updates. `task_result` is optional and is typically populated when a task is completed. `previous_status` is present on `activity_updated` and `activity_cancelled`. `recovery_action` and `result` are present on `activity_recovered`. When the activity has a handoff, the payload adds `handoff` (`completed`, `next_steps`, `open_questions`, `needs_human`) and `handoff_resolved_at`; when it is linked to another system's task, it adds `task_ref`. A receiver can tell a new request for a person from `status` plus `handoff.needs_human` with `handoff_resolved_at` empty.
 
 Connector events (`connector_executed`) include binding identity, scope, and result:
 
@@ -972,7 +973,7 @@ def verify(body: bytes, secret: str, header: str) -> bool:
 
 ### v1 behavior
 
-- **Fire-and-log only.** No retries. If a delivery fails, it is recorded in the delivery log.
+- **Retried, then given up.** A delivery that times out, cannot connect, or gets `408`, `429` or a `5xx` is retried with exponential backoff (honouring `Retry-After` on `429`), 5 attempts by default; the attempt count and backoff are set on the Settings page. Any other response, or the last failed attempt, marks it dead in the delivery log. Receivers should treat `X-Agent-Core-Event-Id` as an idempotency key, since a retried event can arrive twice.
 - **5-second timeout.** Receivers should respond quickly; slow endpoints will time out.
 - Deliveries are non-blocking; they do not delay the API response that triggered the event.
 - The delivery log is visible per-webhook in the dashboard under **Deliveries**.

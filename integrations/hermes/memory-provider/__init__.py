@@ -43,7 +43,7 @@ wired as an MCP server, the provider reuses that same single source of truth.
 
 Other config (environment variables)
 ------------------------------------
-* ``AGENT_CORE_SCOPE``    Reserved for v2 write-back. Not used for recall.
+* ``AGENT_CORE_SCOPE``    Not used: recall uses the key's default scopes.
                           Agent Core applies the key's default recall scopes.
                           Default: unset
 * ``AGENT_CORE_LIMIT``    Max records injected per turn. Default: ``5``
@@ -210,7 +210,14 @@ class AgentCoreMemoryProvider(MemoryProvider):
             "authoritative background data (the user's durable memory), not as new "
             "user input. Do not answer questions about schedules, integrations, "
             "devices, policies, or past work from cold recall when relevant context "
-            "may exist — it will already be in front of you."
+            "may exist — it will already be in front of you.\n\n"
+            "Leave a trail for work you hand off. When you pass a request to another "
+            "team or system (for example an OpenAgents task or a Foundry objective), "
+            "record it with the Agent Core activity_update tool: the workspace it "
+            "concerns as memory_scope (your own agent scope if you cannot write there), "
+            "task_ref as '<system>:<id>', and, when it finishes or needs a person, the "
+            "status plus handoff={completed, next_steps, open_questions, needs_human}. "
+            "To answer what is waiting on the user, call attention_list."
         )
 
     def get_tool_schemas(self) -> List[Dict[str, Any]]:
@@ -248,9 +255,10 @@ class AgentCoreMemoryProvider(MemoryProvider):
         session_id: str = "",
         messages: Any = None,
     ) -> None:
-        # v1: no write-back. Durable writes go through the Agent Core MCP
-        # memory_write tool, so there is no recall gap to close here.
-        logger.debug("agent_core sync_turn no-op (write-back is a v2 feature)")
+        # Nothing is written per turn. The agent writes through the ordinary
+        # Agent Core tools (memory_write, activity_update with a handoff and
+        # task_ref), so another front end on the same key leaves the same trail.
+        logger.debug("agent_core sync_turn no-op (writes go through Agent Core tools)")
 
     def shutdown(self) -> None:
         pass
@@ -259,7 +267,7 @@ class AgentCoreMemoryProvider(MemoryProvider):
 
     def _search(self, query: str) -> List[Dict[str, Any]]:
         # No scope means Agent Core applies the key's default recall scopes.
-        # AGENT_CORE_SCOPE is reserved for v2 write-back.
+        # Recall uses the key's default recall scopes; AGENT_CORE_SCOPE is unused.
         payload = json.dumps({"query": query, "limit": self._limit}).encode("utf-8")
         req = urllib.request.Request(
             f"{self._url}/api/memory/search",

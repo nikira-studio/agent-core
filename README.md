@@ -177,6 +177,7 @@ workspace_sync_ack → acknowledge a delivered page after processing it
 activity_pickup  → check for work a human assigned to this agent in this workspace
 activity_search  → search what agents have already worked on ("what did we do on X")
 activity_list    → find what's stale or pending (for reviews and handoffs)
+attention_list   → what is waiting on a person, across the scopes you read (for coordinators)
 memory_search    → fill in any gaps with a targeted query
 ```
 

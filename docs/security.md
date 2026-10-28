@@ -207,7 +207,7 @@ Outbound webhooks let external systems receive signed notifications when events 
 
 **Secrets are encrypted at rest.** Webhook secrets are encrypted using the same Fernet key used for credentials. They are never returned in API responses; they are write-only on create and update.
 
-**Delivery is fire-and-log-only (v1).** If a receiver is down or slow, the failure is recorded in the delivery log and no retry is attempted. Keep receiver endpoints fast and reliable.
+**Delivery is retried, then logged.** Timeouts, connection errors, `408`, `429` and `5xx` responses are retried with exponential backoff up to the configured attempt limit (5 by default); anything else, or the final failure, is recorded as dead in the delivery log. Retries mean an event can arrive more than once, so receivers should de-duplicate on `X-Agent-Core-Event-Id`. Keep receiver endpoints fast.
 
 **SSRF protection.** Webhook URLs are validated against the same SSRF guard as other outbound URLs. Private network addresses (RFC 1918, loopback, link-local) are allowed by default for local and operator-managed deployments. If you want to block them, set `AGENT_CORE_BLOCK_INTERNAL_HOSTS=true` and use `AGENT_CORE_ALLOWED_INTERNAL_HOSTS` as an exception list.
 

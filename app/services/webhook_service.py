@@ -26,6 +26,7 @@ WEBHOOK_EVENT_TYPES = (
     "activity_heartbeat",
     "activity_cancelled",
     "activity_recovered",
+    "activity_handoff_resolved",
     "connector_executed",
 )
 
@@ -420,6 +421,7 @@ def _sample_payload(event_type: str) -> dict:
         "activity_heartbeat",
         "activity_cancelled",
         "activity_recovered",
+        "activity_handoff_resolved",
     ):
         status_map = {
             "activity_created": "active",
@@ -427,6 +429,7 @@ def _sample_payload(event_type: str) -> dict:
             "activity_heartbeat": "active",
             "activity_cancelled": "cancelled",
             "activity_recovered": "active",
+            "activity_handoff_resolved": "blocked",
         }
         data = {
             "activity_id": "sample-activity-id",
@@ -446,6 +449,14 @@ def _sample_payload(event_type: str) -> dict:
             "ended_at": now if event_type == "activity_cancelled" else None,
             "previous_status": "active" if event_type != "activity_created" else None,
         }
+        if event_type in ("activity_updated", "activity_handoff_resolved"):
+            data["task_ref"] = "openagents:sample-task"
+            data["handoff"] = {
+                "completed": "Drafted the change",
+                "next_steps": ["Review the draft"],
+                "needs_human": "Approve the draft before it ships",
+            }
+            data["handoff_resolved_at"] = now if event_type == "activity_handoff_resolved" else None
     elif event_type == "connector_executed":
         data = {
             "binding_id": "sample-binding-id",

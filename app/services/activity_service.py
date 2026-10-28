@@ -59,6 +59,64 @@ def create_activity(
         }
 
 
+# metadata.task_ref links an activity to the task that started it in another
+# system ("openagents:<task id>", "foundry:<objective>"). A reader that already
+# lists that system's queue skips handoffs carrying one, so an item is not
+# shown twice. The prefix names the system; Core does not interpret the id.
+TASK_REF_PATTERN = re.compile(r"^[a-z][a-z0-9_-]{0,31}:\S{1,200}$")
+
+
+def validate_task_ref(value) -> str:
+    if not isinstance(value, str) or not TASK_REF_PATTERN.match(value.strip()):
+        raise ValueError(
+            "task_ref must look like '<system>:<id>', for example 'openagents:123' or 'foundry:my-objective'"
+        )
+    return value.strip()
+
+
+def validate_metadata_json(metadata_json: Optional[str]) -> Optional[str]:
+    """Reject metadata whose task_ref breaks the convention; pass anything else through."""
+    if metadata_json is None:
+        return None
+    try:
+        metadata = json.loads(metadata_json)
+    except (TypeError, ValueError):
+        return metadata_json
+    if isinstance(metadata, dict) and "task_ref" in metadata:
+        metadata["task_ref"] = validate_task_ref(metadata["task_ref"])
+        return json.dumps(metadata, separators=(",", ":"))
+    return metadata_json
+
+
+def with_task_ref(metadata_json: Optional[str], task_ref: str) -> str:
+    """Set metadata.task_ref, keeping the rest of the activity's metadata."""
+    try:
+        metadata = json.loads(metadata_json) if metadata_json else {}
+    except (TypeError, ValueError):
+        metadata = {}
+    if not isinstance(metadata, dict):
+        metadata = {}
+    metadata["task_ref"] = validate_task_ref(task_ref)
+    return json.dumps(metadata, separators=(",", ":"))
+
+
+def _scope_visible(authorized_scopes: list[str], alias: str = "") -> tuple[str, list]:
+    """SQL for "this activity is in one of these scopes".
+
+    An activity with no memory_scope belongs to its agent's private scope.
+    """
+    placeholders = ",".join("?" for _ in authorized_scopes)
+    clause = (
+        f"({alias}memory_scope IN ({placeholders}) OR "
+        f"({alias}memory_scope IS NULL AND ('agent:' || {alias}agent_id) IN ({placeholders})))"
+    )
+    return clause, [*authorized_scopes, *authorized_scopes]
+
+
+def activity_scope(activity: dict) -> str:
+    return activity.get("memory_scope") or f"agent:{activity.get('agent_id')}"
+
+
 def get_activity(activity_id: str) -> Optional[dict]:
     with get_db() as conn:
         row = conn.execute(
@@ -92,7 +150,58 @@ def set_handoff(activity_id: str, handoff: dict) -> None:
                 activity_id,
             ),
         )
+        _record_handoff_change(conn, activity_id, "handoff_recorded")
         conn.commit()
+
+
+def _record_handoff_change(conn, activity_id: str, change_type: str) -> None:
+    """Put a handoff change on its workspace's change feed, so workspace_sync
+    readers learn about it without polling the activity."""
+    from app.services import workspace_sync_service
+
+    row = conn.execute(
+        "SELECT agent_id, memory_scope, source_execution_id, task_description, status, "
+        "handoff_json, handoff_resolved_at, metadata_json FROM agent_activity WHERE id = ?",
+        (activity_id,),
+    ).fetchone()
+    if not row or not (row["memory_scope"] or "").startswith("workspace:"):
+        return
+    handoff = _parse_handoff(row["handoff_json"]) or {}
+    summary = {
+        "task_description": row["task_description"],
+        "status": row["status"],
+        "needs_human": handoff.get("needs_human"),
+        "completed": handoff.get("completed"),
+        "task_ref": _task_ref(row["metadata_json"]),
+    }
+    workspace_sync_service.record_change(
+        conn,
+        memory_scope=row["memory_scope"],
+        change_type=change_type,
+        resource_type="activity",
+        resource_id=activity_id,
+        summary={k: v for k, v in summary.items() if v is not None},
+        source_agent_id=row["agent_id"],
+        source_execution_id=row["source_execution_id"],
+    )
+
+
+def _parse_handoff(handoff_json: Optional[str]) -> Optional[dict]:
+    try:
+        handoff = json.loads(handoff_json) if handoff_json else None
+    except (TypeError, ValueError):
+        return None
+    return handoff if isinstance(handoff, dict) else None
+
+
+def _task_ref(metadata_json: Optional[str]) -> Optional[str]:
+    try:
+        metadata = json.loads(metadata_json) if metadata_json else None
+    except (TypeError, ValueError):
+        return None
+    if isinstance(metadata, dict) and isinstance(metadata.get("task_ref"), str):
+        return metadata["task_ref"]
+    return None
 
 
 def resolve_handoff(activity_id: str) -> bool:
@@ -103,15 +212,26 @@ def resolve_handoff(activity_id: str) -> bool:
             "WHERE id = ? AND handoff_json IS NOT NULL AND handoff_resolved_at IS NULL",
             (utc_now_iso(), activity_id),
         )
+        if cursor.rowcount:
+            _record_handoff_change(conn, activity_id, "handoff_resolved")
         conn.commit()
         return cursor.rowcount > 0
 
 
-def list_needs_human(user_id: Optional[str] = None, limit: int = 20) -> list[dict]:
+def list_needs_human(
+    user_id: Optional[str] = None,
+    limit: int = 20,
+    authorized_scopes: Optional[list[str]] = None,
+    without_task_ref: bool = False,
+) -> list[dict]:
     """Unresolved handoff requests for a person, newest first.
 
-    Each row carries the request text as `needs_human`. Pass user_id to limit
-    the list to that user's activities; None lists every user's.
+    Each row carries the request text as `needs_human` and the activity's
+    metadata.task_ref, if any. Pass user_id to limit the list to that user's
+    activities; None lists every user's. authorized_scopes limits it to
+    activities in those scopes (None: no scope limit). without_task_ref drops
+    requests that point at another system's task, which that system's own
+    queue already shows.
     """
     conditions = [
         "json_valid(handoff_json)",
@@ -124,13 +244,25 @@ def list_needs_human(user_id: Optional[str] = None, limit: int = 20) -> list[dic
     if user_id:
         conditions.append("user_id = ?")
         params.append(user_id)
+    if authorized_scopes is not None:
+        if not authorized_scopes:
+            return []
+        clause, scope_params = _scope_visible(authorized_scopes)
+        conditions.append(clause)
+        params.extend(scope_params)
+    task_ref_sql = (
+        "CASE WHEN json_valid(metadata_json) THEN json_extract(metadata_json, '$.task_ref') END"
+    )
+    if without_task_ref:
+        conditions.append(f"COALESCE({task_ref_sql}, '') = ''")
     with get_db() as conn:
         rows = conn.execute(
-            "SELECT id, agent_id, memory_scope, task_description, updated_at, "
-            "json_extract(handoff_json, '$.needs_human') AS needs_human "
+            "SELECT id, agent_id, user_id, memory_scope, status, task_description, updated_at, "
+            "json_extract(handoff_json, '$.needs_human') AS needs_human, "
+            f"{task_ref_sql} AS task_ref "
             f"FROM agent_activity WHERE {' AND '.join(conditions)} "
             "ORDER BY updated_at DESC LIMIT ?",
-            [*params, limit],
+            [*params, max(0, limit)],
         ).fetchall()
     return [dict(r) for r in rows]
 
@@ -228,12 +360,9 @@ def list_activities(
     if authorized_scopes is not None:
         if not authorized_scopes:
             return []
-        placeholders = ",".join("?" for _ in authorized_scopes)
-        conditions.append(
-            f"(memory_scope IN ({placeholders}) OR "
-            f"(memory_scope IS NULL AND ('agent:' || agent_id) IN ({placeholders})))"
-        )
-        params.extend([*authorized_scopes, *authorized_scopes])
+        clause, scope_params = _scope_visible(authorized_scopes)
+        conditions.append(clause)
+        params.extend(scope_params)
 
     where = " AND ".join(conditions)
     params.extend([limit, offset])
@@ -366,12 +495,9 @@ def search_activities(
     if authorized_scopes is not None:
         if not authorized_scopes:
             return []
-        placeholders = ",".join("?" for _ in authorized_scopes)
-        conditions.append(
-            f"(a.memory_scope IN ({placeholders}) OR "
-            f"(a.memory_scope IS NULL AND ('agent:' || a.agent_id) IN ({placeholders})))"
-        )
-        params.extend([*authorized_scopes, *authorized_scopes])
+        clause, scope_params = _scope_visible(authorized_scopes, alias="a.")
+        conditions.append(clause)
+        params.extend(scope_params)
 
     where = " AND ".join(conditions)
     params.extend([max(limit, 0), max(offset, 0)])
@@ -664,6 +790,13 @@ def event_data(activity: dict, **extra) -> dict:
         "heartbeat_at": activity.get("heartbeat_at"),
         "ended_at": activity.get("ended_at"),
     }
+    task_ref = _task_ref(activity.get("metadata_json"))
+    if task_ref:
+        payload["task_ref"] = task_ref
+    handoff = _parse_handoff(activity.get("handoff_json"))
+    if handoff:
+        payload["handoff"] = handoff
+        payload["handoff_resolved_at"] = activity.get("handoff_resolved_at")
     payload.update({k: v for k, v in extra.items() if v is not None})
     return payload
 

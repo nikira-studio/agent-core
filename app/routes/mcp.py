@@ -65,6 +65,7 @@ _TOOL_CAPABILITIES = {
             "activity_list",
             "activity_search",
             "activity_pickup",
+            "attention_list",
             "workspace_sync",
             "workspace_sync_ack",
             "session_context",
@@ -424,6 +425,13 @@ MANIFEST = {
                     "status": {"type": "string"},
                     "memory_scope": {"type": "string"},
                     "execution_id": {"type": "string"},
+                    "task_ref": {
+                        "type": "string",
+                        "description": (
+                            "The task in another system that this work belongs to, as '<system>:<id>' "
+                            "(e.g. 'openagents:123', 'foundry:<objective>'). Stored as metadata.task_ref."
+                        ),
+                    },
                     "handoff": {
                         "type": "object",
                         "description": (
@@ -489,6 +497,30 @@ MANIFEST = {
                     "offset": {"type": "integer", "default": 0},
                 },
                 "required": ["query"],
+            },
+        },
+        {
+            "name": "attention_list",
+            "description": (
+                "List unresolved handoffs that need a person (needs_human), newest first, across the scopes "
+                "you can read. For coordinators reporting what is waiting on a person; read-only. Each item "
+                "carries task_ref when the work belongs to another system's task."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "scopes": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Limit to these scopes; each must be readable. Default: all readable scopes.",
+                    },
+                    "without_task_ref": {
+                        "type": "boolean",
+                        "default": False,
+                        "description": "Skip items that point at another system's task, whose own queue already shows them.",
+                    },
+                    "limit": {"type": "integer", "default": 50},
+                },
             },
         },
         {
@@ -1758,10 +1790,21 @@ async def _handle_custom_mcp_tool(body: dict, ctx: EffectiveAuthority):
                 handoff = normalize_handoff(params["handoff"])
             except ValueError as exc:
                 return _mcp_error("INVALID_HANDOFF", str(exc), 400)
+        task_ref = params.get("task_ref")
+        if task_ref is not None:
+            try:
+                activity_service.validate_task_ref(task_ref)
+            except ValueError as exc:
+                return _mcp_error("INVALID_TASK_REF", str(exc), 400)
         existing = activity_service.get_active_activity_for_agent(
             ctx.agent_id, ctx.user_id, memory_scope=memory_scope
         )
         if existing:
+            metadata_json = (
+                activity_service.with_task_ref(existing.get("metadata_json"), task_ref)
+                if task_ref is not None
+                else None
+            )
             if params.get("status"):
                 if params["status"] in (
                     "completed",
@@ -1777,18 +1820,21 @@ async def _handle_custom_mcp_tool(body: dict, ctx: EffectiveAuthority):
                     task_note=params.get("task_note"),
                     task_result=params.get("task_result"),
                     status=params["status"],
+                    metadata_json=metadata_json,
                     source_execution_id=params.get("execution_id"),
                 )
             elif (
                 params.get("task_description")
                 or params.get("task_note")
                 or params.get("task_result")
+                or metadata_json
             ):
                 activity_service.update_activity(
                     existing["id"],
                     task_description=params.get("task_description"),
                     task_note=params.get("task_note"),
                     task_result=params.get("task_result"),
+                    metadata_json=metadata_json,
                     source_execution_id=params.get("execution_id"),
                 )
             else:
@@ -1851,6 +1897,7 @@ async def _handle_custom_mcp_tool(body: dict, ctx: EffectiveAuthority):
                 user_id=ctx.user_id or "",
                 task_description=params["task_description"],
                 memory_scope=memory_scope,
+                metadata_json=activity_service.with_task_ref(None, task_ref) if task_ref else None,
                 source_execution_id=params.get("execution_id"),
             )
             audit_service.write_event(
@@ -1898,10 +1945,12 @@ async def _handle_custom_mcp_tool(body: dict, ctx: EffectiveAuthority):
         activity = activity_service.get_activity(params["activity_id"])
         if not activity:
             return _mcp_error("NOT_FOUND", "Activity not found", 404)
+        # Same visibility as activity_list: own work, or any activity in a
+        # readable scope.
         if (
             activity.get("agent_id") != ctx.agent_id
             and activity.get("assigned_agent_id") != ctx.agent_id
-            and not ctx.is_admin
+            and not enforcer.can_read(activity_service.activity_scope(activity))
         ):
             return _mcp_error("FORBIDDEN", "Access denied", 403)
         # What the session concluded, scope-filtered for this caller: the task
@@ -1983,6 +2032,34 @@ async def _handle_custom_mcp_tool(body: dict, ctx: EffectiveAuthority):
                 "ok": True,
                 "data": {"activities": activities, "count": len(activities)},
             }
+        )
+
+    elif tool == "attention_list":
+        requested = params.get("scopes")
+        if requested is not None and (
+            not isinstance(requested, list) or not all(isinstance(s, str) for s in requested)
+        ):
+            return _mcp_error("INVALID_PARAMS", "scopes must be a list of strings", 400)
+        if requested:
+            denied = next((s for s in requested if not enforcer.can_read(s)), None)
+            if denied:
+                return _mcp_error("SCOPE_DENIED", f"Access denied to scope: {denied}", 403)
+            authorized_scopes = list(dict.fromkeys(requested))
+        else:
+            authorized_scopes = (
+                None if ctx.is_admin else enforcer.filter_readable_scopes(ctx.read_scopes)
+            )
+        try:
+            limit = min(max(int(params.get("limit", 50) or 50), 0), 200)
+        except (TypeError, ValueError):
+            return _mcp_error("INVALID_PARAMS", "limit must be an integer", 400)
+        items = activity_service.list_needs_human(
+            authorized_scopes=authorized_scopes,
+            without_task_ref=bool(params.get("without_task_ref")),
+            limit=limit,
+        )
+        return JSONResponse(
+            content={"ok": True, "data": {"items": items, "count": len(items)}}
         )
 
     elif tool == "activity_pickup":

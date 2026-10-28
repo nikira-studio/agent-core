@@ -598,13 +598,21 @@ Create:
 
 **Valid statuses:** `active`, `stale`, `completed`, `blocked`, `cancelled`
 
-Only the owning agent or an admin can update, heartbeat, cancel, or reassign an activity.
+Only the owning agent or an admin can update, heartbeat, cancel, or reassign an activity. Reading is wider: `GET /api/activity/{id}` and MCP `activity_get` open any activity in a scope the caller reads, the same activities `activity_list` and `activity_search` show it.
 
 For the MCP `activity_update` tool, creating a fresh activity in a readable `workspace:*` scope can add a best-effort `since_last_active` object beside `activity`. It summarizes changes since that agent's prior activity using workspace change-sequence boundaries. A first activity uses `baseline: "retained_tail"`; the response also reports `total_available`, `truncated`, and `oldest_available_at` so clients do not infer completeness beyond retained history. The key is omitted when the feature is disabled, the caller cannot read the scope, digest computation fails, or the supplied `execution_id` is already caught up. REST activity creation is unchanged.
 
 ### Handoffs
 
 `PUT /api/activity/{id}` accepts `handoff` with `completed` (string), `next_steps` and `open_questions` (lists of strings) and `needs_human` (string), up to 4,000 characters. The next session context shows them. `POST /api/activity/{id}/handoff/resolve` (a person only) marks a `needs_human` request as dealt with.
+
+Recording or resolving a handoff in a `workspace:*` scope adds a `handoff_recorded` or `handoff_resolved` change to that workspace's change feed (`workspace_sync`), with the task, status, `needs_human` and `task_ref` in its summary. Activity webhook payloads carry the `handoff`, `handoff_resolved_at` and `task_ref`, and resolving sends `activity_handoff_resolved`.
+
+`GET /api/activity/attention` lists unresolved `needs_human` requests, newest first, in the scopes the caller reads: `id`, `agent_id`, `user_id`, `memory_scope`, `status`, `task_description`, `needs_human`, `task_ref`, `updated_at`. It is for a coordinator, such as an attention reader or a chief-of-staff agent, that tells a person what is waiting on them; it needs the `coordination` capability, not admin. Repeat `scope` to narrow it (each must be readable, or the call returns `403`), pass `without_task_ref=true` to skip requests that point at another system's task, and `limit` (default 50, at most 200). The MCP equivalent is `attention_list`. Listing never resolves anything; that stays with a person.
+
+### Linking an activity to another system's task
+
+When work belongs to a task that lives in another system, record it as `metadata.task_ref = "<system>:<id>"`, for example `openagents:123` or `foundry:<objective>`. MCP `activity_update` and REST `POST`/`PUT /api/activity` take it as `task_ref` (REST also accepts it inside `metadata_json`); it must be a lowercase system name, a colon, and an id without spaces. Core stores it and does not interpret the id. A reader that already lists that system's queue uses it to skip the handoff (`without_task_ref`), so one item is not shown twice. Work started from another system's task should always set it; a terminal session started by a person leaves it empty.
 
 ### Activity pickup
 
@@ -678,8 +686,9 @@ Dispatch:
 | `workspace_sync` | Start or continue an execution and return current context plus workspace changes after its cursor |
 | `workspace_sync_ack` | Advance an execution's acknowledged cursor after processing a delivered page |
 | `activity_update` | Create or update an activity record in the supplied `memory_scope`, including progress notes, completion result and a structured `handoff` (`completed`, `next_steps`, `open_questions`, `needs_human`); it never moves an activity across scopes |
-| `activity_get` | Get an activity record |
+| `activity_get` | Get an activity record in a readable scope, with the memory records written during it |
 | `activity_list` | List activities visible to the current caller |
+| `attention_list` | Unresolved `needs_human` handoffs across readable scopes, newest first, with each one's `task_ref`; read-only, for coordinators |
 | `activity_pickup` | Claim the next active work item assigned to this agent in authorized scopes |
 | `activity_search` | Full-text search the activity trail: what agents worked on, per task, with results. Use for "what did we do on X"; use `memory_search` for durable facts and decisions |
 | `effective_authority` | Report the caller's current effective authority: identity, read and write scopes, workspaces, and capabilities |
