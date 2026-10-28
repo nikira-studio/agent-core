@@ -196,3 +196,36 @@ def test_webhook_offers_the_handoff_resolved_event():
     assert "activity_handoff_resolved" in webhook_service.WEBHOOK_EVENT_TYPES
     sample = webhook_service._sample_payload("activity_handoff_resolved")
     assert sample["handoff"]["needs_human"] and sample["handoff_resolved_at"]
+
+
+def test_agent_and_superseded_resolutions_reach_webhooks_and_the_change_feed(test_client, admin_token, monkeypatch):
+    worker, _ = _setup()
+    events = []
+    monkeypatch.setattr(webhook_service, "dispatch_event", lambda event, payload: events.append((event, payload)))
+
+    first = _waiting(A, "Pick a vendor")
+    resolved = _mcp(test_client, worker, "activity_handoff_resolve", activity_id=first["id"], reason="Picked one")
+    assert resolved.status_code == 200, resolved.json()
+    event, payload = events[-1]
+    assert event == "activity_handoff_resolved" and payload["handoff_resolution"] == "agent"
+
+    older = _waiting(A, "Approve the old plan")
+    with get_db() as conn:  # made before the next session started
+        conn.execute(
+            "UPDATE agent_activity SET handoff_requested_at = '2000-01-01T00:00:00+00:00', "
+            "user_id = (SELECT id FROM users LIMIT 1) WHERE id = ?",
+            (older["id"],),
+        )
+        conn.commit()
+    _mcp(test_client, worker, "activity_update", memory_scope=A, task_description="New plan")
+    closed = _mcp(test_client, worker, "activity_update", memory_scope=A, status="blocked",
+                  handoff={"needs_human": "Approve the new plan"})
+    assert [r["activity_id"] for r in closed.json()["data"]["superseded_requests"]] == [older["id"]]
+    superseded = [p for e, p in events if e == "activity_handoff_resolved" and p.get("handoff_resolution") == "superseded"]
+    assert [p["activity_id"] for p in superseded] == [older["id"]]
+
+    with get_db() as conn:
+        resolved_ids = {r[0] for r in conn.execute(
+            "SELECT resource_id FROM workspace_changes WHERE memory_scope = ? AND change_type = 'handoff_resolved'", (A,)
+        )}
+    assert {first["id"], older["id"]} <= resolved_ids

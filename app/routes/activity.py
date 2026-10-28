@@ -320,6 +320,19 @@ def update_activity(
             "INVALID_TRANSITION", "Cannot close a non-active activity", 400
         )
 
+    # A closed task's handoff is amended, not replaced: its asks to a person
+    # leave only through a resolution (see activity_service.merge_handoff).
+    amend = activity["status"] in ("completed", "blocked")
+    if handoff and amend:
+        try:
+            activity_service.merge_handoff(
+                activity_service.load_handoff(activity.get("handoff_json")),
+                handoff,
+                previous_resolved=bool(activity.get("handoff_resolved_at")),
+            )
+        except ValueError as exc:  # checked before anything is written
+            return error_response("INVALID_HANDOFF", str(exc), 400)
+
     success = activity_service.update_activity(
         activity_id,
         status=body.status,
@@ -328,10 +341,10 @@ def update_activity(
         metadata_json=metadata_json,
         source_execution_id=body.execution_id,
     )
-    if not success and handoff is None:
+    if not success and not handoff:  # a handoff alone is an update too
         return error_response("UPDATE_FAILED", "Activity update failed", 500)
     if handoff:
-        activity_service.set_handoff(activity_id, handoff)
+        activity_service.set_handoff(activity_id, handoff, amend=amend)
 
     updated = activity_service.get_activity(activity_id) or activity
     audit_service.write_event(
@@ -352,12 +365,23 @@ def update_activity(
         "activity_updated", updated, previous_status=activity["status"]
     )
 
-    return success_response({"activity": updated})
+    followups = activity_service.handoff_followups(
+        updated,
+        handoff,
+        closing=body.status in ("completed", "blocked") and activity["status"] in ("active", "stale"),
+        actor_type=ctx.actor_type,
+        actor_id=ctx.actor_id,
+    )
+    return success_response({"activity": updated, **followups})
 
 
 @router.post("/{activity_id}/handoff/resolve")
 def resolve_handoff(activity_id: str, ctx: EffectiveAuthority = Depends(get_request_context)):
-    """A person marks a handoff's needs_human request as dealt with."""
+    """A person marks a handoff's needs_human request as dealt with.
+
+    Person only. The agent that made the request resolves it through the MCP
+    activity_handoff_resolve tool instead, which records its reason.
+    """
     if ctx.actor_type != "user":
         return error_response("FORBIDDEN", "Only a person can resolve a handoff request", 403)
     activity = activity_service.get_activity(activity_id)
@@ -366,8 +390,12 @@ def resolve_handoff(activity_id: str, ctx: EffectiveAuthority = Depends(get_requ
     scope = activity.get("memory_scope") or ""
     if not (ctx.is_admin or ctx.can("activity", "update", scope=scope)):
         return error_response("FORBIDDEN", "Access denied", 403)
-    if not activity_service.resolve_handoff(activity_id):
-        return error_response("NOT_PENDING", "No unresolved handoff on this activity", 409)
+    resolution = activity_service.resolve_handoff(
+        activity_id, kind="person", resolved_by=ctx.actor_id
+    )
+    if not resolution:
+        return error_response("NOT_PENDING", "No unresolved handoff request on this activity", 409)
+    updated = activity_service.get_activity(activity_id) or activity
     audit_service.write_event(
         actor_type=ctx.actor_type,
         actor_id=ctx.actor_id,
@@ -375,10 +403,10 @@ def resolve_handoff(activity_id: str, ctx: EffectiveAuthority = Depends(get_requ
         resource_type="activity",
         resource_id=activity_id,
         result="success",
+        details=activity_service.audit_details(updated, kind="person", actor_type=ctx.actor_type),
     )
-    resolved = activity_service.get_activity(activity_id) or activity
-    activity_service.notify("activity_handoff_resolved", resolved)
-    return success_response({"activity": resolved})
+    activity_service.notify("activity_handoff_resolved", updated, handoff_resolution="person")
+    return success_response({"activity": updated, "resolution": resolution})
 
 
 @router.post("/{activity_id}/heartbeat")

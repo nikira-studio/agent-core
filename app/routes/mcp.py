@@ -65,6 +65,7 @@ _TOOL_CAPABILITIES = {
             "activity_list",
             "activity_search",
             "activity_pickup",
+            "activity_handoff_resolve",
             "attention_list",
             "workspace_sync",
             "workspace_sync_ack",
@@ -436,7 +437,11 @@ MANIFEST = {
                         "type": "object",
                         "description": (
                             "Record when the task finishes or stops: what the next session needs. "
-                            "The next session start shows it."
+                            "The next session start shows it. A needs_human request replaces your open "
+                            "requests in this scope from sessions that started earlier; the response lists "
+                            "them as superseded_requests so you can restate any that still apply. With no "
+                            "open task, a handoff alone is added to the one your latest task closed with: "
+                            "new asks are appended, existing ones are never removed."
                         ),
                         "properties": {
                             "completed": {"type": "string", "description": "One line on what got done."},
@@ -446,6 +451,25 @@ MANIFEST = {
                         },
                     },
                 },
+            },
+        },
+        {
+            "name": "activity_handoff_resolve",
+            "description": (
+                "Resolve one of your own handoff requests to a person (needs_human) once it has been "
+                "dealt with, so it leaves the waiting queue. Only for activities assigned to you."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "activity_id": {"type": "string", "description": "The activity whose handoff request is resolved."},
+                    "reason": {
+                        "type": "string",
+                        "maxLength": 500,
+                        "description": "How it was dealt with, in one line. Shown to people and audited.",
+                    },
+                },
+                "required": ["activity_id", "reason"],
             },
         },
         {
@@ -1091,6 +1115,7 @@ async def _handle_mcp_jsonrpc(body: dict, request: Request, ctx: EffectiveAuthor
                     "At the start of every non-trivial task: call activity_update (status=active, memory_scope=workspace:<your-scope>), "
                     "then run 2-3 memory_search queries for relevant context. "
                     "Send activity_update heartbeats or task_note progress updates every 1-2 minutes while working; when finishing or stopping, set status completed or blocked with task_result and a handoff (completed, next_steps, open_questions, needs_human). "
+                    "When a needs_human request you made has been dealt with, resolve it with activity_handoff_resolve. "
                     f"Use credential_get for {CREDENTIAL_PREFIX}* references — never ask the user for raw secrets; use credential_request when one is missing. "
                     "If tools appear unavailable, your host may defer MCP schemas — run the host's tool discovery or schema-load step first."
                 ),
@@ -1135,6 +1160,9 @@ async def _handle_mcp_jsonrpc(body: dict, request: Request, ctx: EffectiveAuthor
         )
 
     return _jsonrpc_error(request_id, -32601, f"Method not found: {method}")
+
+
+HANDOFF_RESOLVE_REASON_MAX = 500
 
 
 async def _handle_custom_mcp_tool(body: dict, ctx: EffectiveAuthority):
@@ -1877,15 +1905,51 @@ async def _handle_custom_mcp_tool(body: dict, ctx: EffectiveAuthority):
             activity_service.notify(
                 _event, _updated, previous_status=existing["status"]
             )
-            data = {"activity": _updated}
-            if _new_status in ("completed", "blocked") and not _updated.get("handoff_json"):
-                data["warnings"] = [
-                    {
-                        "code": "HANDOFF_MISSING",
-                        "message": "Closed without a handoff. Pass handoff={completed, next_steps, "
-                        "open_questions, needs_human} so the next session can pick this up.",
-                    }
-                ]
+            data = {
+                "activity": _updated,
+                **activity_service.handoff_followups(
+                    _updated,
+                    handoff,
+                    closing=_new_status in ("completed", "blocked"),
+                    actor_type="agent",
+                    actor_id=ctx.agent_id,
+                ),
+            }
+            return JSONResponse(content={"ok": True, "data": data})
+        elif handoff and not any(
+            params.get(key) for key in ("task_description", "task_note", "task_result", "status", "task_ref")
+        ) and (
+            closed := activity_service.get_latest_closed_activity_for_agent(
+                ctx.agent_id, memory_scope, user_id=ctx.user_id or ""
+            )
+        ):
+            # A handoff on its own, with no open task: amend the handoff the
+            # agent's latest task closed with, for example to restate a request
+            # that handoff superseded. Amending adds; it never drops an ask.
+            try:
+                activity_service.set_handoff(closed["id"], handoff, amend=True)
+            except ValueError as exc:
+                return _mcp_error("INVALID_HANDOFF", str(exc), 400)
+            _updated = activity_service.get_activity(closed["id"]) or closed
+            audit_service.write_event(
+                actor_type="agent",
+                actor_id=ctx.agent_id,
+                action="activity_update",
+                resource_type="activity",
+                resource_id=closed["id"],
+                result="success",
+                details=activity_service.audit_details(
+                    _updated, action="handoff_amended", memory_scope=closed.get("memory_scope")
+                ),
+            )
+            activity_service.notify("activity_updated", _updated, previous_status=closed["status"])
+            data = {
+                "activity": _updated,
+                "handoff_amended": True,
+                **activity_service.handoff_followups(
+                    _updated, handoff, closing=False, actor_type="agent", actor_id=ctx.agent_id
+                ),
+            }
             return JSONResponse(content={"ok": True, "data": data})
         else:
             if not params.get("task_description"):
@@ -1940,6 +2004,46 @@ async def _handle_custom_mcp_tool(body: dict, ctx: EffectiveAuthority):
                 if digest is not None:
                     payload["since_last_active"] = digest
             return JSONResponse(content={"ok": True, "data": payload}, status_code=201)
+
+    elif tool == "activity_handoff_resolve":
+        reason = " ".join(str(params.get("reason") or "").split())
+        if not reason:
+            return _mcp_error("INVALID_PARAMS", "reason is required: say how the request was dealt with", 400)
+        if len(reason) > HANDOFF_RESOLVE_REASON_MAX:
+            return _mcp_error(
+                "INVALID_PARAMS", f"reason is limited to {HANDOFF_RESOLVE_REASON_MAX} characters", 400
+            )
+        activity = activity_service.get_activity(params["activity_id"])
+        if not activity:
+            return _mcp_error("NOT_FOUND", "Activity not found", 404)
+        # The agent rule of the REST _can_activity check: only the agent the
+        # activity is assigned to, and only in a scope it can write.
+        scope = activity.get("memory_scope") or f"agent:{activity.get('agent_id')}"
+        if activity.get("assigned_agent_id") != ctx.agent_id or not enforcer.can_write(scope):
+            return _mcp_error(
+                "FORBIDDEN", "You can resolve only your own handoff requests, in scopes you can write", 403
+            )
+        resolution = activity_service.resolve_handoff(
+            activity["id"], kind="agent", resolved_by=ctx.agent_id, reason=reason
+        )
+        if not resolution:
+            return _mcp_error("NOT_PENDING", "No unresolved handoff request on this activity", 409)
+        _updated = activity_service.get_activity(activity["id"]) or activity
+        audit_service.write_event(
+            actor_type="agent",
+            actor_id=ctx.agent_id,
+            action="handoff_resolved",
+            resource_type="activity",
+            resource_id=activity["id"],
+            result="success",
+            details=activity_service.audit_details(
+                _updated, kind="agent", actor_type="agent", reason=reason
+            ),
+        )
+        activity_service.notify("activity_handoff_resolved", _updated, handoff_resolution="agent")
+        return JSONResponse(
+            content={"ok": True, "data": {"activity": _updated, "resolution": resolution}}
+        )
 
     elif tool == "activity_get":
         activity = activity_service.get_activity(params["activity_id"])

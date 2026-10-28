@@ -174,7 +174,14 @@ def spec(
                 "task_result": "string?",
                 "status": "string?",
                 "memory_scope": "string?",
+                "execution_id": "string?",
+                "handoff": "object?",
             },
+        },
+        {
+            "name": "activity_handoff_resolve",
+            "description": "Resolve one of your own handoff requests to a person once it has been dealt with",
+            "inputSchema": {"activity_id": "string", "reason": "string"},
         },
         {
             "name": "activity_get",

@@ -135,7 +135,7 @@ def activity_page(request: Request, session: dict = Depends(require_auth)):
 
     waiting = activity_service.list_needs_human(user_id=scope_user_id)
     waiting_rows = "".join(
-        f"<tr><td>{escape_html(w.get('needs_human') or '')}"
+        f"<tr><td><div style='white-space:pre-line'>{escape_html(w.get('needs_human') or '')}</div>"
         f"<div class='text-muted' style='font-size:0.8rem'>From {escape_html(agent_labels.get(w['agent_id'], w['agent_id']))}"
         f" · {escape_html(w.get('task_description', '')[:100])}</div></td>"
         f"<td><code>{escape_html((w.get('memory_scope') or '').replace('workspace:', '')) or '—'}</code></td>"
@@ -143,13 +143,39 @@ def activity_page(request: Request, session: dict = Depends(require_auth)):
         f"<td><button type='button' class='btn btn-sm' data-handoff-resolve='{escape_html(w['id'])}'>Mark resolved</button></td></tr>"
         for w in waiting
     )
+    superseded = activity_service.list_superseded_requests(user_id=scope_user_id)
+    superseded_rows = "".join(
+        f"<tr><td><div style='white-space:pre-line'>{escape_html(w.get('needs_human') or '')}</div>"
+        f"<div class='text-muted' style='font-size:0.8rem'>From {escape_html(agent_labels.get(w['agent_id'], w['agent_id']))}"
+        f" · {escape_html((w.get('task_description') or '')[:100])}</div></td>"
+        f"<td><code>{escape_html((w.get('memory_scope') or '').replace('workspace:', '')) or '—'}</code></td>"
+        f"<td><code>{escape_html(w.get('superseded_by') or '')}</code></td>"
+        f"<td>{local_dt(w.get('handoff_resolved_at'), style='date')}</td></tr>"
+        for w in superseded
+    )
+    waiting_table = (
+        "<div style='overflow-x:auto'><table><thead><tr><th>Request</th><th>Scope</th><th>Since</th><th></th></tr></thead>"
+        f"<tbody>{waiting_rows}</tbody></table></div>"
+        if waiting
+        else "<p class='text-muted' style='font-size:0.85rem'>Nothing is waiting on you.</p>"
+    )
+    superseded_group = (
+        "<details class='handoff-superseded' style='margin-top:12px'>"
+        f"<summary>Superseded by a later handoff ({len(superseded)})</summary>"
+        "<p class='text-muted' style='font-size:0.85rem'>The agent that asked made a new request in a later session in the "
+        "same workspace, which replaced these. It was shown them so it could restate any that still apply.</p>"
+        "<div style='overflow-x:auto'><table><thead><tr><th>Request</th><th>Scope</th><th>Replaced by</th><th>When</th></tr></thead>"
+        f"<tbody>{superseded_rows}</tbody></table></div></details>"
+        if superseded
+        else ""
+    )
     waiting_card = (
         "<div class='card'><h3>Waiting on you</h3>"
         "<p class='text-muted' style='font-size:0.85rem'>Agents flagged these in a handoff as needing a person. "
-        "Each one appears at the top of every agent session in its workspace until you mark it resolved.</p>"
-        "<div style='overflow-x:auto'><table><thead><tr><th>Request</th><th>Scope</th><th>Since</th><th></th></tr></thead>"
-        f"<tbody>{waiting_rows}</tbody></table></div></div>"
-        if waiting
+        "Each one appears at the top of every agent session in its workspace until you mark it resolved, "
+        "the agent that asked resolves it, or a request that agent makes in a later session in the same workspace replaces it.</p>"
+        f"{waiting_table}{superseded_group}</div>"
+        if waiting or superseded
         else ""
     )
 

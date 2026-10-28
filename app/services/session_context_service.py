@@ -186,20 +186,30 @@ def _handoff(activity: dict) -> dict:
     return value if isinstance(value, dict) else {}
 
 
-def _needs_human(conn, scope: str) -> list[dict]:
-    """Handoffs waiting on a person, newest first: what the human must do."""
-    return [
-        dict(r)
-        for r in conn.execute(
-            """SELECT id, agent_id, task_description, handoff_json FROM agent_activity
+_WAITING_LIMIT = 5
+_OWN_WAITING_LIMIT = 5
+
+
+def _needs_human(conn, scope: str, agent_id: str) -> list[dict]:
+    """Handoffs waiting on a person, newest first: what the human must do.
+
+    The newest few in the scope, plus the calling agent's own open requests
+    (a few more), so the agent always sees what it asked for and can resolve
+    or restate it.
+    """
+    base = """SELECT id, agent_id, assigned_agent_id, task_description, handoff_json, updated_at
+            FROM agent_activity
             WHERE memory_scope = ? AND status IN ('blocked', 'completed', 'active', 'stale')
               AND json_valid(handoff_json)
               AND COALESCE(json_extract(handoff_json, '$.needs_human'), '') != ''
-              AND handoff_resolved_at IS NULL
-            ORDER BY updated_at DESC LIMIT 5""",
-            (scope,),
-        ).fetchall()
-    ]
+              AND handoff_resolved_at IS NULL"""
+    rows = conn.execute(f"{base} ORDER BY updated_at DESC LIMIT ?", (scope, _WAITING_LIMIT)).fetchall()
+    own = conn.execute(
+        f"{base} AND assigned_agent_id = ? ORDER BY updated_at DESC LIMIT ?",
+        (scope, agent_id, _OWN_WAITING_LIMIT),
+    ).fetchall()
+    merged = {r["id"]: dict(r) for r in [*rows, *own]}
+    return sorted(merged.values(), key=lambda r: r["updated_at"] or "", reverse=True)
 
 
 def _render(scope: str, execution_id: str, parts: dict, limits: dict) -> str:
@@ -221,10 +231,18 @@ def _render(scope: str, execution_id: str, parts: dict, limits: dict) -> str:
     waiting = parts.get("needs_human") or []
     if waiting:
         lines += ["", "## Waiting on a person"]
+        own = 0
         for activity in waiting:
+            yours = activity.get("assigned_agent_id") == parts["agent_id"]
+            own += yours
             lines.append(
-                f"- {activity['id']} ({activity['agent_id']}): "
+                f"- {activity['id']} ({activity['agent_id']}{', yours' if yours else ''}): "
                 f"{_one_line(_handoff(activity).get('needs_human'), 240)}"
+            )
+        if own:
+            lines.append(
+                "Yours: when one has been dealt with, activity_handoff_resolve(activity_id, reason); "
+                "if one still applies, restate it in your next handoff."
             )
 
     attention = parts["attention"]
@@ -383,7 +401,7 @@ def build_session_context(
         attention = _attention(conn, scope, agent_id)
         attention_ids = {a["id"] for a in attention}
         recent = _recent(conn, scope, attention_ids)
-        needs_human = _needs_human(conn, scope)
+        needs_human = _needs_human(conn, scope, agent_id)
     shown_activity_ids = attention_ids | {a["id"] for a in recent}
     changes, changes_truncated = _changes(scope, agent_id, shown_activity_ids)
     # A record that just changed is already listed under the changes; the index
