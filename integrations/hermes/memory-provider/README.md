@@ -63,9 +63,15 @@ The URL and bearer are resolved in this order (first match wins):
    is not set, the provider logs one warning naming the variable (never a
    value) and stays unavailable instead of sending the placeholder as a token.
 
-The config is read with PyYAML, or with ruamel.yaml where Hermes ships that instead;
-if neither is installed, or the file cannot be parsed, the provider logs one warning
-and stays unavailable.
+Inside Hermes, the provider reads the config through Hermes' own read-only loader
+(`hermes_cli.config.load_config_readonly`), and resolves `${env:NAME}` placeholders
+with `agent.secret_scope.get_secret`, because Hermes can hold a profile's secrets in
+a per-profile scope rather than in the process environment. If that scope is not
+set, the lookup fails closed: it never falls back to another profile's environment.
+Outside Hermes (for example in the verifier), it reads the file with PyYAML, or with
+ruamel.yaml where that is installed instead, and expands placeholders from
+`os.environ`. If neither parser is installed, or the file cannot be parsed, the
+provider logs one warning and stays unavailable.
 
 So in a deployment where Agent Core is already an MCP server, **no extra config
 is needed** — the provider reuses that single source of truth for the secret.

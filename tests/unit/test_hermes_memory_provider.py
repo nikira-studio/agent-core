@@ -164,3 +164,96 @@ def test_provider_without_any_yaml_parser_warns_once(monkeypatch, tmp_path, capl
     assert not provider.is_available()
     warnings = [r.getMessage() for r in caplog.records if r.levelname == "WARNING"]
     assert len(warnings) == 1 and "PyYAML" in warnings[0] and "ac_sk_unread" not in caplog.text
+
+
+# Inside Hermes the provider reads its config through Hermes itself and resolves
+# placeholders from the active profile's secret scope (a ContextVar), not from
+# os.environ. Synthetic stand-ins for those Hermes modules below.
+
+def _secret_scope(make_get_secret):
+    """A stand-in agent.secret_scope; make_get_secret(scope) returns get_secret."""
+    scope = types.ModuleType("agent.secret_scope")
+    scope.UnscopedSecretError = type("UnscopedSecretError", (RuntimeError,), {})
+    scope.get_secret = make_get_secret(scope)
+    return scope
+
+
+def _hermes_config(config):
+    package = types.ModuleType("hermes_cli")
+    package.__path__ = []
+    module = types.ModuleType("hermes_cli.config")
+    module.load_config_readonly = lambda: config
+    return {"hermes_cli": package, "hermes_cli.config": module}
+
+
+def test_placeholder_uses_the_profile_scoped_secret(monkeypatch):
+    module = _load_provider(monkeypatch)
+    calls = []
+
+    def get_secret(name):
+        calls.append(name)
+        return "synthetic-test-value"
+
+    monkeypatch.setitem(sys.modules, "agent.secret_scope", _secret_scope(lambda scope: get_secret))
+    monkeypatch.delenv("HERMES_CORE_AUTHORIZATION", raising=False)
+
+    assert module._expand_env("${env:HERMES_CORE_AUTHORIZATION}") == ("synthetic-test-value", [])
+    assert calls == ["HERMES_CORE_AUTHORIZATION"]
+
+
+def test_unscoped_profile_secret_fails_closed_without_env_fallback(monkeypatch):
+    module = _load_provider(monkeypatch)
+
+    def unscoped(scope):
+        def get_secret(_name):
+            raise scope.UnscopedSecretError()
+        return get_secret
+
+    monkeypatch.setitem(sys.modules, "agent.secret_scope", _secret_scope(unscoped))
+    monkeypatch.setenv("HERMES_CORE_AUTHORIZATION", "must-not-fallback")
+
+    value, missing = module._expand_env("${env:HERMES_CORE_AUTHORIZATION}")
+    assert value == "${env:HERMES_CORE_AUTHORIZATION}"
+    assert missing == ["HERMES_CORE_AUTHORIZATION"]
+
+
+def test_mcp_config_uses_the_hermes_readonly_loader(monkeypatch):
+    module = _load_provider(monkeypatch)
+    config = {"mcp_servers": {"agent_core": {
+        "url": "https://core.invalid/mcp",
+        "headers": {"Authorization": "Bearer synthetic-expanded-value"},
+    }}}
+    for name, mod in _hermes_config(config).items():
+        monkeypatch.setitem(sys.modules, name, mod)
+
+    assert module._agent_core_mcp_block() == config["mcp_servers"]["agent_core"]
+
+
+def test_provider_initializes_from_the_profile_scope_without_process_env(monkeypatch):
+    module = _load_provider(monkeypatch)
+    for name in ("AGENT_CORE_URL", "AGENT_CORE_API_KEY", "AGENT_CORE_BEARER", "HERMES_CORE_AUTHORIZATION"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setitem(sys.modules, "agent.secret_scope", _secret_scope(
+        lambda scope: lambda name: "synthetic-test-value" if name == "HERMES_CORE_AUTHORIZATION" else None))
+    for name, mod in _hermes_config({"mcp_servers": {"agent_core": {
+        "url": "https://core.invalid/mcp",
+        "headers": {"Authorization": "${env:HERMES_CORE_AUTHORIZATION}"},
+    }}}).items():
+        monkeypatch.setitem(sys.modules, name, mod)
+
+    provider = module.AgentCoreMemoryProvider()
+
+    assert provider.is_available()
+    assert provider._url == "https://core.invalid"
+    assert provider._token == "synthetic-test-value"
+
+
+def test_yaml_loader_uses_the_hermes_safe_loader(monkeypatch, tmp_path):
+    module = _load_provider(monkeypatch)
+    utils = types.ModuleType("utils")
+    utils.fast_safe_load = lambda stream: {"sentinel": stream.read()}
+    monkeypatch.setitem(sys.modules, "utils", utils)
+    path = tmp_path / "config.yaml"
+    path.write_text("synthetic")
+
+    assert module._load_yaml(str(path)) == {"sentinel": "synthetic"}

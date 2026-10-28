@@ -109,6 +109,17 @@ def _load_yaml(path: str) -> Any:
     Hermes environments differ: some ship PyYAML, others only ruamel.yaml.
     Raises ImportError when neither is installed.
     """
+    # Inside Hermes, use its own safe config loader. This avoids adding a second
+    # YAML dependency and ensures this plugin parses the same YAML dialect as
+    # the gateway. The standalone fallbacks keep the plugin usable in its
+    # isolated verification environment.
+    try:
+        from utils import fast_safe_load
+    except ImportError:
+        fast_safe_load = None
+    if fast_safe_load is not None:
+        with open(path, encoding="utf-8") as f:
+            return fast_safe_load(f)
     with open(path, encoding="utf-8") as f:
         text = f.read()
     try:
@@ -132,6 +143,27 @@ def _agent_core_mcp_block() -> Dict[str, Any]:
     that exists but cannot be read logs one warning, so a missing YAML parser
     or a broken file does not look like "not configured".
     """
+    # load_config_readonly applies Hermes' profile-scoped SecretRef expansion
+    # through agent.secret_scope.get_secret(). A raw YAML parse plus os.environ
+    # misses credentials that exist only in the active profile scope.
+    try:
+        from hermes_cli.config import load_config_readonly
+    except ImportError:
+        load_config_readonly = None
+    if load_config_readonly is not None:
+        try:
+            cfg = load_config_readonly() or {}
+        except Exception as exc:
+            logger.warning("agent_core provider: Hermes config load failed (%s)", type(exc).__name__)
+            return {}
+        servers = cfg.get("mcp_servers") if isinstance(cfg, dict) else None
+        if isinstance(servers, dict):
+            for key in ("agent_core", "agent-core"):
+                block = servers.get(key)
+                if isinstance(block, dict):
+                    return block
+        return {}
+
     path = _hermes_config_path()
     if not path:
         return {}
@@ -168,8 +200,22 @@ def _expand_env(value: str) -> tuple[str, list[str]]:
     """
     missing: list[str] = []
 
+    def lookup(name: str) -> Optional[str]:
+        # Match Hermes config expansion: a gateway turn may hold credentials in
+        # a ContextVar profile scope without placing them in process os.environ.
+        try:
+            from agent.secret_scope import UnscopedSecretError, get_secret
+        except ImportError:
+            return os.environ.get(name)
+        try:
+            return get_secret(name)
+        except UnscopedSecretError:
+            # In multiplex mode an absent scope must fail closed; never fall
+            # back to another profile's process environment.
+            return None
+
     def sub(match):
-        found = os.environ.get(match.group(1))
+        found = lookup(match.group(1))
         if found:
             return found
         missing.append(match.group(1))
