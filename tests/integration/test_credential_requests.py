@@ -86,3 +86,33 @@ def test_malformed_request_params_are_400_not_429(test_client, admin_token):
     agent = _agent(admin_token)
     assert _request(test_client, agent, name=["x"]).status_code == 400
     assert _request(test_client, agent, scope="workspace:Bad Scope!").status_code in (400, 403)
+
+
+def test_a_moved_credential_is_not_requested_again_and_moving_it_back_closes_requests(test_client, admin_token):
+    from app.services import credential_service
+
+    agent = _agent(admin_token)
+    admin = {"Authorization": f"Bearer {admin_token}"}
+    request_id = _request(test_client, agent).json()["data"]["request_id"]
+    entry = test_client.post(f"/api/credentials/requests/{request_id}/fulfill",
+                             headers=admin, json={"value": "v"}).json()["data"]["entry"]
+
+    # A person moves the filled credential elsewhere; the agent asking again
+    # must not reopen a request for something that was answered.
+    credential_service.move_credential(entry["id"], "agent:req-agent")
+    again = _request(test_client, agent).json()["data"]
+    assert again["created"] is False and "agent:req-agent" in again["message"]
+    assert test_client.get("/api/credentials/requests", headers=admin).json()["data"]["requests"] == []
+
+
+def test_listing_closes_a_request_answered_without_the_fill_button(test_client, admin_token):
+    from app.services import credential_service
+
+    agent = _agent(admin_token)
+    admin = {"Authorization": f"Bearer {admin_token}"}
+    _request(test_client, agent)
+    # Added by hand (or moved in); the agent has not asked again yet.
+    credential_service.create_credential(scope=SCOPE, name="github-token", value_plaintext="v")
+    assert test_client.get("/api/credentials/requests", headers=admin).json()["data"]["requests"] == []
+    page = test_client.get("/credentials", headers=admin)
+    assert "Requested by agents" not in page.text

@@ -65,6 +65,18 @@ def request_credential(
             ORDER BY created_at DESC LIMIT 1""",
             (scope, name),
         ).fetchone()
+        moved = _moved_elsewhere(conn, latest, scope)
+        if moved:
+            # It was filled, then a person moved it to another scope. That was a
+            # choice, so do not reopen the request behind their back.
+            return {
+                **_public(dict(latest)),
+                "created": False,
+                "message": (
+                    f"This request was filled, then a person moved the credential to {moved}. "
+                    "Use it there if you can read that scope, or ask them before requesting it again."
+                ),
+            }
         if latest and latest["status"] == "cancelled":
             # A person said no. Asking again by itself would just nag; they can
             # still add the credential directly, which the check above finds.
@@ -100,6 +112,35 @@ def request_credential(
     return {**_public(dict(row)), "created": row["id"] == request_id}
 
 
+def _moved_elsewhere(conn, request, scope: str) -> Optional[str]:
+    """The scope a filled request's credential now lives in, if it was moved out."""
+    if not request or request["status"] != "fulfilled" or not request["credential_id"]:
+        return None
+    row = conn.execute(
+        "SELECT scope FROM credentials WHERE id = ?", (request["credential_id"],)
+    ).fetchone()
+    return row["scope"] if row and row["scope"] != scope else None
+
+
+def _close_answered(conn) -> None:
+    """Close pending requests whose credential now exists, however it got there.
+
+    Filling a request closes it, but a person can also add the credential by
+    hand or move one into the requested scope. Without this the request would
+    wait on screen until the agent happened to ask again.
+    """
+    conn.execute(
+        """UPDATE credential_requests SET status = 'fulfilled',
+            credential_id = (SELECT c.id FROM credentials c
+                WHERE c.scope = credential_requests.scope AND c.name = credential_requests.name),
+            resolved_at = ?
+        WHERE status = 'pending' AND EXISTS (SELECT 1 FROM credentials c
+            WHERE c.scope = credential_requests.scope AND c.name = credential_requests.name)""",
+        (utc_now_iso(),),
+    )
+    conn.commit()
+
+
 def _public(request: dict) -> dict:
     result = {
         "request_id": request["id"],
@@ -120,6 +161,7 @@ def _public(request: dict) -> dict:
 def list_pending() -> list[dict]:
     """Every open request, oldest first. Callers filter by what the viewer can read."""
     with get_db() as conn:
+        _close_answered(conn)
         rows = conn.execute(
             "SELECT * FROM credential_requests WHERE status = 'pending' ORDER BY created_at"
         ).fetchall()
