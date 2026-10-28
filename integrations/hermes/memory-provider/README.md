@@ -57,7 +57,11 @@ The URL and bearer are resolved in this order (first match wins):
    server in `$HERMES_HOME/config.yaml`, the provider reuses it:
    `mcp_servers.agent_core.headers.Authorization` (the `Bearer ` prefix is
    stripped) for the token, and `mcp_servers.agent_core.url` (a trailing `/mcp`
-   or `/sse` is removed) for the REST base URL.
+   or `/sse` is removed) for the REST base URL. `${env:NAME}` and `${NAME}`
+   placeholders in either are expanded from the provider's environment, the
+   same way Hermes expands them for the MCP server. If a referenced variable
+   is not set, the provider logs one warning naming the variable (never a
+   value) and stays unavailable instead of sending the placeholder as a token.
 
 So in a deployment where Agent Core is already an MCP server, **no extra config
 is needed** — the provider reuses that single source of truth for the secret.

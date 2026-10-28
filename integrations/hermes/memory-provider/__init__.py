@@ -20,9 +20,9 @@ Design
 * Prefetch-only. ``get_tool_schemas() -> []`` — no tools added to the prompt.
   Explicit reads/writes already exist as Agent Core MCP tools; the entire point
   of this provider is automatic recall, not more tools.
-* Read path only for v1. ``sync_turn()`` is a no-op; durable writes go through
-  the Agent Core MCP ``memory_write`` tool, so there is no recall gap to close.
-  (Write-back can be added in v2.)
+* Nothing is captured per turn. ``sync_turn()`` is a no-op; the agent writes
+  through the ordinary Agent Core tools (``memory_write``, ``activity_update``),
+  and the system prompt block tells it to.
 * Fails safe. Any error in ``prefetch()`` returns ``""`` and logs at debug — a
   missing or broken Agent Core never breaks the agent loop. ``is_available()``
   returns ``False`` when no bearer token can be found, so the loader skips the
@@ -37,6 +37,9 @@ Where the URL + token come from (first match wins)
    ``~/.hermes/config.yaml``). The token is read from
    ``headers.Authorization`` (``Bearer `` stripped) and the REST base URL is
    derived from ``url`` (a trailing ``/mcp`` or ``/sse`` is removed).
+   ``${env:NAME}`` and ``${NAME}`` in either are expanded from the environment,
+   as Hermes does for the MCP server itself. If a referenced variable is unset,
+   the provider logs one warning naming it and stays unavailable.
 
 This means you do NOT have to duplicate the bearer: if Agent Core is already
 wired as an MCP server, the provider reuses that same single source of truth.
@@ -62,6 +65,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import urllib.error
 import urllib.request
 from typing import Any, Dict, List, Optional
@@ -124,6 +128,29 @@ def _agent_core_mcp_block() -> Dict[str, Any]:
     return {}
 
 
+_PLACEHOLDER = re.compile(r"\$\{(?:env:)?([A-Za-z_][A-Za-z0-9_]*)\}")
+
+
+def _expand_env(value: str) -> tuple[str, list[str]]:
+    """Expand ``${env:NAME}`` and ``${NAME}`` from the environment.
+
+    Hermes expands these in config.yaml for the MCP server, but this provider
+    reads the file itself, so without this it sends the placeholder text as
+    the token. Returns the expanded value and the names that were unset; an
+    unset placeholder is left as it was so it can never pass for a token.
+    """
+    missing: list[str] = []
+
+    def sub(match):
+        found = os.environ.get(match.group(1))
+        if found:
+            return found
+        missing.append(match.group(1))
+        return match.group(0)
+
+    return _PLACEHOLDER.sub(sub, value or ""), missing
+
+
 def _strip_bearer(value: str) -> str:
     value = (value or "").strip()
     if value.lower().startswith("bearer "):
@@ -153,9 +180,10 @@ class AgentCoreMemoryProvider(MemoryProvider):
             if not token:
                 headers = block.get("headers") or block.get("http_headers") or {}
                 if isinstance(headers, dict):
-                    token = _strip_bearer(str(headers.get("Authorization", "")))
+                    token = self._from_config("headers.Authorization", headers.get("Authorization", ""))
+                    token = _strip_bearer(token)
             if not url:
-                url = _rest_base_from_mcp_url(str(block.get("url", "")))
+                url = _rest_base_from_mcp_url(self._from_config("url", block.get("url", "")))
 
         # Falls back to a local install, never to somebody else's server. This
         # used to default to the author's own host, so an install that did not
@@ -185,6 +213,20 @@ class AgentCoreMemoryProvider(MemoryProvider):
             self._timeout = max(1.0, float(_env("AGENT_CORE_TIMEOUT", default="4")))
         except (TypeError, ValueError):
             self._timeout = 4.0
+
+    @staticmethod
+    def _from_config(field: str, raw) -> str:
+        """A config value with ${env:...} expanded, or "" with one warning when a
+        variable it names is unset. Never logs the value itself."""
+        value, missing = _expand_env(str(raw or ""))
+        if missing:
+            logger.warning(
+                "agent_core provider: mcp_servers.agent_core.%s refers to unset environment "
+                "variable(s) %s; the provider is disabled until they are set",
+                field, ", ".join(sorted(set(missing))),
+            )
+            return ""
+        return value
 
     @property
     def name(self) -> str:
