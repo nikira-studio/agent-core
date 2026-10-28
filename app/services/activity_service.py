@@ -60,7 +60,7 @@ def create_activity(
 
 
 # metadata.task_ref links an activity to the task that started it in another
-# system ("openagents:<task id>", "foundry:<objective>"). A reader that already
+# system ("jira:PROJ-123", "github:owner/repo#42"). A reader that already
 # lists that system's queue skips handoffs carrying one, so an item is not
 # shown twice. The prefix names the system; Core does not interpret the id.
 TASK_REF_PATTERN = re.compile(r"^[a-z][a-z0-9_-]{0,31}:\S{1,200}$")
@@ -69,7 +69,7 @@ TASK_REF_PATTERN = re.compile(r"^[a-z][a-z0-9_-]{0,31}:\S{1,200}$")
 def validate_task_ref(value) -> str:
     if not isinstance(value, str) or not TASK_REF_PATTERN.match(value.strip()):
         raise ValueError(
-            "task_ref must look like '<system>:<id>', for example 'openagents:123' or 'foundry:my-objective'"
+            "task_ref must look like '<system>:<id>', for example 'jira:PROJ-123' or 'github:owner/repo#42'"
         )
     return value.strip()
 
@@ -382,7 +382,7 @@ def _request_time(row: dict):
 
 def task_ref(activity: dict) -> Optional[str]:
     """The caller's own task identifier, metadata.task_ref (for example
-    "foundry:<objective_id>"), or None when the activity has none."""
+    "jira:PROJ-123"), or None when the activity has none."""
     metadata = load_handoff(activity.get("metadata_json"))  # any JSON object
     value = metadata.get("task_ref")
     return value.strip() if isinstance(value, str) and value.strip() else None
@@ -391,8 +391,8 @@ def task_ref(activity: dict) -> Optional[str]:
 def _same_task(rows: list[dict], ref: Optional[str]) -> list[dict]:
     """Requests that belong to the same task stream as `ref`.
 
-    Tools that run several tasks as one agent in one scope (Foundry's
-    objectives, OpenAgents specialists) tag each activity with
+    Tools that run several tasks as one agent in one scope (an orchestrator
+    working through a queue, a scheduler running jobs) tag each activity with
     metadata.task_ref; one task's request must not replace another's. Two
     activities without a task_ref (ordinary terminal sessions) count as the
     same stream; a task_ref'd one and an untagged one never do.

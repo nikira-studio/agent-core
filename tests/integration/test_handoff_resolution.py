@@ -208,11 +208,11 @@ def test_agent_resolves_its_own_request_with_a_reason(test_client, admin_token):
     activity = _task(test_client, headers, "Wire billing", {"needs_human": "Create the Stripe account."})["activity"]
 
     response = _mcp(test_client, headers, "activity_handoff_resolve",
-                    activity_id=activity["id"], reason="  Brian created it; keys are stored.  ")
+                    activity_id=activity["id"], reason="  The owner created it; keys are stored.  ")
     assert response.status_code == 200, response.json()
     resolution = response.json()["data"]["resolution"]
     assert resolution["kind"] == "agent" and resolution["resolved_by"] == "h-agent"
-    assert resolution["reason"] == "Brian created it; keys are stored."
+    assert resolution["reason"] == "The owner created it; keys are stored."
     handoff, resolved_at = _handoff(activity["id"])
     assert resolved_at and handoff["resolution"] == resolution
     assert handoff["needs_human"] == "Create the Stripe account."
@@ -221,7 +221,7 @@ def test_agent_resolves_its_own_request_with_a_reason(test_client, admin_token):
     audit = _audit("handoff_resolved")[-1]
     assert audit["actor_type"] == "agent" and audit["resource_id"] == activity["id"]
     assert audit["details"]["kind"] == "agent"
-    assert audit["details"]["reason"] == "Brian created it; keys are stored."
+    assert audit["details"]["reason"] == "The owner created it; keys are stored."
 
     again = _mcp(test_client, headers, "activity_handoff_resolve", activity_id=activity["id"], reason="again")
     assert again.status_code == 409 and again.json()["error"]["code"] == "NOT_PENDING"
@@ -467,20 +467,20 @@ def _close_with_request(client, headers, activity, ask):
 
 def test_superseding_is_per_task_ref(test_client, admin_token):
     owner_id, headers, _ = _setup()
-    a = _tagged(owner_id, "Objective A", "foundry:A")
+    a = _tagged(owner_id, "Objective A", "jobs:A")
     _close_with_request(test_client, headers, a, "A needs a decision.")
-    b = _tagged(owner_id, "Objective B", "foundry:B")  # started after A's request
+    b = _tagged(owner_id, "Objective B", "jobs:B")  # started after A's request
     data = _close_with_request(test_client, headers, b, "B needs a decision.")
     assert "superseded_requests" not in data
     assert {w["id"] for w in activity_service.list_needs_human()} == {a["id"], b["id"]}
 
     # Closing another objective without a request reminds only of its own task's requests.
-    c = _tagged(owner_id, "Objective C", "foundry:C")
+    c = _tagged(owner_id, "Objective C", "jobs:C")
     data = _put(test_client, headers, c["id"], status="completed", task_result="done").json()["data"]
     assert "open_requests" not in data
 
     # A later session of objective A replaces A's earlier request, and only that.
-    a2 = _tagged(owner_id, "Objective A, again", "foundry:A")
+    a2 = _tagged(owner_id, "Objective A, again", "jobs:A")
     data = _close_with_request(test_client, headers, a2, "A needs a second decision.")
     assert [r["activity_id"] for r in data["superseded_requests"]] == [a["id"]]
     assert _handoff(a["id"])[1] and not _handoff(b["id"])[1]
@@ -488,13 +488,13 @@ def test_superseding_is_per_task_ref(test_client, admin_token):
 
 def test_tagged_and_untagged_tasks_never_supersede_each_other(test_client, admin_token):
     owner_id, headers, _ = _setup()
-    tagged = _tagged(owner_id, "Tagged", "openagents:42")
+    tagged = _tagged(owner_id, "Tagged", "tracker:42")
     _close_with_request(test_client, headers, tagged, "Tagged ask.")
     untagged = _tagged(owner_id, "Untagged")
     data = _close_with_request(test_client, headers, untagged, "Untagged ask.")
     assert "superseded_requests" not in data and not _handoff(tagged["id"])[1]
 
-    tagged2 = _tagged(owner_id, "Tagged, other task", "openagents:43")
+    tagged2 = _tagged(owner_id, "Tagged, other task", "tracker:43")
     data = _close_with_request(test_client, headers, tagged2, "Another tagged ask.")
     assert "superseded_requests" not in data and not _handoff(untagged["id"])[1]
 

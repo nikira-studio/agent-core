@@ -118,7 +118,7 @@ Agents connect, discover authorized tools, and call what they need. Agent Core p
 
 For memory writes, `slot_key` keeps one active value per slot for preference records, which makes "the current answer" deterministic instead of something retrieval has to guess at. `valid_from` and `valid_to` say when the content was **true in the world**, which is a separate timeline from when the system learned it; set them when a record describes a period other than "from now on", and pass `as_of` to a search to ask what the corpus held to be true at a past moment. See [How It Works](how-it-works.md#two-clocks).
 
-At session startup, call `workspace_sync` for the shared workspace and keep the returned `execution_id` for that host session. Sync again before you resume, review, hand off, or complete shared work. Process each stable change ID once. A change can appear in both its resource group and `other_session_changes`. Call `workspace_sync_ack` only after you process or intentionally skip the delivered page.
+At session startup, use the injected session context if a hook provided one, otherwise call `session_context` for the shared workspace, and keep the returned `execution_id` for that host session. Call `workspace_sync` with it before you resume, review, hand off, or complete shared work. Process each stable change ID once. A change can appear in both its resource group and `other_session_changes`. Call `workspace_sync_ack` only after you process or intentionally skip the delivered page.
 
 Workspace context is not repository access. If a task points to files outside the current checkout, switch to an authorized checkout or report the mismatch. Do not use memory summaries as a substitute for reviewing the source.
 
@@ -487,7 +487,7 @@ The **Integrations** page generates a full `CLAUDE.md` snippet tailored to your 
 
 You are connected to Agent Core at http://localhost:3500.
 
-- At session startup, call `workspace_sync` for the shared workspace and reuse its `execution_id` for that session
+- At session startup, use the hook-injected session context or call `session_context` for the shared workspace, and reuse its `execution_id` for that session
 - Sync before resuming, reviewing, handing off, or completing shared work
 - Process each stable change ID once, including when it appears in both its resource group and `other_session_changes`
 - Call `workspace_sync_ack` only after incorporating or intentionally skipping the delivered page
@@ -582,7 +582,7 @@ Write durable shared memory to the selected workspace. Read the user scope for s
 
 ## Work with Agent Core
 
-1. At session start, call `workspace_sync` and acknowledge all returned pages.
+1. At session start, use the hook-injected session context or call `session_context`; later `workspace_sync` calls return only what changed, and each processed page is acknowledged with `workspace_sync_ack`.
 2. Start meaningful tasks with `activity_update` in the selected workspace.
 3. If a fresh activity returns `since_last_active`, process the bounded digest without treating it as complete history.
 4. Search relevant memory before acting. For a handoff, review, or resume, start from the recent work, next steps, and open questions in the session context; use `activity_search` or `activity_get` for older history.

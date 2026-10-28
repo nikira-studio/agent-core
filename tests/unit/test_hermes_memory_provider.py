@@ -103,3 +103,13 @@ def test_provider_never_logs_the_expanded_token(monkeypatch, tmp_path, caplog):
         module.AgentCoreMemoryProvider().initialize("s")
 
     assert "ac_sk_secret_value" not in caplog.text
+
+
+def test_handoff_paragraph_is_generic_and_can_be_turned_off(monkeypatch):
+    module = _load_provider(monkeypatch)
+    monkeypatch.delenv("AGENT_CORE_HANDOFF_PROMPT", raising=False)
+    block = module.AgentCoreMemoryProvider().system_prompt_block()
+    assert "attention_list" in block and "task_ref" in block
+
+    monkeypatch.setenv("AGENT_CORE_HANDOFF_PROMPT", "0")
+    assert "attention_list" not in module.AgentCoreMemoryProvider().system_prompt_block()

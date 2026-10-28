@@ -256,6 +256,7 @@ For REST-based clients or custom integrations, every feature is also available t
 | [Integrations](docs/integrations.md) | Set up MCP, credentials, connectors, activities, collaboration, and webhooks in that order |
 | [How it works](docs/how-it-works.md) | The system model and full feature set: memory, activity, credentials, connectors, and maintenance |
 | [Credential Broker](docs/credential-broker.md) | How `AC_SECRET_*` references work and how to resolve them at runtime |
+| [Credential consumers](docs/credential-consumers.md) | Give a service or container its own identity that fetches only the secrets granted to it |
 | [Configuration](docs/configuration.md) | Environment variables, ports, and data directory layout |
 | [Security](docs/security.md) | Scope model, secret handling, and deployment checklist |
 | [API reference](docs/api.md) | Full REST and MCP endpoint reference |

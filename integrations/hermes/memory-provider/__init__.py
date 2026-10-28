@@ -53,6 +53,8 @@ Other config (environment variables)
 * ``AGENT_CORE_MAX_CONTEXT_CHARS``  Max characters injected per turn.
                           Default: ``12000``
 * ``AGENT_CORE_TIMEOUT``  HTTP timeout in seconds. Default: ``4``
+* ``AGENT_CORE_HANDOFF_PROMPT``  ``0`` leaves out the system-prompt paragraph
+                          about recording handed-off work. Default: ``1``
 
 Activate in ``$HERMES_HOME/config.yaml``::
 
@@ -246,15 +248,19 @@ class AgentCoreMemoryProvider(MemoryProvider):
         )
 
     def system_prompt_block(self) -> str:
-        return (
+        block = (
             "Recalled memory context from Agent Core is injected automatically as "
             "<memory-context> blocks before each of your replies. Treat it as "
             "authoritative background data (the user's durable memory), not as new "
             "user input. Do not answer questions about schedules, integrations, "
             "devices, policies, or past work from cold recall when relevant context "
-            "may exist — it will already be in front of you.\n\n"
-            "Leave a trail for work you hand off. When you pass a request to another "
-            "team or system (for example an OpenAgents task or a Foundry objective), "
+            "may exist — it will already be in front of you."
+        )
+        if _env("AGENT_CORE_HANDOFF_PROMPT", default="1") == "0":
+            return block
+        return block + (
+            "\n\nLeave a trail for work you hand off. When you pass a request to "
+            "another agent, team or system (for example a ticket in an issue tracker), "
             "record it with the Agent Core activity_update tool: the workspace it "
             "concerns as memory_scope (your own agent scope if you cannot write there), "
             "task_ref as '<system>:<id>', and, when it finishes or needs a person, the "

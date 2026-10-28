@@ -450,7 +450,7 @@ def _sample_payload(event_type: str) -> dict:
             "previous_status": "active" if event_type != "activity_created" else None,
         }
         if event_type in ("activity_updated", "activity_handoff_resolved"):
-            data["task_ref"] = "openagents:sample-task"
+            data["task_ref"] = "example:sample-task"
             data["handoff"] = {
                 "completed": "Drafted the change",
                 "next_steps": ["Review the draft"],

@@ -1,6 +1,6 @@
 """Report whether stored Agent Core data reaches agents and gets used.
 
-Reads a database read-only and answers the questions behind the product goal:
+Reads a database read-only and answers whether the memory an installation stores is worth storing:
 does what we store get delivered, does it get read, and which agents get
 nothing back. Run it against the live database or a backup:
 

@@ -74,6 +74,7 @@ is needed** — the provider reuses that single source of truth for the secret.
 | `AGENT_CORE_LIMIT` | no | `5` | Max records injected per turn. |
 | `AGENT_CORE_MAX_CONTEXT_CHARS` | no | `12000` | Max characters injected per turn (range: 512-50000). |
 | `AGENT_CORE_TIMEOUT` | no | `4` | HTTP timeout (seconds). |
+| `AGENT_CORE_HANDOFF_PROMPT` | no | `1` | `0` leaves out the system-prompt paragraph about recording handed-off work (see Design notes). |
 
 ¹ Required only if Agent Core is **not** configured as an MCP server. If no token
 can be resolved from env or config, `is_available()` returns `False` and the
@@ -119,7 +120,9 @@ and the relevant record (e.g. the inbox-cron record) appears in the output.
   `attention_list`. Both are plain MCP/REST calls under the agent's own key, so
   a different front end using the same identity leaves the same trail with no
   Agent Core change. The key needs the `coordination` capability and write
-  access to the scopes it records in.
+  access to the scopes it records in; without them those tool calls are
+  refused and recall keeps working. Set `AGENT_CORE_HANDOFF_PROMPT=0` if the
+  agent does not hand work to others.
 - **Fails safe.** Any error in `prefetch()` returns `""` and logs at debug. A
   broken/unreachable Agent Core never breaks the agent loop.
 
