@@ -443,6 +443,47 @@ async def test_dashboard_vector_settings(
     )
 
 
+@router.get("/api/dashboard/vector-reembed")
+async def vector_reembed_status(session: dict = Depends(require_admin)):
+    from app.services import reembed_service
+
+    return success_response(await asyncio.to_thread(reembed_service.status))
+
+
+@router.post("/api/dashboard/vector-reembed")
+async def start_vector_reembed(
+    request: Request, session: dict = Depends(require_admin)
+):
+    """Embed every memory record that has no vector for the configured model."""
+    from app.services import audit_service, reembed_service
+    from app.routes.auth import get_client_ip
+
+    state, err = await asyncio.to_thread(reembed_service.start, f"user:{session['user_id']}")
+    if err == "VECTOR_SEARCH_DISABLED":
+        return error_response(err, "Enable vector search and save the settings first.", 400)
+    if err == "REEMBED_ALREADY_RUNNING":
+        return error_response(err, "A re-embed run is already in progress.", 409)
+    audit_service.write_event(
+        actor_type="user",
+        actor_id=session["user_id"],
+        action="system_setting_updated",
+        resource_type="vector_settings",
+        result="success",
+        details={"operation": "reembed_started", "model": state["model"], "run_id": state["run_id"]},
+        ip_address=get_client_ip(request),
+    )
+    return success_response({"job": state})
+
+
+@router.post("/api/dashboard/vector-reembed/cancel")
+async def cancel_vector_reembed(session: dict = Depends(require_admin)):
+    from app.services import reembed_service
+
+    if not await asyncio.to_thread(reembed_service.cancel):
+        return error_response("REEMBED_NOT_RUNNING", "No re-embed run is in progress.", 409)
+    return success_response({"cancelling": True})
+
+
 @router.get("/api/dashboard/ollama-models")
 async def list_ollama_models(url: str, session: dict = Depends(require_admin)):
     """List what an Ollama-compatible endpoint has installed.
@@ -821,7 +862,7 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
         <div class="form-group">
           <label>Embedding Dimension</label>
           <input type="number" id="vector-dimension" min="64" max="4096" value="{escape_html(vector_dimension)}" style="width:120px">
-          <p class="form-hint">Must match the configured embedding model. <code>nomic-embed-text</code> uses 768.</p>
+          <p class="form-hint">For reference only; Agent Core stores whatever length the model returns. <code>nomic-embed-text</code> uses 768.</p>
         </div>
         <div class="form-group">
           <label>Auth Type</label>
@@ -842,6 +883,16 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
         </div>
       </form>
       <div id="vector-settings-result" style="margin-top:12px"></div>
+      <div style="margin-top:20px;border-top:1px solid var(--border, #ddd);padding-top:16px">
+        <h4 style="margin:0 0 8px">Re-embed memory</h4>
+        <p class="form-hint">Search only uses vectors made by the current model. After changing the model, re-embed so existing records are found by meaning again; until then they are matched by text only. A run can be stopped and started again, and it skips records already done.</p>
+        <p id="vector-reembed-coverage" class="text-muted">Loading...</p>
+        <div class="form-actions">
+          <button type="button" class="btn btn-secondary" id="vector-reembed-start" onclick="startReembed()">Re-embed missing records</button>
+          <button type="button" class="btn btn-secondary" id="vector-reembed-cancel" onclick="cancelReembed()" style="display:none">Stop</button>
+        </div>
+        <div id="vector-reembed-result" style="margin-top:12px"></div>
+      </div>
     </div>"""
 
     admin_modals = ""
@@ -1077,10 +1128,52 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
         document.getElementById('vector-api-key').value = '';
         document.getElementById('vector-model').value = model;
         document.getElementById('vector-settings-result').innerHTML = '<div class="alert alert-success">Vector settings saved.</div>';
+        loadReembedStatus();
       }} else {{
         showToast(j.error?.message || 'Failed to save vector settings', 'danger');
       }}
     }}
+    let reembedTimer = null;
+    function renderReembed(data) {{
+      const c = data.coverage || {{}};
+      const job = data.job;
+      const cov = document.getElementById('vector-reembed-coverage');
+      if (!cov) return;
+      cov.textContent = 'Model ' + (c.model || '') + ': ' + (c.active_embedded || 0) + ' of ' + (c.active_total || 0)
+        + ' active records embedded' + (c.missing ? ' (' + c.missing + ' records missing, including superseded and retracted).' : '.');
+      const running = !!job && (job.status === 'running' || job.status === 'cancelling');
+      document.getElementById('vector-reembed-start').disabled = running || !data.vector_search_enabled || !c.missing;
+      document.getElementById('vector-reembed-cancel').style.display = running ? '' : 'none';
+      const out = document.getElementById('vector-reembed-result');
+      if (!job) {{
+        out.innerHTML = data.vector_search_enabled ? '' : '<div class="alert">Enable vector search to re-embed.</div>';
+      }} else {{
+        const counts = escapeHtml(String(job.embedded || 0)) + ' embedded, ' + escapeHtml(String(job.failed || 0)) + ' failed';
+        const labels = {{ running: 'Running', cancelling: 'Stopping', completed: 'Last run finished', cancelled: 'Last run stopped', failed: 'Last run failed', interrupted: 'Last run was interrupted (server restart); start it again to finish' }};
+        const cls = job.status === 'failed' ? 'alert-danger' : (job.status === 'completed' ? 'alert-success' : '');
+        out.innerHTML = '<div class="alert ' + cls + '">' + escapeHtml(labels[job.status] || job.status) + ' for '
+          + escapeHtml(job.model || '') + ': ' + counts + '.'
+          + (job.error ? ' ' + escapeHtml(job.error) : '') + '</div>';
+      }}
+      clearTimeout(reembedTimer);
+      if (running) reembedTimer = setTimeout(loadReembedStatus, 2000);
+    }}
+    async function loadReembedStatus() {{
+      const j = await apiFetch('/api/dashboard/vector-reembed');
+      if (j.ok) renderReembed(j.data);
+    }}
+    async function startReembed() {{
+      if (!confirm('Re-embed every record without a vector for the current model? This calls the embedding backend once per record and runs in the background.')) return;
+      const j = await apiFetch('/api/dashboard/vector-reembed', {{ method: 'POST' }});
+      if (!j.ok) showToast(j.error?.message || 'Could not start the re-embed', 'danger');
+      loadReembedStatus();
+    }}
+    async function cancelReembed() {{
+      const j = await apiFetch('/api/dashboard/vector-reembed/cancel', {{ method: 'POST' }});
+      if (!j.ok) showToast(j.error?.message || 'Could not stop the re-embed', 'danger');
+      loadReembedStatus();
+    }}
+    document.addEventListener('DOMContentLoaded', () => {{ if (document.getElementById('vector-reembed-coverage')) loadReembedStatus(); }});
     async function testVectorSettings() {{
       const result = document.getElementById('vector-settings-result');
       result.innerHTML = '<div class="alert">Testing vector connection...</div>';
@@ -1138,6 +1231,8 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
     document.addEventListener('DOMContentLoaded', initVectorProvider);
     window.saveVectorSettings = saveVectorSettings;
     window.testVectorSettings = testVectorSettings;
+    window.startReembed = startReembed;
+    window.cancelReembed = cancelReembed;
     window.onProviderChange = onProviderChange;
     window.loadOllamaModels = loadOllamaModels;
     </script>"""

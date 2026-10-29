@@ -4,6 +4,10 @@ Notable changes to Agent Core are documented here. The format follows [Keep a Ch
 
 ## [Unreleased]
 
+### Added
+
+- Re-embedding after an embedding model change. Stored vectors are tagged with the model that made them and search only uses the current model's, so switching models used to leave every existing record findable by text only. **Settings → Vector Search** now shows how many records have a vector for the current model and has a **Re-embed missing records** button that embeds the rest in the background, active records first, with progress and a Stop button. A run skips records already done, so a stopped or interrupted run can simply be started again, and only one runs at a time across workers. Also available as `GET`/`POST /api/dashboard/vector-reembed` and `POST /api/dashboard/vector-reembed/cancel` (admin only), and from a shell in the container as `python3 -m app.services.reembed_service`.
+
 ### Changed
 
 - MCP `activity_list` and `activity_search` return compact rows by default (previews of the task, note and result, `task_ref`, and any unresolved request to a person) and keep as many as fit inline, with `response_limited` and offset paging; `view=full` returns every field. Large lists were offloaded to a handle that agents rarely fetched. REST responses are unchanged.

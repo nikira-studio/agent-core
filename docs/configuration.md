@@ -85,6 +85,8 @@ The first five settings are editable in **Settings → System Behavior**. The wo
 
 The embedding provider, endpoint URL, model, and auth type for **vector search** are configured from **Settings → Vector Search** in the dashboard, not through environment variables. Semantic search is off by default. When it's disabled or the embedding backend is unreachable, Agent Core falls back to full-text search automatically.
 
+Vectors are tied to the model that made them. After changing the model, use **Re-embed missing records** in the same section (or run `python3 -m app.services.reembed_service` inside the container) so existing records are found by meaning again; until then they are matched by text only. A run makes one embedding call per record, so on a CPU-only backend with a large model it can take a while. It can be stopped and restarted without redoing finished records. Similarity scores differ between models too, so revisit the duplicate-detection threshold (`memory_dedupe_similarity`) after a switch.
+
 ---
 
 ## Memory verification
