@@ -175,7 +175,7 @@ def test_routes_report_and_start_a_run(admin_client, monkeypatch):
     started = []
     monkeypatch.setattr(
         reembed_service, "start",
-        lambda by: (started.append(by) or ({"run_id": "r1", "model": "new-model", "status": "running"}, None)),
+        lambda by, pause_ms=0: (started.append(by) or ({"run_id": "r1", "model": "new-model", "status": "running"}, None)),
     )
 
     r = admin_client.get("/api/dashboard/vector-reembed")
@@ -208,3 +208,71 @@ def test_settings_page_shows_the_reembed_controls(admin_client):
     html = admin_client.get("/settings").text
     assert 'id="vector-reembed-coverage"' in html
     assert "window.startReembed = startReembed" in html
+
+
+def test_a_slow_run_keeps_its_lease_across_a_batch(records, monkeypatch):
+    """A batch that outlasts the lease must not let a second run start."""
+    import time as _time
+
+    monkeypatch.setattr(reembed_service, "LEASE_SECONDS", 1)
+    seen = []
+
+    def slow_embed(text):
+        _time.sleep(0.6)
+        seen.append((reembed_service._claim("intruder")[1], reembed_service.status()["job"]["status"]))
+        return _vec(1.0), "ok"
+
+    monkeypatch.setattr(embedding_service, "generate_embedding", slow_embed)
+    state, _ = reembed_service._claim("test")
+
+    final = reembed_service.run(state)
+
+    assert final["status"] == "completed" and final["embedded"] == 3  # 1.8 s, past the 1 s lease
+    assert len(seen) == 3
+    assert all(seen_item == ("REEMBED_ALREADY_RUNNING", "running") for seen_item in seen)
+
+
+def test_a_stop_request_takes_effect_after_the_current_record(records, monkeypatch):
+    def embed_then_cancel(text):
+        assert reembed_service.cancel() is True
+        return _vec(1.0), "ok"
+
+    monkeypatch.setattr(embedding_service, "generate_embedding", embed_then_cancel)
+    final = reembed_service.run(reembed_service._claim("test")[0])
+
+    assert final["status"] == "cancelled" and final["embedded"] == 1
+
+
+def test_cancel_does_not_clobber_progress_saved_since_it_was_requested(records):
+    state, _ = reembed_service._claim("test")
+    assert reembed_service.cancel() is True
+    state["embedded"] = 5
+    assert reembed_service._save_progress(state) is True
+
+    stored = reembed_service.status()["job"]
+    assert stored["status"] == "cancelling" and stored["embedded"] == 5
+
+
+def test_an_optional_pause_follows_each_record(records, monkeypatch):
+    pauses = []
+    monkeypatch.setattr(reembed_service.time, "sleep", pauses.append)
+    state, _ = reembed_service._claim("test", pause_ms=250)
+
+    reembed_service.run(state)
+
+    assert state["pause_ms"] == 250 and pauses == [0.25, 0.25, 0.25]
+    assert reembed_service._claim("test", pause_ms=10**9)[0]["pause_ms"] == reembed_service.MAX_PAUSE_MS
+
+
+def test_start_route_validates_and_passes_the_pause(admin_client, monkeypatch):
+    save_vector_settings(enabled=True, model="new-model")
+    got = []
+    monkeypatch.setattr(
+        reembed_service, "start",
+        lambda by, pause_ms=0: (got.append(pause_ms) or ({"run_id": "r", "model": "new-model"}, None)),
+    )
+    assert admin_client.post("/api/dashboard/vector-reembed", json={"pause_ms": 500}).status_code == 200
+    assert got == [500]
+    r = admin_client.post("/api/dashboard/vector-reembed", json={"pause_ms": 999999})
+    assert r.status_code == 400 and r.json()["error"]["code"] == "INVALID_PAUSE"
+    assert admin_client.post("/api/dashboard/vector-reembed", json={"pause_ms": "soon"}).status_code == 400

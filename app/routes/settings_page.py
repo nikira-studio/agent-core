@@ -454,11 +454,32 @@ async def vector_reembed_status(session: dict = Depends(require_admin)):
 async def start_vector_reembed(
     request: Request, session: dict = Depends(require_admin)
 ):
-    """Embed every memory record that has no vector for the configured model."""
+    """Embed every memory record that has no vector for the configured model.
+
+    Optional JSON body: {"pause_ms": N} pauses after each record (up to 30000),
+    so a run can share a slow embedding backend with its other clients.
+    """
     from app.services import audit_service, reembed_service
     from app.routes.auth import get_client_ip
 
-    state, err = await asyncio.to_thread(reembed_service.start, f"user:{session['user_id']}")
+    pause_ms = 0
+    try:
+        body = await request.json()
+    except Exception:
+        body = None
+    if isinstance(body, dict) and body.get("pause_ms") is not None:
+        try:
+            pause_ms = int(body["pause_ms"])
+        except (TypeError, ValueError):
+            return error_response("INVALID_PAUSE", "pause_ms must be a number of milliseconds", 400)
+        if not 0 <= pause_ms <= reembed_service.MAX_PAUSE_MS:
+            return error_response(
+                "INVALID_PAUSE", f"pause_ms must be between 0 and {reembed_service.MAX_PAUSE_MS}", 400
+            )
+
+    state, err = await asyncio.to_thread(
+        reembed_service.start, f"user:{session['user_id']}", pause_ms
+    )
     if err == "VECTOR_SEARCH_DISABLED":
         return error_response(err, "Enable vector search and save the settings first.", 400)
     if err == "REEMBED_ALREADY_RUNNING":
@@ -885,7 +906,7 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
       <div id="vector-settings-result" style="margin-top:12px"></div>
       <div style="margin-top:20px;border-top:1px solid var(--border, #ddd);padding-top:16px">
         <h4 style="margin:0 0 8px">Re-embed memory</h4>
-        <p class="form-hint">Search only uses vectors made by the current model. After changing the model, re-embed so existing records are found by meaning again; until then they are matched by text only. A run can be stopped and started again, and it skips records already done.</p>
+        <p class="form-hint">Search only uses vectors made by the current model. After changing the model, re-embed so existing records are found by meaning again; until then they are matched by text only. A run can be stopped and started again, and it skips records already done. Each record keeps one vector, so re-embedding replaces the previous model's vectors: switching back later means re-embedding again.</p>
         <p id="vector-reembed-coverage" class="text-muted">Loading...</p>
         <div class="form-actions">
           <button type="button" class="btn btn-secondary" id="vector-reembed-start" onclick="startReembed()">Re-embed missing records</button>
@@ -1163,7 +1184,7 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
       if (j.ok) renderReembed(j.data);
     }}
     async function startReembed() {{
-      if (!confirm('Re-embed every record without a vector for the current model? This calls the embedding backend once per record and runs in the background.')) return;
+      if (!confirm('Re-embed every record without a vector for the current model? This calls the embedding backend once per record and runs in the background. Each record keeps one vector, so vectors from the previous model are replaced.')) return;
       const j = await apiFetch('/api/dashboard/vector-reembed', {{ method: 'POST' }});
       if (!j.ok) showToast(j.error?.message || 'Could not start the re-embed', 'danger');
       loadReembedStatus();

@@ -12,7 +12,7 @@ records it finished done, and the next run picks up the rest.
 
 Job state lives in system_settings rather than in process memory, so that a
 server with several workers reports the same progress whichever worker answers,
-and so two runs cannot start at once. A run renews its lease after every batch;
+and so two runs cannot start at once. A run renews its lease after every record;
 a lease nobody renewed for LEASE_SECONDS belongs to a run that died with its
 process, and a new run may take over.
 
@@ -24,6 +24,7 @@ import logging
 import secrets
 import sys
 import threading
+import time
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
@@ -34,8 +35,14 @@ from app.services.vector_settings_service import get_vector_model, is_vector_sea
 logger = logging.getLogger(__name__)
 
 STATE_KEY = "vector_reembed_job"
+# The lease is renewed after every record. One record takes at most the two
+# 5 s backend checks plus the 30 s embed timeout, plus the optional pause, so
+# a live run always renews well inside this window.
 LEASE_SECONDS = 120
 BATCH_SIZE = 20
+# An optional pause after each record lets a run share a slow backend (one
+# CPU-bound model serving other clients too) instead of saturating it.
+MAX_PAUSE_MS = 30_000
 # Give up after this many failures in a row: the backend is down or rejecting
 # the model, and pressing on would only mark every record failed.
 MAX_CONSECUTIVE_FAILURES = 5
@@ -60,10 +67,6 @@ def _read_state() -> Optional[dict]:
     except (TypeError, ValueError):
         return None
     return state if isinstance(state, dict) else None
-
-
-def _write_state(state: dict) -> None:
-    system_settings_service.write_raw({STATE_KEY: json.dumps(state)})
 
 
 def _lease_live(state: Optional[dict]) -> bool:
@@ -119,7 +122,7 @@ def status() -> dict:
     }
 
 
-def _claim(started_by: str) -> tuple[Optional[dict], Optional[str]]:
+def _claim(started_by: str, pause_ms: int = 0) -> tuple[Optional[dict], Optional[str]]:
     """Take the run lease. Returns (state, None) or (None, error_code)."""
     if not is_vector_search_enabled():
         return None, "VECTOR_SEARCH_DISABLED"
@@ -151,6 +154,7 @@ def _claim(started_by: str) -> tuple[Optional[dict], Optional[str]]:
             "embedded": 0,
             "failed": 0,
             "error": None,
+            "pause_ms": max(0, min(int(pause_ms or 0), MAX_PAUSE_MS)),
         }
         conn.execute(
             "INSERT INTO system_settings (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP) "
@@ -258,12 +262,21 @@ def run(state: dict) -> dict:
                             f"(last: {embed_status}). Check the embedding backend and model."
                         )
                         break
+                # Renew after every record, not every batch: on a slow backend
+                # a batch can outlast the lease, and a second run would start.
+                state["lease_at"] = _iso(_now())
+                if not _save_progress(state):
+                    return state  # another run took over; leave its state alone
+                if state["status"] == "cancelling":
+                    break
+                if state.get("pause_ms"):
+                    time.sleep(state["pause_ms"] / 1000)
             if error:
                 final_status = "failed"
                 break
-            state["lease_at"] = _iso(_now())
-            if not _save_progress(state):
-                return state  # another run took over
+            if state["status"] == "cancelling":
+                final_status = "cancelled"
+                break
     except Exception as e:  # never leave a dead run looking alive
         logger.exception("Re-embed run %s failed", run_id)
         final_status, error = "failed", f"{type(e).__name__}: {e}"
@@ -283,9 +296,9 @@ def run(state: dict) -> dict:
     return state
 
 
-def start(started_by: str) -> tuple[Optional[dict], Optional[str]]:
+def start(started_by: str, pause_ms: int = 0) -> tuple[Optional[dict], Optional[str]]:
     """Claim the lease and run in a background thread."""
-    state, err = _claim(started_by)
+    state, err = _claim(started_by, pause_ms)
     if err:
         return None, err
     threading.Thread(
@@ -295,16 +308,36 @@ def start(started_by: str) -> tuple[Optional[dict], Optional[str]]:
 
 
 def cancel() -> bool:
-    """Ask the running job to stop after its current batch."""
-    state = _read_state()
-    if not _lease_live(state):
-        return False
-    state["status"] = "cancelling"
-    _write_state(state)
+    """Ask the running job to stop after the record it is on."""
+    with get_db() as conn:
+        # Locked like _save_progress, so the two cannot overwrite each other.
+        conn.execute("BEGIN IMMEDIATE")
+        row = conn.execute(
+            "SELECT value FROM system_settings WHERE key = ?", (STATE_KEY,)
+        ).fetchone()
+        try:
+            state = json.loads(row["value"]) if row and row["value"] else None
+        except ValueError:
+            state = None
+        if not _lease_live(state):
+            conn.rollback()
+            return False
+        state["status"] = "cancelling"
+        conn.execute(
+            "UPDATE system_settings SET value = ?, updated_at = CURRENT_TIMESTAMP WHERE key = ?",
+            (json.dumps(state), STATE_KEY),
+        )
+        conn.commit()
     return True
 
 
-def main() -> int:
+def main(argv: Optional[list[str]] = None) -> int:
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Embed memory records that lack a vector for the configured model.")
+    parser.add_argument("--pause-ms", type=int, default=0,
+                        help=f"pause after each record, to share a slow backend (max {MAX_PAUSE_MS})")
+    args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     before = coverage()
     print(
@@ -314,7 +347,7 @@ def main() -> int:
     if before["missing"] == 0:
         print("Nothing to do.")
         return 0
-    state, err = _claim("cli")
+    state, err = _claim("cli", args.pause_ms)
     if err:
         print(f"Cannot start: {err}", file=sys.stderr)
         return 1
