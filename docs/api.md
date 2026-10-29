@@ -596,7 +596,7 @@ Create:
 }
 ```
 
-**Valid statuses:** `active`, `stale`, `completed`, `blocked`, `cancelled`
+**Valid statuses:** `active`, `stale`, `completed`, `blocked`, `cancelled`, `reassigned` (set by recovery when work moves to another agent)
 
 Only the owning agent or an admin can update, heartbeat, cancel, or reassign an activity. Reading is wider: `GET /api/activity/{id}` and MCP `activity_get` open any activity in a scope the caller reads, the same activities `activity_list` and `activity_search` show it.
 
@@ -656,7 +656,7 @@ Over MCP, `activity_list` and `activity_search` return compact rows unless `view
 
 ### Linking an activity to another system's task
 
-When work belongs to a task that lives in another system, record it as `metadata.task_ref = "<system>:<id>"`, for example `jira:PROJ-123` or `github:owner/repo#42`. MCP `activity_update` and REST `POST`/`PUT /api/activity` take it as `task_ref` (REST also accepts it inside `metadata_json`); it must be a lowercase system name, a colon, and an id without spaces. Core stores it and does not interpret the id. A reader that already lists that system's queue uses it to skip the handoff (`without_task_ref`), so one item is not shown twice. Work started from another system's task should always set it; a terminal session started by a person leaves it empty.
+When work belongs to a task that lives in another system, record it as `metadata.task_ref = "<system>:<id>"`, for example `jira:PROJ-123` or `github:owner/repo#42`. MCP `activity_update` and REST `POST /api/activity` and `PUT /api/activity/{id}` take it as `task_ref` (REST also accepts it inside `metadata_json`); it must be a lowercase system name, a colon, and an id without spaces. Core stores it and does not interpret the id. A reader that already lists that system's queue uses it to skip the handoff (`without_task_ref`), so one item is not shown twice. Work started from another system's task should always set it; a terminal session started by a person leaves it empty.
 
 ### Activity pickup
 

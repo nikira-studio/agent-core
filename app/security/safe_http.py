@@ -14,6 +14,19 @@ from app.security.url_validation import ResolvedUrl, resolve_public_url
 
 _MAX_REDIRECTS = 5
 _REDIRECT_STATUSES = {301, 302, 303, 307, 308}
+MAX_RESPONSE_BYTES = 10 * 1024 * 1024
+
+
+def read_capped(resp, limit: int = MAX_RESPONSE_BYTES) -> bytes:
+    """Read at most `limit` bytes of a response body.
+
+    An upstream that streams without end, or answers with a multi-gigabyte
+    body, must not be able to hold the whole thing in this process. What
+    comes back is truncated at the limit; callers that care can compare
+    against the limit.
+    """
+    data = resp.read(limit + 1) if limit else resp.read()
+    return data[:limit] if limit and len(data) > limit else data
 
 
 def _connect_address(

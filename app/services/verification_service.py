@@ -291,8 +291,10 @@ def _note_attempts(record_ids: list[str]) -> None:
         logger.debug("Could not record verification attempts", exc_info=True)
 
 
-def verify_scope(scope: Optional[str] = None, limit: int = 200) -> dict:
-    """Verify anchored facts, optionally within one scope.
+def verify_scope(
+    scope: Optional[str] = None, limit: int = 200, scopes: Optional[list] = None
+) -> dict:
+    """Verify anchored facts, optionally within one scope or a list of scopes.
 
     Works through the corpus least-recently-attempted first, so a capped nightly
     run rotates across everything rather than re-checking the same head of the
@@ -310,6 +312,11 @@ def verify_scope(scope: Optional[str] = None, limit: int = 200) -> dict:
     if scope:
         conditions.append("scope = ?")
         params.append(scope)
+    elif scopes is not None:
+        if not scopes:
+            return {"results": [], "tally": {VERIFIED: 0, MISSING: 0, UNVERIFIABLE: 0}, "queued": 0}
+        conditions.append(f"scope IN ({','.join('?' for _ in scopes)})")
+        params.extend(scopes)
     params.append(max(limit, 0))
 
     with get_db() as conn:

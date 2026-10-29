@@ -12,6 +12,7 @@ from app.routes.dashboard_shared import (
     escape_html,
     local_dt,
     _build_pagination,
+    _page_number,
 )
 
 router = APIRouter()
@@ -36,7 +37,7 @@ def audit_page(request: Request, session: dict = Depends(require_auth)):
             status_code=403,
         )
 
-    page = max(1, int(request.query_params.get("page", 1)))
+    page = _page_number(request.query_params.get("page"))
     limit = 50
     offset = (page - 1) * limit
 
@@ -126,12 +127,12 @@ def audit_page(request: Request, session: dict = Depends(require_auth)):
         )
         return (
             f"<tr><td class='audit-time-cell'>{time_cell}</td>"
-            f"<td class='audit-actor-cell'><span class='badge badge-secondary'>{event.get('actor_type', '')}</span></td>"
-            f"<td class='audit-action-cell'><code>{event.get('action', '')}</code></td>"
-            f"<td class='audit-resource-cell'>{event.get('resource_type', '') or '-'}</td>"
-            f"<td class='audit-result-cell'><span class='badge badge-{result_class}'>{event.get('result', '')}</span></td>"
+            f"<td class='audit-actor-cell'><span class='badge badge-secondary'>{escape_html(event.get('actor_type') or '')}</span></td>"
+            f"<td class='audit-action-cell'><code>{escape_html(event.get('action') or '')}</code></td>"
+            f"<td class='audit-resource-cell'>{escape_html(event.get('resource_type') or '-')}</td>"
+            f"<td class='audit-result-cell'><span class='badge badge-{result_class}'>{escape_html(event.get('result') or '')}</span></td>"
             f"<td class='mono audit-details-cell'>{details_html}</td>"
-            f"<td class='mono audit-ip-cell'>{event.get('ip_address', '') or '-'}</td></tr>"
+            f"<td class='mono audit-ip-cell'>{escape_html(event.get('ip_address') or '-')}</td></tr>"
         )
 
     rows = "".join(audit_row(e) for e in all_events)

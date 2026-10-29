@@ -13,7 +13,7 @@ from app.security.rate_limiter import CSG, RL
 from app.security.response_helpers import rate_limited_response
 from app.security.scope_enforcer import ScopeEnforcer
 from app.security.effective_authority import EffectiveAuthority
-from app.branding import APP_NAME, CREDENTIAL_PREFIX, MCP_SERVER_DESCRIPTION
+from app.branding import APP_NAME, APP_VERSION, CREDENTIAL_PREFIX, MCP_SERVER_DESCRIPTION
 from app.services import (
     memory_service,
     credential_service,
@@ -24,7 +24,7 @@ from app.services import (
     embedding_service,
 )
 from app.config import settings
-from app.models.enums import MEMORY_CLASSES, SOURCE_KINDS
+from app.models.enums import ACTIVITY_STATUSES, MEMORY_CLASSES, SOURCE_KINDS
 from app.operations.connector_actions import run_connector_action
 from app.operations.memory import (
     MemoryOperationError,
@@ -94,7 +94,7 @@ _TOOL_CAPABILITIES = {
 MANIFEST = {
     "schema_version": "1.0",
     "name": APP_NAME,
-    "version": "1.0.0",
+    "version": APP_VERSION,
     "description": MCP_SERVER_DESCRIPTION,
     "tools": [
         {
@@ -426,7 +426,7 @@ MANIFEST = {
                     "task_description": {"type": "string"},
                     "task_note": {"type": "string"},
                     "task_result": {"type": "string"},
-                    "status": {"type": "string"},
+                    "status": {"type": "string", "enum": list(ACTIVITY_STATUSES)},
                     "memory_scope": {"type": "string"},
                     "execution_id": {"type": "string"},
                     "task_ref": {
@@ -1001,8 +1001,7 @@ def _maybe_attach_digest(
     context for the MCP call, distinct from a workspace-sync execution
     identity). Reading it off `ctx` silently raised AttributeError on
     every real call, which the helper's own try/except then swallowed,
-    silently disabling the digest feature in production. See planb.md
-    Workstream 1 and the code-review follow-up.
+    silently disabling the digest feature.
 
     Order of operations:
     1. If `execution_id` is provided, run `execution_is_caught_up`. A
@@ -1123,7 +1122,7 @@ async def _handle_mcp_jsonrpc(body: dict, request: Request, ctx: EffectiveAuthor
                 },
                 "serverInfo": {
                     "name": APP_NAME,
-                    "version": "1.0.0",
+                    "version": APP_VERSION,
                 },
                 "instructions": (
                     f"{APP_NAME} provides workspace memory, activity tracking, and credential access. "
@@ -1316,8 +1315,8 @@ async def _run_custom_mcp_tool(body: dict, ctx: EffectiveAuthority):
             return _mcp_error(exc.code, exc.message, exc.status_code)
         if max_response_chars is None and settings.TOOL_RESULT_SPILL_THRESHOLD > 0:
             # Without a budget, an oversized result is offloaded and the agent
-            # sees a preview instead of the records it searched for — a quarter
-            # of searches on the first deployment. Trimming to whole records
+            # sees a preview instead of the records it searched for. Trimming
+            # to whole records
             # under the offload threshold delivers the best matches inline, and
             # record_recall below then counts only what the agent received.
             max_response_chars = settings.TOOL_RESULT_SPILL_THRESHOLD
@@ -1629,15 +1628,16 @@ async def _run_custom_mcp_tool(body: dict, ctx: EffectiveAuthority):
             # Verification writes confirmation onto records, so it needs the
             # same authority as any other statement about a scope.
             return _mcp_error("SCOPE_DENIED", "Access denied to this scope", 403)
+        scopes = [verify_scope] if verify_scope else None
         if not verify_scope:
             candidates = list(ctx.write_scopes)
-            writable = ctx.filter_scopes("memory", "write", candidates)
-            if not writable:
+            scopes = ctx.filter_scopes("memory", "write", candidates)
+            if not scopes:
                 return _mcp_error("SCOPE_DENIED", "No writable scope to verify", 403)
 
         result = await asyncio.to_thread(
             verification_service.verify_scope,
-            scope=verify_scope,
+            scopes=scopes,
             limit=min(int(params.get("limit", 50) or 50), 200),
         )
         # Drop per-record detail for anything that passed: the interesting output
@@ -1731,7 +1731,8 @@ async def _run_custom_mcp_tool(body: dict, ctx: EffectiveAuthority):
         denied = validate_source_kind_authority(source_kind, ctx)
         if denied is not None:
             return _mcp_error(denied[0], denied[1], 403)
-        new_record, err = memory_service.move_memory(
+        new_record, err = await asyncio.to_thread(
+            memory_service.move_memory,
             record_id=params["record_id"],
             new_scope=new_scope,
             provenance_json=_memory_provenance(ctx, source_kind, new_scope),
@@ -1824,7 +1825,7 @@ async def _run_custom_mcp_tool(body: dict, ctx: EffectiveAuthority):
             scope = normalize_scope(scope)  # check write on the scope it will be stored in
         except ValueError:
             return _mcp_error("INVALID_SCOPE", "Malformed scope", 400)
-        if not enforcer.can_write(scope):
+        if not (enforcer.can_write(scope) and enforcer.can_read(scope)):
             return _mcp_error("SCOPE_DENIED", "You cannot store credentials in this scope", 403)
         try:
             result = credential_request_service.request_credential(
@@ -1881,6 +1882,12 @@ async def _run_custom_mcp_tool(body: dict, ctx: EffectiveAuthority):
                 activity_service.validate_task_ref(task_ref)
             except ValueError as exc:
                 return _mcp_error("INVALID_TASK_REF", str(exc), 400)
+        if params.get("status") and params["status"] not in ACTIVITY_STATUSES:
+            return _mcp_error(
+                "INVALID_STATUS",
+                f"status must be one of: {', '.join(ACTIVITY_STATUSES)}",
+                400,
+            )
         existing = activity_service.get_active_activity_for_agent(
             ctx.agent_id, ctx.user_id, memory_scope=memory_scope
         )
@@ -1941,6 +1948,7 @@ async def _run_custom_mcp_tool(body: dict, ctx: EffectiveAuthority):
                     and not params.get("task_description")
                     and not params.get("task_note")
                     and not params.get("task_result")
+                    and metadata_json is None
                     else "update",
                     previous_status=existing["status"],
                     new_status=params.get("status") or existing["status"],
@@ -1953,6 +1961,7 @@ async def _run_custom_mcp_tool(body: dict, ctx: EffectiveAuthority):
                 and not params.get("task_description")
                 and not params.get("task_note")
                 and not params.get("task_result")
+                and metadata_json is None
             ):
                 _event = "activity_heartbeat"
             elif _new_status == "cancelled":
@@ -2041,7 +2050,7 @@ async def _run_custom_mcp_tool(body: dict, ctx: EffectiveAuthority):
             # `workspace:*` scope, never to heartbeats/updates, and never to a
             # caller that lacks read authority on the scope. Activity creation
             # is already complete at this point — a digest failure cannot
-            # prevent the activity from existing. See planb.md Workstream 1.
+            # prevent the activity from existing.
             payload: dict = {"activity": act}
             if (
                 memory_scope

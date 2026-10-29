@@ -120,14 +120,13 @@
         "description": "Create an issue via gh issue create",
         "args": [
           "issue", "create",
-          "--json", "url,number",
           "--title", "{{ params.title }}",
           "--body", "{{ params.body | default('', as=omit) }}",
           "--repo", "{{ params.repo }}"
         ],
         "parse": {
-          "type": "jsonpath",
-          "path": "$"
+          "type": "regex",
+          "path": "(?P<url>https://\\S+/issues/(?P<number>\\d+))"
         }
       }
     }

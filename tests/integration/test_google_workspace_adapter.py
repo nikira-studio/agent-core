@@ -85,7 +85,8 @@ class TestRenderFixes:
 
     def test_sheets_append_targets_append_endpoint_with_values(self):
         req = _req("append_values", {"spreadsheet_id": "S", "range": "Sheet1!A1", "values": [["a", "b"]]})
-        assert req["url"].startswith("https://sheets.googleapis.com/v4/spreadsheets/S/values/Sheet1!A1:append")
+        # Path params are percent-encoded as one segment, which the Sheets API accepts.
+        assert req["url"].startswith("https://sheets.googleapis.com/v4/spreadsheets/S/values/Sheet1%21A1:append")
         assert req["body"]["values"] == [["a", "b"]]
 
 

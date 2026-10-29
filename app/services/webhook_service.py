@@ -505,12 +505,21 @@ def test_delivery(webhook_id: str, event_type: Optional[str] = None) -> dict:
         "data": _sample_payload(event_type),
     }
     _enqueue_delivery(webhook_id, event_id, event_type, payload)
+    now = _iso()
     with get_db() as conn:
+        # Claim it here so the background worker does not also pick it up and
+        # send the same test payload a second time.
+        claimed = conn.execute(
+            "UPDATE webhook_delivery_log SET status = 'delivering', attempt_count = attempt_count + 1, "
+            "last_attempt_at = ?, lease_expires_at = ? "
+            "WHERE webhook_id = ? AND event_id = ? AND status = 'pending'",
+            (now, _iso(_now() + timedelta(seconds=LEASE_SECONDS)), webhook_id, event_id),
+        ).rowcount
         delivery = conn.execute(
             "SELECT * FROM webhook_delivery_log WHERE webhook_id = ? AND event_id = ?",
             (webhook_id, event_id),
         ).fetchone()
-    if not delivery:
+    if not delivery or not claimed:
         return {"ok": False, "error": "Could not create delivery"}
     _finish_delivery(dict(delivery))
     with get_db() as conn:

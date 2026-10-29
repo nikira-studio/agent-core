@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends
 from app.security.dependencies import get_request_context
 from app.security.context import RequestContext
 from app.security.response_helpers import success_response
-from app.branding import CREDENTIAL_PREFIX
+from app.branding import APP_VERSION, CREDENTIAL_PREFIX
 from app.config import settings
 from app.models.enums import MEMORY_CLASSES, SOURCE_KINDS
 
@@ -367,7 +367,7 @@ def spec(
 
     return success_response(
         {
-            "version": "1.0.0",
+            "version": APP_VERSION,
             "base_url": f"http://localhost:{settings.PORT}",
             "mcp_endpoint": "/mcp",
             "rest_api_prefix": "/api",
@@ -389,7 +389,7 @@ def spec(
 def spec_public():
     return success_response(
         {
-            "version": "1.0.0",
+            "version": APP_VERSION,
             "mcp_endpoint": "/mcp",
             "auth_methods": ["api_key", "session"],
         }

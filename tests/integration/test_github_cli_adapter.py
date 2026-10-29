@@ -49,16 +49,18 @@ class TestGitHubCliAdapterManifest:
         assert fields[0]["secret"] is True
         assert fields[0]["required"] is True
 
-    def test_github_cli_all_commands_use_json_output(self):
+    def test_github_cli_commands_parse_structured_output(self):
         manifest_path = SYSTEM_ADAPTER_DIR / "github_cli" / "adapter.json"
         m, err = load_and_validate(manifest_path)
         assert err is None
         commands = m.backend.get("commands", {})
         for action_name, cmd_def in commands.items():
             parse_type = cmd_def.get("parse", {}).get("type")
-            assert parse_type == "jsonpath", (
-                f"Action {action_name} should use jsonpath parse type"
-            )
+            # Listing commands support --json; `gh issue create` only prints the
+            # issue URL, so it is parsed with a regex instead.
+            expected = "regex" if action_name == "create_issue" else "jsonpath"
+            assert parse_type == expected, f"Action {action_name} should use {expected}"
+            assert ("--json" in cmd_def["args"]) == (expected == "jsonpath")
 
 
 class TestGitHubCliAdapterWireLevel:
@@ -87,7 +89,7 @@ class TestGitHubCliAdapterWireLevel:
 
         assert result["success"] is True
         argv = mock_run.call_args[0][0]
-        assert argv[0] == "gh"
+        assert argv[0] == "gh" or argv[0].endswith("/gh")
         assert "repo" in argv
         assert "list" in argv
         assert "--json" in argv
@@ -118,11 +120,10 @@ class TestGitHubCliAdapterWireLevel:
 
     @patch("app.connectors.cli_engine.subprocess.run")
     def test_create_issue_omits_body_when_not_provided(self, mock_run):
+        # `gh issue create` has no --json flag; it prints the new issue's URL.
         mock_run.return_value = MagicMock(
             returncode=0,
-            stdout=json.dumps(
-                {"url": "https://github.com/owner/repo/issues/6", "number": 6}
-            ).encode(),
+            stdout=b"\nCreating issue in owner/repo\n\nhttps://github.com/owner/repo/issues/6\n",
             stderr=b"",
         )
         manifest_path = SYSTEM_ADAPTER_DIR / "github_cli" / "adapter.json"
@@ -138,10 +139,14 @@ class TestGitHubCliAdapterWireLevel:
             "{}",
             None,
         )
-
         assert result["success"] is True
+        assert result["output"] == {"url": "https://github.com/owner/repo/issues/6", "number": "6"}
         argv = mock_run.call_args[0][0]
-        assert "--body" not in argv
+        assert "--body" not in argv and "--json" not in argv
+        # The child inherits PATH (so the binary resolves) but not the server's secrets.
+        env = mock_run.call_args[1]["env"]
+        assert "PATH" in env and "GH_TOKEN" in env
+        assert not (set(env) - set(CliEngine._INHERITED_ENV) - {"GH_TOKEN", "GITHUB_TOKEN"})
 
     @patch("app.connectors.cli_engine.subprocess.run")
     def test_list_repos_passes_token_via_env(self, mock_run):
@@ -217,8 +222,7 @@ class TestGitHubCliAdapterWireLevel:
         argv = mock_run.call_args[0][0]
         assert "issue" in argv
         assert "create" in argv
-        assert "--json" in argv
-        assert "url,number" in argv
+        assert "--json" not in argv
         assert "--title" in argv
         assert "Bug: login fails" in argv
         assert "--repo" in argv

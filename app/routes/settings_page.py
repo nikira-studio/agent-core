@@ -534,9 +534,9 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
     <div class="two-col">
       <div class="card">
         <h3>Account</h3>
-        <p><strong>Display Name:</strong> {user.get("display_name", "")}</p>
-        <p><strong>Email:</strong> {user.get("email", "")}</p>
-        <p><strong>Role:</strong> {session.get("role", "user")}</p>
+        <p><strong>Display Name:</strong> {escape_html(user.get("display_name") or "")}</p>
+        <p><strong>Email:</strong> {escape_html(user.get("email") or "")}</p>
+        <p><strong>Role:</strong> {escape_html(session.get("role") or "user")}</p>
       </div>
       <div class="card">
         <h3>Security</h3>

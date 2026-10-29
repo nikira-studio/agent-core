@@ -76,11 +76,14 @@ def test_coordinator_lists_needs_human_across_readable_scopes_only(test_client, 
     rest = test_client.get("/api/activity/attention", headers=coordinator)
     assert rest.status_code == 200, rest.json()
     assert {i["id"] for i in rest.json()["data"]["items"]} == {in_a["id"], in_b["id"]}
-    rest_narrowed = test_client.get(
-        "/api/activity/attention", headers=coordinator,
-        params={"scope": [A], "without_task_ref": "true"},
+    rest_untracked = test_client.get(
+        "/api/activity/attention", headers=coordinator, params={"without_task_ref": "true"},
     ).json()["data"]
-    assert [i["id"] for i in rest_narrowed["items"]] == [in_a["id"]]
+    assert [i["id"] for i in rest_untracked["items"]] == [in_a["id"]]
+    rest_narrowed = test_client.get(
+        "/api/activity/attention", headers=coordinator, params={"scope": [B]},
+    ).json()["data"]
+    assert [i["id"] for i in rest_narrowed["items"]] == [in_b["id"]]
     assert test_client.get(
         "/api/activity/attention", headers=coordinator, params={"scope": [HIDDEN]}
     ).status_code == 403

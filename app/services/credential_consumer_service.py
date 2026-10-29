@@ -261,7 +261,7 @@ def write(api_key, entry_id, request_id, expected_version, value):
                         reference = CREDENTIAL_PREFIX + "CONFLICT_" + secrets.token_hex(16).upper()
                         metadata = json.loads(entry["metadata_json"] or "{}")
                         candidate_metadata = {"consumer_conflict_parent": entry_id, "request_id": request_id, "writer_consumer": agent["id"]}
-                        conn.execute("INSERT INTO credentials(id,scope,name,label,value_encrypted,metadata_json,reference_name,created_by) VALUES(?,?,?,?,?,?,?,?)", (candidate_id,entry["scope"],"Consumer conflict candidate","Owner reconciliation required",encrypt_value(value),json.dumps(candidate_metadata),reference,agent["owner_user_id"]))
+                        conn.execute("INSERT INTO credentials(id,scope,name,label,value_encrypted,metadata_json,reference_name,created_by) VALUES(?,?,?,?,?,?,?,?)", (candidate_id,entry["scope"],f"Consumer conflict candidate {candidate_id}","Owner reconciliation required",encrypt_value(value),json.dumps(candidate_metadata),reference,agent["owner_user_id"]))
                         metadata["consumer_write_conflict"] = {"candidate_entry_id": candidate_id, "request_id": request_id, "recorded_at": now}
                         conn.execute("UPDATE credentials SET metadata_json=?,updated_at=? WHERE id=?", (json.dumps(metadata),now,entry_id))
                         result = {"entry_id": entry_id, "request_id": request_id, "state": "conflict_retained", "candidate_entry_id": candidate_id, "status_code": 409}

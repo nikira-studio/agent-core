@@ -63,6 +63,15 @@ def clean_db(test_db_path):
 
 
 @pytest.fixture(autouse=True)
+def _fast_password_hashing(monkeypatch):
+    # Production cost (12) makes every register/login about half a second;
+    # the tests check behaviour, not hash strength.
+    from app.services import auth_service
+
+    monkeypatch.setattr(auth_service, "BCRYPT_COST", 4)
+
+
+@pytest.fixture(autouse=True)
 def reset_runtime_state():
     from app.security.rate_limiter import RateLimiter, ConcurrentSearchGuard
 

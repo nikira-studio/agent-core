@@ -67,6 +67,13 @@ def delete_scope_data(conn: sqlite3.Connection, scope: str) -> dict:
         (scope,),
     ).rowcount
     agents_updated = remove_scope_from_agent_access(conn, scope)
+    # The change feed keeps previews of deleted records, and a re-created
+    # workspace with the same id would otherwise be served them as history.
+    # Deleted after the record deletions above, which append to the feed.
+    conn.execute("DELETE FROM memory_proposals WHERE scope = ?", (scope,))
+    conn.execute("DELETE FROM execution_sync_state WHERE memory_scope = ?", (scope,))
+    conn.execute("DELETE FROM agent_executions WHERE memory_scope = ?", (scope,))
+    conn.execute("DELETE FROM workspace_changes WHERE memory_scope = ?", (scope,))
 
     return {
         "memory_records_deleted": memory_deleted,

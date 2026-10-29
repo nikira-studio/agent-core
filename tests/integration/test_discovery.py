@@ -1,3 +1,4 @@
+from app.branding import APP_VERSION
 def test_public_discovery_document_links_to_instance_guidance(test_client):
     response = test_client.get(
         "/.well-known/agent-core.json",
@@ -7,7 +8,7 @@ def test_public_discovery_document_links_to_instance_guidance(test_client):
     assert response.status_code == 200
     assert response.json() == {
         "name": "Agent Core",
-        "version": "1.0.0",
+        "version": APP_VERSION,
         "mcp_url": "http://core.example.test/mcp",
         "transport": "streamable-http",
         "authentication": {"type": "bearer"},

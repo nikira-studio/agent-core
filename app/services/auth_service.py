@@ -1,5 +1,6 @@
 import logging
 import sqlite3
+import time
 from datetime import timedelta
 from typing import Optional
 
@@ -475,16 +476,26 @@ def verify_otp(user_id: str, otp_code: str) -> bool:
     secret = decrypt_otp_secret(secret_data["secret_encrypted"])
     totp = pyotp.TOTP(secret)
 
-    if totp.verify(otp_code, valid_window=1):
-        with get_db() as conn:
-            conn.execute(
-                "UPDATE otp_secrets SET last_used = ? WHERE user_id = ?",
-                (utc_now_iso(), user_id),
-            )
-            conn.commit()
-        return True
-
-    return False
+    if not totp.verify(otp_code, valid_window=1):
+        return False
+    # A code is good for one login: record the time step it belongs to and
+    # refuse that step (or an earlier one) again, so a code seen in transit
+    # cannot be replayed inside the validity window.
+    now = time.time()
+    step = next(
+        (int((now + offset * totp.interval) // totp.interval)
+         for offset in (0, -1, 1)
+         if totp.verify(otp_code, for_time=now + offset * totp.interval, valid_window=0)),
+        int(now // totp.interval),
+    )
+    with get_db() as conn:
+        updated = conn.execute(
+            "UPDATE otp_secrets SET last_used = ?, last_used_step = ? "
+            "WHERE user_id = ? AND (last_used_step IS NULL OR last_used_step < ?)",
+            (utc_now_iso(), step, user_id, step),
+        ).rowcount
+        conn.commit()
+    return updated == 1
 
 
 def get_otp_secret(user_id: str) -> Optional[dict]:

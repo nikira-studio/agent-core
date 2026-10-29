@@ -453,10 +453,13 @@ def list_binding_executions(
     )
     if not enforcer.can_read(binding["scope"]):
         return error_response("SCOPE_DENIED", "Access denied to this binding", 403)
+    limit = max(1, min(limit, 200))
+    offset = max(0, offset)
     executions = connector_service.list_executions(
         binding_id, limit=limit, offset=offset
     )
-    return success_response({"executions": executions, "total": len(executions)})
+    total = connector_service.count_executions(binding_id)
+    return success_response({"executions": executions, "total": total})
 
 
 @router.get("/{binding_id}/tools")

@@ -610,7 +610,7 @@ def test_mcp_tool_memory_write_supports_slot_key_and_freshness(
     assert record["slot_key"] == "style"
     assert record["valid_from"] == "2026-05-15T00:00:00+00:00"
     # last_confirmed_at is fully server-owned: only memory_confirm, with evidence,
-    # sets it. A fresh write leaves it null. See plan.md Workstream 1.
+    # sets it. A fresh write leaves it null.
     assert record["last_confirmed_at"] is None
 
 

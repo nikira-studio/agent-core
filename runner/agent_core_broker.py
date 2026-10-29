@@ -75,12 +75,10 @@ def resolve_reference(
             body = json.loads(resp.read())
             if body.get("ok"):
                 return body["data"]["value"]
-    except (
-        urllib.error.HTTPError,
-        urllib.error.URLError,
-        json.JSONDecodeError,
-        KeyError,
-    ):
+    except (OSError, ValueError, KeyError, TypeError):
+        # HTTPError/URLError are OSErrors; a read timeout is a bare TimeoutError
+        # (also OSError); JSONDecodeError is a ValueError; a non-dict body is a
+        # TypeError. The wrapped command still runs, without the variable.
         pass
     return None
 

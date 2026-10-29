@@ -11,7 +11,7 @@ re-proposed on the next pass, so the queue converges instead of nagging.
 
 The `unconfirmed_inference` rule plus the cap machinery in `generate_proposals`
 gate queue growth so that turning consolidation on unattended does not flood the
-queue. See plan.md Workstreams 2 and 5 for the design.
+queue.
 """
 
 import json
@@ -46,15 +46,14 @@ UNCONFIRMED_INFERENCE_DAYS_DEFAULT = 90
 # Below this importance, an unconfirmed fact just ages out of ranking quietly
 # instead of asking the operator to fact-check it. Confirmation review time is
 # scarce and should go to the records that would actually be missed, not every
-# agent-authored assertion regardless of how minor. See plan.md Workstream 2
-# follow-up: importance-gating the review queue.
+# agent-authored assertion regardless of how minor.
 UNCONFIRMED_INFERENCE_MIN_IMPORTANCE_DEFAULT = 0.7
 # Reuse memory_service.DUPLICATE_PREFIX_CHARS; the two checks (one in the
 # proposal rule, one as a non-embedding fallback in memory_service) must agree
 # on what "near-exact prefix" means.
 
 # Three caps, working together, so unattended consolidation does not flood the
-# queue. See plan.md Workstream 5.
+# queue.
 PROPOSAL_PENDING_CAP_PER_RULE_DEFAULT = 20  # per-(rule, scope) ceiling
 PROPOSAL_PENDING_CAP_TOTAL_DEFAULT = 50  # installation-wide pending ceiling
 PROPOSAL_GENERATION_BUDGET_PER_RUN_DEFAULT = 20  # max new rows per call
@@ -221,7 +220,7 @@ def _rule_stale_volatile(records: list[dict]) -> list[dict]:
         # Facts only. A fact asserts observed state, which perishes when the
         # world moves; a decision records what was chosen, which does not stop
         # being true because a version number changed — it gets superseded by a
-        # later decision instead. On the live corpus every decision this rule
+        # later decision instead. In practice every decision this rule
         # caught was a durable choice (a pinned image, a session protocol, a
         # collaboration model) that merely happened to quote a version.
         if record.get("memory_class") != "fact":
@@ -260,7 +259,7 @@ def _rule_unconfirmed_inference(records: list[dict]) -> list[dict]:
     `_provenance_penalty` is not staleness, the underlying problem is the same
     and the question to the reviewer is the same ("is this still current?"),
     but the rule keeps its own precision score so its quality is measured
-    separately. See plan.md Workstream 2.
+    separately.
     """
     cutoff_days = _unconfirmed_inference_days_setting()
     min_importance = _unconfirmed_inference_min_importance_setting()
@@ -449,7 +448,7 @@ def _rationale_unconfirmed_inference(evidence: dict) -> str:
     # Plain language about what answering will and won't do, so the reviewer is
     # not surprised: a "yes, still current" verdict stops the queue asking
     # about this record, but only a follow-up confirm with evidence clears the
-    # ranking penalty. See plan.md Workstream 2.
+    # ranking penalty.
     return (
         f"This is a fact written by an agent ({source_kind}) that nobody has "
         f"checked against the world yet, even {when}. It is being treated as "
@@ -710,8 +709,7 @@ def _pending_count_total(conn) -> int:
     Bypassing the aggregate cap by calling generate_proposals one scope at a
     time would let the queue grow past `proposal_pending_cap_total` because
     each call would only see its own scope's pending count. The aggregate
-    check is always over the whole `memory_proposals` table. See plan.md
-    Workstream 5 round-3 review.
+    check is always over the whole `memory_proposals` table.
     """
     row = conn.execute(
         "SELECT COUNT(*) AS n FROM memory_proposals WHERE status = 'pending'"
@@ -728,7 +726,7 @@ def _last_served_at(conn, rule: str, scope: str) -> Optional[str]:
     its last-served instant and sorts later. This is monotonic — once a
     group is served its timestamp advances to "now" and cannot tie the way a
     pending count of zero (after a reviewer clears the queue) repeatedly
-    does. See plan.md Workstream 5 round-4 and round-5 reviews.
+    does.
     """
     row = conn.execute(
         "SELECT MAX(created_at) AS last_at FROM memory_proposals "
@@ -809,7 +807,7 @@ def generate_proposals(
     and the inserts — it never covers the corpus scan, so unrelated writers
     against `memory_records` are not blocked for the duration of a slow pass.
 
-    Capping and fairness (see plan.md Workstream 5):
+    Capping and fairness:
     * `proposal_pending_cap_per_rule` — per-`(rule, scope)` pending ceiling.
     * `proposal_pending_cap_total` — installation-wide pending ceiling.
     * `proposal_generation_budget_per_run` — max new rows per call.

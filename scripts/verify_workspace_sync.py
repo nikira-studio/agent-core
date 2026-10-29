@@ -8,9 +8,9 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-import app.database as database
-from app.database import get_db, init_db
-from app.services import memory_service, workspace_sync_service
+import app.database as database  # noqa: E402
+from app.database import get_db, init_db  # noqa: E402
+from app.services import memory_service, workspace_sync_service  # noqa: E402
 
 
 def main() -> None:

@@ -588,7 +588,7 @@ def memory_page(request: Request, session: dict = Depends(require_auth)):
       if (!j.ok) { showToast(j.error?.message || 'Failed', 'danger'); return; }
       // Say what happened to the memory, not what happened to the suggestion.
       // 'still_current' deliberately does NOT clear last_confirmed_at — that
-      // requires confirm_with_evidence. See plan.md Workstream 2.
+      // requires confirm_with_evidence.
       if (verdict !== 'accepted') { showToast('Left alone — it will not be flagged again'); }
       else if (outcome === 'still_current') { showToast('Marked as still current — it will not be flagged again'); }
       else { showToast('Retracted — find it under Retracted Records to restore'); }
@@ -615,7 +615,7 @@ def memory_page(request: Request, session: dict = Depends(require_auth)):
         // has just been genuinely checked. Order matters: confirm first (it
         // has already succeeded), then resolve — if the second fails the
         // record is confirmed with a stale pending proposal, not the
-        // reverse. See plan.md Workstream 2.
+        // reverse.
         const decideJ = await apiFetch('/api/memory/proposals/' + proposalId + '/decide', {
           method: 'POST', body: JSON.stringify({ verdict: 'accepted', outcome: 'still_current' })
         });

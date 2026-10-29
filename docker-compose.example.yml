@@ -18,7 +18,10 @@ services:
     ports:
       - "3500:3500"
     volumes:
-      - ./data:/data
+      # A named volume works out of the box. To keep the data in a folder of
+      # your own instead, create it first so the container's user (1001) can
+      # write it:  mkdir -p data && chown 1001:1001 data   and use ./data:/data
+      - agent-core-data:/data
     environment:
       - AGENT_CORE_DATA_PATH=/data
       # Generate encryption key automatically on first start
@@ -27,6 +30,11 @@ services:
       # For production, set a fixed key instead:
       # - AGENT_CORE_ENCRYPTION_KEY=your-32-byte-fernet-key-here
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:3500/health', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
 volumes:
   agent-core-data:

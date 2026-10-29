@@ -20,6 +20,14 @@ def _hf(s):
     return s.replace("escape_html", "escapeHtml")
 
 
+def _page_number(raw) -> int:
+    """Parse a ?page= query value; anything that is not a positive integer is page 1."""
+    try:
+        return max(1, int(raw or 1))
+    except (TypeError, ValueError):
+        return 1
+
+
 def escape_html(s):
     """Escape a value for interpolation into dashboard HTML.
 

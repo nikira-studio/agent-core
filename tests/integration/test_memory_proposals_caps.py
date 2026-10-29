@@ -1,7 +1,6 @@
-"""Workstream 5 — cap, fairness, and concurrency regression for the consolidation queue.
+"""Cap, fairness, and concurrency regression for the consolidation queue.
 
-The hardest-won part of plan.md, reviewed across five rounds, includes an
-explicitly-required concurrency regression test. These tests cover:
+These tests cover:
 
 * per-(rule, scope) cap enforcement
 * installation-wide aggregate cap (always full-installation)

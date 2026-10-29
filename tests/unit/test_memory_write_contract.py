@@ -10,15 +10,15 @@ def _db(clean_db):
 
 # Per-occurrence logs unambiguous enough to both warn and auto-expire.
 EXPIRING_SAMPLES = [
-    "SAG-638 routine fallback sweep heartbeat (2026-06-07 15:16 UTC). Continuation tick.",
-    "NIKA-731 silent-run review for CTO completed 2026-06-18T11:34:35Z. Finding: FALSE POSITIVE.",
-    "STA-112 fire #59 close 2026-06-24T11:32Z. Sixteenth wake on STA-112.",
+    "OPS-638 routine fallback sweep heartbeat (2026-06-07 15:16 UTC). Continuation tick.",
+    "PROJ-731 silent-run review for operations completed 2026-06-18T11:34:35Z. Finding: FALSE POSITIVE.",
+    "MON-112 fire #59 close 2026-06-24T11:32Z. Sixteenth wake on MON-112.",
     "Idle closeout heartbeat 2026-06-13T21:35Z. activity_pickup returned null.",
 ]
 
 # Warned about, but not expired: a closeout often carries a durable payload.
 EPISODIC_SAMPLES = EXPIRING_SAMPLES + [
-    "STA-220 closed done 2026-06-24T21:32:29Z. Fire of the IT Services Wake Recovery Monitor.",
+    "MON-220 closed done 2026-06-24T21:32:29Z. Fire of the Wake Recovery Monitor.",
 ]
 
 DURABLE_SAMPLES = [
@@ -28,7 +28,7 @@ DURABLE_SAMPLES = [
 ]
 
 
-# Records drawn from the live corpus that a naive "contains the word heartbeat"
+# Records drawn from a real corpus that a naive "contains the word heartbeat"
 # rule flagged, but that are durable knowledge and must never auto-expire.
 FALSE_POSITIVE_SAMPLES = [
     "Paperclip startup and periodic heartbeat recovery run scanSilentActiveRuns() and "
@@ -36,10 +36,10 @@ FALSE_POSITIVE_SAMPLES = [
     "defaults to 30000 ms.",
     "Paperclip config is read once at startup — there is no live config reload, no SIGHUP "
     "handler, and no PATCH /api/config route, as of 2026-06-11.",
-    "Consolidation note (2026-07-05): retracted 43 near-duplicate 'routine fallback sweep "
-    "heartbeat' memories from workspace:sage.",
-    "STA-47 closed done 2026-06-21. Built reusable Python client package at "
-    "/host/projects/Apps/healthquery/healthquery_client/ (installable as healthquery-client).",
+    "Consolidation note (2026-07-05): retracted near-duplicate 'routine fallback sweep "
+    "heartbeat' memories from workspace:example.",
+    "PROJ-47 closed done 2026-06-21. Built reusable Python client package at "
+    "/opt/projects/example-app/client/ (installable as example-app-client).",
 ]
 
 

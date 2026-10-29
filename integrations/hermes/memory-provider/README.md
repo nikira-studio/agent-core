@@ -14,7 +14,7 @@ Drop this directory at:
 $HERMES_HOME/plugins/agent_core/
 ```
 
-For this deployment `HERMES_HOME=/opt/data`, so:
+For example, with `HERMES_HOME=/opt/data`:
 
 ```
 /opt/data/plugins/
@@ -99,9 +99,9 @@ When Agent Core is already an MCP server, the token auto-resolves from
 home and make the Hermes packages importable via `PYTHONPATH`:
 
 ```bash
-HERMES_HOME=/opt/data PYTHONPATH=/opt/hermes \
-  /opt/hermes/.venv/bin/python3 \
-  /opt/data/plugins/verify_agent_core_provider.py "how often do you check email"
+HERMES_HOME=/opt/data PYTHONPATH=/path/to/hermes \
+  python3 \
+  $HERMES_HOME/plugins/verify_agent_core_provider.py "how often do you check email"
 ```
 
 It exercises the real discovery → load → `is_available()` → `prefetch()` path and

@@ -208,6 +208,7 @@ Confirming a record requires **evidence** naming what was checked. Reading a rec
 Memory holds what stays true. The activity trail holds what happened: one record per task, self-reported by the agent.
 
 ```
+session_context   one session-start block: rules, waiting and unfinished work, recent results, changes
 activity_update   open a task, heartbeat every minute or two, close with a result
 workspace_sync    receive pinned context, assignments, and changes since this execution's cursor
 workspace_sync_ack acknowledge a delivered page after processing it
@@ -216,6 +217,7 @@ activity_list     what is stale or pending
 activity_get      one task, plus the memory records written during it
 activity_pickup   claim work a human assigned to this agent
 activity_handoff_resolve  settle a request to a person that the agent itself made
+attention_list    what is waiting on a person across the scopes the caller reads (coordinators)
 ```
 
 It is **self-reported on purpose**. There is no detection of agent work: an agent that does not call `activity_update` does not appear, and no handoff is recorded for it. The alternative, inferring activity, would produce a trail that looks authoritative and is quietly incomplete.

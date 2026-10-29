@@ -885,8 +885,8 @@ def run_scheduled_maintenance(triggered_by: str = "manual") -> dict:
         )
 
     # Operational logs. Memory had retention from the start; the logs that
-    # record what agents *did* had none, and on the first real deployment the
-    # connector execution log alone reached 142 MB of a 180 MB database. These
+    # record what agents *did* had none, and the connector execution log alone
+    # can grow to dominate the database. These
     # are diagnostics with a short useful life, not durable records.
     execution_retention_days = _system_setting_int("execution_log_retention_days", 30)
     webhook_retention_days = _system_setting_int("webhook_log_retention_days", 30)

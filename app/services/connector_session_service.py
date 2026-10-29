@@ -10,7 +10,7 @@ _locks_guard = threading.Lock()
 
 
 def binding_lock(binding_id: str) -> threading.Lock:
-    """Per-binding refresh mutex. In-process by design (single-core; see plan.md §1/§8.3).
+    """Per-binding refresh mutex. In-process by design (single process).
     Swap for a DB `locked_until` compare-and-set only if Agent Core ever goes multi-process."""
     with _locks_guard:
         lk = _locks.get(binding_id)

@@ -595,7 +595,7 @@ def test_memory_write_roundtrips_provenance_and_freshness_fields(
     assert record["valid_from"] == "2026-05-15T00:00:00+00:00"
     assert record["valid_to"] == "2026-06-15T00:00:00+00:00"
     # last_confirmed_at is server-owned: only memory_confirm with evidence
-    # sets it. A fresh write leaves it null. See plan.md Workstream 1.
+    # sets it. A fresh write leaves it null.
     assert record["last_confirmed_at"] is None
     assert record["provenance_json"]
     provenance = json.loads(record["provenance_json"])

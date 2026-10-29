@@ -41,9 +41,8 @@ MEMORY_RANK_COLUMNS = (
 # What a search result actually needs to be useful to the caller. Everything
 # else is bookkeeping the reader cannot act on: self-assigned scores that do not
 # vary, provenance blobs, and lifecycle columns that only matter when inspecting one
-# record. On a 20-result page that bookkeeping was 37% of the payload against
-# 35% for the content itself — charged to the context window memory exists to
-# protect. Full records remain one memory_get away.
+# record. On a 20-result page that bookkeeping outweighed the content itself —
+# charged to the context window memory exists to protect. Full records remain one memory_get away.
 MEMORY_RESULT_FIELDS = (
     "id",
     "content",
@@ -346,7 +345,7 @@ def _annotate_provenance(provenance_json: Optional[str], **extras) -> Optional[s
 
 # Shapes that describe one occurrence of recurring work rather than something
 # durable: monitor fires, heartbeat ticks, per-run reviews, ticket closeouts.
-# Derived from an audit of the live corpus, where records matching these made up
+# Derived from an audit of a real corpus, where records matching these made up
 # the overwhelming majority of everything an operator later had to retract by
 # hand. They are not wrong to record — they are just episodic, and the activity
 # trail is where episodic belongs.
@@ -354,9 +353,9 @@ def _annotate_provenance(provenance_json: Optional[str], **extras) -> Optional[s
 # Two tiers, because the two consequences are not equally reversible. Advising
 # wrongly costs a line of noise in a response; expiring wrongly deletes real
 # knowledge months later, silently, when nobody is looking. So the advisory set
-# is generous and the expiring set is strict — measured against the live corpus,
-# where the strict set covers 79% of records an operator had already retracted
-# by hand while flagging none of the durable ones.
+# is generous and the expiring set is strict — measured against a real corpus,
+# the strict set covered most records an operator had already retracted by hand
+# while flagging none of the durable ones.
 EPISODIC_ADVISORY_PATTERNS = (
     (re.compile(r"\bheartbeat\b", re.I), "reads as a heartbeat tick"),
     (re.compile(r"\bsilent[- ]run\b", re.I), "reads as a per-run review"),
@@ -373,7 +372,7 @@ EPISODIC_ADVISORY_PATTERNS = (
 )
 
 # Deliberately absent here: a bare ticket closeout ("STA-47 closed done ...").
-# In the live corpus those routinely carry a durable payload in the same record
+# In practice those routinely carry a durable payload in the same record
 # ("...Built reusable Python client package at ..."), so they are worth a
 # warning but must not silently expire.
 EPISODIC_EXPIRY_PATTERNS = (
@@ -605,7 +604,7 @@ def find_near_duplicates(
 # Cheap, no-embedding check for retracted records: normalize whitespace and
 # case, then compare the first DUPLICATE_PREFIX_CHARS characters against
 # every retracted record in the same scope. Used as an unconditional fallback
-# for the retracted-status check (see plan.md Workstream 4), so a transient
+# for the retracted-status check, so a transient
 # embedding failure on a vector-search-enabled installation does not disable
 # retraction awareness. Reuses the same normalization as
 # `_rule_duplicate_cluster` so what counts as a "near-exact-prefix match" is
@@ -628,8 +627,8 @@ def _normalize_for_prefix_match(content: str) -> str:
     sides of the match — the new content and the stored record — so they
     compare under the same definition. SQLite has no regex replace and
     no native string-stripping function, and reproducing this rule in
-    SQL was getting fragile (see planb.md round-3 round-3 review for the
-    whitespace-collapsing round trip). Keeping the normalization in
+    SQL was getting fragile (the whitespace-collapsing round trip in
+    particular). Keeping the normalization in
     Python, on a small retention-bounded candidate set, removes the
     SQL-vs-Python drift risk and is fast enough — retracted rows are
     retention-bounded and this function is only called from
@@ -878,7 +877,7 @@ def assess_memory_write(
         # would otherwise silently disable retraction awareness. The fallback
         # is cheap (retracted rows are a retention-bounded set), needs no
         # embedding, and matches on the same prefix definition the
-        # duplicate_cluster rule uses. See plan.md Workstream 4.
+        # duplicate_cluster rule uses.
         seen_retracted = {c["id"] for c in retracted_matches}
         fallback = _retracted_prefix_duplicates(
             content, scope, memory_class, exclude_id=exclude_id
@@ -991,7 +990,7 @@ def _provenance_penalty(record: dict) -> float:
     it was sourced, and a scratchpad ages out on its own. A record that has
     ever been confirmed (`last_confirmed_at` set) escapes the penalty entirely;
     confirmation is the only path that lifts it, and only `confirm_memory` sets
-    the timestamp. See plan.md Workstream 2.
+    the timestamp.
     """
     if record.get("memory_class") != "fact":
         return 0.0
@@ -1697,7 +1696,8 @@ def search_memory(
                     for r in semantic_candidates:
                         r["_semantic_score"] = scored_map.get(r["id"], 0.0)
                         r["_freshness_score"] = _evidence_bonus(r)
-                    retrieval_mode = "hybrid"
+                    if scored:
+                        retrieval_mode = "hybrid"
         except Exception as e:
             logger.warning(
                 "Vector embedding failed for memory search; falling back to FTS: %s",

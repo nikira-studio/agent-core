@@ -172,6 +172,7 @@ The trail is searchable, and it is the right home for "what did we do on X last 
 You can assign work to an agent directly from the dashboard (**Activity → Assign Work**). The agent session discovers that work on the next pickup check:
 
 ```
+session_context   → one session-start block: rules, waiting work, recent results, changes
 workspace_sync    → receive new workspace context and changes for this execution
 workspace_sync_ack → acknowledge a delivered page after processing it
 activity_pickup  → check for work a human assigned to this agent in this workspace

@@ -163,7 +163,7 @@ AGENT_CORE_CORS_ORIGINS=http://localhost:5173
 docker compose logs agent-core
 ```
 
-Common causes: port 3500 already in use on the host, the `./data` mount isn't writable, or an environment variable has an invalid format.
+Common causes: port 3500 already in use on the host, the `./data` mount isn't writable (the container runs as uid 1001; a folder Docker created as root needs `chown 1001:1001 data`), or an environment variable has an invalid format.
 
 ### Data disappears after restart
 

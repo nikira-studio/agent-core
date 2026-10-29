@@ -7,7 +7,7 @@ from typing import Optional
 from app.connectors import BaseConnector
 from app.connectors.value_utils import decode_json_body
 from app.security.url_validation import validate_public_url
-from app.security.safe_http import safe_urlopen
+from app.security.safe_http import read_capped, safe_urlopen
 
 
 class GenericHttpConnector(BaseConnector):
@@ -91,6 +91,14 @@ class GenericHttpConnector(BaseConnector):
                 "success": False,
                 "error": "url or config_json.base_url plus params.path is required",
             }
+        if params.get("url") and config.get("base_url"):
+            # The binding's credential is for the configured host. A caller
+            # may pick any path there, but not send the secret somewhere else.
+            if not self._same_origin(url, config["base_url"]):
+                return {
+                    "success": False,
+                    "error": "url must be on the binding's base_url host; use params.path for a different path",
+                }
         try:
             validate_public_url(url)
         except ValueError as e:
@@ -114,7 +122,7 @@ class GenericHttpConnector(BaseConnector):
         try:
             req = urllib.request.Request(url, method=method, headers=headers, data=data)
             with safe_urlopen(req, timeout=int(config.get("timeout", 20))) as resp:
-                raw = resp.read()
+                raw = read_capped(resp)
                 text = raw.decode("utf-8", errors="replace") if raw else ""
                 return {
                     "success": 200 <= resp.status < 300,
@@ -124,7 +132,7 @@ class GenericHttpConnector(BaseConnector):
                     "body_preview": text[:500],
                 }
         except urllib.error.HTTPError as e:
-            text = e.read().decode("utf-8", errors="replace")
+            text = read_capped(e, 64 * 1024).decode("utf-8", errors="replace")
             return {
                 "success": False,
                 "status": e.code,
@@ -149,6 +157,19 @@ class GenericHttpConnector(BaseConnector):
         else:
             headers[header_name] = credential
         return url
+
+    @staticmethod
+    def _same_origin(url: str, base_url: str) -> bool:
+        a, b = urllib.parse.urlsplit(url), urllib.parse.urlsplit(base_url)
+        default = {"http": 80, "https": 443}
+        try:
+            a_port = a.port or default.get(a.scheme)
+            b_port = b.port or default.get(b.scheme)
+        except ValueError:
+            return False
+        return (a.scheme, (a.hostname or "").lower(), a_port) == (
+            b.scheme, (b.hostname or "").lower(), b_port
+        )
 
     def _join_url(self, base_url: Optional[str], path: Optional[str]) -> Optional[str]:
         if not base_url:

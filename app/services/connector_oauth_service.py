@@ -8,7 +8,7 @@ import urllib.request
 from datetime import timedelta
 
 from app.database import get_db
-from app.security.safe_http import safe_urlopen
+from app.security.safe_http import read_capped, safe_urlopen
 from app.services import connector_service, credential_service
 from app.time_utils import parse_utc_datetime, utc_now
 
@@ -106,10 +106,10 @@ def exchange_callback(state: str, code: str, user_id: str) -> dict:
     )
     try:
         with safe_urlopen(request, timeout=30) as response:
-            token_data = json.loads(response.read().decode("utf-8"))
+            token_data = json.loads(read_capped(response, 1024 * 1024).decode("utf-8"))
     except urllib.error.HTTPError as exc:
         try:
-            error_data = json.loads(exc.read().decode("utf-8"))
+            error_data = json.loads(read_capped(exc, 64 * 1024).decode("utf-8"))
         except Exception:
             error_data = {}
         message = error_data.get("error_description") or error_data.get("error") or str(exc)

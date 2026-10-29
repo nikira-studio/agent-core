@@ -216,7 +216,12 @@ def set_handoff(activity_id: str, handoff: dict, *, amend: bool = False) -> Opti
             stored = merge_handoff(previous, handoff, previous_resolved=was_resolved)
         else:
             stored = {k: v for k, v in handoff.items() if k != "resolution"}
-        same_request = previous.get("needs_human") == stored.get("needs_human")
+        # Amending after a person resolved the request means the agent is asking
+        # again, even if the words are identical; only a full re-send of the same
+        # handoff keeps the earlier resolution.
+        same_request = previous.get("needs_human") == stored.get("needs_human") and not (
+            amend and was_resolved and handoff.get("needs_human")
+        )
         resolved_at = None
         if was_resolved and same_request:
             resolved_at = row["handoff_resolved_at"]
@@ -332,7 +337,7 @@ def request_summary(row: dict) -> dict:
         "summary": description,
         "status": row.get("status"),
         "needs_human": handoff.get("needs_human"),
-        "requested_at": row.get("updated_at"),
+        "requested_at": row.get("handoff_requested_at") or row.get("ended_at") or row.get("updated_at"),
     }
     if handoff.get("open_questions"):
         summary["open_questions"] = handoff["open_questions"]
@@ -1182,8 +1187,7 @@ def execution_linked_workspace_stats() -> dict:
     The 30-day comparison goes through SQLite's `datetime()` on both sides
     (`started_at` is ISO-with-`T` from application code, not the plain
     `CURRENT_TIMESTAMP` format that `datetime('now', '-30 days')` returns,
-    so a bare string compare gives a measurably different, wrong count —
-    verified directly against production. See planb.md Workstream 2.
+    so a bare string compare gives a measurably different, wrong count).
 
     Returns 0/0 on a fresh installation rather than raising on divide-by-zero;
     callers render the fraction.

@@ -1,3 +1,5 @@
+import time
+
 import pytest
 
 from app.branding import APP_NAME, CREDENTIAL_PREFIX
@@ -364,7 +366,10 @@ def test_otp_reset_keeps_existing_otp_active_until_confirmation(authenticated_cl
     )
     assert pending.status_code == 200
     assert is_otp_enrolled("testuser") is True
-    assert verify_otp("testuser", original_code) is True
+    # The reset consumed original_code (codes are single-use); the existing
+    # secret still verifies with the next code in its window.
+    assert verify_otp("testuser", original_code) is False
+    assert verify_otp("testuser", pyotp.TOTP(original["secret"]).at(time.time() + 30)) is True
 
     confirm = authenticated_client.post(
         "/api/auth/otp/confirm",

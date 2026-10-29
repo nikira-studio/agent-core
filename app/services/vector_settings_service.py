@@ -1,7 +1,9 @@
+import logging
 from typing import Optional
 from app.security.encryption import encrypt_value, decrypt_value
 from app.services import system_settings_service
 
+logger = logging.getLogger(__name__)
 
 VECTOR_KEYS = (
     "vector_search_enabled",
@@ -61,7 +63,11 @@ def _get_stored_api_key_plaintext() -> Optional[str]:
     try:
         return decrypt_value(encrypted)
     except Exception:
-        return encrypted
+        # After a key rotation the stored value may no longer decrypt. Sending
+        # the ciphertext as the API key would only produce confusing auth
+        # failures upstream; report it as missing instead.
+        logger.warning("Stored vector API key could not be decrypted; re-enter it in Settings")
+        return None
 
 
 def save_vector_setting(key: str, value: str) -> bool:

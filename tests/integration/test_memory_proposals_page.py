@@ -1,6 +1,6 @@
 CLOSEOUT = (
-    "STA-47 closed done 2026-06-21. Built reusable Python client package at "
-    "/host/projects/Apps/healthquery/healthquery_client/ (installable as healthquery-client)."
+    "PROJ-47 closed done 2026-06-21. Built reusable Python client package at "
+    "/opt/projects/example-app/client/ (installable as example-app-client)."
 )
 
 
@@ -36,7 +36,7 @@ def test_queued_proposal_is_rendered_with_its_evidence(test_client, admin_token)
     assert "(1 to look at)" in html
     assert "ticket_closeout" in html
     assert record["id"] in html
-    assert "healthquery_client" in html, "operator must see what they are deciding on"
+    assert "example-app-client" in html, "operator must see what they are deciding on"
     assert "decideProposal(" in html
     # Buttons must name what happens to the memory, not the verdict recorded.
     assert "Yes, retract it" in html
@@ -48,7 +48,7 @@ def test_queue_is_grouped_by_scope_and_collapsed(test_client, admin_token):
     default groups rather than one flat list — reviewing one project at a
     time, not a wall of unrelated cards."""
     _write(content=CLOSEOUT, scope="workspace:alpha")
-    _write(content=CLOSEOUT.replace("STA-47", "STA-48"), scope="workspace:beta")
+    _write(content=CLOSEOUT.replace("PROJ-47", "PROJ-48"), scope="workspace:beta")
     test_client.post(
         "/api/memory/proposals/generate",
         headers={"Authorization": f"Bearer {admin_token}"},

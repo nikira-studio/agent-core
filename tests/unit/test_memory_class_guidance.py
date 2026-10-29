@@ -6,7 +6,7 @@ def _db(clean_db):
     pass
 
 
-# Records taken from the live corpus, filed under the class they should have had.
+# Records taken from a real corpus, filed under the class they should have had.
 CHOICES = [
     "Assistant-style agents such as the upstream framework should be told to update their own MCP "
     "config rather than being handed a hardcoded path.",

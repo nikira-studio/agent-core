@@ -1,6 +1,7 @@
 """Unit tests for the declarative CLI engine."""
 
 import json
+import shutil
 import subprocess
 from unittest.mock import MagicMock, patch
 
@@ -194,7 +195,9 @@ class TestEnvBuilding:
         )
         cred = make_cred(raw="my-secret-token", fields={"token": "my-secret-token"})
         env = engine._build_env({}, {}, cred)
-        assert env == {"GH_TOKEN": "my-secret-token"}
+        assert env["GH_TOKEN"] == "my-secret-token"
+        # Only the allowlisted process variables come through, never the whole server env.
+        assert set(env) <= set(CliEngine._INHERITED_ENV) | {"GH_TOKEN"}
 
     def test_build_env_empty_for_missing_cred(self):
         engine = CliEngine(
@@ -203,7 +206,7 @@ class TestEnvBuilding:
             )
         )
         env = engine._build_env({}, {}, None)
-        assert env == {"GH_TOKEN": "{{ cred.token }}"}  # falls back to raw template
+        assert env["GH_TOKEN"] == "{{ cred.token }}"  # falls back to raw template
 
 
 # ─── Output Parsing ────────────────────────────────────────────────────────
@@ -290,7 +293,8 @@ class TestCliEngineExecute:
 
         mock_run.assert_called_once()
         call_args = mock_run.call_args
-        assert call_args[0][0] == ["gh", "api", "user"]
+        assert call_args[0][0][1:] == ["api", "user"]
+        assert call_args[0][0][0] in ("gh", shutil.which("gh"))  # resolved on the server's PATH
         assert call_args[1]["shell"] is False
         assert call_args[1]["capture_output"] is True
 
@@ -485,7 +489,8 @@ class TestCliEngineExecute:
             None,
         )
         env = mock_run.call_args[1]["env"]
-        assert env == {"GH_TOKEN": "my-token"}
+        assert env["GH_TOKEN"] == "my-token"
+        assert set(env) <= set(CliEngine._INHERITED_ENV) | {"GH_TOKEN"}
 
     def test_execute_unknown_action_returns_error(self):
         engine = CliEngine(make_ct({"bin": "gh", "commands": {}}))

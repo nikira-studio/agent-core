@@ -1684,6 +1684,13 @@ def prune_executions(retention_days: int) -> int:
         return cursor.rowcount or 0
 
 
+def count_executions(binding_id: str) -> int:
+    with get_db() as conn:
+        return conn.execute(
+            "SELECT COUNT(*) FROM connector_executions WHERE binding_id = ?", (binding_id,)
+        ).fetchone()[0]
+
+
 def list_executions(binding_id: str, limit: int = 50, offset: int = 0) -> list[dict]:
     with get_db() as conn:
         rows = conn.execute(

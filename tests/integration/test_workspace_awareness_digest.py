@@ -1,8 +1,7 @@
-"""Acceptance tests for planb.md (workspace-awareness reliability).
+"""Acceptance tests for workspace-awareness reliability.
 
-Each test maps to a bullet in the plan's acceptance-tests section. The
-plan survived three rounds of Codex review with substantive corrections;
-these tests are the regression-protection net for that work.
+Each test maps to one acceptance criterion of the workspace digest work;
+these tests are the regression-protection net for it.
 """
 
 from app.database import get_db

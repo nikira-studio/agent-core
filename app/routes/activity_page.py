@@ -12,6 +12,7 @@ from app.routes.dashboard_shared import (
     escape_html,
     local_dt,
     _build_pagination,
+    _page_number,
 )
 
 router = APIRouter()
@@ -37,7 +38,7 @@ def activity_page(request: Request, session: dict = Depends(require_auth)):
         for e in executions
     )
 
-    page = max(1, int(request.query_params.get("page", 1)))
+    page = _page_number(request.query_params.get("page"))
     status_filter = request.query_params.get("status", "")
     limit = 50
     scope_user_id = None if is_admin else session["user_id"]

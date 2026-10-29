@@ -138,7 +138,7 @@ def fetch_memory_by_ids(ids: Any, ctx: EffectiveAuthority, *, view: Optional[str
 # The two source_kind values that assert human authorship. Restricted to genuine
 # human sessions by validate_source_kind_authority — anything else claiming one
 # of these is the kind of input the ranking cannot reason about without
-# impersonation. See plan.md Workstream 1.
+# impersonation.
 HUMAN_SOURCE_KINDS = frozenset({"operator_authored", "human_direct"})
 
 
@@ -212,7 +212,7 @@ async def write_memory(
         )
     # Restrict caller-supplied source_kind by actor_type — the ranking cannot
     # reason about human provenance unless the system can check who claimed it.
-    # See validate_source_kind_authority and plan.md Workstream 1.
+    # See validate_source_kind_authority.
     denied = validate_source_kind_authority(source_kind, authority)
     if denied is not None:
         raise MemoryOperationError(denied[0], denied[1], 403)

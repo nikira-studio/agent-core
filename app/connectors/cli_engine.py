@@ -1,7 +1,9 @@
 """Declarative CLI engine for adapter manifests."""
 
 import json
+import os
 import re
+import shutil
 import subprocess
 from typing import Any, Optional
 
@@ -65,9 +67,12 @@ class CliEngine(BaseConnector):
             rendered_stdin = self._render(stdin_content, params, config, credential)
             stdin_bytes = rendered_stdin.encode("utf-8")
 
+        # Resolve against the server's PATH now: the child's PATH may differ,
+        # and a bare name would otherwise fall back to the OS default path.
+        bin_path = shutil.which(self.bin) or self.bin
         try:
             result = subprocess.run(
-                [self.bin] + argv,
+                [bin_path] + argv,
                 env=env,
                 input=stdin_bytes,
                 capture_output=True,
@@ -103,10 +108,14 @@ class CliEngine(BaseConnector):
     ) -> dict:
         return {"error": "cli does not support session refresh"}
 
+    # The child gets a minimal environment: enough to find and run the tool,
+    # none of the server's own secrets. Manifest `env` entries layer on top.
+    _INHERITED_ENV = ("PATH", "HOME", "LANG", "LC_ALL", "TMPDIR", "TMP", "TEMP", "SYSTEMROOT")
+
     def _build_env(
         self, params: dict, config: dict, cred: Optional[Credential]
     ) -> dict:
-        env = {}
+        env = {k: os.environ[k] for k in self._INHERITED_ENV if k in os.environ}
         for key, tpl in self.env_spec.items():
             env[key] = self._render(tpl, params, config, cred)
         return env
@@ -255,6 +264,10 @@ class CliEngine(BaseConnector):
                     "success": False,
                     "error": f"Regex pattern '{pattern}' not found",
                 }
+            named = m.groupdict()
+            if named:
+                # Named groups give structured output ({"url": ..., "number": ...}).
+                return {"success": True, "output": named}
             groups = m.groups()
             if groups:
                 result = groups[group_idx] if group_idx < len(groups) else groups[0]

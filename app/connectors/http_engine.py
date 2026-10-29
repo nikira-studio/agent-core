@@ -17,7 +17,7 @@ from app.connectors.errors import (
     RateLimitedError,
     SessionExpiredError,
 )
-from app.security.safe_http import safe_urlopen
+from app.security.safe_http import read_capped, safe_urlopen
 from app.security.url_validation import validate_public_url
 
 
@@ -240,9 +240,15 @@ class HttpEngine(BaseConnector):
         cred: Optional[Credential] = None,
     ) -> dict:
         method = request_def.get("method", "GET")
-        path = self._render(request_def.get("path", ""), params, config, cred)
+        path_tpl = request_def.get("path", "")
+        # Caller-supplied values become single path segments: a param such as
+        # "../../admin" cannot walk to an endpoint the action was not reviewed
+        # for, and only a template that is literally absolute may replace base_url.
+        path = self._render(path_tpl, _path_safe(params), config, cred)
         base_url = self._base_url(config)
-        url = self._join_url(base_url, path)
+        url = self._join_url(
+            base_url, path, absolute_ok=path_tpl.startswith(("http://", "https://"))
+        )
 
         req = {"method": method, "url": url, "headers": {}, "body": None}
 
@@ -344,13 +350,14 @@ class HttpEngine(BaseConnector):
     ) -> Any:
         return _cred_get_impl(key, params, config, cred)
 
-    def _join_url(self, base: str, path: str) -> str:
+    def _join_url(self, base: str, path: str, absolute_ok: bool = True) -> str:
         if not path:
             return base
         # An absolute URL in the path overrides base_url, so one adapter can span
         # multiple API hosts (e.g. Google Workspace: gmail.googleapis.com,
         # sheets.googleapis.com, docs.googleapis.com, people.googleapis.com).
-        if path.startswith(("http://", "https://")):
+        # Only the manifest may do that, never a rendered parameter.
+        if absolute_ok and path.startswith(("http://", "https://")):
             return path
         return f"{base.rstrip('/')}/{path.lstrip('/')}"
 
@@ -539,11 +546,11 @@ class HttpEngine(BaseConnector):
         )
         try:
             with safe_urlopen(req, timeout=30) as resp:
-                raw = resp.read()
+                raw = read_capped(resp, 1024 * 1024)
                 token_resp = json.loads(raw.decode("utf-8"))
         except urllib.error.HTTPError as e:
             try:
-                error_data = json.loads(e.read().decode("utf-8"))
+                error_data = json.loads(read_capped(e, 64 * 1024).decode("utf-8"))
             except Exception:
                 error_data = {}
             message = (
@@ -619,7 +626,7 @@ class HttpEngine(BaseConnector):
 
     def _extract(self, resp, request_def: dict, config: dict) -> dict:
         resp_spec = request_def.get("response", {})
-        raw = resp.read()
+        raw = read_capped(resp)
         text = raw.decode("utf-8", errors="replace") if raw else ""
         try:
             body = json.loads(text)
@@ -707,10 +714,20 @@ class _HTTPErrorResponse:
     def __init__(self, error: urllib.error.HTTPError):
         self.status = error.code
         self.headers = error.headers
-        self._body = error.read()
+        self._body = read_capped(error)
 
     def read(self) -> bytes:
         return self._body
+
+
+def _path_safe(params: dict) -> dict:
+    """Params as they may appear inside a URL path: scalars percent-encoded whole."""
+    if not isinstance(params, dict):
+        return params
+    return {
+        k: urllib.parse.quote(str(v), safe="") if isinstance(v, (str, int, float)) and not isinstance(v, bool) else v
+        for k, v in params.items()
+    }
 
 
 def _render_dict(

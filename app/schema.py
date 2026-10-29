@@ -31,6 +31,7 @@ CREATE TABLE IF NOT EXISTS otp_secrets (
     enrolled_at TEXT DEFAULT CURRENT_TIMESTAMP,
     pending_at TEXT,
     last_used TEXT,
+    last_used_step INTEGER,
     is_active BOOLEAN DEFAULT 1,
     FOREIGN KEY (user_id) REFERENCES users(id)
 );
@@ -516,6 +517,7 @@ def _apply_schema_migrations(conn) -> None:
         (12, "structured-activity-handoffs", _migrate_012_activity_handoffs),
         (13, "remove-handoff-briefings", _migrate_013_remove_handoff_briefings),
         (14, "drop-removed-feature-settings", _migrate_014_drop_removed_feature_settings),
+        (15, "single-use-otp-codes", _migrate_015_otp_last_used_step),
     )
     applied = {
         row["revision"]
@@ -566,8 +568,7 @@ def _migrate_004_system_settings_default_rows(conn) -> None:
     """Seed the runtime default rows into system_settings so a fresh
     installation has them visible in the database.
 
-    See plan.md and planb.md for the runtime-default rationale. This is
-    purely a hygiene migration — the runtime fallbacks (`_system_setting_int`
+    This is purely a hygiene migration — the runtime fallbacks (`_system_setting_int`
     et al.) continue to handle the absence of any of these rows
     gracefully, so an existing installation is not affected.
     """
@@ -1124,9 +1125,8 @@ def _ensure_activity_fts(conn) -> None:
 def _drop_retired_memory_columns(conn) -> None:
     """Drop columns that duplicated something else and are no longer written.
 
-    event_time was identical to created_at on all but 2 of 425 records in the
-    first real corpus — it recorded when a write happened, which created_at
-    already does. A restored backup that still has the column is cleaned up
+    event_time was, in practice, identical to created_at — it recorded when a
+    write happened, which created_at already does. A restored backup that still has the column is cleaned up
     the same way the next time schema setup runs.
     """
     columns = {
@@ -1547,6 +1547,13 @@ def _seed_connector_types(conn) -> None:
     conn.commit()
 
 
+def _migrate_015_otp_last_used_step(conn) -> None:
+    """Remember the time step of the last accepted TOTP code so it cannot be replayed."""
+    columns = {row["name"] for row in conn.execute("PRAGMA table_info(otp_secrets)")}
+    if "last_used_step" not in columns:
+        conn.execute("ALTER TABLE otp_secrets ADD COLUMN last_used_step INTEGER")
+
+
 def _migrate_006_consumer_write_grants(conn) -> None:
     columns = {row["name"] for row in conn.execute("PRAGMA table_info(credential_consumer_grants)")}
     if "allow_write" not in columns:
@@ -1576,8 +1583,8 @@ def _migrate_008_quiet_unattended_confirms(conn) -> None:
     """Recreate the workspace triggers so unattended re-confirms stay out of sync.
 
     The maintenance verifier re-stamps last_confirmed_at on every pass, and each
-    stamp became a workspace change: 35% of all changes on the first deployment,
-    none of them telling an agent anything new. Confirms by an agent or a person
+    stamp became a workspace change: a large share of all changes, none of
+    them telling an agent anything new. Confirms by an agent or a person
     still sync, because a peer checking a record is worth knowing about.
     """
     _ensure_workspace_sync_schema(conn)

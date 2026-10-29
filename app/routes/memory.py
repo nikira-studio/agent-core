@@ -265,8 +265,8 @@ def get_memory(
             return error_response("SCOPE_DENIED", "Access denied to this scope", 403)
         records = memory_service.get_memory_by_scope(
             scope=body.scope,
-            limit=min(body.limit, 100),
-            offset=body.offset,
+            limit=max(0, min(body.limit, 100)),
+            offset=max(0, body.offset),
             record_status=body.record_status,
         )
     else:
@@ -274,8 +274,8 @@ def get_memory(
         allowed_scopes = ctx.filter_scopes("memory", "read", candidates)
         records = memory_service.get_memory_by_scopes(
             scopes=allowed_scopes,
-            limit=min(body.limit, 100),
-            offset=body.offset,
+            limit=max(0, min(body.limit, 100)),
+            offset=max(0, body.offset),
         )
 
     return success_response({"records": records, "total": len(records)})
@@ -443,7 +443,8 @@ async def move_memory(
     if denied is not None:
         return error_response(denied[0], denied[1], 403)
 
-    new_record, err = memory_service.move_memory(
+    new_record, err = await asyncio.to_thread(
+        memory_service.move_memory,
         record_id=record_id,
         new_scope=new_scope,
         provenance_json=memory_service.build_provenance(

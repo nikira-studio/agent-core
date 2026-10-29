@@ -6,7 +6,7 @@ from io import BytesIO
 from pathlib import Path
 
 from cryptography.fernet import Fernet
-from app.branding import CREDENTIAL_PREFIX, DB_FILENAME, MANIFEST_VERSION_KEY
+from app.branding import APP_VERSION, CREDENTIAL_PREFIX, DB_FILENAME, MANIFEST_VERSION_KEY
 from app.schema import SCHEMA_SQL
 
 
@@ -22,7 +22,7 @@ def test_spec_endpoint_returns_full_spec(test_client, admin_token):
     )
     assert r.status_code == 200
     data = r.json()["data"]
-    assert data["version"] == "1.0.0"
+    assert data["version"] == APP_VERSION
     assert data["mcp_endpoint"] == "/mcp"
     assert data["rest_api_prefix"] == "/api"
     assert "scope_model" in data

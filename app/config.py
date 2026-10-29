@@ -55,7 +55,13 @@ class Settings(BaseSettings):
         if not path.is_absolute():
             path = (Path(__file__).parent.parent / path).resolve()
         path.mkdir(parents=True, exist_ok=True, mode=0o700)
-        path.chmod(0o700)
+        try:
+            path.chmod(0o700)
+        except PermissionError:
+            # A bind-mounted directory owned by another user (a fresh clone's
+            # ./data created by Docker as root) still works when it is writable;
+            # the key files inside are created 0600 regardless.
+            pass
         return path
 
     @property

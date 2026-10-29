@@ -49,6 +49,7 @@ These control how long dashboard logins stay active.
 | --- | --- | --- |
 | `AGENT_CORE_SHARED_SCOPE_AGENTS` | *(empty)* | Comma-separated agent IDs that can write to the `shared` memory scope, in addition to any agent that has `shared` explicitly in its `write_scopes`. This does not grant credential access |
 | `AGENT_CORE_STALE_THRESHOLD_MINUTES` | `5` | How long an agent can go without sending a heartbeat before its active task is automatically marked stale |
+| `AGENT_CORE_ATTENTION_LOOKBACK_DAYS` | `3` | How many days a stale or blocked activity stays on the Overview page's attention list; the Activity page keeps full history |
 | `AGENT_CORE_WORKSPACE_SYNC_BOOTSTRAP_HOURS` | `24` | How much recent workspace change history a new execution receives on its first sync |
 | `AGENT_CORE_WORKSPACE_CHANGE_RETENTION_DAYS` | `30` | How long maintenance keeps durable workspace change rows |
 | `AGENT_CORE_EXECUTION_STALE_MINUTES` | `30` | How long an execution can go without a sync before maintenance marks it stale. This status is informational |
@@ -156,7 +157,11 @@ data/
 
 ## Docker setup
 
-The example `docker-compose.yml` mounts your local `data/` directory into the container at `/data`:
+The example `docker-compose.yml` keeps the data in a named Docker volume mounted at `/data`. To keep it in a folder of your own instead, create the folder first so the container's user (uid 1001) can write it, then mount it:
+
+```bash
+mkdir -p data && chown 1001:1001 data
+```
 
 ```yaml
 volumes:
@@ -165,7 +170,7 @@ environment:
   AGENT_CORE_DATA_PATH: /data
 ```
 
-This means data persists on your host machine across container restarts and rebuilds. For a shared or more permanent deployment, consider a named Docker volume instead:
+This means data persists on your host machine across container restarts and rebuilds. For a shared or more permanent deployment, the named Docker volume is the simpler choice:
 
 ```yaml
 services:

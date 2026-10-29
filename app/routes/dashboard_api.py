@@ -182,6 +182,11 @@ def export_audit_csv(
     import csv
     import io
 
+    def _cell(value) -> str:
+        # Spreadsheets treat a leading = + - @ as a formula; neutralise it.
+        text = "" if value is None else str(value)
+        return "'" + text if text[:1] in ("=", "+", "-", "@") else text
+
     output = io.StringIO()
     writer = csv.writer(output)
     writer.writerow(
@@ -200,15 +205,15 @@ def export_audit_csv(
     for e in events:
         writer.writerow(
             [
-                e.get("timestamp", ""),
-                e.get("actor_type", ""),
-                e.get("actor_id", ""),
-                e.get("action", ""),
-                e.get("resource_type", ""),
-                e.get("resource_id", ""),
-                e.get("result", ""),
-                e.get("ip_address", ""),
-                e.get("details", ""),
+                _cell(e.get("timestamp", "")),
+                _cell(e.get("actor_type", "")),
+                _cell(e.get("actor_id", "")),
+                _cell(e.get("action", "")),
+                _cell(e.get("resource_type", "")),
+                _cell(e.get("resource_id", "")),
+                _cell(e.get("result", "")),
+                _cell(e.get("ip_address", "")),
+                _cell(e.get("details", "")),
             ]
         )
     from fastapi.responses import StreamingResponse

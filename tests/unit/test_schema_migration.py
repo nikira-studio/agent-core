@@ -228,6 +228,7 @@ def test_create_schema_records_and_skips_applied_revision(monkeypatch):
         {"revision": 12, "name": "structured-activity-handoffs"},
         {"revision": 13, "name": "remove-handoff-briefings"},
         {"revision": 14, "name": "drop-removed-feature-settings"},
+        {"revision": 15, "name": "single-use-otp-codes"},
     ]
     assert conn.execute(
         "SELECT 1 FROM sqlite_master WHERE type='table' AND name='credential_resolution_daily'"

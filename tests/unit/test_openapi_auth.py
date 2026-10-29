@@ -308,7 +308,7 @@ def test_generic_http_allows_private_url_by_default(monkeypatch):
         def __exit__(self, exc_type, exc, tb):
             return False
 
-        def read(self):
+        def read(self, _limit=None):
             return json.dumps({"ok": True}).encode()
 
     def fake_safe_urlopen(req, timeout=30):

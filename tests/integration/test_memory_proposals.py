@@ -1,10 +1,10 @@
 HEARTBEAT = (
-    "SAG-638 routine fallback sweep heartbeat (2026-06-07 15:16 UTC). Continuation tick "
+    "OPS-638 routine fallback sweep heartbeat (2026-06-07 15:16 UTC). Continuation tick "
     "on the now-activated registry. Tests 29/29 pass in 0.18s."
 )
 CLOSEOUT = (
-    "STA-47 closed done 2026-06-21. Built reusable Python client package at "
-    "/host/projects/Apps/healthquery/healthquery_client/ (installable as healthquery-client)."
+    "PROJ-47 closed done 2026-06-21. Built reusable Python client package at "
+    "/opt/projects/example-app/client/ (installable as example-app-client)."
 )
 DURABLE = "Do NOT edit vendored dependencies directly: it is pulled frequently, so core edits get clobbered."
 VOLATILE = (

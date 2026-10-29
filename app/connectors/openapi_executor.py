@@ -9,7 +9,7 @@ from app.connectors import BaseConnector
 from app.connectors.action_validation import validate_action_params
 from app.connectors.value_utils import decode_json_body
 from app.security.url_validation import validate_public_url
-from app.security.safe_http import safe_urlopen
+from app.security.safe_http import read_capped, safe_urlopen
 
 _MAX_RESPONSE_BODY = 50_000
 
@@ -162,7 +162,7 @@ class OpenApiExecutor(BaseConnector):
         try:
             req = urllib.request.Request(url, method=method, headers=headers, data=data)
             with safe_urlopen(req, timeout=30) as resp:
-                raw = resp.read()
+                raw = read_capped(resp)
                 text = raw.decode("utf-8", errors="replace") if raw else ""
                 body_obj = self._decode_body(text)
                 truncated = False
@@ -183,7 +183,7 @@ class OpenApiExecutor(BaseConnector):
                     "truncated": truncated,
                 }
         except urllib.error.HTTPError as e:
-            text = e.read().decode("utf-8", errors="replace")
+            text = read_capped(e, 64 * 1024).decode("utf-8", errors="replace")
             return {
                 "success": False,
                 "status": e.code,

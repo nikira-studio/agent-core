@@ -10,6 +10,7 @@ from app.services import audit_service
 from app.security.dependencies import get_request_context, require_capability
 from app.security.effective_authority import EffectiveAuthority
 from app.security.scope_enforcer import ScopeEnforcer
+from app.security.scope_utils import validate_scope_string
 from app.security.rate_limiter import RL
 from app.security.response_helpers import (
     success_response,
@@ -226,6 +227,8 @@ def create_entry(
         is_admin=ctx.is_admin,
         active_workspace_ids=ctx.active_workspace_ids,
     )
+    if not validate_scope_string(body.scope):
+        return error_response("INVALID_SCOPE", "Malformed scope", 400)
     if not enforcer.can_write(body.scope):
         return error_response("SCOPE_DENIED", "Access denied to this scope", 403)
 

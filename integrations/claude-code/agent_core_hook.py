@@ -81,7 +81,7 @@ def resolve_connection(cwd, env=os.environ, home=None):
         if not server or not isinstance(server.get("url"), str):
             continue
         header = _dict(server.get("headers")).get("Authorization", "")
-        server_key = header[7:] if isinstance(header, str) and header.startswith("Bearer ") else ""
+        server_key = header[7:].strip() if isinstance(header, str) and header[:7].lower() == "bearer " else ""
         server_url = server["url"].rstrip("/")
         if server_url.endswith("/mcp"):
             server_url = server_url[: -len("/mcp")]
