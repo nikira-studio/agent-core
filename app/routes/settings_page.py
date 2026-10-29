@@ -498,7 +498,7 @@ async def start_vector_reembed(
 
 @router.post("/api/dashboard/vector-reembed/estimate")
 async def estimate_vector_reembed(request: Request, session: dict = Depends(require_admin)):
-    """Time one typical record on a model and project the re-embed and write cost.
+    """Time a synthetic, average-length sample on a model and project the re-embed and write cost.
 
     Optional JSON body {"model": ..., "url": ...} measures a model before it is
     saved; both default to the saved settings. Nothing is stored.
@@ -1204,7 +1204,7 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
     }}
     async function measureVectorCost(model, url) {{
       const out = document.getElementById('vector-estimate-result');
-      out.innerHTML = '<div class="alert">Measuring ' + escapeHtml(model || 'the saved model') + ' on one typical record. A model that is not loaded yet can take a minute...</div>';
+      out.innerHTML = '<div class="alert">Measuring ' + escapeHtml(model || 'the saved model') + ' on a sample as long as an average record (no memory content is sent). A model that is not loaded yet can take a minute...</div>';
       const body = {{}};
       if (model) body.model = model;
       if (url) body.url = url;

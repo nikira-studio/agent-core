@@ -335,30 +335,33 @@ def cancel() -> bool:
 _MEASURE_TIMEOUT_SECONDS = 120
 
 
+_SAMPLE_SENTENCE = (
+    "The deploy procedure runs docker compose from the project checkout, "
+    "rebuilds the image, and restarts the service; migrations run on start. "
+)
+_DEFAULT_SAMPLE_CHARS = 900
+
+
 def _sample_text() -> str:
-    """An active record of about average length, so the timing is typical."""
+    """Synthetic text as long as an average active record.
+
+    Never a real record: an estimate can be pointed at an endpoint that is not
+    saved yet, possibly a hosted provider, and memory content must not leave
+    the install that way. Only the average length is read, which is metadata.
+    """
     with get_db() as conn:
         row = conn.execute(
-            """
-            SELECT content FROM memory_records
-            WHERE record_status = 'active' AND content IS NOT NULL
-            ORDER BY ABS(LENGTH(content) - (
-                SELECT AVG(LENGTH(content)) FROM memory_records WHERE record_status = 'active'
-            ))
-            LIMIT 1
-            """
+            "SELECT AVG(LENGTH(content)) AS n FROM memory_records "
+            "WHERE record_status = 'active' AND content IS NOT NULL"
         ).fetchone()
-    if row and row["content"]:
-        return row["content"]
-    # An empty install still gets a realistic measurement.
-    return (
-        "The deploy procedure runs docker compose from the project checkout, "
-        "rebuilds the image, and restarts the service; migrations run on start. "
-    ) * 6
+    length = int(row["n"]) if row and row["n"] else _DEFAULT_SAMPLE_CHARS
+    length = max(length, 1)
+    repeats = length // len(_SAMPLE_SENTENCE) + 1
+    return (_SAMPLE_SENTENCE * repeats)[:length]
 
 
 def estimate(model: Optional[str] = None, url: Optional[str] = None) -> dict:
-    """Embed one typical record with `model` and project what a switch costs.
+    """Embed a typical-length sample with `model` and project what a switch costs.
 
     Defaults to the configured model and URL, so it can also be asked about a
     model before it is saved. A first call warms the model (loading it can take

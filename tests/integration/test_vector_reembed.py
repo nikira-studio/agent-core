@@ -323,11 +323,29 @@ def test_estimate_warning_levels(records, monkeypatch, seconds, level):
     assert reembed_service.estimate()["level"] == level
 
 
-def test_estimate_samples_a_record_of_typical_length(records, monkeypatch):
+def test_estimate_never_sends_record_content(records, monkeypatch):
+    """The sample is synthetic, as long as an average active record, for any URL."""
     sent = []
     _fake_backend(monkeypatch, seconds=1.0, sent=sent)
-    est = reembed_service.estimate()
-    assert est["sample_chars"] in {len("deploy uses docker compose"), len("the ingest route is a POST")}
+    prompts = []
+    import httpx
+
+    real_post = httpx.post
+
+    def capture(url, json=None, headers=None, timeout=None):
+        prompts.append((url, json["prompt"]))
+        return real_post(url, json=json, headers=headers, timeout=timeout)
+
+    monkeypatch.setattr(httpx, "post", capture)
+
+    est = reembed_service.estimate(url="http://unsaved.example:11434")
+
+    contents = ["deploy uses docker compose", "the ingest route is a POST", "an older statement"]
+    average = (len(contents[0]) + len(contents[1])) // 2
+    assert est["sample_chars"] == average
+    assert prompts and all(u.startswith("http://unsaved.example") for u, _ in prompts)
+    for _, prompt in prompts:
+        assert not any(c in prompt for c in contents)
 
 
 def test_estimate_keeps_the_stored_key_on_the_saved_endpoint(records, monkeypatch):
