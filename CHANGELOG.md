@@ -22,6 +22,7 @@ Notable changes to Agent Core are documented here. The format follows [Keep a Ch
 
 ### Fixed
 
+- HTTP-engine adapters return a non-2xx upstream reply (a 404, a session challenge) as `success: false` with its status and body again. Since the response-size cap, the error-response wrapper crashed with a `TypeError` instead.
 - MCP `activity_update` with an unknown `status` returns `400 INVALID_STATUS` instead of a 500; `?page=` values that are not numbers open page one instead of a 500; a malformed credential scope is a 400.
 - Amending a handoff with a `needs_human` after a person resolved the previous request opens a new request even when the text is the same, and a `task_ref`-only update is reported as `activity_updated`, not a heartbeat. `superseded_requests`/`open_requests` report the time the request was made.
 - CLI adapters run their tool with the server's `PATH` and `HOME` (and nothing else from the server environment), so a tool installed outside `/usr/bin` is found; the GitHub CLI adapter's `create_issue` no longer passes a `--json` flag `gh issue create` does not have and returns the issue URL and number.

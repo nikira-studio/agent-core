@@ -286,3 +286,28 @@ def test_openapi_executor_reports_an_over_cap_body(monkeypatch):
     result = OpenApiExecutor().execute("big", {}, None, json.dumps({"_operations_json": spec}))
     assert result["success"] is False and result["error_code"] == "RESPONSE_TOO_LARGE"
     assert result["error"] == "upstream response exceeded 100 bytes"
+
+
+# --- a non-2xx upstream reply is a result, not a crash -------------------------
+
+
+def test_http_engine_returns_a_404_with_its_body(monkeypatch):
+    """The HTTPError wrapper must read like a urllib response (read_capped asks for a size)."""
+    body = json.dumps({"error": "no such task"}).encode()
+
+    def fake_urlopen(request, timeout=30):
+        raise urllib.error.HTTPError(request.full_url, 404, "Not Found",
+                                     {"Content-Type": "application/json"}, io.BytesIO(body))
+
+    engine = HttpEngine({"id": "t", "backend_json": json.dumps({
+        "base_url": {"from": "config", "field": "base_url"},
+        "requests": {"task_status": {"method": "GET", "path": "/tasks/{id}"}},
+    })})
+    monkeypatch.setattr("app.connectors.http_engine.safe_urlopen", fake_urlopen)
+    monkeypatch.setattr("app.connectors.http_engine.validate_public_url", lambda url: None)
+
+    result = engine.execute("task_status", {"id": "x"}, Credential(raw="s", fields={}, reference_name="r"),
+                            json.dumps({"base_url": "https://api.example.com"}))
+    assert result["success"] is False
+    assert result["status"] == 404
+    assert result["body"] == {"error": "no such task"}

@@ -721,8 +721,9 @@ class _HTTPErrorResponse:
         self.headers = error.headers
         self._body = read_capped(error, truncate=True)
 
-    def read(self) -> bytes:
-        return self._body
+    def read(self, amt: int | None = None) -> bytes:
+        # Same signature as a urllib response: read_capped asks for limit + 1.
+        return self._body if amt is None else self._body[:amt]
 
 
 def _path_safe(params: dict) -> dict:
