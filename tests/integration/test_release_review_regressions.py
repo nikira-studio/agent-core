@@ -132,10 +132,13 @@ def test_http_engine_path_params_cannot_leave_their_segment():
 
 
 def test_upstream_bodies_are_read_with_a_cap():
-    from app.security.safe_http import read_capped
+    import pytest
 
-    resp = io.BytesIO(b"x" * 100)
-    assert read_capped(resp, 10) == b"x" * 10
+    from app.security.safe_http import ResponseTooLargeError, read_capped
+
+    with pytest.raises(ResponseTooLargeError, match="exceeded 10 bytes"):
+        read_capped(io.BytesIO(b"x" * 100), 10)
+    assert read_capped(io.BytesIO(b"x" * 100), 10, truncate=True) == b"x" * 10
     assert read_capped(io.BytesIO(b"short"), 10) == b"short"
 
 
@@ -223,3 +226,63 @@ def test_broker_runner_treats_a_read_timeout_as_unresolved(monkeypatch):
 
     monkeypatch.setattr(agent_core_broker.urllib.request, "urlopen", _http_error)
     assert agent_core_broker.resolve_reference("AC_SECRET_X", "agent", "tok", "http://127.0.0.1:1") is None
+
+
+# --- an over-cap body is an error, not a cut-off document -----------------------
+
+
+class _HugeResponse:
+    """Answers every read with one byte more than was asked for."""
+
+    status = 200
+    headers = {}
+
+    def read(self, n=-1):
+        return b"x" * (n + 1 if n and n > 0 else 1)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+
+def test_generic_http_reports_an_over_cap_body(monkeypatch):
+    monkeypatch.setattr("app.security.safe_http.MAX_RESPONSE_BYTES", 100)
+    monkeypatch.setattr("app.connectors.generic_http.safe_urlopen", lambda req, timeout=30: _HugeResponse())
+    monkeypatch.setattr("app.connectors.generic_http.validate_public_url", lambda url: None)
+    connector = GenericHttpConnector()
+
+    result = connector._call(Credential(raw="s", fields={}, reference_name="r"),
+                             {"base_url": "https://api.example.com"}, {"path": "/big"})
+    assert result == {"success": False, "error": "upstream response exceeded 100 bytes",
+                      "error_code": "RESPONSE_TOO_LARGE"}
+
+
+def test_http_engine_reports_an_over_cap_body(monkeypatch):
+    monkeypatch.setattr("app.security.safe_http.MAX_RESPONSE_BYTES", 100)
+    engine = HttpEngine({"id": "t", "backend_json": json.dumps({
+        "base_url": {"from": "config", "field": "base_url"},
+        "requests": {"big": {"method": "GET", "path": "/big"}},
+    })})
+    monkeypatch.setattr(engine, "_send", lambda req, config: _HugeResponse())
+    monkeypatch.setattr(engine, "_raise_on_errors", lambda resp, credential: None)
+
+    result = engine.execute("big", {}, Credential(raw="s", fields={}, reference_name="r"),
+                            json.dumps({"base_url": "https://api.example.com"}))
+    assert result["success"] is False and result["error_code"] == "RESPONSE_TOO_LARGE"
+    assert result["error"] == "upstream response exceeded 100 bytes"
+
+
+def test_openapi_executor_reports_an_over_cap_body(monkeypatch):
+    from app.connectors.openapi_executor import OpenApiExecutor
+
+    monkeypatch.setattr("app.security.safe_http.MAX_RESPONSE_BYTES", 100)
+    monkeypatch.setattr("app.connectors.openapi_executor.safe_urlopen", lambda req, timeout=30: _HugeResponse())
+    monkeypatch.setattr("app.connectors.openapi_executor.validate_public_url", lambda url: None, raising=False)
+    spec = {"servers": ["https://api.example.com"],
+            "operations": [{"operation_id": "big", "method": "GET", "path": "/big"}]}
+
+    result = OpenApiExecutor().execute("big", {}, None, json.dumps({"_operations_json": spec}))
+    assert result["success"] is False and result["error_code"] == "RESPONSE_TOO_LARGE"
+    assert result["error"] == "upstream response exceeded 100 bytes"

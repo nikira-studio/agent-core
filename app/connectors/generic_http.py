@@ -7,7 +7,7 @@ from typing import Optional
 from app.connectors import BaseConnector
 from app.connectors.value_utils import decode_json_body
 from app.security.url_validation import validate_public_url
-from app.security.safe_http import read_capped, safe_urlopen
+from app.security.safe_http import ResponseTooLargeError, read_capped, safe_urlopen
 
 
 class GenericHttpConnector(BaseConnector):
@@ -132,12 +132,14 @@ class GenericHttpConnector(BaseConnector):
                     "body_preview": text[:500],
                 }
         except urllib.error.HTTPError as e:
-            text = read_capped(e, 64 * 1024).decode("utf-8", errors="replace")
+            text = read_capped(e, 64 * 1024, truncate=True).decode("utf-8", errors="replace")
             return {
                 "success": False,
                 "status": e.code,
                 "error": f"HTTP {e.code}: {text[:500]}",
             }
+        except ResponseTooLargeError as e:
+            return {"success": False, "error": str(e), "error_code": "RESPONSE_TOO_LARGE"}
         except Exception as e:
             return {"success": False, "error": str(e)}
 

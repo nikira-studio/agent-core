@@ -14,7 +14,7 @@ Notable changes to Agent Core are documented here. The format follows [Keep a Ch
 ### Security
 
 - The Generic HTTP connector only sends the binding's credential to the configured `base_url` host; a caller-supplied `url` on another host is refused. Adapter path parameters are percent-encoded as single segments, and only a manifest path that is literally absolute can replace `base_url`.
-- Upstream response bodies are read with a 10 MB cap, so a runaway upstream cannot exhaust the process.
+- Upstream response bodies are read with a 10 MB cap, so a runaway upstream cannot exhaust the process; a body over the cap is reported as `RESPONSE_TOO_LARGE` rather than parsed cut off.
 - TOTP codes are single-use: a code that already signed in is refused for the rest of its window. Migration 15 adds `otp_secrets.last_used_step`.
 - MCP `memory_verify` without a `scope` verifies only the caller's writable scopes instead of the whole installation.
 - `credential_request` needs read access to the scope as well as write access, so a write-only key cannot learn which entries exist.

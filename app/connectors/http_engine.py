@@ -17,7 +17,7 @@ from app.connectors.errors import (
     RateLimitedError,
     SessionExpiredError,
 )
-from app.security.safe_http import read_capped, safe_urlopen
+from app.security.safe_http import ResponseTooLargeError, read_capped, safe_urlopen
 from app.security.url_validation import validate_public_url
 
 
@@ -198,7 +198,10 @@ class HttpEngine(BaseConnector):
                 attempts += 1
 
         self._raise_on_errors(resp, credential)
-        result = self._extract(resp, request_def, config)
+        try:
+            result = self._extract(resp, request_def, config)
+        except ResponseTooLargeError as e:
+            return {"success": False, "error": str(e), "error_code": "RESPONSE_TOO_LARGE"}
         return self._apply_response_limit(result, request_def, merged_params)
 
     def _capture_from_response(self, resp, session_spec: dict) -> dict:
@@ -546,11 +549,13 @@ class HttpEngine(BaseConnector):
         )
         try:
             with safe_urlopen(req, timeout=30) as resp:
+                # A token endpoint answers with a small JSON document; 1 MB is
+                # generous and keeps a misconfigured URL from streaming at us.
                 raw = read_capped(resp, 1024 * 1024)
                 token_resp = json.loads(raw.decode("utf-8"))
         except urllib.error.HTTPError as e:
             try:
-                error_data = json.loads(read_capped(e, 64 * 1024).decode("utf-8"))
+                error_data = json.loads(read_capped(e, 64 * 1024, truncate=True).decode("utf-8"))
             except Exception:
                 error_data = {}
             message = (
@@ -714,7 +719,7 @@ class _HTTPErrorResponse:
     def __init__(self, error: urllib.error.HTTPError):
         self.status = error.code
         self.headers = error.headers
-        self._body = read_capped(error)
+        self._body = read_capped(error, truncate=True)
 
     def read(self) -> bytes:
         return self._body

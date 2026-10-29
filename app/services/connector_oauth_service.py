@@ -109,7 +109,7 @@ def exchange_callback(state: str, code: str, user_id: str) -> dict:
             token_data = json.loads(read_capped(response, 1024 * 1024).decode("utf-8"))
     except urllib.error.HTTPError as exc:
         try:
-            error_data = json.loads(read_capped(exc, 64 * 1024).decode("utf-8"))
+            error_data = json.loads(read_capped(exc, 64 * 1024, truncate=True).decode("utf-8"))
         except Exception:
             error_data = {}
         message = error_data.get("error_description") or error_data.get("error") or str(exc)

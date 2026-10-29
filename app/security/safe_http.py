@@ -17,16 +17,31 @@ _REDIRECT_STATUSES = {301, 302, 303, 307, 308}
 MAX_RESPONSE_BYTES = 10 * 1024 * 1024
 
 
-def read_capped(resp, limit: int = MAX_RESPONSE_BYTES) -> bytes:
-    """Read at most `limit` bytes of a response body.
+class ResponseTooLargeError(ValueError):
+    """The upstream body passed the read cap; nothing was parsed."""
+
+    def __init__(self, limit: int):
+        super().__init__(f"upstream response exceeded {limit} bytes")
+        self.limit = limit
+
+
+def read_capped(resp, limit: int | None = None, truncate: bool = False) -> bytes:
+    """Read at most `limit` bytes (default MAX_RESPONSE_BYTES) of a response body.
 
     An upstream that streams without end, or answers with a multi-gigabyte
-    body, must not be able to hold the whole thing in this process. What
-    comes back is truncated at the limit; callers that care can compare
-    against the limit.
+    body, must not be able to hold the whole thing in this process. A body
+    over the cap raises ResponseTooLargeError so the caller reports it
+    rather than parsing a cut-off document; `truncate=True` returns the
+    first `limit` bytes instead, for error text that is only quoted.
     """
-    data = resp.read(limit + 1) if limit else resp.read()
-    return data[:limit] if limit and len(data) > limit else data
+    if limit is None:
+        limit = MAX_RESPONSE_BYTES
+    data = resp.read(limit + 1)
+    if len(data) > limit:
+        if truncate:
+            return data[:limit]
+        raise ResponseTooLargeError(limit)
+    return data
 
 
 def _connect_address(
