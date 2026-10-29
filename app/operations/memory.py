@@ -30,11 +30,20 @@ def validate_response_budget(value: Any) -> Optional[int]:
     return value
 
 
-def budget_search_response(data: dict, max_response_chars: Optional[int]) -> dict:
+def budget_search_response(
+    data: dict,
+    max_response_chars: Optional[int],
+    *,
+    items_key: str = "records",
+    count_key: str = "total",
+    noun: str = "memories",
+) -> dict:
     """Keep a whole-record prefix within the JSON-RPC logical-text budget.
 
     Projection and pagination have already run. No database writes here: callers
     record recall only after this function selects the delivered response.
+    items_key, count_key and noun let other list tools (activity_list,
+    activity_search) share the same trimming.
     """
     if max_response_chars is None:
         return data
@@ -46,7 +55,7 @@ def budget_search_response(data: dict, max_response_chars: Optional[int]) -> dic
     if size(full) <= max_response_chars:
         return full
 
-    records = data["records"]
+    records = data[items_key]
     if records:
         # Find the longest prefix, including every metadata field in each check.
         low, high = 1, len(records) - 1
@@ -55,8 +64,8 @@ def budget_search_response(data: dict, max_response_chars: Optional[int]) -> dic
             count = (low + high) // 2
             candidate = {
                 **data,
-                "records": records[:count],
-                "total": count,
+                items_key: records[:count],
+                count_key: count,
                 "response_limited": True,
             }
             if size(candidate) <= max_response_chars:
@@ -68,13 +77,13 @@ def budget_search_response(data: dict, max_response_chars: Optional[int]) -> dic
             return best
         empty = {
             **data,
-            "records": [],
-            "total": 0,
+            items_key: [],
+            count_key: 0,
             "response_limited": True,
             "warnings": [
                 {
                     "code": "RESPONSE_BUDGET_TOO_SMALL",
-                    "message": "Matching memories exist, but the first record does not fit. Raise max_response_chars.",
+                    "message": f"Matching {noun} exist, but the first one does not fit. Raise max_response_chars.",
                 }
             ],
         }

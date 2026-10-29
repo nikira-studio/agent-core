@@ -758,9 +758,7 @@ def list_activities(
     with get_db() as conn:
         rows = conn.execute(
             f"""
-            SELECT id, agent_id, user_id, assigned_agent_id, reassigned_from_agent_id,
-                   task_description, task_note, task_result, status, memory_scope, started_at, updated_at,
-                   heartbeat_at, ended_at, metadata_json
+            SELECT {ACTIVITY_COLUMNS}
             FROM agent_activity
             WHERE {where}
             ORDER BY started_at DESC
@@ -821,8 +819,59 @@ def list_attention_activities(
 ACTIVITY_COLUMNS = (
     "id, agent_id, user_id, assigned_agent_id, reassigned_from_agent_id, "
     "task_description, task_note, task_result, status, memory_scope, started_at, "
-    "updated_at, heartbeat_at, ended_at, metadata_json"
+    "updated_at, heartbeat_at, ended_at, metadata_json, handoff_json, handoff_resolved_at"
 )
+
+# Per-field preview lengths for compact activity rows. A list of 50 activities
+# with full notes, results and handoffs routinely passed the tool-result offload
+# threshold, and offloaded lists were rarely fetched back, so MCP lists return
+# previews by default and activity_get gives the whole record.
+COMPACT_PREVIEW_CHARS = {
+    "task_description": 200,
+    "task_note": 160,
+    "task_result": 240,
+    "needs_human": 240,
+}
+
+
+def _preview(text: Optional[str], limit: int) -> Optional[str]:
+    if not text:
+        return text
+    text = " ".join(text.split())
+    return text if len(text) <= limit else text[: limit - 1].rstrip() + "…"
+
+
+def compact_activity(activity: dict) -> dict:
+    """An activity row for listing: who, where, status, what, and what came of it.
+
+    Long text is cut to a preview (marked with …), metadata is reduced to its
+    task_ref, and a handoff to whether it is still waiting on a person. Use
+    activity_get for the whole record.
+    """
+    row = {
+        "id": activity.get("id"),
+        "agent_id": activity.get("agent_id"),
+        "memory_scope": activity.get("memory_scope"),
+        "status": activity.get("status"),
+        "started_at": activity.get("started_at"),
+        "updated_at": activity.get("updated_at"),
+        "ended_at": activity.get("ended_at"),
+    }
+    if activity.get("assigned_agent_id") not in (None, activity.get("agent_id")):
+        row["assigned_agent_id"] = activity["assigned_agent_id"]
+    for field in ("task_description", "task_note", "task_result"):
+        value = _preview(activity.get(field), COMPACT_PREVIEW_CHARS[field])
+        if value:
+            row[field] = value
+    ref = task_ref(activity)
+    if ref:
+        row["task_ref"] = ref
+    handoff = load_handoff(activity.get("handoff_json"))
+    if handoff:
+        row["has_handoff"] = True
+        if handoff.get("needs_human") and not activity.get("handoff_resolved_at"):
+            row["needs_human"] = _preview(handoff["needs_human"], COMPACT_PREVIEW_CHARS["needs_human"])
+    return {k: v for k, v in row.items() if v is not None}
 
 
 def _sanitize_fts_query(query: str) -> str:

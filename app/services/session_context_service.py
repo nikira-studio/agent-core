@@ -34,7 +34,9 @@ DEFAULT_BUDGET_CHARS = 9000
 MAX_BUDGET_CHARS = 50000
 MIN_BUDGET_CHARS = 1000
 
-_INDEX_LIMIT = 40
+# Agents rarely open the listed records; a short list of the
+# most current ones points the way, and memory_search finds the rest.
+_INDEX_LIMIT = 10
 _INDEX_FRESH_DAYS = 14
 _INDEX_RECALLED_DAYS = 30
 _CHANGE_LIMIT = 50
@@ -306,7 +308,7 @@ def _render(scope: str, execution_id: str, parts: dict, limits: dict) -> str:
         for record in index:
             topic = f" · {record['topic']}" if record.get("topic") else ""
             lines.append(
-                f"- {record['id']} {record['memory_class']}{topic}: {_one_line(record['content'], 140)}"
+                f"- {record['id']} {record['memory_class']}{topic}: {_one_line(record['content'], 100)}"
             )
         lines.append(
             "Full text: memory_get(ids=[...]). Anything else: memory_search(query)."
@@ -317,8 +319,6 @@ def _render(scope: str, execution_id: str, parts: dict, limits: dict) -> str:
 # The order things are given up in, cheapest loss first. Each step returns the
 # next limits, or None when nothing more can go.
 def _reduce(limits: dict, parts: dict) -> Optional[dict]:
-    if limits["index"] > 10:
-        return {**limits, "index": max(10, limits["index"] // 2)}
     if limits["changes"] > 5:
         return {**limits, "changes": max(5, limits["changes"] // 2)}
     if limits["recent_chars"] > 0:

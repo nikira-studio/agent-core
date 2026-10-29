@@ -650,6 +650,10 @@ Recording or resolving a handoff in a `workspace:*` scope adds a `handoff_record
 
 `GET /api/activity/attention` lists unresolved `needs_human` requests, newest first, in the scopes the caller reads: `id`, `agent_id`, `user_id`, `memory_scope`, `status`, `task_description`, `needs_human`, `task_ref`, `updated_at`. It is for a coordinator, such as an attention reader or a chief-of-staff agent, that tells a person what is waiting on them; it needs the `coordination` capability, not admin. Repeat `scope` to narrow it (each must be readable, or the call returns `403`), pass `without_task_ref=true` to skip requests that point at another system's task, and `limit` (default 50, at most 200). The MCP equivalent is `attention_list`. Listing never resolves anything; that stays with a person.
 
+### Compact activity lists
+
+Over MCP, `activity_list` and `activity_search` return compact rows unless `view=full` is passed: `id`, `agent_id`, `memory_scope`, `status` and timestamps, previews of `task_description`, `task_note` and `task_result` (cut at 200, 160 and 240 characters and marked with `…`), `task_ref`, `has_handoff`, and `needs_human` while a request to a person is unresolved. They keep as many whole rows as fit under the tool-result offload threshold; when `response_limited` is true, raise `offset` by `count` for the next page. `activity_get` returns one whole record. REST `GET /api/activity` and `/api/activity/search` are unchanged and return full rows.
+
 ### Linking an activity to another system's task
 
 When work belongs to a task that lives in another system, record it as `metadata.task_ref = "<system>:<id>"`, for example `jira:PROJ-123` or `github:owner/repo#42`. MCP `activity_update` and REST `POST`/`PUT /api/activity` take it as `task_ref` (REST also accepts it inside `metadata_json`); it must be a lowercase system name, a colon, and an id without spaces. Core stores it and does not interpret the id. A reader that already lists that system's queue uses it to skip the handoff (`without_task_ref`), so one item is not shown twice. Work started from another system's task should always set it; a terminal session started by a person leaves it empty.
@@ -728,10 +732,10 @@ Dispatch:
 | `activity_update` | Create or update an activity record in the supplied `memory_scope`, including progress notes, completion result and a structured `handoff` (`completed`, `next_steps`, `open_questions`, `needs_human`); it never moves an activity across scopes. A `needs_human` request supersedes the agent's open requests in the scope from earlier sessions and lists them in `superseded_requests` (see [Handoffs](#handoffs)) |
 | `activity_handoff_resolve` | Resolve one of the caller's own `needs_human` requests once it has been dealt with. `activity_id` and `reason` (up to 500 characters) are required; only the agent the activity is assigned to may call it |
 | `activity_get` | Get an activity record in a readable scope, with the memory records written during it |
-| `activity_list` | List activities visible to the current caller |
+| `activity_list` | List activities visible to the current caller. Compact by default (see below); `view=full` returns every field |
 | `attention_list` | Unresolved `needs_human` handoffs across readable scopes, newest first, with each one's `task_ref`; read-only, for coordinators |
 | `activity_pickup` | Claim the next active work item assigned to this agent in authorized scopes |
-| `activity_search` | Full-text search the activity trail: what agents worked on, per task, with results. Use for "what did we do on X"; use `memory_search` for durable facts and decisions |
+| `activity_search` | Full-text search the activity trail: what agents worked on, per task, with results. Use for "what did we do on X"; use `memory_search` for durable facts and decisions. Compact by default, like `activity_list` |
 | `effective_authority` | Report the caller's current effective authority: identity, read and write scopes, workspaces, and capabilities |
 | `connectors_list` | List installed connector types as lean summaries (id, name, auth/backend type, action_count; no full specs). Supports `limit`/`offset`; use `connectors_actions_list` for a type's actions |
 | `connectors_bindings_list` | List connector bindings in authorized scopes |

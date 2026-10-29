@@ -190,13 +190,14 @@ def spec(
         },
         {
             "name": "activity_list",
-            "description": "List activities visible to the current agent or user",
+            "description": "List activities visible to the current agent or user, as compact previews unless view=full",
             "inputSchema": {
                 "status": "string?",
                 "agent_id": "string?",
                 "assigned_agent_id": "string?",
                 "limit": "integer?",
                 "offset": "integer?",
+                "view": "compact|full?",
             },
         },
         {
@@ -245,6 +246,7 @@ def spec(
                 "since": "string?",
                 "limit": "integer?",
                 "offset": "integer?",
+                "view": "compact|full?",
             },
         },
         {

@@ -488,7 +488,7 @@ MANIFEST = {
         },
         {
             "name": "activity_list",
-            "description": "List activities visible to the current agent or user",
+            "description": "List activities visible to the current agent or user, as compact previews unless view=full",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -497,16 +497,28 @@ MANIFEST = {
                     "assigned_agent_id": {"type": "string"},
                     "limit": {"type": "integer", "default": 50},
                     "offset": {"type": "integer", "default": 0},
+                    "view": {
+                        "type": "string",
+                        "enum": ["compact", "full"],
+                        "default": "compact",
+                        "description": "compact (default): previews of the task, note, result and any open request to a person, plus task_ref, trimmed to fit inline; if response_limited is true, raise offset by count for the next page. full: every field, untrimmed. activity_get returns one whole record.",
+                    },
                 },
             },
         },
         {
             "name": "activity_search",
-            "description": "Search the activity trail — what agents actually worked on, one record per task, with results. Use this for 'what did we do on X', 'what has been tried', or 'what happened last week' questions; use memory_search for durable facts and decisions. Returns newest-first.",
+            "description": "Search the activity trail — what agents actually worked on, one record per task, with results. Use this for 'what did we do on X', 'what has been tried', or 'what happened last week' questions; use memory_search for durable facts and decisions. Returns newest-first, as compact previews unless view=full.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "query": {"type": "string"},
+                    "view": {
+                        "type": "string",
+                        "enum": ["compact", "full"],
+                        "default": "compact",
+                        "description": "compact (default): previews of the task, note, result and any open request to a person, plus task_ref, trimmed to fit inline; if response_limited is true, raise offset by count for the next page. full: every field, untrimmed. activity_get returns one whole record.",
+                    },
                     "agent_id": {
                         "type": "string",
                         "description": "Limit to work this agent did or was assigned",
@@ -1172,6 +1184,23 @@ HANDOFF_RESOLVE_REASON_MAX = 500
 # docs/security.md). They count against the same buckets, so an agent cannot
 # double its budget by switching transport.
 _RATE_LIMITED_TOOLS = ("memory_write", "memory_search")
+
+
+def _activity_page(activities: list[dict], view: Optional[str]) -> dict:
+    """activity_list/activity_search data. Compact (the default) previews each
+    activity and keeps as many whole rows as fit inline, like memory_search, so
+    the list arrives instead of being offloaded; response_limited says to page
+    on by raising offset by count. view=full returns every field untrimmed."""
+    data = {"activities": activities, "count": len(activities)}
+    if view == "full":
+        return data
+    data["activities"] = [activity_service.compact_activity(a) for a in activities]
+    if settings.TOOL_RESULT_SPILL_THRESHOLD <= 0:
+        return data
+    return budget_search_response(
+        data, settings.TOOL_RESULT_SPILL_THRESHOLD,
+        items_key="activities", count_key="count", noun="activities",
+    )
 
 
 async def _handle_custom_mcp_tool(body: dict, ctx: EffectiveAuthority):
@@ -2108,6 +2137,8 @@ async def _run_custom_mcp_tool(body: dict, ctx: EffectiveAuthority):
         )
 
     elif tool == "activity_list":
+        if params.get("view") not in (None, "compact", "full"):
+            return _mcp_error("INVALID_PARAMS", "view must be 'compact' or 'full'", 400)
         agent_filter = params.get("agent_id")
         assigned_filter = params.get("assigned_agent_id")
         status = params.get("status")
@@ -2136,11 +2167,13 @@ async def _run_custom_mcp_tool(body: dict, ctx: EffectiveAuthority):
         return JSONResponse(
             content={
                 "ok": True,
-                "data": {"activities": activities, "count": len(activities)},
+                "data": _activity_page(activities, params.get("view")),
             }
         )
 
     elif tool == "activity_search":
+        if params.get("view") not in (None, "compact", "full"):
+            return _mcp_error("INVALID_PARAMS", "view must be 'compact' or 'full'", 400)
         query = params.get("query") or ""
         limit = min(int(params.get("limit", 20) or 20), 100)
         offset = max(int(params.get("offset", 0) or 0), 0)
@@ -2162,7 +2195,7 @@ async def _run_custom_mcp_tool(body: dict, ctx: EffectiveAuthority):
         return JSONResponse(
             content={
                 "ok": True,
-                "data": {"activities": activities, "count": len(activities)},
+                "data": _activity_page(activities, params.get("view")),
             }
         )
 

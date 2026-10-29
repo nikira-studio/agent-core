@@ -4,6 +4,11 @@ Notable changes to Agent Core are documented here. The format follows [Keep a Ch
 
 ## [Unreleased]
 
+### Changed
+
+- MCP `activity_list` and `activity_search` return compact rows by default (previews of the task, note and result, `task_ref`, and any unresolved request to a person) and keep as many as fit inline, with `response_limited` and offset paging; `view=full` returns every field. Large lists were offloaded to a handle that agents rarely fetched. REST responses are unchanged.
+- Session context lists at most 10 key records, with shorter previews, down from up to 40. Listed records were rarely opened; `memory_search` finds the rest.
+
 ## [1.1.0] - 2026-10-28
 
 ### Added
