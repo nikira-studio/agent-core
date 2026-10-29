@@ -276,3 +276,95 @@ def test_start_route_validates_and_passes_the_pause(admin_client, monkeypatch):
     r = admin_client.post("/api/dashboard/vector-reembed", json={"pause_ms": 999999})
     assert r.status_code == 400 and r.json()["error"]["code"] == "INVALID_PAUSE"
     assert admin_client.post("/api/dashboard/vector-reembed", json={"pause_ms": "soon"}).status_code == 400
+
+
+class _FakeEmbedResponse:
+    status_code = 200
+
+    def __init__(self, dims=4):
+        self._dims = dims
+
+    def json(self):
+        return {"embedding": [0.1] * self._dims}
+
+
+def _fake_backend(monkeypatch, seconds, sent=None):
+    """httpx.post that reports `seconds` elapsed for the timed (non-warm-up) call."""
+    import httpx
+
+    clock = {"t": 0.0}
+
+    def fake_post(url, json=None, headers=None, timeout=None):
+        if sent is not None:
+            sent.append((url, dict(headers or {}), json["model"]))
+        if json["prompt"] != "warm up":
+            clock["t"] += seconds
+        return _FakeEmbedResponse()
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    monkeypatch.setattr(reembed_service.time, "monotonic", lambda: clock["t"])
+
+
+def test_estimate_projects_backfill_and_write_delay(records, monkeypatch):
+    _fake_backend(monkeypatch, seconds=11.0)
+
+    est = reembed_service.estimate("big-model")
+
+    assert est["ok"] and est["model"] == "big-model" and est["dimension"] == 4
+    assert est["seconds_per_record"] == 11.0
+    assert est["records_to_embed"] == 3 and est["backfill_seconds"] == 33
+    assert est["write_delay_seconds"] == 22.0
+    assert est["level"] == "warning" and "30 s timeout" in est["message"]
+
+
+@pytest.mark.parametrize("seconds,level", [(0.1, "ok"), (2.0, "notice"), (8.0, "warning"), (31.0, "danger")])
+def test_estimate_warning_levels(records, monkeypatch, seconds, level):
+    _fake_backend(monkeypatch, seconds=seconds)
+    assert reembed_service.estimate()["level"] == level
+
+
+def test_estimate_samples_a_record_of_typical_length(records, monkeypatch):
+    sent = []
+    _fake_backend(monkeypatch, seconds=1.0, sent=sent)
+    est = reembed_service.estimate()
+    assert est["sample_chars"] in {len("deploy uses docker compose"), len("the ingest route is a POST")}
+
+
+def test_estimate_keeps_the_stored_key_on_the_saved_endpoint(records, monkeypatch):
+    save_vector_settings(url="http://embed.saved:11434", auth_type="bearer", api_key="stored-key")
+    sent = []
+    _fake_backend(monkeypatch, seconds=1.0, sent=sent)
+
+    reembed_service.estimate(url="http://embed.saved:11434")
+    reembed_service.estimate(url="http://somewhere.else:11434")
+
+    saved = [h for u, h, _ in sent if u.startswith("http://embed.saved")]
+    other = [h for u, h, _ in sent if u.startswith("http://somewhere.else")]
+    assert saved and all(h.get("Authorization") == "Bearer stored-key" for h in saved)
+    assert other and all("Authorization" not in h for h in other)
+
+
+def test_estimate_reports_an_unreachable_backend(records, monkeypatch):
+    import httpx
+
+    def refuse(*a, **k):
+        raise httpx.ConnectError("refused")
+
+    monkeypatch.setattr(httpx, "post", refuse)
+    est = reembed_service.estimate()
+    assert est["ok"] is False and "refused" in est["error"]
+
+
+def test_estimate_route(admin_client, monkeypatch):
+    seen = []
+    monkeypatch.setattr(reembed_service, "estimate",
+                        lambda model, url: seen.append((model, url)) or {"ok": True, "level": "ok"})
+    r = admin_client.post("/api/dashboard/vector-reembed/estimate",
+                          json={"model": "qwen3-embedding:4b", "url": "http://ollama:11434"})
+    assert r.status_code == 200 and seen == [("qwen3-embedding:4b", "http://ollama:11434")]
+    assert admin_client.post("/api/dashboard/vector-reembed/estimate", json={"url": "file:///etc"}).status_code == 400
+    assert admin_client.post("/api/dashboard/vector-reembed/estimate", json={"model": ""}).status_code == 400
+
+    monkeypatch.setattr(reembed_service, "estimate", lambda model, url: {"ok": False, "error": "down"})
+    r = admin_client.post("/api/dashboard/vector-reembed/estimate")
+    assert r.status_code == 502 and r.json()["error"]["code"] == "ESTIMATE_FAILED"

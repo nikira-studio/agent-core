@@ -16,6 +16,9 @@ from app.services.vector_settings_service import (
 _cached_status: Optional[dict] = None
 _cache_timestamp: float = 0.0
 _CACHE_TTL = 60.0
+# One embedding call may take this long before the write that needed it goes on
+# without a vector (text search still finds the record).
+EMBED_TIMEOUT_SECONDS = 30
 
 
 def _reset_cache() -> None:
@@ -106,7 +109,7 @@ def generate_embedding(text: str) -> tuple[Optional[bytes], str]:
             f"{ollama_url}/api/embeddings",
             json={"model": model, "prompt": text},
             headers=_auth_headers(),
-            timeout=30,
+            timeout=EMBED_TIMEOUT_SECONDS,
         )
         if resp.status_code != 200:
             return None, f"ollama_error:{resp.status_code}"

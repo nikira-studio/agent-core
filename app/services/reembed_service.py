@@ -331,6 +331,113 @@ def cancel() -> bool:
     return True
 
 
+# How long a measurement may wait: the first call can include loading the model.
+_MEASURE_TIMEOUT_SECONDS = 120
+
+
+def _sample_text() -> str:
+    """An active record of about average length, so the timing is typical."""
+    with get_db() as conn:
+        row = conn.execute(
+            """
+            SELECT content FROM memory_records
+            WHERE record_status = 'active' AND content IS NOT NULL
+            ORDER BY ABS(LENGTH(content) - (
+                SELECT AVG(LENGTH(content)) FROM memory_records WHERE record_status = 'active'
+            ))
+            LIMIT 1
+            """
+        ).fetchone()
+    if row and row["content"]:
+        return row["content"]
+    # An empty install still gets a realistic measurement.
+    return (
+        "The deploy procedure runs docker compose from the project checkout, "
+        "rebuilds the image, and restarts the service; migrations run on start. "
+    ) * 6
+
+
+def estimate(model: Optional[str] = None, url: Optional[str] = None) -> dict:
+    """Embed one typical record with `model` and project what a switch costs.
+
+    Defaults to the configured model and URL, so it can also be asked about a
+    model before it is saved. A first call warms the model (loading it can take
+    a while), and the second, on the sample record, is the one timed.
+    """
+    import httpx
+
+    from app.services.vector_settings_service import get_vector_url
+
+    model = (model or get_vector_model()).strip()
+    saved_url = get_vector_url().strip().rstrip("/")
+    url = (url or saved_url).strip().rstrip("/")
+    # The stored API key belongs to the saved endpoint; never send it to a URL
+    # typed into the form but not yet saved.
+    headers = embedding_service._auth_headers() if url == saved_url else {}
+    text = _sample_text()
+
+    def call(prompt: str) -> tuple[float, int]:
+        started = time.monotonic()
+        resp = httpx.post(
+            f"{url}/api/embeddings",
+            json={"model": model, "prompt": prompt},
+            headers=headers,
+            timeout=_MEASURE_TIMEOUT_SECONDS,
+        )
+        elapsed = time.monotonic() - started
+        if resp.status_code != 200:
+            raise RuntimeError(f"the embedding backend answered {resp.status_code}")
+        vector = resp.json().get("embedding") or []
+        if not vector:
+            raise RuntimeError("the embedding backend returned no vector")
+        return elapsed, len(vector)
+
+    try:
+        call("warm up")
+        seconds, dimension = call(text)
+    except httpx.TimeoutException:
+        return {"ok": False, "model": model,
+                "error": f"No answer within {_MEASURE_TIMEOUT_SECONDS} s for one record."}
+    except (httpx.HTTPError, RuntimeError, ValueError) as e:
+        return {"ok": False, "model": model, "error": f"Could not measure {model}: {e}"}
+
+    cov = coverage(model)
+    timeout = embedding_service.EMBED_TIMEOUT_SECONDS
+    # A memory write embeds twice: once for the duplicate check, once to store.
+    write_delay = round(seconds * 2, 2)
+    if seconds >= timeout:
+        level = "danger"
+        message = (
+            f"One record takes {seconds:.1f} s, longer than the {timeout} s embedding timeout. "
+            "New records would get no vector at all, and a re-embed would fail."
+        )
+    elif write_delay >= timeout * 0.5:
+        level = "warning"
+        message = (
+            f"Each memory write would wait about {write_delay:.0f} s for embeddings, "
+            f"close to the {timeout} s timeout; longer records may time out and get no vector."
+        )
+    elif write_delay >= 2:
+        level = "notice"
+        message = f"Each memory write would wait about {write_delay:.1f} s for embeddings."
+    else:
+        level = "ok"
+        message = "Embedding cost is small."
+    return {
+        "ok": True,
+        "model": model,
+        "dimension": dimension,
+        "sample_chars": len(text),
+        "seconds_per_record": round(seconds, 2),
+        "records_to_embed": cov["missing"],
+        "backfill_seconds": round(seconds * cov["missing"]),
+        "write_delay_seconds": write_delay,
+        "embed_timeout_seconds": timeout,
+        "level": level,
+        "message": message,
+    }
+
+
 def main(argv: Optional[list[str]] = None) -> int:
     import argparse
 

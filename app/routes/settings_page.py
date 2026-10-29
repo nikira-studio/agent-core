@@ -496,6 +496,34 @@ async def start_vector_reembed(
     return success_response({"job": state})
 
 
+@router.post("/api/dashboard/vector-reembed/estimate")
+async def estimate_vector_reembed(request: Request, session: dict = Depends(require_admin)):
+    """Time one typical record on a model and project the re-embed and write cost.
+
+    Optional JSON body {"model": ..., "url": ...} measures a model before it is
+    saved; both default to the saved settings. Nothing is stored.
+    """
+    from app.services import reembed_service
+
+    try:
+        body = await request.json()
+    except Exception:
+        body = None
+    body = body if isinstance(body, dict) else {}
+    model = body.get("model")
+    url = body.get("url")
+    if model is not None and (not isinstance(model, str) or not model.strip()):
+        return error_response("INVALID_MODEL", "model must be a non-empty string", 400)
+    if url is not None:
+        parsed = urlparse(str(url).strip())
+        if parsed.scheme not in ("http", "https") or not parsed.netloc:
+            return error_response("INVALID_URL", "url must be an http(s) URL", 400)
+    result = await asyncio.to_thread(reembed_service.estimate, model, url)
+    if not result.get("ok"):
+        return error_response("ESTIMATE_FAILED", result.get("error", "Could not measure the model"), 502)
+    return success_response(result)
+
+
 @router.post("/api/dashboard/vector-reembed/cancel")
 async def cancel_vector_reembed(session: dict = Depends(require_admin)):
     from app.services import reembed_service
@@ -901,9 +929,11 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
         <div class="form-actions">
           <button type="submit" class="btn">Save Vector Settings</button>
           <button type="button" class="btn btn-secondary" onclick="testVectorSettings()">Test Connection</button>
+          <button type="button" class="btn btn-secondary" onclick="estimateVectorCost()">Estimate Cost</button>
         </div>
       </form>
       <div id="vector-settings-result" style="margin-top:12px"></div>
+      <div id="vector-estimate-result" style="margin-top:12px"></div>
       <div style="margin-top:20px;border-top:1px solid var(--border, #ddd);padding-top:16px">
         <h4 style="margin:0 0 8px">Re-embed memory</h4>
         <p class="form-hint">Search only uses vectors made by the current model. After changing the model, re-embed so existing records are found by meaning again; until then they are matched by text only. A run can be stopped and started again, and it skips records already done. Each record keeps one vector, so re-embedding replaces the previous model's vectors: switching back later means re-embedding again.</p>
@@ -1149,14 +1179,55 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
         document.getElementById('vector-api-key').value = '';
         document.getElementById('vector-model').value = model;
         document.getElementById('vector-settings-result').innerHTML = '<div class="alert alert-success">Vector settings saved.</div>';
+        const changed = savedVectorModel !== null && model !== savedVectorModel;
         loadReembedStatus();
+        if (changed && body.vector_search_enabled === 'true') {{
+          document.getElementById('vector-settings-result').innerHTML = '<div class="alert alert-success">Vector settings saved. The model changed: existing records are matched by text only until they are re-embedded.</div>';
+          measureVectorCost(null, null);
+        }}
       }} else {{
         showToast(j.error?.message || 'Failed to save vector settings', 'danger');
       }}
     }}
     let reembedTimer = null;
+    let savedVectorModel = null;
+    function fmtDuration(s) {{
+      if (s < 90) return Math.round(s) + ' s';
+      if (s < 5400) return Math.round(s / 60) + ' min';
+      return (s / 3600).toFixed(1) + ' h';
+    }}
+    function formVectorModel() {{
+      const provider = document.getElementById('vector-provider').value;
+      const selected = document.getElementById('vector-model-select').value;
+      const typed = document.getElementById('vector-model').value;
+      return provider === 'ollama' ? (selected || typed) : typed;
+    }}
+    async function measureVectorCost(model, url) {{
+      const out = document.getElementById('vector-estimate-result');
+      out.innerHTML = '<div class="alert">Measuring ' + escapeHtml(model || 'the saved model') + ' on one typical record. A model that is not loaded yet can take a minute...</div>';
+      const body = {{}};
+      if (model) body.model = model;
+      if (url) body.url = url;
+      const j = await apiFetch('/api/dashboard/vector-reembed/estimate', {{ method: 'POST', body: JSON.stringify(body) }});
+      if (!j.ok) {{
+        out.innerHTML = '<div class="alert alert-danger">' + escapeHtml(j.error?.message || 'Could not measure the model') + '</div>';
+        return null;
+      }}
+      const d = j.data;
+      const cls = {{ danger: 'alert-danger', warning: 'alert-warning', notice: '', ok: 'alert-success' }}[d.level] || '';
+      out.innerHTML = '<div class="alert ' + cls + '"><strong>' + escapeHtml(d.model) + '</strong> (' + escapeHtml(String(d.dimension)) + ' dimensions): '
+        + escapeHtml(String(d.seconds_per_record)) + ' s per record (sample of ' + escapeHtml(String(d.sample_chars)) + ' characters). '
+        + 'Re-embedding the ' + escapeHtml(String(d.records_to_embed)) + ' records without a vector for it would take about ' + escapeHtml(fmtDuration(d.backfill_seconds)) + '. '
+        + 'Each memory write would wait about ' + escapeHtml(String(d.write_delay_seconds)) + ' s for embeddings (it embeds twice; the limit per call is ' + escapeHtml(String(d.embed_timeout_seconds)) + ' s). '
+        + escapeHtml(d.message) + '</div>';
+      return d;
+    }}
+    async function estimateVectorCost() {{
+      await measureVectorCost(formVectorModel(), document.getElementById('vector-url').value.trim());
+    }}
     function renderReembed(data) {{
       const c = data.coverage || {{}};
+      if (c.model) savedVectorModel = c.model;
       const job = data.job;
       const cov = document.getElementById('vector-reembed-coverage');
       if (!cov) return;
@@ -1184,7 +1255,10 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
       if (j.ok) renderReembed(j.data);
     }}
     async function startReembed() {{
-      if (!confirm('Re-embed every record without a vector for the current model? This calls the embedding backend once per record and runs in the background. Each record keeps one vector, so vectors from the previous model are replaced.')) return;
+      const est = await measureVectorCost(null, null);
+      if (!est) return;
+      const warn = (est.level === 'danger' || est.level === 'warning') ? '\\n\\nWarning: ' + est.message : '';
+      if (!confirm('Re-embed ' + est.records_to_embed + ' records with ' + est.model + '? At ' + est.seconds_per_record + ' s per record this takes about ' + fmtDuration(est.backfill_seconds) + ' and runs in the background. Each record keeps one vector, so vectors from the previous model are replaced.' + warn)) return;
       const j = await apiFetch('/api/dashboard/vector-reembed', {{ method: 'POST' }});
       if (!j.ok) showToast(j.error?.message || 'Could not start the re-embed', 'danger');
       loadReembedStatus();
@@ -1253,6 +1327,7 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
     window.saveVectorSettings = saveVectorSettings;
     window.testVectorSettings = testVectorSettings;
     window.startReembed = startReembed;
+    window.estimateVectorCost = estimateVectorCost;
     window.cancelReembed = cancelReembed;
     window.onProviderChange = onProviderChange;
     window.loadOllamaModels = loadOllamaModels;
