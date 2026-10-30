@@ -402,7 +402,7 @@ def estimate(
                 "error": f"No answer within {_MEASURE_TIMEOUT_SECONDS} s for one record."}
     except embedding_service.EmbeddingRequestError as e:
         return {"ok": False, "model": model,
-                "error": f"Could not measure {model}: the backend answered {e.code}"}
+                "error": f"Could not measure {model}: {embedding_service.describe_error(e.code, provider, url)}"}
     except (httpx.HTTPError, ValueError) as e:
         return {"ok": False, "model": model, "error": f"Could not measure {model}: {e}"}
 

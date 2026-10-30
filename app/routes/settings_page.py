@@ -591,9 +591,13 @@ async def list_vector_models(request: Request, session: dict = Depends(require_a
     try:
         models = await asyncio.to_thread(embedding_service.list_models, provider, url, headers)
     except embedding_service.EmbeddingRequestError as e:
-        return error_response("MODEL_LIST_FAILED", f"The endpoint answered {e.code} while listing models", 502)
-    except Exception:
-        return error_response("MODEL_LIST_FAILED", "Could not fetch models from the endpoint", 502)
+        return error_response("MODEL_LIST_FAILED", embedding_service.describe_error(e.code, provider, url), 502)
+    except Exception as e:
+        return error_response(
+            "MODEL_LIST_FAILED",
+            embedding_service.describe_error(f"exception:{type(e).__name__}", provider, url),
+            502,
+        )
     return success_response({"models": models, "provider": provider})
 
 
@@ -1367,7 +1371,7 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
       if (!j.ok || models.length === 0) {{
         select.style.display = 'none';
         hint.textContent = j.ok ? 'The endpoint reported no models. Type the model name instead.'
-          : (j.error?.message || 'Could not load models') + '. You can still type the model name.';
+          : (j.error?.message || 'Could not load models.') + ' You can still type the model name.';
         return;
       }}
       const current = formVectorModel();

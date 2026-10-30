@@ -127,7 +127,7 @@ def test_model_list_route_reports_failures(admin_client, openai_backend):
                              json={"url": "https://embed.example/v1", "provider": "cohere"}).status_code == 400
     state["status"] = 401
     r = admin_client.post("/api/dashboard/vector-models", json={"url": "https://embed.example/v1"})
-    assert r.status_code == 502 and "openai_error:401" in r.json()["error"]["message"]
+    assert r.status_code == 502 and "needs an API key" in r.json()["error"]["message"]
 
 
 def test_model_list_route_for_ollama(admin_client, monkeypatch):
@@ -148,3 +148,77 @@ def test_settings_page_offers_ollama_and_openai_only(admin_client):
     select = html.split('id="vector-provider"')[1].split("</select>")[0]
     assert ">OpenAI-compatible<" in select and ">Ollama<" in select and "generic" not in select.lower()
     assert "window.loadVectorModels = loadVectorModels" in html
+
+
+class _HtmlResp:
+    status_code = 200
+
+    def json(self):
+        raise ValueError("not json")
+
+
+def _gateway(monkeypatch):
+    """A gateway like New API: a web page at the root, a token-checked API under /v1."""
+    def fake_get(url, headers=None, timeout=None):
+        if "/v1/" in url:
+            if (headers or {}).get("Authorization") == "Bearer good":
+                return _Resp(200, {"data": [{"id": "nomic-embed-text"}]})
+            return _Resp(401, {"error": {"message": "Invalid token"}})
+        return _HtmlResp()
+
+    monkeypatch.setattr(httpx, "get", fake_get)
+
+
+def test_connection_test_says_the_url_needs_v1(clean_db, monkeypatch):
+    from app.services.vector_settings_service import test_vector_connection
+
+    _gateway(monkeypatch)
+    save_vector_settings(enabled=True, provider="openai", url="http://gateway.test:4000", model="nomic-embed-text")
+
+    result = test_vector_connection()
+
+    assert result["success"] is False
+    assert "not with the embedding API" in result["error"]
+    assert "http://gateway.test:4000/v1" in result["error"]
+
+
+def test_connection_test_says_a_key_is_needed(clean_db, monkeypatch):
+    from app.services.vector_settings_service import test_vector_connection
+
+    _gateway(monkeypatch)
+    save_vector_settings(enabled=True, provider="openai", url="http://gateway.test:4000/v1",
+                         model="nomic-embed-text", auth_type="none")
+
+    result = test_vector_connection()
+
+    assert result["success"] is False and "needs an API key" in result["error"]
+    assert "Invalid token" not in result["error"]  # upstream text is not echoed
+
+
+def test_connection_test_passes_with_v1_and_a_key(clean_db, monkeypatch):
+    from app.services.vector_settings_service import test_vector_connection
+
+    _gateway(monkeypatch)
+    save_vector_settings(enabled=True, provider="openai", url="http://gateway.test:4000/v1",
+                         model="nomic-embed-text", auth_type="bearer", api_key="good")
+    assert test_vector_connection()["success"] is True
+
+
+def test_unreachable_backend_says_so(clean_db, monkeypatch):
+    from app.services.vector_settings_service import test_vector_connection
+
+    def refuse(*a, **k):
+        raise httpx.ConnectError("refused")
+
+    monkeypatch.setattr(httpx, "get", refuse)
+    save_vector_settings(enabled=True, provider="ollama", url="http://nowhere.test:11434", model="m")
+    assert test_vector_connection()["error"] == (
+        "Cannot reach the embedding backend at http://nowhere.test:11434 (ConnectError).")
+
+
+def test_model_list_route_explains_a_missing_v1(admin_client, monkeypatch):
+    _gateway(monkeypatch)
+    r = admin_client.post("/api/dashboard/vector-models",
+                          json={"provider": "openai", "url": "http://gateway.test:4000"})
+    assert r.status_code == 502
+    assert "usually end in /v1" in r.json()["error"]["message"]

@@ -66,6 +66,47 @@ class EmbeddingRequestError(Exception):
         self.code = code
 
 
+def _check(resp, provider: str) -> dict:
+    """The JSON body of a successful API answer, or EmbeddingRequestError."""
+    prefix = "openai_error" if provider == "openai" else "ollama_error"
+    if resp.status_code in (401, 403):
+        raise EmbeddingRequestError(f"unauthorized:{resp.status_code}")
+    if resp.status_code != 200:
+        raise EmbeddingRequestError(f"{prefix}:{resp.status_code}")
+    try:
+        body = resp.json()
+    except ValueError:
+        # A web page or proxy answered instead of the API: usually a base URL
+        # missing its API path, such as /v1.
+        raise EmbeddingRequestError("not_an_api") from None
+    if not isinstance(body, dict):
+        raise EmbeddingRequestError("not_an_api")
+    return body
+
+
+def describe_error(code: str, provider: str, url: str) -> str:
+    """A sentence an admin can act on, for a failure code from this module."""
+    url = (url or "").rstrip("/")
+    needs_v1 = provider == "openai" and not url.endswith("/v1")
+    v1_hint = f" OpenAI-compatible base URLs usually end in /v1, for example {url}/v1." if needs_v1 else ""
+    if code.startswith("unauthorized"):
+        return (
+            f"{url} refused the request ({code.split(':')[-1]}). It needs an API key: "
+            "set Auth Type (usually Bearer) and enter the key, or check that the key is valid."
+        )
+    if code == "not_an_api":
+        return f"{url} answered, but not with the embedding API.{v1_hint}"
+    if code.endswith(":404"):
+        if provider == "openai":
+            return f"{url} has no OpenAI-compatible API at that path (404).{v1_hint}"
+        return f"{url} has no Ollama API (404). If it is an OpenAI-compatible service, choose that provider."
+    if code.startswith(("openai_error", "ollama_error")):
+        return f"{url} answered with an error ({code.split(':')[-1]})."
+    if code.startswith("exception:"):
+        return f"Cannot reach the embedding backend at {url} ({code.split(':', 1)[1]})."
+    return f"The embedding backend at {url} failed: {code}."
+
+
 def request_embedding(
     provider: str,
     url: str,
@@ -83,9 +124,7 @@ def request_embedding(
             headers=headers or {},
             timeout=timeout,
         )
-        if resp.status_code != 200:
-            raise EmbeddingRequestError(f"openai_error:{resp.status_code}")
-        items = (resp.json() or {}).get("data") or []
+        items = _check(resp, provider).get("data") or []
         embedding = items[0].get("embedding") if items and isinstance(items[0], dict) else None
     else:
         resp = httpx.post(
@@ -94,9 +133,7 @@ def request_embedding(
             headers=headers or {},
             timeout=timeout,
         )
-        if resp.status_code != 200:
-            raise EmbeddingRequestError(f"ollama_error:{resp.status_code}")
-        embedding = (resp.json() or {}).get("embedding")
+        embedding = _check(resp, provider).get("embedding")
     if not embedding:
         raise EmbeddingRequestError("no_embedding_in_response")
     return embedding
@@ -111,15 +148,11 @@ def list_models(provider: str, url: str, headers: Optional[dict] = None, timeout
     url = url.rstrip("/")
     if provider == "openai":
         resp = httpx.get(f"{url}/models", headers=headers or {}, timeout=timeout)
-        if resp.status_code != 200:
-            raise EmbeddingRequestError(f"openai_error:{resp.status_code}")
-        items = (resp.json() or {}).get("data") or []
+        items = _check(resp, provider).get("data") or []
         names = [m.get("id") for m in items if isinstance(m, dict)]
     else:
         resp = httpx.get(f"{url}/api/tags", headers=headers or {}, timeout=timeout)
-        if resp.status_code != 200:
-            raise EmbeddingRequestError(f"ollama_error:{resp.status_code}")
-        items = (resp.json() or {}).get("models") or []
+        items = _check(resp, provider).get("models") or []
         names = [m.get("name") for m in items if isinstance(m, dict)]
     return [n for n in names if isinstance(n, str) and n]
 
@@ -170,11 +203,14 @@ def get_embedding_backend_status() -> dict:
     url = get_vector_url()
     model = get_vector_model()
     headers = _auth_headers()
+    error = None
     try:
         list_models(provider, url, headers)
         backend = "healthy"
-    except Exception:
-        pass
+    except EmbeddingRequestError as e:
+        error = e.code
+    except Exception as e:
+        error = f"exception:{type(e).__name__}"
 
     if backend == "healthy":
         try:
@@ -189,6 +225,7 @@ def get_embedding_backend_status() -> dict:
         "provider": provider,
         "vector_url": url,
         "vector_search_enabled": vector_enabled,
+        "error": error,
     }
     _cache_timestamp = now
     return _cached_status

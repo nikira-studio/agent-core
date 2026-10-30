@@ -160,7 +160,11 @@ def test_vector_connection() -> dict:
     if status.get("backend") == "unavailable":
         return {
             "success": False,
-            "error": f"Cannot reach embedding backend at {status.get('vector_url', 'unknown')}",
+            "error": embedding_service.describe_error(
+                status.get("error") or "exception:unreachable",
+                status.get("provider", "ollama"),
+                status.get("vector_url", ""),
+            ),
         }
     if not status.get("model_configured"):
         return {
