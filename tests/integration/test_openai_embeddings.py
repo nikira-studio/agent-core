@@ -166,7 +166,13 @@ def _gateway(monkeypatch):
             return _Resp(401, {"error": {"message": "Invalid token"}})
         return _HtmlResp()
 
+    def fake_post(url, json=None, headers=None, timeout=None):
+        if url.endswith("/v1/embeddings") and (headers or {}).get("Authorization") == "Bearer good":
+            return _Resp(200, {"data": [{"embedding": [0.1, 0.2]}]})
+        return _Resp(401, {"error": {"message": "Invalid token"}})
+
     monkeypatch.setattr(httpx, "get", fake_get)
+    monkeypatch.setattr(httpx, "post", fake_post)
 
 
 def test_connection_test_says_the_url_needs_v1(clean_db, monkeypatch):
@@ -222,3 +228,27 @@ def test_model_list_route_explains_a_missing_v1(admin_client, monkeypatch):
                           json={"provider": "openai", "url": "http://gateway.test:4000"})
     assert r.status_code == 502
     assert "usually end in /v1" in r.json()["error"]["message"]
+
+
+def test_connection_test_embeds_for_real_and_reports_overload(clean_db, monkeypatch):
+    """A gateway can list the model and still refuse to embed."""
+    from app.services.vector_settings_service import test_vector_connection
+
+    def fake_get(url, headers=None, timeout=None):
+        return _Resp(200, {"data": [{"id": "nomic-embed-text"}]})
+
+    sent = []
+
+    def fake_post(url, json=None, headers=None, timeout=None):
+        sent.append(json)
+        return _Resp(503, {"error": {"message": "system cpu overloaded"}})
+
+    monkeypatch.setattr(httpx, "get", fake_get)
+    monkeypatch.setattr(httpx, "post", fake_post)
+    save_vector_settings(enabled=True, provider="openai", url="http://gateway.test/v1", model="nomic-embed-text")
+
+    result = test_vector_connection()
+
+    assert result["success"] is False
+    assert "embedding failed" in result["error"] and "overloaded" in result["error"]
+    assert sent == [{"model": "nomic-embed-text", "input": "connection test"}]

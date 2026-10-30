@@ -94,6 +94,11 @@ def describe_error(code: str, provider: str, url: str) -> str:
             f"{url} refused the request ({code.split(':')[-1]}). It needs an API key: "
             "set Auth Type (usually Bearer) and enter the key, or check that the key is valid."
         )
+    if code.endswith((":503", ":429")):
+        return (
+            f"{url} is overloaded or rate-limiting requests ({code.split(':')[-1]}). "
+            "Embeddings fail until it recovers; text search still works meanwhile."
+        )
     if code == "not_an_api":
         return f"{url} answered, but not with the embedding API.{v1_hint}"
     if code.endswith(":404"):

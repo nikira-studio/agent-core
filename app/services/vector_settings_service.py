@@ -171,6 +171,32 @@ def test_vector_connection() -> dict:
             "success": False,
             "error": f"Model '{status.get('model', 'unknown')}' not found on backend",
         }
+    # Listing the model is not enough: a gateway can list a model and still
+    # refuse to embed (overloaded, no channel for it, a key without access).
+    # One real embedding of a fixed word settles it; no memory content is sent.
+    try:
+        embedding_service.request_embedding(
+            status.get("provider", "ollama"),
+            status.get("vector_url", ""),
+            status.get("model", ""),
+            "connection test",
+            embedding_service._auth_headers(),
+            timeout=embedding_service.EMBED_TIMEOUT_SECONDS,
+        )
+    except embedding_service.EmbeddingRequestError as e:
+        return {
+            "success": False,
+            "error": "The model is listed, but embedding failed: "
+            + embedding_service.describe_error(e.code, status.get("provider", "ollama"), status.get("vector_url", "")),
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "error": "The model is listed, but embedding failed: "
+            + embedding_service.describe_error(
+                f"exception:{type(e).__name__}", status.get("provider", "ollama"), status.get("vector_url", "")
+            ),
+        }
     return {
         "success": True,
         "backend": status.get("backend"),
