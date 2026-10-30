@@ -19,6 +19,7 @@ Notable changes to Agent Core are documented here. The format follows [Keep a Ch
 
 ### Security
 
+- `POST /api/dashboard/vector-settings` no longer returns the stored embedding API key in its response; it reports `vector_has_api_key` instead, as the settings page already did.
 - The Generic HTTP connector only sends the binding's credential to the configured `base_url` host; a caller-supplied `url` on another host is refused. Adapter path parameters are percent-encoded as single segments, and only a manifest path that is literally absolute can replace `base_url`.
 - Upstream response bodies are read with a 10 MB cap, so a runaway upstream cannot exhaust the process; a body over the cap is reported as `RESPONSE_TOO_LARGE` rather than parsed cut off.
 - TOTP codes are single-use: a code that already signed in is refused for the rest of its window. Migration 15 adds `otp_secrets.last_used_step`.

@@ -171,7 +171,14 @@ def test_vector_settings_api_saves_openai_auth_settings(admin_client):
     assert data["vector_dimension"] == "768"
     assert data["vector_auth_type"] == "bearer"
     assert data["vector_has_api_key"] is True
-    assert data["vector_api_key"] == "test-key"
+    # The key is stored, but never returned.
+    assert "vector_api_key" not in data
+    assert "test-key" not in r.text
+    from app.services.vector_settings_service import get_vector_setting
+
+    assert get_vector_setting("vector_api_key") == "test-key"
+    page = admin_client.get("/settings").text
+    assert "test-key" not in page
 
 
 def test_model_listing_rejects_invalid_url(admin_client):

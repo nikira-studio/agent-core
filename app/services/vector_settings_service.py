@@ -40,11 +40,12 @@ VECTOR_DEFAULTS = {
 
 
 def get_vector_settings() -> dict:
+    """Settings for display and API responses. Never includes the API key itself,
+    only whether one is stored; code that calls the backend reads the key with
+    get_vector_setting("vector_api_key")."""
     result = system_settings_service.read_raw(VECTOR_DEFAULTS)
     result["vector_provider"] = normalize_provider(result.get("vector_provider"))
-    api_key_plaintext = _get_stored_api_key_plaintext()
-    result["vector_api_key"] = api_key_plaintext if api_key_plaintext else ""
-    result["vector_has_api_key"] = bool(api_key_plaintext)
+    result["vector_has_api_key"] = bool(_get_stored_api_key_plaintext())
     return result
 
 
