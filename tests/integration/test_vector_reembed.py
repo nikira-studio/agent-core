@@ -376,13 +376,13 @@ def test_estimate_reports_an_unreachable_backend(records, monkeypatch):
 def test_estimate_route(admin_client, monkeypatch):
     seen = []
     monkeypatch.setattr(reembed_service, "estimate",
-                        lambda model, url: seen.append((model, url)) or {"ok": True, "level": "ok"})
+                        lambda model, url, *rest: seen.append((model, url)) or {"ok": True, "level": "ok"})
     r = admin_client.post("/api/dashboard/vector-reembed/estimate",
                           json={"model": "qwen3-embedding:4b", "url": "http://ollama:11434"})
     assert r.status_code == 200 and seen == [("qwen3-embedding:4b", "http://ollama:11434")]
     assert admin_client.post("/api/dashboard/vector-reembed/estimate", json={"url": "file:///etc"}).status_code == 400
     assert admin_client.post("/api/dashboard/vector-reembed/estimate", json={"model": ""}).status_code == 400
 
-    monkeypatch.setattr(reembed_service, "estimate", lambda model, url: {"ok": False, "error": "down"})
+    monkeypatch.setattr(reembed_service, "estimate", lambda *a: {"ok": False, "error": "down"})
     r = admin_client.post("/api/dashboard/vector-reembed/estimate")
     assert r.status_code == 502 and r.json()["error"]["code"] == "ESTIMATE_FAILED"

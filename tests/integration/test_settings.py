@@ -114,7 +114,8 @@ def test_admin_settings_exposes_vector_controls(admin_client):
     html = r.text
     assert 'id="vector-provider"' in html
     assert '<option value="ollama" selected>Ollama</option>' in html
-    assert '<option value="generic" ' in html
+    assert '<option value="openai" ' in html
+    assert "generic" not in html.lower().split('id="vector-provider"')[1].split("</select>")[0]
     assert 'id="vector-model-select"' in html
     assert 'window.saveVectorSettings = saveVectorSettings' in html
     assert 'window.testVectorSettings = testVectorSettings' in html
@@ -124,12 +125,36 @@ def test_admin_settings_exposes_vector_controls(admin_client):
     assert "vector_provider: provider" in html
 
 
-def test_vector_settings_api_saves_generic_auth_settings(admin_client):
+def test_vector_settings_api_reads_generic_as_ollama(admin_client):
+    """"generic" only ever changed the form; its calls went to Ollama's API."""
+    r = admin_client.post(
+        "/api/dashboard/vector-settings",
+        json={"vector_provider": "generic", "vector_model": "nomic-embed-text",
+              "vector_url": "http://localhost:11434"},
+    )
+    assert r.status_code == 200
+    assert r.json()["data"]["settings"]["vector_provider"] == "ollama"
+
+    from app.services import system_settings_service
+    from app.services.vector_settings_service import get_vector_provider, get_vector_settings
+
+    system_settings_service.write_raw({"vector_provider": "generic"})  # saved by an older version
+    assert get_vector_provider() == "ollama"
+    assert get_vector_settings()["vector_provider"] == "ollama"
+
+    r = admin_client.post(
+        "/api/dashboard/vector-settings",
+        json={"vector_provider": "cohere", "vector_model": "m", "vector_url": "http://x"},
+    )
+    assert r.status_code == 400 and r.json()["error"]["code"] == "INVALID_PROVIDER"
+
+
+def test_vector_settings_api_saves_openai_auth_settings(admin_client):
     r = admin_client.post(
         "/api/dashboard/vector-settings",
         json={
             "vector_search_enabled": "true",
-            "vector_provider": "generic",
+            "vector_provider": "openai",
             "vector_model": "nomic-embed-text",
             "vector_url": "http://localhost:11434",
             "vector_dimension": "768",
@@ -140,7 +165,7 @@ def test_vector_settings_api_saves_generic_auth_settings(admin_client):
     assert r.status_code == 200
     data = r.json()["data"]["settings"]
     assert data["vector_search_enabled"] == "true"
-    assert data["vector_provider"] == "generic"
+    assert data["vector_provider"] == "openai"
     assert data["vector_model"] == "nomic-embed-text"
     assert data["vector_url"] == "http://localhost:11434"
     assert data["vector_dimension"] == "768"

@@ -14,6 +14,21 @@ VECTOR_KEYS = (
     "vector_auth_type",
 )
 
+# "ollama": Ollama's own API (/api/tags, /api/show, /api/embeddings).
+# "openai": the OpenAI embeddings API (/models, /embeddings under a base URL
+# that usually ends in /v1), which hosted providers and most gateways serve.
+VECTOR_PROVIDERS = ("ollama", "openai")
+# "generic" was offered before "openai" existed. It only changed the form; every
+# call still went to Ollama's endpoints, so an install that saved it is an
+# Ollama install, and is read as one.
+_PROVIDER_ALIASES = {"generic": "ollama"}
+
+
+def normalize_provider(value: Optional[str]) -> str:
+    value = (value or "ollama").strip().lower()
+    return _PROVIDER_ALIASES.get(value, value)
+
+
 VECTOR_DEFAULTS = {
     "vector_search_enabled": "false",
     "vector_provider": "ollama",
@@ -26,6 +41,7 @@ VECTOR_DEFAULTS = {
 
 def get_vector_settings() -> dict:
     result = system_settings_service.read_raw(VECTOR_DEFAULTS)
+    result["vector_provider"] = normalize_provider(result.get("vector_provider"))
     api_key_plaintext = _get_stored_api_key_plaintext()
     result["vector_api_key"] = api_key_plaintext if api_key_plaintext else ""
     result["vector_has_api_key"] = bool(api_key_plaintext)
@@ -42,6 +58,10 @@ def get_vector_setting(key: str) -> str:
 
 def is_vector_search_enabled() -> bool:
     return get_vector_setting("vector_search_enabled").lower() == "true"
+
+
+def get_vector_provider() -> str:
+    return normalize_provider(get_vector_setting("vector_provider"))
 
 
 def get_vector_url() -> str:
@@ -102,8 +122,9 @@ def save_vector_settings(
     if enabled is not None:
         save_vector_setting("vector_search_enabled", "true" if enabled else "false")
     if provider is not None:
-        if provider not in ("ollama", "generic"):
-            raise ValueError("provider must be ollama or generic")
+        provider = normalize_provider(provider)
+        if provider not in VECTOR_PROVIDERS:
+            raise ValueError("provider must be ollama or openai")
         save_vector_setting("vector_provider", provider)
     if url is not None:
         save_vector_setting("vector_url", url.strip().rstrip("/"))

@@ -804,6 +804,7 @@ Session authentication required. Global overview and audit routes require admin.
 | `POST` | `/api/dashboard/vector-settings/test` | Test the vector search endpoint (admin only) |
 | `GET` | `/api/dashboard/vector-reembed` | Re-embed progress and how many records have a vector for the current model (admin only) |
 | `POST` | `/api/dashboard/vector-reembed` | Start embedding every record without a vector for the current model, replacing its vector from any earlier model; optional body `{"pause_ms": N}` (0-30000) pauses after each record; `409` if a run is already going (admin only) |
+| `POST` | `/api/dashboard/vector-models` | List the models an embedding endpoint reports; body `{"provider": "ollama"|"openai", "url", "auth_type"?, "api_key"?}`; the saved key is used only for the saved URL (admin only) |
 | `POST` | `/api/dashboard/vector-reembed/estimate` | Time a synthetic sample as long as an average record (no memory content is sent) on a model and return seconds per record, estimated re-embed time, the wait each memory write would add, and a warning level; optional body `{"model", "url"}` measures a model before it is saved (admin only) |
 | `POST` | `/api/dashboard/vector-reembed/cancel` | Stop the running re-embed after its current batch (admin only) |
 | `GET` | `/api/dashboard/ollama-models?url=` | List the models an Ollama-compatible endpoint has installed; used by the embedding settings card (admin only) |

@@ -362,9 +362,12 @@ async def update_dashboard_vector_settings(
             "INVALID_ENABLED", "vector_search_enabled must be true or false", 400
         )
 
-    if provider not in ("ollama", "generic"):
+    from app.services.vector_settings_service import VECTOR_PROVIDERS, normalize_provider
+
+    provider = normalize_provider(provider)
+    if provider not in VECTOR_PROVIDERS:
         return error_response(
-            "INVALID_PROVIDER", "vector_provider must be ollama or generic", 400
+            "INVALID_PROVIDER", "vector_provider must be ollama or openai", 400
         )
 
     if auth_type not in ("none", "bearer", "api_key"):
@@ -518,7 +521,12 @@ async def estimate_vector_reembed(request: Request, session: dict = Depends(requ
         parsed = urlparse(str(url).strip())
         if parsed.scheme not in ("http", "https") or not parsed.netloc:
             return error_response("INVALID_URL", "url must be an http(s) URL", 400)
-    result = await asyncio.to_thread(reembed_service.estimate, model, url)
+    provider, auth_type, api_key, err = _form_endpoint_auth(body)
+    if err:
+        return err
+    result = await asyncio.to_thread(
+        reembed_service.estimate, model, url, provider, auth_type, api_key
+    )
     if not result.get("ok"):
         return error_response("ESTIMATE_FAILED", result.get("error", "Could not measure the model"), 502)
     return success_response(result)
@@ -531,6 +539,62 @@ async def cancel_vector_reembed(session: dict = Depends(require_admin)):
     if not await asyncio.to_thread(reembed_service.cancel):
         return error_response("REEMBED_NOT_RUNNING", "No re-embed run is in progress.", 409)
     return success_response({"cancelling": True})
+
+
+def _form_endpoint_auth(body: dict):
+    """Provider and a typed key from a settings-form request: (provider, auth_type, api_key, error)."""
+    from app.services.vector_settings_service import VECTOR_PROVIDERS, normalize_provider
+
+    provider = body.get("provider")
+    if provider is not None:
+        provider = normalize_provider(str(provider))
+        if provider not in VECTOR_PROVIDERS:
+            return None, None, None, error_response(
+                "INVALID_PROVIDER", "provider must be ollama or openai", 400
+            )
+    auth_type = body.get("auth_type")
+    if auth_type is not None and auth_type not in ("none", "bearer", "api_key"):
+        return None, None, None, error_response(
+            "INVALID_AUTH_TYPE", "auth_type must be none, bearer, or api_key", 400
+        )
+    api_key = body.get("api_key") or None
+    if api_key is not None and not isinstance(api_key, str):
+        return None, None, None, error_response("INVALID_API_KEY", "api_key must be a string", 400)
+    return provider, auth_type, api_key, None
+
+
+@router.post("/api/dashboard/vector-models")
+async def list_vector_models(request: Request, session: dict = Depends(require_admin)):
+    """List what an embedding endpoint reports, for the settings form.
+
+    Body: {"provider": "ollama"|"openai", "url": ..., "auth_type"?, "api_key"?}.
+    A key typed into the form is sent to that URL; otherwise the saved key is
+    used only when the URL is the saved one.
+    """
+    from app.services import embedding_service
+    from app.services.vector_settings_service import get_vector_provider
+
+    try:
+        body = await request.json()
+    except Exception:
+        body = None
+    body = body if isinstance(body, dict) else {}
+    url = str(body.get("url") or "").strip()
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https") or not parsed.netloc:
+        return error_response("INVALID_URL", "url must be an http(s) URL", 400)
+    provider, auth_type, api_key, err = _form_endpoint_auth(body)
+    if err:
+        return err
+    provider = provider or get_vector_provider()
+    headers = embedding_service.headers_for_endpoint(url, auth_type, api_key)
+    try:
+        models = await asyncio.to_thread(embedding_service.list_models, provider, url, headers)
+    except embedding_service.EmbeddingRequestError as e:
+        return error_response("MODEL_LIST_FAILED", f"The endpoint answered {e.code} while listing models", 502)
+    except Exception:
+        return error_response("MODEL_LIST_FAILED", "Could not fetch models from the endpoint", 502)
+    return success_response({"models": models, "provider": provider})
 
 
 @router.get("/api/dashboard/ollama-models")
@@ -875,7 +939,7 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
         vector_settings_html = f"""
     <div class="card">
       <h3>Vector Search</h3>
-      <p class="text-muted" style="margin-bottom:12px">Enable semantic search using an Ollama-compatible embedding endpoint. Save the settings to turn it on immediately when the backend is healthy. Disable to use FTS5 text search only.</p>
+      <p class="text-muted" style="margin-bottom:12px">Enable semantic search using an embedding endpoint: Ollama, or any service with an OpenAI-compatible embeddings API. Save the settings to turn it on immediately when the backend is healthy. Disable to use FTS5 text search only.</p>
       <form id="vector-settings-form" onsubmit="saveVectorSettings(event)">
         <label class="checkbox-label" style="margin-bottom:16px">
           <input type="checkbox" id="vector-search-enabled" {vector_checked}>
@@ -885,28 +949,22 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
           <label>Provider</label>
           <select id="vector-provider" style="width:200px" onchange="onProviderChange(this.value)">
             <option value="ollama" {"selected" if vector_provider == "ollama" else ""}>Ollama</option>
-            <option value="generic" {"selected" if vector_provider == "generic" else ""}>Generic</option>
+            <option value="openai" {"selected" if vector_provider == "openai" else ""}>OpenAI-compatible</option>
           </select>
         </div>
-        <div class="form-group" id="vector-model-text-group">
+        <div class="form-group">
           <label>Model</label>
           <input type="text" id="vector-model" value="{escape_html(vector_model)}" style="width:240px">
-          <p class="form-hint" id="vector-model-hint-text">For Ollama, use <code>nomic-embed-text</code> or another installed embedding model.</p>
-        </div>
-        <div class="form-group" id="vector-model-select-group" style="display:none">
-          <label>Model</label>
-          <select id="vector-model-select" style="width:240px">
-            <option value="">Loading models...</option>
-          </select>
+          <button type="button" class="btn btn-secondary btn-sm" onclick="loadVectorModels()">Load Models</button>
           <div style="margin-top:8px">
-            <button type="button" class="btn btn-secondary btn-sm" onclick="loadOllamaModels()">Load Models</button>
+            <select id="vector-model-select" style="width:240px;display:none" onchange="if (this.value) document.getElementById('vector-model').value = this.value"></select>
           </div>
-          <p class="form-hint" id="vector-model-hint-select"></p>
+          <p class="form-hint" id="vector-model-hint">Type a model name, or click Load Models to pick one the endpoint reports.</p>
         </div>
         <div class="form-group">
           <label>URL</label>
           <input type="text" id="vector-url" value="{escape_html(vector_url)}" style="width:300px">
-          <p class="form-hint">Base URL for an Ollama-compatible API, for example <code>http://localhost:11434</code>.</p>
+          <p class="form-hint" id="vector-url-hint">Base URL of the Ollama server, for example <code>http://localhost:11434</code>.</p>
         </div>
         <div class="form-group">
           <label>Embedding Dimension</label>
@@ -1158,9 +1216,7 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
     async function saveVectorSettings(e) {{
       e.preventDefault();
       const provider = document.getElementById('vector-provider').value;
-      const selectedModel = document.getElementById('vector-model-select').value;
-      const textModel = document.getElementById('vector-model').value;
-      const model = provider === 'ollama' ? (selectedModel || textModel) : textModel;
+      const model = formVectorModel();
       const body = {{
         vector_search_enabled: document.getElementById('vector-search-enabled').checked ? 'true' : 'false',
         vector_provider: provider,
@@ -1197,15 +1253,22 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
       return (s / 3600).toFixed(1) + ' h';
     }}
     function formVectorModel() {{
-      const provider = document.getElementById('vector-provider').value;
-      const selected = document.getElementById('vector-model-select').value;
-      const typed = document.getElementById('vector-model').value;
-      return provider === 'ollama' ? (selected || typed) : typed;
+      return document.getElementById('vector-model').value.trim();
+    }}
+    function formVectorAuth() {{
+      // Only a key typed into the form is sent from here; the server pairs the
+      // saved key with the saved URL itself and never sends it anywhere else.
+      const auth = {{ provider: document.getElementById('vector-provider').value,
+                      url: document.getElementById('vector-url').value.trim(),
+                      auth_type: document.getElementById('vector-auth-type').value }};
+      const key = document.getElementById('vector-api-key').value;
+      if (key) auth.api_key = key;
+      return auth;
     }}
     async function measureVectorCost(model, url) {{
       const out = document.getElementById('vector-estimate-result');
       out.innerHTML = '<div class="alert">Measuring ' + escapeHtml(model || 'the saved model') + ' on a sample as long as an average record (no memory content is sent). A model that is not loaded yet can take a minute...</div>';
-      const body = {{}};
+      const body = url ? formVectorAuth() : {{}};
       if (model) body.model = model;
       if (url) body.url = url;
       const j = await apiFetch('/api/dashboard/vector-reembed/estimate', {{ method: 'POST', body: JSON.stringify(body) }});
@@ -1279,49 +1342,44 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
         result.innerHTML = '<div class="alert alert-danger">' + escapeHtml(j.error?.message || 'Vector connection failed') + '</div>';
       }}
     }}
-    async function onProviderChange(provider) {{
-      const textGroup = document.getElementById('vector-model-text-group');
-      const selectGroup = document.getElementById('vector-model-select-group');
-      if (provider === 'ollama') {{
-        textGroup.style.display = 'none';
-        selectGroup.style.display = 'block';
-        document.getElementById('vector-model-hint-select').textContent = 'Click Load Models after confirming the URL.';
+    function onProviderChange(provider) {{
+      const hint = document.getElementById('vector-url-hint');
+      if (provider === 'openai') {{
+        hint.innerHTML = 'Base URL of the OpenAI-compatible API, usually ending in <code>/v1</code>, for example <code>https://api.openai.com/v1</code>. Most hosted services need an API key with Bearer auth.';
       }} else {{
-        textGroup.style.display = 'block';
-        selectGroup.style.display = 'none';
+        hint.innerHTML = 'Base URL of the Ollama server, for example <code>http://localhost:11434</code>.';
       }}
+      const select = document.getElementById('vector-model-select');
+      select.style.display = 'none';
+      select.innerHTML = '';
     }}
-    async function loadOllamaModels() {{
-      const url = document.getElementById('vector-url').value.trim();
-      if (!url) {{
-        document.getElementById('vector-model-select').innerHTML = '<option value="">Enter URL first</option>';
+    async function loadVectorModels() {{
+      const select = document.getElementById('vector-model-select');
+      const hint = document.getElementById('vector-model-hint');
+      const auth = formVectorAuth();
+      if (!auth.url) {{
+        hint.textContent = 'Enter the URL first.';
         return;
       }}
-      try {{
-        const fullUrl = '/api/dashboard/ollama-models?url=' + encodeURIComponent(url);
-        const resp = await fetch(fullUrl, {{ method: 'GET', credentials: 'same-origin' }});
-        if (!resp.ok) throw new Error('Failed to fetch');
-        const data = await resp.json();
-        if (!data.ok) throw new Error(data.error?.message || 'Failed to fetch');
-        const models = data.data?.models || [];
-        if (models.length === 0) throw new Error('No models');
-        const select = document.getElementById('vector-model-select');
-        const currentModel = select.value || document.getElementById('vector-model').value || '';
-        select.innerHTML = models.map(name => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`).join('');
-        if (currentModel) select.value = currentModel;
-        document.getElementById('vector-model-hint-select').textContent = 'Select an embedding model from Ollama';
-      }} catch (e) {{
-        document.getElementById('vector-model-select').innerHTML = '<option value="">Failed to load models</option>';
-        document.getElementById('vector-model-hint-select').textContent = 'Could not fetch models from Ollama. Ensure Ollama is running.';
+      hint.textContent = 'Loading models...';
+      const j = await apiFetch('/api/dashboard/vector-models', {{ method: 'POST', body: JSON.stringify(auth) }});
+      const models = j.ok ? (j.data?.models || []) : [];
+      if (!j.ok || models.length === 0) {{
+        select.style.display = 'none';
+        hint.textContent = j.ok ? 'The endpoint reported no models. Type the model name instead.'
+          : (j.error?.message || 'Could not load models') + '. You can still type the model name.';
+        return;
       }}
+      const current = formVectorModel();
+      select.innerHTML = '<option value="">Choose a model...</option>'
+        + models.map(name => `<option value="${{escapeHtml(name)}}">${{escapeHtml(name)}}</option>`).join('');
+      if (models.includes(current)) select.value = current;
+      select.style.display = '';
+      hint.textContent = models.length + ' models reported. Not all of them are embedding models; pick one that is.';
     }}
     function initVectorProvider() {{
-      const provider = document.getElementById('vector-provider').value;
-      if (provider === 'ollama') {{
-        document.getElementById('vector-model-text-group').style.display = 'none';
-        document.getElementById('vector-model-select-group').style.display = 'block';
-        document.getElementById('vector-model-hint-select').textContent = 'Click Load Models after confirming the URL.';
-      }}
+      const provider = document.getElementById('vector-provider');
+      if (provider) onProviderChange(provider.value);
     }}
     document.addEventListener('DOMContentLoaded', initVectorProvider);
     window.saveVectorSettings = saveVectorSettings;
@@ -1330,7 +1388,7 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
     window.estimateVectorCost = estimateVectorCost;
     window.cancelReembed = cancelReembed;
     window.onProviderChange = onProviderChange;
-    window.loadOllamaModels = loadOllamaModels;
+    window.loadVectorModels = loadVectorModels;
     </script>"""
     js = js.replace("{{", "{").replace("}}", "}")
 

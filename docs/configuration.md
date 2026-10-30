@@ -83,7 +83,14 @@ The maintenance sweep also prunes the connector execution and webhook delivery l
 
 The first five settings are editable in **Settings → System Behavior**. The workspace-awareness settings are installation-wide database settings. Proposal generation rechecks all caps and candidate eligibility inside its short write transaction, so simultaneous manual and scheduled runs cannot overfill the queue.
 
-The embedding provider, endpoint URL, model, and auth type for **vector search** are configured from **Settings → Vector Search** in the dashboard, not through environment variables. Semantic search is off by default. When it's disabled or the embedding backend is unreachable, Agent Core falls back to full-text search automatically.
+The embedding provider, endpoint URL, model, and auth type for **vector search** are configured from **Settings → Vector Search** in the dashboard, not through environment variables.
+
+Two providers are supported:
+
+- **Ollama** speaks Ollama's own API. The URL is the server, for example `http://localhost:11434`.
+- **OpenAI-compatible** speaks the OpenAI embeddings API, which hosted providers and most gateways serve (including Ollama itself, under `/v1`). The URL is the API base, usually ending in `/v1`, for example `https://api.openai.com/v1`. Hosted services usually need an API key with Bearer auth.
+
+**Load Models** lists what the endpoint reports, chat models included, so pick an embedding model, or type the name. The API key is Core's own setting, stored encrypted; it is only ever sent to the saved URL, or with a key typed into the form, to the URL in the form. Installs that saved the old "Generic" provider are read as Ollama, which is the API that option always used. Semantic search is off by default. When it's disabled or the embedding backend is unreachable, Agent Core falls back to full-text search automatically.
 
 Before switching, **Estimate Cost** times a synthetic sample as long as an average record on the model in the form (no memory content is sent, so it is safe to point at an endpoint you have not saved yet) and shows the time per record, how long re-embedding would take, and how long each memory write would wait (a write embeds twice, and each call is cut off after 30 seconds). It warns when that wait gets close to the limit. Saving a different model runs the same estimate.
 
