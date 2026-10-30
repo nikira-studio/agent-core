@@ -1670,7 +1670,7 @@ def search_memory(
         and vector_settings_service.is_vector_search_enabled()
     ):
         try:
-            vector_bytes, embed_status = embedding_service.generate_embedding(query)
+            vector_bytes, embed_status = embedding_service.generate_embedding(query, query=True)
             if vector_bytes is not None:
                 with get_db() as conn:
                     candidate_rows = conn.execute(

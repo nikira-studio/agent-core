@@ -356,6 +356,11 @@ async def update_dashboard_vector_settings(
     model = body.get("vector_model", "").strip()
     url = body.get("vector_url", "").strip()
     dimension_raw = body.get("vector_dimension")
+    query_prefix = body.get("vector_query_prefix")
+    if query_prefix is not None and (not isinstance(query_prefix, str) or len(query_prefix) > 100):
+        return error_response(
+            "INVALID_QUERY_PREFIX", "vector_query_prefix must be text of at most 100 characters", 400
+        )
 
     if enabled_raw is not None and enabled_raw not in ("true", "false"):
         return error_response(
@@ -402,6 +407,7 @@ async def update_dashboard_vector_settings(
         dimension=dimension,
         auth_type=auth_type,
         api_key=api_key,
+        query_prefix=query_prefix,
     )
 
     audit_service.write_event(
@@ -591,7 +597,7 @@ async def list_vector_models(request: Request, session: dict = Depends(require_a
     try:
         models = await asyncio.to_thread(embedding_service.list_models, provider, url, headers)
     except embedding_service.EmbeddingRequestError as e:
-        return error_response("MODEL_LIST_FAILED", embedding_service.describe_error(e.code, provider, url), 502)
+        return error_response("MODEL_LIST_FAILED", embedding_service.describe_error(e.code, provider, url, e.detail), 502)
     except Exception as e:
         return error_response(
             "MODEL_LIST_FAILED",
@@ -932,6 +938,7 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
         vector_model = vector_settings["vector_model"]
         vector_url = vector_settings["vector_url"]
         vector_dimension = vector_settings["vector_dimension"]
+        vector_query_prefix = vector_settings.get("vector_query_prefix", "")
         vector_auth_type = vector_settings["vector_auth_type"]
         vector_has_api_key = vector_settings["vector_has_api_key"]
         vector_checked = "checked" if vector_enabled else ""
@@ -974,6 +981,11 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
           <label>Embedding Dimension</label>
           <input type="number" id="vector-dimension" min="64" max="4096" value="{escape_html(vector_dimension)}" style="width:120px">
           <p class="form-hint">For reference only; Agent Core stores whatever length the model returns. <code>nomic-embed-text</code> uses 768.</p>
+        </div>
+        <div class="form-group">
+          <label>Query Prefix</label>
+          <input type="text" id="vector-query-prefix" value="{escape_html(vector_query_prefix)}" maxlength="100" style="width:200px" placeholder="none">
+          <p class="form-hint">Added to search text only, never to stored memories, so changing it needs no re-embed. Use what the model card gives for queries, including any trailing space, for example <code>query: </code> for snowflake-arctic-embed. Only for models whose documents take no prefix; leave blank otherwise.</p>
         </div>
         <div class="form-group">
           <label>Auth Type</label>
@@ -1227,6 +1239,7 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
         vector_model: model,
         vector_url: document.getElementById('vector-url').value,
         vector_dimension: document.getElementById('vector-dimension').value,
+        vector_query_prefix: document.getElementById('vector-query-prefix').value,
         vector_auth_type: document.getElementById('vector-auth-type').value,
       }};
       const apiKey = document.getElementById('vector-api-key').value;

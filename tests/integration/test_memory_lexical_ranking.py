@@ -22,7 +22,7 @@ def test_text_relevance_survives_final_sort_and_importance_distractors(
     monkeypatch.setattr(
         embedding_service,
         "generate_embedding",
-        lambda text: (
+        lambda text, query=False: (
             struct.pack("2f", 1, 0) if text == "scheduler" else struct.pack("2f", 0, 1),
             "healthy",
         ),
@@ -57,7 +57,7 @@ def test_semantic_pages_beyond_100_and_no_service_recall_writes(clean_db, monkey
     vector_settings_service.save_vector_settings(enabled=True)
     vector = struct.pack("2f", 1, 0)
     monkeypatch.setattr(
-        embedding_service, "generate_embedding", lambda text: (vector, "healthy")
+        embedding_service, "generate_embedding", lambda text, query=False: (vector, "healthy")
     )
     with get_db() as conn:
         for index in range(120):
@@ -85,7 +85,7 @@ def test_pagination_uses_one_ranking_before_slicing(clean_db, monkeypatch, hybri
     vector_settings_service.save_vector_settings(enabled=hybrid)
     vector = struct.pack("2f", 1, 0)
     monkeypatch.setattr(
-        embedding_service, "generate_embedding", lambda text: (vector, "healthy")
+        embedding_service, "generate_embedding", lambda text, query=False: (vector, "healthy")
     )
     with get_db() as conn:
         for index in range(12):

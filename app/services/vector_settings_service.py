@@ -12,6 +12,7 @@ VECTOR_KEYS = (
     "vector_model",
     "vector_dimension",
     "vector_auth_type",
+    "vector_query_prefix",
 )
 
 # "ollama": Ollama's own API (/api/tags, /api/show, /api/embeddings).
@@ -36,6 +37,10 @@ VECTOR_DEFAULTS = {
     "vector_model": "nomic-embed-text",
     "vector_dimension": "768",
     "vector_auth_type": "none",
+    # Some models embed a search differently from the text it searches, such as
+    # snowflake-arctic-embed, which expects "query: " on queries and nothing on
+    # documents. Only searches get it; stored memories are embedded as is.
+    "vector_query_prefix": "",
 }
 
 
@@ -75,6 +80,10 @@ def get_vector_model() -> str:
 
 def get_vector_auth_type() -> str:
     return get_vector_setting("vector_auth_type")
+
+
+def get_vector_query_prefix() -> str:
+    return get_vector_setting("vector_query_prefix")
 
 
 def _get_stored_api_key_plaintext() -> Optional[str]:
@@ -119,6 +128,7 @@ def save_vector_settings(
     dimension: Optional[int] = None,
     auth_type: Optional[str] = None,
     api_key: Optional[str] = None,
+    query_prefix: Optional[str] = None,
 ) -> dict:
     if enabled is not None:
         save_vector_setting("vector_search_enabled", "true" if enabled else "false")
@@ -139,6 +149,9 @@ def save_vector_settings(
         save_vector_setting("vector_auth_type", auth_type)
     if api_key is not None:
         save_vector_api_key(api_key)
+    if query_prefix is not None:
+        # Keep the trailing space: "query: " is not the same prefix as "query:".
+        save_vector_setting("vector_query_prefix", query_prefix.lstrip())
     try:
         from app.services.embedding_service import _reset_cache
 
@@ -187,7 +200,9 @@ def test_vector_connection() -> dict:
         return {
             "success": False,
             "error": "The model is listed, but embedding failed: "
-            + embedding_service.describe_error(e.code, status.get("provider", "ollama"), status.get("vector_url", "")),
+            + embedding_service.describe_error(
+                e.code, status.get("provider", "ollama"), status.get("vector_url", ""), e.detail
+            ),
         }
     except Exception as e:
         return {

@@ -9,6 +9,7 @@ from app.services.vector_settings_service import (
     get_vector_url,
     get_vector_model,
     get_vector_auth_type,
+    get_vector_query_prefix,
     get_vector_setting,
     is_vector_search_enabled,
 )
@@ -59,20 +60,59 @@ def headers_for_endpoint(
 
 
 class EmbeddingRequestError(Exception):
-    """The backend answered, but not with an embedding. `code` is a short status."""
+    """The backend answered, but not with an embedding. `code` is a short status;
+    `detail` is the backend's own reason, when it gave one."""
 
-    def __init__(self, code: str):
+    def __init__(self, code: str, detail: str = ""):
         super().__init__(code)
         self.code = code
+        self.detail = detail
+
+    @property
+    def status(self) -> str:
+        return f"{self.code} ({self.detail})" if self.detail else self.code
+
+
+# Long enough for a gateway's reason, short enough for one line of a form.
+_DETAIL_MAX_CHARS = 200
+
+
+def _error_detail(resp) -> str:
+    """The reason an error response gives, if it gives one in JSON.
+
+    OpenAI-style APIs send {"error": {"message": ...}}, Ollama {"error": "..."},
+    and many proxies {"detail": "..."}. Gateways put their own reasons there,
+    such as a content filter or a missing channel, which a status code alone
+    does not show. A web page or empty body yields nothing.
+    """
+    try:
+        body = resp.json()
+    except ValueError:
+        return ""
+    if not isinstance(body, dict):
+        return ""
+    error = body.get("error")
+    if isinstance(error, dict):
+        message = error.get("message") or error.get("code")
+    else:
+        message = error or body.get("detail") or body.get("message")
+    if not isinstance(message, str):
+        return ""
+    message = " ".join(message.split())
+    if len(message) > _DETAIL_MAX_CHARS:
+        message = message[: _DETAIL_MAX_CHARS - 3] + "..."
+    return message
 
 
 def _check(resp, provider: str) -> dict:
     """The JSON body of a successful API answer, or EmbeddingRequestError."""
     prefix = "openai_error" if provider == "openai" else "ollama_error"
     if resp.status_code in (401, 403):
+        # No detail here: a refusal can quote the key it refused (OpenAI masks
+        # but still prints part of it), and the status already says what to fix.
         raise EmbeddingRequestError(f"unauthorized:{resp.status_code}")
     if resp.status_code != 200:
-        raise EmbeddingRequestError(f"{prefix}:{resp.status_code}")
+        raise EmbeddingRequestError(f"{prefix}:{resp.status_code}", _error_detail(resp))
     try:
         body = resp.json()
     except ValueError:
@@ -84,8 +124,21 @@ def _check(resp, provider: str) -> dict:
     return body
 
 
-def describe_error(code: str, provider: str, url: str) -> str:
-    """A sentence an admin can act on, for a failure code from this module."""
+# httpx timeouts after the connection is made: the backend was reached but
+# did not answer in time. ConnectTimeout is left out; that one never reached it.
+_SLOW_ANSWER_ERRORS = ("ReadTimeout", "WriteTimeout", "PoolTimeout", "TimeoutException")
+
+
+def describe_error(code: str, provider: str, url: str, detail: str = "") -> str:
+    """A sentence an admin can act on, for a failure code from this module.
+    `detail` is the backend's own reason (EmbeddingRequestError.detail)."""
+    sentence = _describe_code(code, provider, url)
+    if detail:
+        sentence += f" The backend said: {detail}"
+    return sentence
+
+
+def _describe_code(code: str, provider: str, url: str) -> str:
     url = (url or "").rstrip("/")
     needs_v1 = provider == "openai" and not url.endswith("/v1")
     v1_hint = f" OpenAI-compatible base URLs usually end in /v1, for example {url}/v1." if needs_v1 else ""
@@ -108,7 +161,13 @@ def describe_error(code: str, provider: str, url: str) -> str:
     if code.startswith(("openai_error", "ollama_error")):
         return f"{url} answered with an error ({code.split(':')[-1]})."
     if code.startswith("exception:"):
-        return f"Cannot reach the embedding backend at {url} ({code.split(':', 1)[1]})."
+        name = code.split(":", 1)[1]
+        if name in _SLOW_ANSWER_ERRORS:
+            return (
+                f"{url} did not answer within {EMBED_TIMEOUT_SECONDS} seconds ({name}). "
+                "It is reachable but slow or busy, often because it is overloaded or still loading the model."
+            )
+        return f"Cannot reach the embedding backend at {url} ({name})."
     return f"The embedding backend at {url} failed: {code}."
 
 
@@ -236,11 +295,15 @@ def get_embedding_backend_status() -> dict:
     return _cached_status
 
 
-def generate_embedding(text: str) -> tuple[Optional[bytes], str]:
+def generate_embedding(text: str, query: bool = False) -> tuple[Optional[bytes], str]:
+    """Embed `text` with the configured model. Pass query=True for search text:
+    it gets the configured query prefix, which stored memories never do."""
     status = get_embedding_backend_status()
     if status["backend"] != "healthy" or not status["model_configured"]:
         return None, "unavailable"
 
+    if query:
+        text = get_vector_query_prefix() + text
     try:
         embedding = request_embedding(
             get_vector_provider(), get_vector_url(), get_vector_model(), text, _auth_headers()
@@ -248,7 +311,7 @@ def generate_embedding(text: str) -> tuple[Optional[bytes], str]:
         vector_bytes = struct.pack(f"{len(embedding)}f", *embedding)
         return vector_bytes, "ok"
     except EmbeddingRequestError as e:
-        return None, e.code
+        return None, e.status
     except Exception as e:
         return None, f"exception:{type(e).__name__}"
 

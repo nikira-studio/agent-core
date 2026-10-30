@@ -252,3 +252,114 @@ def test_connection_test_embeds_for_real_and_reports_overload(clean_db, monkeypa
     assert result["success"] is False
     assert "embedding failed" in result["error"] and "overloaded" in result["error"]
     assert sent == [{"model": "nomic-embed-text", "input": "connection test"}]
+
+
+def _refusing_gateway(monkeypatch, status, payload):
+    """Lists the model, then refuses every embedding with `status` and `payload`."""
+    monkeypatch.setattr(httpx, "get", lambda url, headers=None, timeout=None: _Resp(
+        200, {"data": [{"id": "snowflake-arctic-embed2"}]}))
+    monkeypatch.setattr(httpx, "post", lambda url, json=None, headers=None, timeout=None: _Resp(status, payload))
+    save_vector_settings(enabled=True, provider="openai", url="http://gateway.test/v1",
+                         model="snowflake-arctic-embed2")
+    embedding_service._reset_cache()
+
+
+def test_connection_test_shows_the_gateways_reason(clean_db, monkeypatch):
+    """A gateway's own rejection, such as a word filter, is not visible in the status alone."""
+    from app.services.vector_settings_service import test_vector_connection
+
+    _refusing_gateway(monkeypatch, 500, {"error": {
+        "message": "user sensitive words detected: test_sensitive", "code": "sensitive_words_detected"}})
+
+    error = test_vector_connection()["error"]
+
+    assert "answered with an error (500)" in error
+    assert error.endswith("The backend said: user sensitive words detected: test_sensitive")
+
+
+def test_reembed_failure_status_carries_the_reason(clean_db, monkeypatch):
+    _refusing_gateway(monkeypatch, 400, {"error": "input length exceeds the context length"})
+    assert embedding_service.generate_embedding("x") == (
+        None, "openai_error:400 (input length exceeds the context length)")
+
+
+@pytest.mark.parametrize("payload, detail", [
+    ({"detail": "no channel for this model"}, "no channel for this model"),
+    ({"message": "  spread \n over\tlines "}, "spread over lines"),
+    ({"error": {"message": "x" * 500}}, "x" * 197 + "..."),
+    ({"error": {"code": 7}}, ""),
+    ({}, ""),
+    (["not", "a", "dict"], ""),
+])
+def test_error_detail_shapes(payload, detail):
+    assert embedding_service._error_detail(_Resp(500, payload)) == detail
+    assert embedding_service._error_detail(_HtmlResp()) == ""
+
+
+def test_refused_key_detail_is_never_kept(clean_db, monkeypatch):
+    _refusing_gateway(monkeypatch, 401, {"error": {"message": "Incorrect API key provided: sk-ab***yz"}})
+    with pytest.raises(embedding_service.EmbeddingRequestError) as e:
+        embedding_service.request_embedding("openai", "http://gateway.test/v1", "m", "x")
+    assert e.value.code == "unauthorized:401" and e.value.detail == ""
+
+
+def test_timeout_after_connecting_says_slow_not_unreachable(clean_db, monkeypatch):
+    from app.services.vector_settings_service import test_vector_connection
+
+    def slow(*a, **k):
+        raise httpx.ReadTimeout("timed out")
+
+    monkeypatch.setattr(httpx, "get", lambda url, headers=None, timeout=None: _Resp(
+        200, {"data": [{"id": "m"}]}))
+    monkeypatch.setattr(httpx, "post", slow)
+    save_vector_settings(enabled=True, provider="openai", url="http://gateway.test/v1", model="m")
+
+    error = test_vector_connection()["error"]
+
+    assert "did not answer within 30 seconds (ReadTimeout)" in error
+    assert "Cannot reach" not in error
+    assert embedding_service.describe_error("exception:ConnectTimeout", "openai", "http://g/v1") == (
+        "Cannot reach the embedding backend at http://g/v1 (ConnectTimeout).")
+
+
+def _capture_inputs(monkeypatch):
+    sent = []
+
+    def fake_post(url, json=None, headers=None, timeout=None):
+        sent.append(json["input"])
+        return _Resp(200, {"data": [{"embedding": [0.1, 0.2]}]})
+
+    monkeypatch.setattr(httpx, "get", lambda url, headers=None, timeout=None: _Resp(
+        200, {"data": [{"id": "m"}]}))
+    monkeypatch.setattr(httpx, "post", fake_post)
+    return sent
+
+
+def test_query_prefix_goes_on_searches_only(clean_db, monkeypatch):
+    from app.services import memory_service
+
+    sent = _capture_inputs(monkeypatch)
+    save_vector_settings(enabled=True, provider="openai", url="http://gateway.test/v1", model="m",
+                         query_prefix="query: ")
+    embedding_service._reset_cache()
+
+    memory_service.write_memory("The build server runs nightly.", "fact", "workspace:prefix-test")
+    memory_service.search_memory("build server", ["workspace:prefix-test"])
+
+    assert "The build server runs nightly." in sent
+    assert "query: build server" in sent
+    assert not any(s.startswith("query: The build") for s in sent)
+
+
+def test_query_prefix_is_saved_from_the_form_and_shown(admin_client):
+    r = admin_client.post("/api/dashboard/vector-settings", json={
+        "vector_provider": "openai", "vector_url": "http://gateway.test/v1", "vector_model": "m",
+        "vector_auth_type": "none", "vector_query_prefix": "query: "})
+    assert r.status_code == 200
+    assert r.json()["data"]["settings"]["vector_query_prefix"] == "query: "
+    assert 'id="vector-query-prefix" value="query: "' in admin_client.get("/settings").text
+
+    r = admin_client.post("/api/dashboard/vector-settings", json={
+        "vector_provider": "openai", "vector_url": "http://gateway.test/v1", "vector_model": "m",
+        "vector_auth_type": "none", "vector_query_prefix": "q" * 101})
+    assert r.status_code == 400
