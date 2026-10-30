@@ -125,7 +125,26 @@ def test_effective_authority_reports_current_permanent_identity(test_client, age
     authority = response.json()["data"]["authority"]
     assert authority["authenticated_actor"] == {"type": "agent", "id": "testagent"}
     assert authority["executor_agent_id"] == "testagent"
+    assert authority["authorization_mode"] == "permanent"
     assert "grant_id" not in authority
+
+
+def test_effective_authority_for_a_signed_in_user_is_permanent(test_client, clean_db):
+    """The check OpenAgents makes before it opens a human session."""
+    from app.services.auth_service import create_session, create_user
+
+    create_user("person", "person@test.local", "testpassword123", "A Person")
+    token = create_session("person")["session_id"]
+
+    response = test_client.get(
+        "/api/auth/effective-authority", headers={"Authorization": f"Bearer {token}"}
+    )
+
+    assert response.status_code == 200, response.json()
+    authority = response.json()["data"]["authority"]
+    assert authority["authenticated_actor"] == {"type": "user", "id": "person"}
+    assert authority["principal_user_id"] == "person"
+    assert authority["authorization_mode"] == "permanent"
 
 
 def test_login_failed_attempts_are_rate_limited(test_client, clean_db):

@@ -125,6 +125,11 @@ class EffectiveAuthority:
             "authenticated_actor": {"type": self.context.actor_type, "id": self.context.actor_id},
             "executor_agent_id": self.context.agent_id,
             "principal_user_id": self.context.user_id,
+            # Compatibility: delegated authority was removed (2026-10-25), so
+            # request authority is always permanent. Clients written against
+            # the earlier contract, OpenAgents' human sign-in among them,
+            # refuse a response without this field.
+            "authorization_mode": "permanent",
             "effective_read_scopes": self.context.read_scopes,
             "effective_write_scopes": self.context.write_scopes,
             "active_workspace_ids": sorted(self.context.active_workspace_ids),
