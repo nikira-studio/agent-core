@@ -143,7 +143,7 @@ Search queries that look like credentials, or are too short/noisy (single stop w
 
 ## Rate limits
 
-Rate limits protect against runaway agents and misconfigured automation. Limits are in-memory token buckets that reset on process restart.
+Rate limits protect against runaway agents and misconfigured automation. Limits are token buckets. The failed-login and failed-OTP limits are kept in the database, so every worker counts the same attempts and a restart does not reset them; the others are in process memory and reset on restart. Login limits are counted per client address and per account. Behind a reverse proxy, set `AGENT_CORE_TRUSTED_PROXIES` to the proxy's address, or every client arrives from the proxy and shares one per-address bucket.
 
 | Operation | Limit |
 | --- | --- |

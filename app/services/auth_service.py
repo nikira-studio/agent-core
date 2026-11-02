@@ -25,34 +25,65 @@ class RegistrationDisabledError(RuntimeError):
     """Raised when the one-time bootstrap administrator already exists."""
 
 
-def create_jwt(session_id: str) -> str:
+# Session tokens are signed with their own random key, kept in the data
+# directory next to the database. It never touches stored credentials, and a
+# credential-key rotation leaves sessions alone. Deleting the file and
+# restarting signs everyone out.
+SESSION_KEY_FILENAME = "session.key"
+_session_key: Optional[bytes] = None
+
+
+def _session_signing_key() -> bytes:
+    global _session_key
+    if _session_key is not None:
+        return _session_key
+    import os
+    import secrets
+    import tempfile
+
     from app.config import settings
 
-    if settings.ENCRYPTION_KEY == "auto":
-        from app.security.encryption import get_primary_key
+    path = settings.data_dir / SESSION_KEY_FILENAME
+    if not path.exists():
+        # Write the new key under a temporary name, then link it into place.
+        # link() fails when the file exists, so if two workers start at once
+        # one key wins, and neither ever reads a half-written file.
+        candidate = secrets.token_bytes(32)
+        descriptor, temporary = tempfile.mkstemp(prefix="session.key.tmp-", dir=path.parent)
+        try:
+            with os.fdopen(descriptor, "wb") as output:
+                os.fchmod(output.fileno(), 0o600)
+                output.write(candidate)
+                output.flush()
+                os.fsync(output.fileno())
+            try:
+                os.link(temporary, path)
+            except FileExistsError:
+                pass
+        finally:
+            os.unlink(temporary)
+    key = path.read_bytes()
+    if len(key) < 32:
+        raise RuntimeError(f"{path} is too short to be a session key; delete it to make a new one")
+    _session_key = key
+    return key
 
-        key = get_primary_key()
-    else:
-        key = settings.ENCRYPTION_KEY.encode()
-    return jwt.encode({"sub": session_id}, key, algorithm="HS256")
+
+def reset_session_key_cache() -> None:
+    global _session_key
+    _session_key = None
+
+
+def create_jwt(session_id: str) -> str:
+    return jwt.encode({"sub": session_id}, _session_signing_key(), algorithm="HS256")
 
 
 def decode_jwt(token: str) -> Optional[str]:
-    from app.config import settings
-
-    if settings.ENCRYPTION_KEY == "auto":
-        from app.security.encryption import get_keyring
-
-        keys = get_keyring()
-    else:
-        keys = [settings.ENCRYPTION_KEY.encode()]
-    for key in keys:
-        try:
-            payload = jwt.decode(token, key, algorithms=["HS256"])
-            return payload.get("sub")
-        except InvalidTokenError:
-            continue
-    return None
+    try:
+        payload = jwt.decode(token, _session_signing_key(), algorithms=["HS256"])
+    except InvalidTokenError:
+        return None
+    return payload.get("sub")
 
 
 def hash_password(password: str) -> str:

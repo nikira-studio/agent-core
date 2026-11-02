@@ -140,6 +140,13 @@ def build_backup_zip(
     # Snapshot first, then describe and archive the snapshot: the manifest
     # checksum has to be of the bytes that actually go into the archive, not of
     # a live file that may move between hashing and reading.
+    # A backup without the credential key cannot be restored. The key file is
+    # created on first use, so make sure it exists even on an install that has
+    # not stored a credential yet.
+    if _configured_env_key_bytes() is None:
+        from app.security.encryption import get_primary_key
+
+        get_primary_key()
     snapshot_dir = tempfile.mkdtemp(prefix="agent-core-backup-")
     snapshot_path = os.path.join(snapshot_dir, DB_FILENAME)
     try:

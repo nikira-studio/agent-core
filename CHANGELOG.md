@@ -20,6 +20,9 @@ Notable changes to Agent Core are documented here. The format follows [Keep a Ch
 
 ### Security
 
+- Login sessions are signed with their own random key (`session.key` in the data directory) instead of the credential encryption key, and only that key is accepted. Before, a session token was signed with the credential key and every retired key still verified one. **Upgrade note:** every session ends once on upgrade, so people sign in again, including in apps that use Agent Core as their login. Rotating the credential key no longer affects sessions; deleting `session.key` and restarting signs everyone out.
+- The key status in Settings shows a digest of the primary key instead of its first characters.
+- The failed-login and failed-OTP rate limits are kept in the database (migration 16 adds `rate_limit_buckets`), so they hold across workers and restarts instead of being per process. Behind a reverse proxy, set `AGENT_CORE_TRUSTED_PROXIES`, or all clients share one per-address login bucket.
 - `POST /api/dashboard/vector-settings` no longer returns the stored embedding API key in its response; it reports `vector_has_api_key` instead, as the settings page already did.
 - The Generic HTTP connector only sends the binding's credential to the configured `base_url` host; a caller-supplied `url` on another host is refused. Adapter path parameters are percent-encoded as single segments, and only a manifest path that is literally absolute can replace `base_url`.
 - Upstream response bodies are read with a 10 MB cap, so a runaway upstream cannot exhaust the process; a body over the cap is reported as `RESPONSE_TOO_LARGE` rather than parsed cut off.

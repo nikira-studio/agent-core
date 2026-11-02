@@ -1,3 +1,4 @@
+import hashlib
 import os
 import json
 import threading
@@ -97,6 +98,12 @@ def _rotate_key(admin_user_id: str) -> tuple[bool, str, dict]:
         _rotation_lock.release()
 
 
+def key_id(key: str) -> str:
+    """A short identifier for a key that reveals nothing about it: the start of
+    its SHA-256, not the start of the key itself."""
+    return hashlib.sha256(key.encode()).hexdigest()[:12]
+
+
 def get_key_status() -> dict:
     keyring_path = settings.data_dir / "credential.keyring"
     if not os.path.exists(keyring_path):
@@ -109,7 +116,7 @@ def get_key_status() -> dict:
         return {
             "mode": "keyring",
             "keyring_size": len(keys),
-            "primary_key_id": keys[0][:8] if keys else "none",
+            "primary_key_id": key_id(keys[0]) if keys else "none",
         }
     except Exception:
         return {"mode": "error", "keyring_size": 0}

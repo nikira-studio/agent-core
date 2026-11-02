@@ -57,6 +57,40 @@ class RateLimiter:
         ("inbound_webhook", "ip"): RateLimitConfig(60, 1.0),
     }
 
+    # Limits that guard sign-in. Kept in the database so every worker and every
+    # restart sees the same count; an in-memory bucket per worker multiplied
+    # the allowed guesses by the worker count and reset on every restart.
+    _shared = frozenset({"login_failed", "otp_failed"})
+
+    @classmethod
+    def _shared_bucket(cls, bucket_key: str, template: RateLimitConfig, count: int) -> tuple[bool, dict]:
+        """Refill, then take `count` tokens (0 to only look), in one locked transaction."""
+        from app.database import get_db
+
+        now = time.time()
+        with get_db() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute(
+                "SELECT tokens, last_refill FROM rate_limit_buckets WHERE bucket_key = ?",
+                (bucket_key,),
+            ).fetchone()
+            tokens = template.max_tokens
+            if row is not None:
+                elapsed = max(0.0, now - row["last_refill"])
+                tokens = min(template.max_tokens, row["tokens"] + elapsed * template.refill_rate)
+            allowed = tokens >= max(count, 1)
+            if allowed and count:
+                tokens -= count
+            if count:
+                conn.execute(
+                    "INSERT INTO rate_limit_buckets (bucket_key, tokens, last_refill) VALUES (?, ?, ?) "
+                    "ON CONFLICT(bucket_key) DO UPDATE SET tokens = excluded.tokens, last_refill = excluded.last_refill",
+                    (bucket_key, tokens, now),
+                )
+            conn.commit()
+        reset = int(now) if tokens >= 1 else int(now + (1 - tokens) / template.refill_rate)
+        return allowed, {"limit": int(template.max_tokens), "remaining": int(tokens), "reset": reset}
+
     @classmethod
     def check(
         cls,
@@ -66,6 +100,8 @@ class RateLimiter:
         count: int = 1,
     ) -> tuple[bool, dict]:
         bucket_key = f"{limit_name}:{key_type}:{key_id}"
+        if limit_name in cls._shared and (limit_name, key_type) in cls._limits:
+            return cls._shared_bucket(bucket_key, cls._limits[(limit_name, key_type)], count)
         with cls._lock:
             if bucket_key not in cls._buckets:
                 template = cls._limits.get((limit_name, key_type))
@@ -104,6 +140,8 @@ class RateLimiter:
         already-exhausted caller cannot keep spending bcrypt CPU.
         """
         bucket_key = f"{limit_name}:{key_type}:{key_id}"
+        if limit_name in cls._shared and (limit_name, key_type) in cls._limits:
+            return cls._shared_bucket(bucket_key, cls._limits[(limit_name, key_type)], 0)
         with cls._lock:
             bucket = cls._buckets.get(bucket_key)
             template = cls._limits.get((limit_name, key_type))
@@ -127,6 +165,14 @@ class RateLimiter:
     def reset(cls) -> None:
         with cls._lock:
             cls._buckets.clear()
+        try:
+            from app.database import get_db
+
+            with get_db() as conn:
+                conn.execute("DELETE FROM rate_limit_buckets")
+                conn.commit()
+        except Exception:
+            pass  # no database yet (unit tests, early startup)
 
 
 class ConcurrentSearchGuard:

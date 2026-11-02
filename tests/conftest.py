@@ -35,6 +35,9 @@ def clean_db(test_db_path):
         encryption._keyring = None
     except Exception:
         pass
+    from app.services import auth_service as _auth
+
+    _auth.reset_session_key_cache()
 
     import shutil as si
     for f in tmpdir.iterdir():

@@ -28,7 +28,9 @@ These control how long dashboard logins stay active.
 | `AGENT_CORE_SESSION_DURATION_HOURS` | `8` | Maximum session lifetime before requiring a new login |
 | `AGENT_CORE_INACTIVITY_TIMEOUT_MINUTES` | `30` | How long a session can sit idle before expiring |
 | `AGENT_CORE_COOKIE_SECURE` | `false` | Set to `true` if Agent Core is served over HTTPS or behind a TLS proxy. Makes browser cookies require a secure connection |
-| `AGENT_CORE_TRUSTED_PROXIES` | *(empty)* | Comma-separated proxy IPs that may supply `X-Forwarded-For` for login rate-limit identity |
+| `AGENT_CORE_TRUSTED_PROXIES` | *(empty)* | Comma-separated proxy IPs that may supply `X-Forwarded-For` for login rate-limit identity. Set it behind a reverse proxy, or every client shares the proxy's per-address login limit |
+
+Session tokens are signed with their own random key, `session.key` in the data directory, created on first use. It is separate from the credential key, so rotating the credential key does not sign anyone out. To sign everyone out, delete `session.key` and restart. It is not in backups; after a restore, people log in again.
 
 ---
 
@@ -156,6 +158,7 @@ data/
   credential.key      ← Current encryption key for credentials
   credential.keyring  ← JSON file with all historical keys (needed for decryption after rotation)
   broker.credential   ← Credential for the local Credential Broker (auto-generated at first startup)
+  session.key         ← Signing key for login sessions (auto-generated; not backed up)
   backups/            ← Backup ZIPs and pre-restore snapshots land here automatically
 ```
 

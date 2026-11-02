@@ -23,6 +23,14 @@ CREATE TABLE IF NOT EXISTS sessions (
     FOREIGN KEY (user_id) REFERENCES users(id)
 );
 
+-- Rate-limit buckets that must hold across workers and restarts (failed
+-- logins and OTP codes). Other limits stay in process memory.
+CREATE TABLE IF NOT EXISTS rate_limit_buckets (
+    bucket_key TEXT PRIMARY KEY,
+    tokens REAL NOT NULL,
+    last_refill REAL NOT NULL
+);
+
 -- OTP secrets table
 CREATE TABLE IF NOT EXISTS otp_secrets (
     user_id TEXT PRIMARY KEY,
@@ -518,6 +526,7 @@ def _apply_schema_migrations(conn) -> None:
         (13, "remove-handoff-briefings", _migrate_013_remove_handoff_briefings),
         (14, "drop-removed-feature-settings", _migrate_014_drop_removed_feature_settings),
         (15, "single-use-otp-codes", _migrate_015_otp_last_used_step),
+        (16, "shared-login-rate-limits", _migrate_016_rate_limit_buckets),
     )
     applied = {
         row["revision"]
@@ -1552,6 +1561,17 @@ def _migrate_015_otp_last_used_step(conn) -> None:
     columns = {row["name"] for row in conn.execute("PRAGMA table_info(otp_secrets)")}
     if "last_used_step" not in columns:
         conn.execute("ALTER TABLE otp_secrets ADD COLUMN last_used_step INTEGER")
+
+
+def _migrate_016_rate_limit_buckets(conn) -> None:
+    """Failed-login and OTP limits move from process memory to the database."""
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS rate_limit_buckets (
+            bucket_key TEXT PRIMARY KEY,
+            tokens REAL NOT NULL,
+            last_refill REAL NOT NULL
+        )"""
+    )
 
 
 def _migrate_006_consumer_write_grants(conn) -> None:
