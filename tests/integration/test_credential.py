@@ -1,3 +1,6 @@
+from tests.conftest import operator_token_for
+
+
 def test_credential_create_entry(test_client, agent_token):
     r = test_client.post(
         "/api/credentials/entries",
@@ -134,11 +137,11 @@ def test_credential_scope_move_preserves_secret_and_reports_linked_bindings(
 
 
 def test_credential_scope_move_requires_write_access_to_destination(test_client, clean_db):
-    from app.services.auth_service import create_session, create_user
+    from app.services.auth_service import create_user
 
     create_user("regular", "regular@test.local", "testpassword123", "Regular", "user")
     create_user("other", "other@test.local", "testpassword123", "Other", "user")
-    token = create_session("regular")["session_id"]
+    token = operator_token_for("regular")
     create_r = test_client.post(
         "/api/credentials/entries",
         headers={"Authorization": f"Bearer {token}"},
@@ -277,7 +280,7 @@ def test_credential_scopes(test_client, agent_token):
 
 
 def test_non_admin_user_can_reveal_own_credential_entry(test_client, clean_db):
-    from app.services.auth_service import create_user, create_session
+    from app.services.auth_service import create_user
 
     create_user(
         user_id="regular",
@@ -286,8 +289,7 @@ def test_non_admin_user_can_reveal_own_credential_entry(test_client, clean_db):
         display_name="Regular User",
         role="user",
     )
-    session = create_session("regular")
-    token = session["session_id"]
+    token = operator_token_for("regular")
 
     create_r = test_client.post(
         "/api/credentials/entries",
@@ -309,7 +311,7 @@ def test_non_admin_user_can_reveal_own_credential_entry(test_client, clean_db):
 def test_non_admin_user_cannot_reveal_other_user_credential_entry(
     test_client, clean_db
 ):
-    from app.services.auth_service import create_user, create_session
+    from app.services.auth_service import create_user
     from app.services.credential_service import create_credential
 
     create_user(
@@ -322,7 +324,7 @@ def test_non_admin_user_cannot_reveal_other_user_credential_entry(
         value_plaintext="other-secret-value",
         created_by="other",
     )
-    token = create_session("regular")["session_id"]
+    token = operator_token_for("regular")
 
     reveal_r = test_client.post(
         f"/api/credentials/entries/{entry['id']}/reveal",

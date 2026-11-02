@@ -13,7 +13,6 @@ from fastapi.responses import HTMLResponse
 from app.services.auth_service import validate_session
 from app.branding import APP_NAME, JS_WINDOW_EVENT
 from app.config import settings
-from app.security.session_token import get_session_token
 
 
 def _hf(s):
@@ -92,7 +91,17 @@ def get_icon(name: str, size: int = 16, color: str = "currentColor") -> str:
 
 
 def require_auth(request: Request):
-    token = get_session_token(request)
+    authorization = request.headers.get("Authorization", "")
+    if authorization.startswith("Bearer "):
+        from app.services.auth_service import validate_operator_token
+
+        # Dashboard routes take a Bearer operator token, never a Bearer login
+        # session; see BEARER_SESSION_PATH_PREFIX.
+        session = validate_operator_token(authorization[7:])
+        if not session:
+            raise HTTPException(status_code=302, headers={"Location": "/login"})
+        return session
+    token = request.cookies.get("session_token") or ""
     if not token:
         raise HTTPException(status_code=302, headers={"Location": "/login"})
     session = validate_session(
@@ -165,6 +174,23 @@ def render_page(
     events_js = (
         '<script src="/static/js/events.js?v=20260816a"></script>' if session else ""
     )
+    # Every state-changing request this page makes with the session cookie must
+    # carry the CSRF token; wrapping fetch once covers every page's scripts.
+    csrf_js = ""
+    if session and session.get("channel") != "operator" and session.get("id"):
+        from app.services.auth_service import CSRF_HEADER, csrf_token_for_session_id
+
+        csrf_js = (
+            "<script>(function(){var t=" + json.dumps(csrf_token_for_session_id(session["id"]))
+            + ",h=" + json.dumps(CSRF_HEADER) + ",f=window.fetch;"
+            "window.AC_CSRF_TOKEN=t;"
+            "window.fetch=function(input,init){init=init||{};"
+            "var m=(init.method||(input&&input.method)||'GET').toUpperCase();"
+            "var u=typeof input==='string'?input:(input&&input.url)||'';"
+            "var same=u.charAt(0)==='/'||u.indexOf(location.origin)===0;"
+            "if(same&&m!=='GET'&&m!=='HEAD'&&m!=='OPTIONS'){var hd=new Headers(init.headers||(input&&input.headers)||{});"
+            "if(!hd.has(h))hd.set(h,t);init.headers=hd;}return f.call(this,input,init);};})();</script>"
+        )
 
     return HTMLResponse(
         f"""<!DOCTYPE html>
@@ -190,6 +216,7 @@ def render_page(
     <link rel="apple-touch-icon" sizes="180x180" href="/static/img/favicon/apple-touch-icon.png">
     <link rel="manifest" href="/static/img/favicon/site.webmanifest">
     <link rel="stylesheet" href="/static/css/dashboard.css?v=20260828">
+    {csrf_js}
 </head>
 <body>
 <div class="{layout_class}">

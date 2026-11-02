@@ -9,6 +9,7 @@ import json
 
 from app.database import get_db
 from app.services import activity_service, agent_service, workspace_service
+from tests.conftest import csrf_headers
 
 SCOPE = "workspace:handoff-test"
 OTHER_SCOPE = "workspace:handoff-other"
@@ -73,6 +74,9 @@ def _audit(action):
 def _as_person(client, owner_id):
     from app.services.auth_service import create_session
 
+    # Drop the login cookie first: two session_token cookies (different
+    # domains) make the client's cookie jar ambiguous.
+    client.cookies.clear()
     client.cookies.set("session_token", create_session(owner_id, channel="dashboard")["session_id"])
 
 
@@ -265,8 +269,10 @@ def test_person_resolves_with_kind_person_and_agents_cannot_use_the_person_route
     assert not _handoff(activity["id"])[1]
 
     _as_person(test_client, owner_id)
-    response = test_client.post(f"/api/activity/{activity['id']}/handoff/resolve")
-    again = test_client.post(f"/api/activity/{activity['id']}/handoff/resolve")
+    response = test_client.post(f"/api/activity/{activity['id']}/handoff/resolve",
+                                headers=csrf_headers(test_client))
+    again = test_client.post(f"/api/activity/{activity['id']}/handoff/resolve",
+                             headers=csrf_headers(test_client))
     test_client.cookies.clear()
     assert response.status_code == 200
     resolution = response.json()["data"]["resolution"]

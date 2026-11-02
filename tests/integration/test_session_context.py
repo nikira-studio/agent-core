@@ -5,6 +5,7 @@ from pathlib import Path
 
 from app.database import get_db
 from app.services import activity_service, agent_service, memory_service, workspace_service
+from tests.conftest import csrf_headers
 
 SCOPE = "workspace:ctx-test"
 
@@ -321,7 +322,8 @@ def test_handoff_is_recorded_and_shown_to_the_next_session(test_client, admin_to
     # Only a person resolves it; then it stops appearing.
     assert test_client.post(f"/api/activity/{activity_id}/handoff/resolve", headers=headers).status_code == 403
     test_client.cookies.set("session_token", create_session(owner_id, channel="dashboard")["session_id"])
-    assert test_client.post(f"/api/activity/{activity_id}/handoff/resolve").status_code == 200  # the button's call
+    assert test_client.post(f"/api/activity/{activity_id}/handoff/resolve",
+                            headers=csrf_headers(test_client)).status_code == 200  # the button's call
     assert "Waiting on you" not in test_client.get("/activity").text
     test_client.cookies.clear()
     text = _context(test_client, headers, memory_scope=SCOPE, host_session_ref="s-3")["context"]

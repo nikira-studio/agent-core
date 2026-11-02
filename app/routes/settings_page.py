@@ -737,6 +737,27 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
         <button type="submit" class="btn">Save Preferences</button>
         <div id="user-settings-result" style="margin-top:12px"></div>
       </form>
+    </div>
+    <div class="card">
+      <div class="section-header">
+        <h3>Operator Tokens</h3>
+        <div class="section-note">Short-lived keys for scripts that act as you, such as an attended install script. Requests made with one are recorded as yours. Agents use their own agent keys, not these.</div>
+      </div>
+      <div class="form-group">
+        <label for="op-token-label">Label</label>
+        <input type="text" id="op-token-label" maxlength="100" placeholder="what it is for" style="max-width:360px">
+      </div>
+      <div class="form-group">
+        <label for="op-token-minutes">Valid for</label>
+        <select id="op-token-minutes" style="max-width:200px">
+          <option value="15">15 minutes</option>
+          <option value="30" selected>30 minutes</option>
+          <option value="60">60 minutes</option>
+        </select>
+      </div>
+      <button type="button" class="btn" onclick="createOperatorToken()">Create Token</button>
+      <div id="op-token-result" style="margin-top:12px"></div>
+      <div id="op-token-list" style="margin-top:12px"></div>
     </div>"""
 
     secrets_snapshot_html = ""
@@ -1093,6 +1114,39 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
       }}
     }}
     window.saveUserSettings = saveUserSettings;
+
+    async function loadOperatorTokens() {{
+      const box = document.getElementById('op-token-list');
+      if (!box) return;
+      const j = await apiFetch('/api/auth/operator-tokens');
+      const tokens = (j.ok && j.data.tokens) || [];
+      if (!tokens.length) {{ box.innerHTML = '<p class="form-hint">No active operator tokens.</p>'; return; }}
+      box.innerHTML = '<table class="table"><tr><th>Label</th><th>Expires</th><th>Last used</th><th></th></tr>' +
+        tokens.map(t => '<tr><td>' + escapeHtml(t.label || '') + '</td><td>' + escapeHtml(t.expires_at) +
+          '</td><td>' + escapeHtml(t.last_used_at || 'never') + '</td><td><button class="btn btn-sm" data-token-id="' +
+          escapeHtml(t.id) + '" onclick="revokeOperatorToken(this.dataset.tokenId)">Revoke</button></td></tr>').join('') + '</table>';
+    }}
+    async function createOperatorToken() {{
+      const body = {{ label: document.getElementById('op-token-label').value,
+                     minutes: parseInt(document.getElementById('op-token-minutes').value, 10) }};
+      const j = await apiFetch('/api/auth/operator-tokens', {{ method: 'POST', body: JSON.stringify(body) }});
+      const res = document.getElementById('op-token-result');
+      if (j.ok) {{
+        res.innerHTML = '<div class="alert alert-success">Copy it now; it is not shown again. Expires ' + escapeHtml(j.data.expires_at) +
+          '.<br><code style="user-select:all;word-break:break-all">' + escapeHtml(j.data.token) + '</code></div>';
+        loadOperatorTokens();
+      }} else {{
+        res.innerHTML = '<div class="alert alert-danger">' + escapeHtml((j.error && j.error.message) || 'Could not create a token') + '</div>';
+      }}
+    }}
+    async function revokeOperatorToken(id) {{
+      const j = await apiFetch('/api/auth/operator-tokens/' + encodeURIComponent(id), {{ method: 'DELETE' }});
+      if (j.ok) showToast('Token revoked', 'success');
+      loadOperatorTokens();
+    }}
+    window.createOperatorToken = createOperatorToken;
+    window.revokeOperatorToken = revokeOperatorToken;
+    loadOperatorTokens();
 
     async function exportBackup() {{
       const r = await fetch('/api/backup/export', {{

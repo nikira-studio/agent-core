@@ -11,13 +11,14 @@ from app.services.workspace_service import (
     upsert_workspace_collaborator,
 )
 from app.services import agent_service
+from tests.conftest import operator_token_for
 
 
 def test_workspace_collaborator_can_view_and_create_agent_scopes(test_client, admin_token):
     create_user("owner", "owner@test.local", "testpassword123", "Owner", "user")
     create_user("collab", "collab@test.local", "testpassword123", "Collab", "user")
-    owner_token = create_session("owner")["session_id"]
-    collab_token = create_session("collab")["session_id"]
+    owner_token = operator_token_for("owner")
+    collab_token = operator_token_for("collab")
 
     created = test_client.post(
         "/api/workspaces",
@@ -71,7 +72,7 @@ def test_workspace_collaborator_can_view_and_create_agent_scopes(test_client, ad
 def test_workspace_collaborator_revocation_blocks_agent_runtime_access(test_client, admin_token):
     create_user("owner2", "owner2@test.local", "testpassword123", "Owner2", "user")
     create_user("collab2", "collab2@test.local", "testpassword123", "Collab2", "user")
-    owner_token = create_session("owner2")["session_id"]
+    owner_token = operator_token_for("owner2")
 
     created = test_client.post(
         "/api/workspaces",
@@ -90,7 +91,7 @@ def test_workspace_collaborator_revocation_blocks_agent_runtime_access(test_clie
     )
     assert grant.status_code == 200, grant.json()
 
-    collab_token = create_session("collab2")["session_id"]
+    collab_token = operator_token_for("collab2")
     created_agent = test_client.post(
         "/api/agents",
         headers={"Authorization": f"Bearer {collab_token}"},
@@ -123,7 +124,7 @@ def test_agent_workspace_authority_tracks_collaborator_permission_bits(test_clie
     """An unchanged collaborator row must not keep an agent's old authority."""
     create_user("ownerbits", "ownerbits@test.local", "testpassword123", "Owner", "user")
     create_user("memberbits", "memberbits@test.local", "testpassword123", "Member", "user")
-    owner_token = create_session("ownerbits")["session_id"]
+    owner_token = operator_token_for("ownerbits")
     test_client.post(
         "/api/workspaces",
         headers={"Authorization": f"Bearer {owner_token}"},
@@ -168,7 +169,7 @@ def test_agent_workspace_authority_tracks_collaborator_permission_bits(test_clie
 def test_disabled_default_user_cannot_lend_workspace_authority(test_client, admin_token):
     create_user("ownerprincipal", "ownerprincipal@test.local", "testpassword123", "Owner", "user")
     create_user("principal", "principal@test.local", "testpassword123", "Principal", "user")
-    owner_token = create_session("ownerprincipal")["session_id"]
+    owner_token = operator_token_for("ownerprincipal")
     test_client.post(
         "/api/workspaces",
         headers={"Authorization": f"Bearer {owner_token}"},
@@ -182,9 +183,11 @@ def test_disabled_default_user_cannot_lend_workspace_authority(test_client, admi
     )
     assert "workspace:principalspace" in build_agent_context(agent).read_scopes
 
+    # /api/auth/* is checked with a login session token, so it uses one here.
+    admin_session = create_session("admin")["session_id"]
     test_client.put(
         "/api/auth/users/principal",
-        headers={"Authorization": f"Bearer {admin_token}"},
+        headers={"Authorization": f"Bearer {admin_session}"},
         json={"is_active": False},
     )
     context = build_agent_context(agent_service.get_agent_by_id("principalagent"))
@@ -195,8 +198,8 @@ def test_disabled_default_user_cannot_lend_workspace_authority(test_client, admi
 def test_non_owner_collaborator_cannot_manage_collaborators(test_client, admin_token):
     create_user("owner4", "owner4@test.local", "testpassword123", "Owner4", "user")
     create_user("collab4", "collab4@test.local", "testpassword123", "Collab4", "user")
-    owner_token = create_session("owner4")["session_id"]
-    collab_token = create_session("collab4")["session_id"]
+    owner_token = operator_token_for("owner4")
+    collab_token = operator_token_for("collab4")
 
     test_client.post(
         "/api/workspaces",
@@ -241,7 +244,7 @@ def test_non_owner_collaborator_cannot_manage_collaborators(test_client, admin_t
 
 def test_workspace_collaborator_listing_includes_owner_row(test_client, admin_token):
     create_user("owner3", "owner3@test.local", "testpassword123", "Owner3", "user")
-    owner_token = create_session("owner3")["session_id"]
+    owner_token = operator_token_for("owner3")
 
     created = test_client.post(
         "/api/workspaces",
@@ -264,7 +267,7 @@ def test_admin_links_a_repository_folder_and_owners_cannot(test_client, admin_to
     from app.services import session_context_service
 
     create_user("owner2", "owner2@test.local", "testpassword123", "Owner", "user")
-    owner = {"Authorization": f"Bearer {create_session('owner2')['session_id']}"}
+    owner = {"Authorization": f"Bearer {operator_token_for('owner2')}"}
     admin = {"Authorization": f"Bearer {admin_token}"}
     assert test_client.post("/api/workspaces", headers=owner, json={"id": "linked", "name": "Linked"}).status_code == 201
 
@@ -287,7 +290,9 @@ def test_admin_links_a_repository_folder_and_owners_cannot(test_client, admin_to
 
 
 def test_workspaces_page_script_does_not_call_server_helpers(test_client, admin_token):
-    test_client.cookies.set("session_token", admin_token)
+    # The dashboard page is read with the browser's session cookie, so it needs
+    # a real login session (an operator token is a Bearer key, not a session).
+    test_client.cookies.set("session_token", create_session("admin")["session_id"])
     page = test_client.get("/workspaces").text
     test_client.cookies.clear()
     assert "get_icon(" not in page

@@ -106,7 +106,12 @@ def admin_token(test_client):
         "password": "testpassword123",
     })
     assert r2.status_code == 200, f"login failed: {r2.json()}"
-    return r2.json()["data"]["session_id"]
+    # A login session is a Bearer key only on /api/auth/*; tests act as the
+    # admin everywhere, which is what an operator token is for.
+    from app.services.auth_service import create_operator_token
+
+    token, _ = create_operator_token(r2.json()["data"]["user_id"], 60, "tests")
+    return token
 
 
 @pytest.fixture(scope="function")
@@ -124,3 +129,20 @@ def agent_token(test_client, admin_token):
     )
     assert key_response.status_code == 200, f"agent key generate failed: {key_response.json()}"
     return key_response.json()["data"]["api_key"]
+
+
+def operator_token_for(user_id: str) -> str:
+    """A Bearer token that acts as `user_id` on any route (login sessions are
+    Bearer keys only on /api/auth/*)."""
+    from app.services.auth_service import create_operator_token
+
+    return create_operator_token(user_id, 60, "tests")[0]
+
+
+def csrf_headers(client) -> dict:
+    """The CSRF header for state-changing requests a test client makes with its
+    session cookie (dashboard pages add it to every fetch)."""
+    from app.services.auth_service import CSRF_HEADER, csrf_token_for_session_token
+
+    token = csrf_token_for_session_token(client.cookies.get("session_token") or "")
+    return {CSRF_HEADER: token} if token else {}

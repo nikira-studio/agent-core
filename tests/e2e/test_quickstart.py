@@ -1,5 +1,8 @@
 
 
+from tests.conftest import operator_token_for
+
+
 def test_quickstart_sequence(test_client, clean_db):
     r = test_client.get("/health")
     assert r.status_code == 200
@@ -13,6 +16,7 @@ def test_quickstart_sequence(test_client, clean_db):
         },
     )
     assert r.status_code == 200
+    user_id = r.json()["data"]["user_id"]
 
     r = test_client.post(
         "/api/auth/login",
@@ -22,18 +26,21 @@ def test_quickstart_sequence(test_client, clean_db):
         },
     )
     assert r.status_code == 200
-    session_id = r.json()["data"]["session_id"]
+    assert r.json()["data"]["session_id"]
+    # A login session is a Bearer key only on /api/auth/*; the rest of the
+    # quickstart acts as the user with an operator token.
+    operator = operator_token_for(user_id)
 
     r = test_client.post(
         "/api/agents",
-        headers={"Authorization": f"Bearer {session_id}"},
+        headers={"Authorization": f"Bearer {operator}"},
         json={"id": "quickstart-agent", "display_name": "Quickstart Agent"},
     )
     assert r.status_code == 201
 
     r = test_client.post(
         "/api/integrations/generate-connection",
-        headers={"Authorization": f"Bearer {session_id}"},
+        headers={"Authorization": f"Bearer {operator}"},
         json={"user_id": "admin", "agent_id": "quickstart-agent", "output_type": "env"},
     )
     assert r.status_code == 200

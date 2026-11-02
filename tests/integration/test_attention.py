@@ -10,6 +10,7 @@ import json
 
 from app.database import get_db
 from app.services import activity_service, agent_service, webhook_service, workspace_service
+from tests.conftest import csrf_headers
 
 A = "workspace:att-a"
 B = "workspace:att-b"
@@ -168,7 +169,13 @@ def test_handoffs_reach_webhooks_and_the_change_feed(test_client, admin_token, m
     assert payload["handoff"]["needs_human"] == "Approve the release"
     assert payload["handoff_resolved_at"] is None
 
-    resolved = test_client.post(f"/api/activity/{created['id']}/handoff/resolve", cookies=_admin_cookie())
+    # A person resolves it, with the browser's session cookie and its CSRF token.
+    test_client.cookies.clear()
+    test_client.cookies.set("session_token", _admin_session())
+    resolved = test_client.post(
+        f"/api/activity/{created['id']}/handoff/resolve",
+        headers=csrf_headers(test_client),
+    )
     assert resolved.status_code == 200, resolved.json()
     event, payload = events[-1]
     assert event == "activity_handoff_resolved"
@@ -187,12 +194,12 @@ def test_handoffs_reach_webhooks_and_the_change_feed(test_client, admin_token, m
     assert recorded["task_ref"] == "jobs:release-1"
 
 
-def _admin_cookie():
+def _admin_session():
     from app.services.auth_service import create_session
 
     with get_db() as conn:
         admin_id = conn.execute("SELECT id FROM users WHERE role = 'admin' LIMIT 1").fetchone()["id"]
-    return {"session_token": create_session(admin_id, channel="dashboard")["session_id"]}
+    return create_session(admin_id, channel="dashboard")["session_id"]
 
 
 def test_webhook_offers_the_handoff_resolved_event():

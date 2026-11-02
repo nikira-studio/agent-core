@@ -1,6 +1,8 @@
 """Integration tests for manual audit/activity pruning."""
 import pytest
 
+from tests.conftest import csrf_headers
+
 
 @pytest.fixture
 def admin_client(test_client, clean_db):
@@ -43,6 +45,7 @@ class TestManualPrune:
         r = admin_client.post(
             "/api/dashboard/prune",
             json={"resource_type": "audit", "before_date": "2001-01-01"},
+            headers=csrf_headers(admin_client),
         )
         assert r.status_code == 200
         assert r.json()["data"]["deleted_count"] >= 1
@@ -86,6 +89,7 @@ class TestManualPrune:
         r = admin_client.post(
             "/api/dashboard/prune",
             json={"resource_type": "activity", "before_date": "2001-01-01"},
+            headers=csrf_headers(admin_client),
         )
         assert r.status_code == 200
         assert r.json()["data"]["deleted_count"] >= 1
@@ -106,5 +110,6 @@ class TestManualPrune:
         r = user_client.post(
             "/api/dashboard/prune",
             json={"resource_type": "audit", "before_date": "2001-01-01"},
+            headers=csrf_headers(user_client),
         )
         assert r.status_code in (302, 403)

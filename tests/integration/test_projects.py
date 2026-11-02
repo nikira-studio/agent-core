@@ -1,5 +1,8 @@
 
 
+from tests.conftest import operator_token_for
+
+
 def test_project_create(test_client, admin_token):
     from app.services import audit_service
 
@@ -56,10 +59,10 @@ def test_project_deactivate(test_client, admin_token):
 
 def test_non_admin_can_manage_owned_project(test_client, admin_token):
     from app.services import audit_service
-    from app.services.auth_service import create_user, create_session
+    from app.services.auth_service import create_user
 
     create_user("owner", "owner@test.local", "testpassword123", "Owner", "user")
-    owner_token = create_session("owner")["session_id"]
+    owner_token = operator_token_for("owner")
     create = test_client.post(
         "/api/workspaces",
         headers={"Authorization": f"Bearer {owner_token}"},
@@ -83,13 +86,13 @@ def test_non_admin_can_manage_owned_project(test_client, admin_token):
 
 
 def test_non_admin_cannot_manage_unowned_project(test_client, admin_token):
-    from app.services.auth_service import create_user, create_session
+    from app.services.auth_service import create_user
     from app.services.workspace_service import create_workspace
 
     create_user("owner", "owner@test.local", "testpassword123", "Owner", "user")
     create_user("other", "other@test.local", "testpassword123", "Other", "user")
     create_workspace("other-workspace", "Other Workspace", "other")
-    owner_token = create_session("owner")["session_id"]
+    owner_token = operator_token_for("owner")
 
     update = test_client.put(
         "/api/workspaces/other-workspace",
@@ -106,7 +109,6 @@ def test_project_purge_removes_scoped_data_and_access_references(
     from app.database import get_db
     from app.services import (
         agent_service,
-        auth_service,
         memory_service,
         credential_service,
         workspace_service,
@@ -129,7 +131,7 @@ def test_project_purge_removes_scoped_data_and_access_references(
         value_plaintext="workspace secret",
         created_by="admin",
     )
-    fresh_admin_token = auth_service.create_session("admin")["session_id"]
+    fresh_admin_token = operator_token_for("admin")
 
     r = test_client.post(
         "/api/workspaces/purge-workspace/purge",

@@ -692,3 +692,78 @@ def delete_user_endpoint(
         ip_address=get_client_ip(request),
     )
     return success_response({"message": "User deleted"})
+
+
+class OperatorTokenRequest(BaseModel):
+    minutes: int = 30
+    label: str | None = None
+
+
+def _browser_session(request: Request) -> dict:
+    """The signed-in person, from the browser cookie only.
+
+    Minting an operator token turns a sign-in into a key for the whole API, so
+    it takes the cookie session (with its CSRF token), never a Bearer token: an
+    app that uses this server as its sign-in holds a Bearer session for
+    /api/auth/* and must not be able to widen it.
+    """
+    from app.security.exceptions import APIError
+
+    if request.headers.get("Authorization"):
+        raise APIError("COOKIE_SESSION_REQUIRED", "Use the dashboard: operator tokens are managed with the browser session", 403)
+    session = validate_session(
+        request.cookies.get("session_token") or "",
+        inactivity_minutes=settings.INACTIVITY_TIMEOUT_MINUTES,
+    )
+    if not session:
+        raise APIError("UNAUTHORIZED", "Authentication required", 401)
+    return session
+
+
+@router.post("/operator-tokens")
+def create_operator_token_route(body: OperatorTokenRequest, request: Request):
+    from app.services.auth_service import create_operator_token
+
+    session = _browser_session(request)
+    try:
+        token, record = create_operator_token(session["user_id"], body.minutes, body.label)
+    except ValueError as e:
+        return error_response("INVALID_MINUTES", str(e), 400)
+    audit_service.write_event(
+        actor_type="user",
+        actor_id=session["user_id"],
+        action="operator_token_created",
+        resource_type="operator_token",
+        resource_id=record["id"],
+        result="success",
+        details={"label": record["label"], "expires_at": record["expires_at"]},
+        ip_address=get_client_ip(request),
+    )
+    return success_response({**record, "token": token})
+
+
+@router.get("/operator-tokens")
+def list_operator_tokens_route(request: Request):
+    from app.services.auth_service import list_operator_tokens
+
+    session = _browser_session(request)
+    return success_response({"tokens": list_operator_tokens(session["user_id"])})
+
+
+@router.delete("/operator-tokens/{token_id}")
+def revoke_operator_token_route(token_id: str, request: Request):
+    from app.services.auth_service import revoke_operator_token
+
+    session = _browser_session(request)
+    if not revoke_operator_token(session["user_id"], token_id):
+        return error_response("NOT_FOUND", "No active operator token with that id", 404)
+    audit_service.write_event(
+        actor_type="user",
+        actor_id=session["user_id"],
+        action="operator_token_revoked",
+        resource_type="operator_token",
+        resource_id=token_id,
+        result="success",
+        ip_address=get_client_ip(request),
+    )
+    return success_response({"revoked": token_id})

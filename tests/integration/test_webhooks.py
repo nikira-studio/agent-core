@@ -4,6 +4,8 @@ import json
 import pytest
 from unittest.mock import patch, MagicMock
 
+from tests.conftest import csrf_headers
+
 
 # ---------------------------------------------------------------------------
 # Fixtures / helpers
@@ -48,6 +50,7 @@ def _create_webhook(
                 "event_types": event_types
                 or ["activity_created", "activity_cancelled"],
             },
+            headers=csrf_headers(client),
         )
 
 
@@ -77,7 +80,9 @@ class TestWebhookAdminCRUD:
         wh_id = _create_webhook(admin_client).json()["data"]["webhook"]["id"]
         with patch("app.security.url_validation.validate_public_url"):
             r = admin_client.put(
-                f"/api/webhooks/{wh_id}", json={"name": "Renamed", "enabled": False}
+                f"/api/webhooks/{wh_id}",
+                json={"name": "Renamed", "enabled": False},
+                headers=csrf_headers(admin_client),
             )
         assert r.status_code == 200
         updated = r.json()["data"]["webhook"]
@@ -86,7 +91,9 @@ class TestWebhookAdminCRUD:
 
     def test_admin_can_delete_webhook(self, admin_client):
         wh_id = _create_webhook(admin_client).json()["data"]["webhook"]["id"]
-        r = admin_client.delete(f"/api/webhooks/{wh_id}")
+        r = admin_client.delete(
+            f"/api/webhooks/{wh_id}", headers=csrf_headers(admin_client)
+        )
         assert r.status_code == 200
         r2 = admin_client.get(f"/api/webhooks/{wh_id}")
         assert r2.status_code == 404
@@ -101,6 +108,7 @@ class TestWebhookAdminCRUD:
                     "secret": "x",
                     "event_types": ["activity_created"],
                 },
+                headers=csrf_headers(user_client),
             )
         assert r.status_code == 403
 
@@ -124,6 +132,7 @@ class TestWebhookAdminCRUD:
                     "secret": "x",
                     "event_types": ["not_a_real_event"],
                 },
+                headers=csrf_headers(admin_client),
             )
         assert r.status_code == 400
 
@@ -137,6 +146,7 @@ class TestWebhookAdminCRUD:
                     "secret": "x",
                     "event_types": [],
                 },
+                headers=csrf_headers(admin_client),
             )
         assert r.status_code == 400
 
@@ -319,7 +329,11 @@ class TestWebhookDelivery:
             "data"
         ]["webhook"]["id"]
         with patch("app.security.url_validation.validate_public_url"):
-            admin_client.put(f"/api/webhooks/{wh_id}", json={"enabled": False})
+            admin_client.put(
+                f"/api/webhooks/{wh_id}",
+                json={"enabled": False},
+                headers=csrf_headers(admin_client),
+            )
 
         with patch("threading.Thread") as mock_thread:
             webhook_service.dispatch_event("activity_created", {"activity_id": "abc"})
@@ -345,7 +359,9 @@ class TestTestDelivery:
         with patch(
             "app.services.webhook_service.safe_httpx_post", side_effect=mock_post
         ):
-            r = admin_client.post(f"/api/webhooks/{wh_id}/test")
+            r = admin_client.post(
+                f"/api/webhooks/{wh_id}/test", headers=csrf_headers(admin_client)
+            )
 
         assert r.status_code == 200
         assert r.json()["data"]["ok"] is True
@@ -375,7 +391,9 @@ class TestTestDelivery:
         with patch(
             "app.services.webhook_service.safe_httpx_post", side_effect=mock_post
         ):
-            r = admin_client.post(f"/api/webhooks/{wh_id}/test")
+            r = admin_client.post(
+                f"/api/webhooks/{wh_id}/test", headers=csrf_headers(admin_client)
+            )
         assert r.json()["data"]["ok"] is True
 
     def test_test_delivery_logged(self, admin_client):
@@ -389,7 +407,9 @@ class TestTestDelivery:
         with patch(
             "app.services.webhook_service.safe_httpx_post", side_effect=mock_post
         ):
-            admin_client.post(f"/api/webhooks/{wh_id}/test")
+            admin_client.post(
+                f"/api/webhooks/{wh_id}/test", headers=csrf_headers(admin_client)
+            )
 
         r = admin_client.get(f"/api/webhooks/{wh_id}/deliveries")
         deliveries = r.json()["data"]["deliveries"]
@@ -406,7 +426,9 @@ class TestTestDelivery:
         with patch(
             "app.services.webhook_service.safe_httpx_post", side_effect=mock_post
         ):
-            r = admin_client.post(f"/api/webhooks/{wh_id}/test")
+            r = admin_client.post(
+                f"/api/webhooks/{wh_id}/test", headers=csrf_headers(admin_client)
+            )
 
         data = r.json()["data"]
         assert data["http_status"] == 503

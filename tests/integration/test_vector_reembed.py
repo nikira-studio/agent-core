@@ -9,6 +9,7 @@ import pytest
 from app.database import get_db
 from app.services import embedding_service, reembed_service, system_settings_service
 from app.services.vector_settings_service import save_vector_settings
+from tests.conftest import csrf_headers
 
 SCOPE = "workspace:reembed-test"
 
@@ -182,16 +183,17 @@ def test_routes_report_and_start_a_run(admin_client, monkeypatch):
     assert r.status_code == 200
     assert r.json()["data"]["coverage"]["missing"] == 1
 
-    r = admin_client.post("/api/dashboard/vector-reembed")
+    r = admin_client.post("/api/dashboard/vector-reembed", headers=csrf_headers(admin_client))
     assert r.status_code == 200 and r.json()["data"]["job"]["run_id"] == "r1"
     assert started == ["user:admin"]
 
-    assert admin_client.post("/api/dashboard/vector-reembed/cancel").status_code == 409
+    assert admin_client.post("/api/dashboard/vector-reembed/cancel",
+                             headers=csrf_headers(admin_client)).status_code == 409
 
 
 def test_start_route_refuses_while_vector_search_is_off(admin_client):
     save_vector_settings(enabled=False)
-    r = admin_client.post("/api/dashboard/vector-reembed")
+    r = admin_client.post("/api/dashboard/vector-reembed", headers=csrf_headers(admin_client))
     assert r.status_code == 400 and r.json()["error"]["code"] == "VECTOR_SEARCH_DISABLED"
 
 
@@ -201,7 +203,8 @@ def test_routes_are_admin_only(test_client, clean_db):
     create_user("someone", "u@test.local", "testpassword123", "User", "user")
     test_client.cookies.set("session_token", create_session("someone", channel="dashboard")["session_id"])
     assert test_client.get("/api/dashboard/vector-reembed").status_code in (401, 403)
-    assert test_client.post("/api/dashboard/vector-reembed").status_code in (401, 403)
+    assert test_client.post("/api/dashboard/vector-reembed",
+                             headers=csrf_headers(test_client)).status_code in (401, 403)
 
 
 def test_settings_page_shows_the_reembed_controls(admin_client):
@@ -271,11 +274,14 @@ def test_start_route_validates_and_passes_the_pause(admin_client, monkeypatch):
         reembed_service, "start",
         lambda by, pause_ms=0: (got.append(pause_ms) or ({"run_id": "r", "model": "new-model"}, None)),
     )
-    assert admin_client.post("/api/dashboard/vector-reembed", json={"pause_ms": 500}).status_code == 200
+    assert admin_client.post("/api/dashboard/vector-reembed", json={"pause_ms": 500},
+                             headers=csrf_headers(admin_client)).status_code == 200
     assert got == [500]
-    r = admin_client.post("/api/dashboard/vector-reembed", json={"pause_ms": 999999})
+    r = admin_client.post("/api/dashboard/vector-reembed", json={"pause_ms": 999999},
+                          headers=csrf_headers(admin_client))
     assert r.status_code == 400 and r.json()["error"]["code"] == "INVALID_PAUSE"
-    assert admin_client.post("/api/dashboard/vector-reembed", json={"pause_ms": "soon"}).status_code == 400
+    assert admin_client.post("/api/dashboard/vector-reembed", json={"pause_ms": "soon"},
+                             headers=csrf_headers(admin_client)).status_code == 400
 
 
 class _FakeEmbedResponse:
@@ -378,11 +384,15 @@ def test_estimate_route(admin_client, monkeypatch):
     monkeypatch.setattr(reembed_service, "estimate",
                         lambda model, url, *rest: seen.append((model, url)) or {"ok": True, "level": "ok"})
     r = admin_client.post("/api/dashboard/vector-reembed/estimate",
-                          json={"model": "qwen3-embedding:4b", "url": "http://ollama:11434"})
+                          json={"model": "qwen3-embedding:4b", "url": "http://ollama:11434"},
+                          headers=csrf_headers(admin_client))
     assert r.status_code == 200 and seen == [("qwen3-embedding:4b", "http://ollama:11434")]
-    assert admin_client.post("/api/dashboard/vector-reembed/estimate", json={"url": "file:///etc"}).status_code == 400
-    assert admin_client.post("/api/dashboard/vector-reembed/estimate", json={"model": ""}).status_code == 400
+    assert admin_client.post("/api/dashboard/vector-reembed/estimate", json={"url": "file:///etc"},
+                             headers=csrf_headers(admin_client)).status_code == 400
+    assert admin_client.post("/api/dashboard/vector-reembed/estimate", json={"model": ""},
+                             headers=csrf_headers(admin_client)).status_code == 400
 
     monkeypatch.setattr(reembed_service, "estimate", lambda *a: {"ok": False, "error": "down"})
-    r = admin_client.post("/api/dashboard/vector-reembed/estimate")
+    r = admin_client.post("/api/dashboard/vector-reembed/estimate",
+                          headers=csrf_headers(admin_client))
     assert r.status_code == 502 and r.json()["error"]["code"] == "ESTIMATE_FAILED"

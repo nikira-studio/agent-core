@@ -1,6 +1,8 @@
 """Integration tests for the inbound webhook receiver."""
 import pytest
 
+from tests.conftest import csrf_headers
+
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -27,7 +29,7 @@ def user_client(test_client, clean_db):
 
 @pytest.fixture
 def inbound_key(admin_client):
-    r = admin_client.post("/api/webhooks/inbound/key")
+    r = admin_client.post("/api/webhooks/inbound/key", headers=csrf_headers(admin_client))
     assert r.status_code == 201
     return r.json()["data"]["key"]
 
@@ -43,7 +45,7 @@ class TestInboundKeyManagement:
         assert r.json()["data"]["has_key"] is False
 
     def test_generate_key_returns_plaintext(self, admin_client):
-        r = admin_client.post("/api/webhooks/inbound/key")
+        r = admin_client.post("/api/webhooks/inbound/key", headers=csrf_headers(admin_client))
         assert r.status_code == 201
         data = r.json()["data"]
         assert data["key"].startswith("ac_inbound_")
@@ -54,35 +56,35 @@ class TestInboundKeyManagement:
         assert r.json()["data"]["has_key"] is True
 
     def test_generate_key_twice_is_409(self, admin_client, inbound_key):
-        r = admin_client.post("/api/webhooks/inbound/key")
+        r = admin_client.post("/api/webhooks/inbound/key", headers=csrf_headers(admin_client))
         assert r.status_code == 409
 
     def test_rotate_key_succeeds(self, admin_client, inbound_key):
-        r = admin_client.post("/api/webhooks/inbound/key/rotate")
+        r = admin_client.post("/api/webhooks/inbound/key/rotate", headers=csrf_headers(admin_client))
         assert r.status_code == 200
         new_key = r.json()["data"]["key"]
         assert new_key.startswith("ac_inbound_")
         assert new_key != inbound_key
 
     def test_rotate_invalidates_old_key(self, admin_client, inbound_key):
-        admin_client.post("/api/webhooks/inbound/key/rotate")
+        admin_client.post("/api/webhooks/inbound/key/rotate", headers=csrf_headers(admin_client))
         r = admin_client.post(
             "/api/webhooks/inbound",
             json={"event_type": "activity.create", "assigned_agent_id": "codex"},
-            headers={"X-Agent-Core-Inbound-Key": inbound_key},
+            headers={**csrf_headers(admin_client), "X-Agent-Core-Inbound-Key": inbound_key},
         )
         assert r.status_code == 401
 
     def test_rotate_without_key_is_404(self, admin_client):
-        r = admin_client.post("/api/webhooks/inbound/key/rotate")
+        r = admin_client.post("/api/webhooks/inbound/key/rotate", headers=csrf_headers(admin_client))
         assert r.status_code == 404
 
     def test_non_admin_cannot_generate_key(self, user_client):
-        r = user_client.post("/api/webhooks/inbound/key")
+        r = user_client.post("/api/webhooks/inbound/key", headers=csrf_headers(user_client))
         assert r.status_code == 403
 
     def test_non_admin_cannot_rotate_key(self, user_client):
-        r = user_client.post("/api/webhooks/inbound/key/rotate")
+        r = user_client.post("/api/webhooks/inbound/key/rotate", headers=csrf_headers(user_client))
         assert r.status_code == 403
 
     def test_non_admin_cannot_view_key_status(self, user_client):
@@ -106,7 +108,7 @@ class TestInboundAuth:
         r = admin_client.post(
             "/api/webhooks/inbound",
             json={"event_type": "activity.create", "assigned_agent_id": "codex"},
-            headers={"X-Agent-Core-Inbound-Key": "totally-wrong-key"},
+            headers={**csrf_headers(admin_client), "X-Agent-Core-Inbound-Key": "totally-wrong-key"},
         )
         assert r.status_code == 401
 
@@ -114,7 +116,7 @@ class TestInboundAuth:
         r = admin_client.post(
             "/api/webhooks/inbound",
             json={"event_type": "activity.create", "assigned_agent_id": "codex", "task_description": "test"},
-            headers={"X-Agent-Core-Inbound-Key": inbound_key},
+            headers={**csrf_headers(admin_client), "X-Agent-Core-Inbound-Key": inbound_key},
         )
         assert r.status_code == 200
         assert r.json()["ok"] is True
@@ -129,7 +131,7 @@ class TestInboundActivityCreate:
         r = admin_client.post(
             "/api/webhooks/inbound",
             json={"event_type": "activity.create"},
-            headers={"X-Agent-Core-Inbound-Key": inbound_key},
+            headers={**csrf_headers(admin_client), "X-Agent-Core-Inbound-Key": inbound_key},
         )
         assert r.status_code == 400
 
@@ -142,7 +144,7 @@ class TestInboundActivityCreate:
                 "task_description": "Review webhook implementation",
                 "workspace": "workspace:agent-core",
             },
-            headers={"X-Agent-Core-Inbound-Key": inbound_key},
+            headers={**csrf_headers(admin_client), "X-Agent-Core-Inbound-Key": inbound_key},
         )
         assert r.status_code == 200
         data = r.json()["data"]
@@ -153,7 +155,7 @@ class TestInboundActivityCreate:
         admin_client.post(
             "/api/webhooks/inbound",
             json={"event_type": "activity.create", "assigned_agent_id": "codex", "task_description": "from inbound"},
-            headers={"X-Agent-Core-Inbound-Key": inbound_key},
+            headers={**csrf_headers(admin_client), "X-Agent-Core-Inbound-Key": inbound_key},
         )
         from app.services import activity_service
         activities = activity_service.list_activities()
@@ -176,7 +178,7 @@ class TestInboundActivityAssign:
         r = admin_client.post(
             "/api/webhooks/inbound",
             json={"event_type": "activity.assign", "assigned_agent_id": "opus"},
-            headers={"X-Agent-Core-Inbound-Key": inbound_key},
+            headers={**csrf_headers(admin_client), "X-Agent-Core-Inbound-Key": inbound_key},
         )
         assert r.status_code == 400
 
@@ -185,7 +187,7 @@ class TestInboundActivityAssign:
         r = admin_client.post(
             "/api/webhooks/inbound",
             json={"event_type": "activity.assign", "activity_id": act["id"]},
-            headers={"X-Agent-Core-Inbound-Key": inbound_key},
+            headers={**csrf_headers(admin_client), "X-Agent-Core-Inbound-Key": inbound_key},
         )
         assert r.status_code == 400
 
@@ -194,7 +196,7 @@ class TestInboundActivityAssign:
         r = admin_client.post(
             "/api/webhooks/inbound",
             json={"event_type": "activity.assign", "activity_id": act["id"], "assigned_agent_id": "opus"},
-            headers={"X-Agent-Core-Inbound-Key": inbound_key},
+            headers={**csrf_headers(admin_client), "X-Agent-Core-Inbound-Key": inbound_key},
         )
         assert r.status_code == 200
         assert r.json()["data"]["assigned_agent_id"] == "opus"
@@ -213,7 +215,7 @@ class TestInboundActivityCancel:
         r = admin_client.post(
             "/api/webhooks/inbound",
             json={"event_type": "activity.cancel", "activity_id": act["id"], "reason": "no longer needed"},
-            headers={"X-Agent-Core-Inbound-Key": inbound_key},
+            headers={**csrf_headers(admin_client), "X-Agent-Core-Inbound-Key": inbound_key},
         )
         assert r.status_code == 200
         assert r.json()["data"]["status"] == "cancelled"
@@ -232,7 +234,7 @@ class TestInboundActivityNote:
         r = admin_client.post(
             "/api/webhooks/inbound",
             json={"event_type": "activity.note", "activity_id": act["id"], "note": ""},
-            headers={"X-Agent-Core-Inbound-Key": inbound_key},
+            headers={**csrf_headers(admin_client), "X-Agent-Core-Inbound-Key": inbound_key},
         )
         assert r.status_code == 400
 
@@ -244,7 +246,7 @@ class TestInboundActivityNote:
         r = admin_client.post(
             "/api/webhooks/inbound",
             json={"event_type": "activity.note", "activity_id": act["id"], "note": "handoff complete"},
-            headers={"X-Agent-Core-Inbound-Key": inbound_key},
+            headers={**csrf_headers(admin_client), "X-Agent-Core-Inbound-Key": inbound_key},
         )
         assert r.status_code == 200
         assert r.json()["data"]["noted"] is True
@@ -262,7 +264,7 @@ class TestInboundUnknownEvent:
         r = admin_client.post(
             "/api/webhooks/inbound",
             json={"event_type": "activity.delete"},
-            headers={"X-Agent-Core-Inbound-Key": inbound_key},
+            headers={**csrf_headers(admin_client), "X-Agent-Core-Inbound-Key": inbound_key},
         )
         assert r.status_code == 400
 

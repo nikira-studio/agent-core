@@ -88,6 +88,16 @@ async def _lifespan(app: FastAPI):
         await stop_maintenance_scheduler(app.state.maintenance_task)
 
 
+
+# Routes a browser reaches before it has a usable session, or where a forged
+# request does no harm (signing out), so they need no CSRF token.
+CSRF_EXEMPT_PATHS = frozenset({
+    "/api/auth/login",
+    "/api/auth/register",
+    "/api/auth/otp/verify",
+    "/api/auth/logout",
+})
+
 def create_app() -> FastAPI:
     app = FastAPI(
         title=APP_NAME,
@@ -95,6 +105,36 @@ def create_app() -> FastAPI:
         description=f"{APP_NAME} local-first AI agent control layer",
         lifespan=_lifespan,
     )
+
+    @app.middleware("http")
+    async def csrf_protection(request: Request, call_next):
+        # A state-changing request authenticated by the session cookie must
+        # carry the CSRF token the dashboard pages embed. Requests with an
+        # Authorization header are not cookie-authenticated, so they skip it.
+        if (
+            request.method not in ("GET", "HEAD", "OPTIONS")
+            and "authorization" not in request.headers
+            and request.url.path not in CSRF_EXEMPT_PATHS
+        ):
+            cookie = request.cookies.get("session_token")
+            if cookie:
+                import hmac
+
+                from app.services.auth_service import CSRF_HEADER, csrf_token_for_session_token
+
+                expected = csrf_token_for_session_token(cookie)
+                sent = request.headers.get(CSRF_HEADER, "")
+                if expected and not hmac.compare_digest(expected, sent):
+                    from fastapi.responses import JSONResponse
+
+                    return JSONResponse(
+                        status_code=403,
+                        content={"ok": False, "error": {
+                            "code": "CSRF_FAILED",
+                            "message": f"Missing or wrong {CSRF_HEADER}; reload the page and try again",
+                        }},
+                    )
+        return await call_next(request)
 
     @app.middleware("http")
     async def security_headers(request: Request, call_next):

@@ -1,7 +1,11 @@
 from fastapi import Depends, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
-from app.services.auth_service import validate_session
+from app.services.auth_service import (
+    OPERATOR_TOKEN_PREFIX,
+    validate_operator_token,
+    validate_session,
+)
 from app.security.context import (
     build_user_context,
     build_user_context_for_connectors,
@@ -13,6 +17,14 @@ from app.config import settings
 
 security = HTTPBearer(auto_error=False)
 
+# Apps that use this server as their sign-in send the login session token as a
+# Bearer key, but only to these routes (identity, effective authority, logout).
+BEARER_SESSION_PATH_PREFIX = "/api/auth/"
+
+
+def bearer_session_allowed(path: str) -> bool:
+    return path.startswith(BEARER_SESSION_PATH_PREFIX)
+
 
 async def get_current_session(
     request: Request,
@@ -20,7 +32,21 @@ async def get_current_session(
 ) -> dict:
     session_token = None
     if credentials:
-        session_token = credentials.credentials
+        bearer = credentials.credentials
+        if bearer.startswith(OPERATOR_TOKEN_PREFIX):
+            session = validate_operator_token(bearer)
+            if not session:
+                raise APIError("SESSION_INVALID", "Operator token expired, revoked or invalid", 401)
+            return session
+        if not bearer_session_allowed(request.url.path):
+            raise APIError(
+                "SESSION_BEARER_NOT_ALLOWED",
+                "A login session token is accepted as a Bearer key only on /api/auth/*. "
+                "Scripts that act as a person should use an operator token "
+                "(POST /api/auth/operator-tokens while signed in); agents use their agent key.",
+                401,
+            )
+        session_token = bearer
     elif request.cookies.get("session_token"):
         session_token = request.cookies.get("session_token")
 

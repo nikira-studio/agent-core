@@ -1,6 +1,7 @@
 import pytest
 
 from app.branding import APP_NAME
+from tests.conftest import csrf_headers
 
 
 @pytest.fixture
@@ -138,6 +139,7 @@ def test_dashboard_search_spans_operational_state(admin_client):
     r = admin_client.post(
         "/api/dashboard/search",
         json={"query": "Search Alpha", "limit": 5},
+        headers=csrf_headers(admin_client),
     )
     assert r.status_code == 200
     data = r.json()["data"]

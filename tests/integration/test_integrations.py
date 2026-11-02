@@ -7,6 +7,7 @@ from app.services.agent_service import create_agent
 from app.services.workspace_service import create_workspace
 from app.services.credential_service import create_credential
 from app.services import activity_service
+from tests.conftest import csrf_headers
 
 
 @pytest.fixture
@@ -425,6 +426,7 @@ def test_integrations_generate_connection_endpoint(integrations_client):
     r = integrations_client.post(
         "/api/integrations/generate-connection",
         json={"user_id": "alex", "workspace_id": "agent-core", "agent_id": "claude-code", "output_type": "env"},
+        headers=csrf_headers(integrations_client),
     )
     assert r.status_code == 200
     data = r.json()["data"]
@@ -442,6 +444,7 @@ def test_integrations_preview_and_apply_access_endpoints(integrations_client):
             "target": "claude_code",
             "output_type": "claude_md",
         },
+        headers=csrf_headers(integrations_client),
     )
     assert preview.status_code == 200
     preview_data = preview.json()["data"]
@@ -456,6 +459,7 @@ def test_integrations_preview_and_apply_access_endpoints(integrations_client):
             "agent_id": "claude-code",
             "include_user_write": False,
         },
+        headers=csrf_headers(integrations_client),
     )
     assert apply_access.status_code == 200
     assert "read_scopes" in apply_access.json()["data"]

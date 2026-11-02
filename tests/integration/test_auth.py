@@ -4,6 +4,7 @@ import pytest
 
 from app.database import get_db
 from app.security.rate_limiter import RL
+from tests.conftest import operator_token_for
 
 
 def test_health_endpoint(test_client):
@@ -95,15 +96,24 @@ def test_disabling_a_user_revokes_sessions_and_blocks_login(test_client, admin_t
 
     create_user("disabled", "disabled@test.local", "testpassword123", "Disabled User")
     old_session = create_session("disabled")["session_id"]
+    # A login session is a Bearer key only on /api/auth/*; to act as the user
+    # elsewhere the test needs an operator token.
+    disabled_token = operator_token_for("disabled")
+    # /api/auth/* is checked with a login session token, so it uses one here.
+    admin_session = create_session("admin")["session_id"]
     disabled = test_client.put(
         "/api/auth/users/disabled",
-        headers={"Authorization": f"Bearer {admin_token}"},
+        headers={"Authorization": f"Bearer {admin_session}"},
         json={"is_active": False},
     )
     assert disabled.status_code == 200, disabled.json()
 
+    revoked = test_client.get(
+        "/api/auth/effective-authority", headers={"Authorization": f"Bearer {old_session}"}
+    )
+    assert revoked.status_code == 401, revoked.json()
     existing = test_client.get(
-        "/api/agents", headers={"Authorization": f"Bearer {old_session}"}
+        "/api/agents", headers={"Authorization": f"Bearer {disabled_token}"}
     )
     assert existing.status_code == 401, existing.json()
     login = test_client.post(

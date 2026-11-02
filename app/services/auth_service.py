@@ -388,6 +388,9 @@ def get_session(session_id: str) -> Optional[dict]:
 def validate_session(
     session_token: str, inactivity_minutes: int = 30
 ) -> Optional[dict]:
+    if session_token.startswith(OPERATOR_TOKEN_PREFIX):
+        # An operator token stands in for its person wherever a session would.
+        return validate_operator_token(session_token)
     session_id = decode_jwt(session_token)
     if not session_id:
         return None
@@ -583,3 +586,127 @@ def disable_otp(user_id: str) -> bool:
         cursor = conn.execute("DELETE FROM otp_secrets WHERE user_id = ?", (user_id,))
         conn.commit()
         return cursor.rowcount > 0
+
+
+# ---------------------------------------------------------------------------
+# Operator tokens
+#
+# A login session token works as a Bearer key only on /api/auth/*. Scripts that
+# must act as a person elsewhere (attended admin scripts that create grants or
+# credentials under that person's authority) use an operator token instead: the
+# person mints it while signed in, it lasts minutes, is shown once, and can be
+# revoked. Requests made with it are audited as the person.
+
+OPERATOR_TOKEN_PREFIX = "ac_op_"
+OPERATOR_TOKEN_MIN_MINUTES = 5
+OPERATOR_TOKEN_MAX_MINUTES = 60
+OPERATOR_TOKEN_DEFAULT_MINUTES = 30
+
+
+def _operator_token_hash(token: str) -> str:
+    import hashlib
+
+    return hashlib.sha256(token.encode()).hexdigest()
+
+
+def create_operator_token(user_id: str, minutes: int = OPERATOR_TOKEN_DEFAULT_MINUTES,
+                          label: Optional[str] = None) -> tuple[str, dict]:
+    """Mint a token for `user_id`. Returns (token, record); the token is never stored."""
+    import secrets
+    import uuid
+
+    minutes = int(minutes)
+    if not OPERATOR_TOKEN_MIN_MINUTES <= minutes <= OPERATOR_TOKEN_MAX_MINUTES:
+        raise ValueError(
+            f"minutes must be between {OPERATOR_TOKEN_MIN_MINUTES} and {OPERATOR_TOKEN_MAX_MINUTES}"
+        )
+    label = (label or "").strip()[:100] or None
+    token = OPERATOR_TOKEN_PREFIX + secrets.token_urlsafe(32)
+    now = utc_now()
+    record = {
+        "id": uuid.uuid4().hex,
+        "label": label,
+        "created_at": now.isoformat(),
+        "expires_at": (now + timedelta(minutes=minutes)).isoformat(),
+    }
+    with get_db() as conn:
+        conn.execute(
+            "INSERT INTO operator_tokens (id, user_id, token_hash, label, created_at, expires_at) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (record["id"], user_id, _operator_token_hash(token), label,
+             record["created_at"], record["expires_at"]),
+        )
+        conn.commit()
+    return token, record
+
+
+def validate_operator_token(token: str) -> Optional[dict]:
+    """The session-shaped identity behind a live operator token, or None."""
+    if not token.startswith(OPERATOR_TOKEN_PREFIX):
+        return None
+    with get_db() as conn:
+        row = conn.execute(
+            """
+            SELECT t.id AS token_id, t.expires_at, t.revoked_at, u.id AS user_id,
+                   u.email, u.display_name, u.role, u.timezone, u.is_active
+            FROM operator_tokens t JOIN users u ON u.id = t.user_id
+            WHERE t.token_hash = ? AND u.is_active = 1
+            """,
+            (_operator_token_hash(token),),
+        ).fetchone()
+        if not row or row["revoked_at"] or utc_now() > parse_utc_datetime(row["expires_at"]):
+            return None
+        conn.execute("UPDATE operator_tokens SET last_used_at = ? WHERE id = ?",
+                     (utc_now_iso(), row["token_id"]))
+        conn.commit()
+    session = dict(row)
+    session.update({"id": f"operator:{row['token_id']}", "channel": "operator",
+                    "operator_token_id": row["token_id"], "last_activity": utc_now_iso()})
+    session.pop("revoked_at", None)
+    session.pop("token_id", None)
+    return session
+
+
+def list_operator_tokens(user_id: str) -> list[dict]:
+    """The user's tokens that have not expired or been revoked, newest first."""
+    now = utc_now()
+    with get_db() as conn:
+        rows = conn.execute(
+            "SELECT id, label, created_at, expires_at, last_used_at FROM operator_tokens "
+            "WHERE user_id = ? AND revoked_at IS NULL ORDER BY created_at DESC",
+            (user_id,),
+        ).fetchall()
+    return [dict(r) for r in rows if parse_utc_datetime(r["expires_at"]) > now]
+
+
+def revoke_operator_token(user_id: str, token_id: str) -> bool:
+    with get_db() as conn:
+        cursor = conn.execute(
+            "UPDATE operator_tokens SET revoked_at = ? WHERE id = ? AND user_id = ? AND revoked_at IS NULL",
+            (utc_now_iso(), token_id, user_id),
+        )
+        conn.commit()
+        return cursor.rowcount > 0
+
+
+# ---------------------------------------------------------------------------
+# CSRF
+#
+# Requests authenticated by the session cookie that change state must carry
+# X-CSRF-Token. The token is derived from the session id with the session key,
+# so it needs no storage and is known to every page rendered for the session.
+
+CSRF_HEADER = "X-CSRF-Token"
+
+
+def csrf_token_for_session_id(session_id: str) -> str:
+    import hashlib
+    import hmac
+
+    return hmac.new(_session_signing_key(), b"csrf:" + session_id.encode(), hashlib.sha256).hexdigest()
+
+
+def csrf_token_for_session_token(session_token: str) -> Optional[str]:
+    session_id = decode_jwt(session_token) if session_token else None
+    return csrf_token_for_session_id(session_id) if session_id else None
+

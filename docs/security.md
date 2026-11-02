@@ -141,6 +141,14 @@ Search queries that look like credentials, or are too short/noisy (single stop w
 
 ---
 
+## Sessions, operator tokens and CSRF
+
+A dashboard sign-in is a browser cookie. The session token returned by `/api/auth/login` also works as a Bearer key, but only on `/api/auth/*`, so an app that uses Agent Core as its sign-in can check who a person is without being able to use the rest of the API as them.
+
+A script that must act as a person everywhere, for example one that creates credential grants under that person's authority, uses an **operator token**. The person creates it in **Settings → Operator Tokens** while signed in. It lasts 5 to 60 minutes, is shown once, can be revoked, and everything done with it is recorded as that person. Operator tokens can only be created from the browser session, never with a Bearer token. Agents never need one; they use their agent keys.
+
+State-changing requests that rely on the session cookie must carry an `X-CSRF-Token` header. Dashboard pages add it automatically.
+
 ## Rate limits
 
 Rate limits protect against runaway agents and misconfigured automation. Limits are token buckets. The failed-login and failed-OTP limits are kept in the database, so every worker counts the same attempts and a restart does not reset them; the others are in process memory and reset on restart. Login limits are counted per client address and per account. Behind a reverse proxy, set `AGENT_CORE_TRUSTED_PROXIES` to the proxy's address, or every client arrives from the proxy and shares one per-address bucket.

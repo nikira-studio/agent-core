@@ -7,12 +7,13 @@ and owners of every project on the installation.
 """
 
 from app.services import agent_service, workspace_service
-from app.services.auth_service import create_session, create_user
+from app.services.auth_service import create_user
+from tests.conftest import operator_token_for
 
 
 def _user(uid, token_only=False):
     create_user(uid, f"{uid}@test.local", "testpassword123", uid.title(), "user")
-    return create_session(uid)["session_id"]
+    return operator_token_for(uid)
 
 
 def _make_workspace(client, token, wid, description="private"):

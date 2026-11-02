@@ -10,6 +10,8 @@ RESULT_TYPES = ("success", "failure", "blocked")
 AUDIT_ACTIONS = (
     "session_login",
     "session_logout",
+    "operator_token_created",
+    "operator_token_revoked",
     "user_registered",
     "agent_created",
     "agent_updated",

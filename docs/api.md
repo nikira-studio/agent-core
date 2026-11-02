@@ -68,6 +68,9 @@ Agent API keys start with `ac_sk_`. Broker credentials start with `ac_broker_`. 
 | `POST` | `/api/auth/register` | None | Register a user. First user becomes admin. |
 | `POST` | `/api/auth/login` | None | Login and receive a session token |
 | `POST` | `/api/auth/logout` | Session | End the current session |
+| `POST` | `/api/auth/operator-tokens` | Browser session | Create an operator token (`minutes` 5 to 60, optional `label`); the token is shown once |
+| `GET` | `/api/auth/operator-tokens` | Browser session | List your active operator tokens |
+| `DELETE` | `/api/auth/operator-tokens/{id}` | Browser session | Revoke one of your operator tokens |
 | `POST` | `/api/auth/password` | Session | Change password |
 | `POST` | `/api/auth/otp/enroll` | Session + password | Start TOTP enrollment and receive QR data. Reset also requires current OTP. |
 | `POST` | `/api/auth/otp/confirm` | Session | Confirm the first TOTP code and enable OTP |

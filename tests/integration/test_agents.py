@@ -1,6 +1,8 @@
 
 import json
 
+from tests.conftest import operator_token_for
+
 
 def test_create_agent(test_client, admin_token):
     r = test_client.post(
@@ -24,10 +26,10 @@ def test_create_agent(test_client, admin_token):
 
 
 def test_non_admin_can_create_and_manage_owned_agent(test_client, admin_token):
-    from app.services.auth_service import create_user, create_session
+    from app.services.auth_service import create_user
 
     create_user("owner", "owner@test.local", "testpassword123", "Owner", "user")
-    owner_token = create_session("owner")["session_id"]
+    owner_token = operator_token_for("owner")
 
     r = test_client.post(
         "/api/agents",
@@ -53,13 +55,13 @@ def test_non_admin_can_create_and_manage_owned_agent(test_client, admin_token):
 def test_non_admin_cannot_grant_unowned_or_shared_write_scopes(
     test_client, admin_token
 ):
-    from app.services.auth_service import create_user, create_session
+    from app.services.auth_service import create_user
     from app.services.workspace_service import create_workspace
 
     create_user("owner", "owner@test.local", "testpassword123", "Owner", "user")
     create_user("other", "other@test.local", "testpassword123", "Other", "user")
     create_workspace("otherproject", "Other Project", "other")
-    owner_token = create_session("owner")["session_id"]
+    owner_token = operator_token_for("owner")
 
     shared_write = test_client.post(
         "/api/agents",
@@ -98,10 +100,10 @@ def test_non_admin_cannot_grant_unowned_or_shared_write_scopes(
 def test_shared_agent_is_visible_but_read_only_to_other_users(
     test_client, admin_token
 ):
-    from app.services.auth_service import create_user, create_session
+    from app.services.auth_service import create_user
 
     create_user("viewer", "viewer@test.local", "testpassword123", "Viewer", "user")
-    viewer_token = create_session("viewer")["session_id"]
+    viewer_token = operator_token_for("viewer")
 
     created = test_client.post(
         "/api/agents",
@@ -156,10 +158,10 @@ def test_admin_can_explicitly_grant_other_users_personal_scope_to_agent(
 
 
 def test_owner_can_remove_their_own_user_scope(test_client, admin_token):
-    from app.services.auth_service import create_session, create_user
+    from app.services.auth_service import create_user
 
     create_user("owner", "owner@test.local", "testpassword123", "Owner", "user")
-    owner_token = create_session("owner")["session_id"]
+    owner_token = operator_token_for("owner")
     created = test_client.post(
         "/api/agents",
         headers={"Authorization": f"Bearer {owner_token}"},
@@ -326,7 +328,6 @@ def test_agent_purge_removes_scoped_data_and_access_references(
     from app.database import get_db
     from app.services import (
         agent_service,
-        auth_service,
         memory_service,
         credential_service,
         activity_service,
@@ -354,7 +355,7 @@ def test_agent_purge_removes_scoped_data_and_access_references(
     activity_service.create_activity(
         "purgeagent", "admin", "Purge task", "agent:purgeagent"
     )
-    fresh_admin_token = auth_service.create_session("admin")["session_id"]
+    fresh_admin_token = operator_token_for("admin")
 
     r = test_client.post(
         "/api/agents/purgeagent/purge",

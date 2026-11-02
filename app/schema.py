@@ -23,6 +23,19 @@ CREATE TABLE IF NOT EXISTS sessions (
     FOREIGN KEY (user_id) REFERENCES users(id)
 );
 
+-- Operator tokens: short-lived Bearer tokens a signed-in person mints for
+-- scripts that act as that person. Only a hash is stored.
+CREATE TABLE IF NOT EXISTS operator_tokens (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    token_hash TEXT NOT NULL UNIQUE,
+    label TEXT,
+    created_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    revoked_at TEXT,
+    last_used_at TEXT
+);
+
 -- Rate-limit buckets that must hold across workers and restarts (failed
 -- logins and OTP codes). Other limits stay in process memory.
 CREATE TABLE IF NOT EXISTS rate_limit_buckets (
@@ -527,6 +540,7 @@ def _apply_schema_migrations(conn) -> None:
         (14, "drop-removed-feature-settings", _migrate_014_drop_removed_feature_settings),
         (15, "single-use-otp-codes", _migrate_015_otp_last_used_step),
         (16, "shared-login-rate-limits", _migrate_016_rate_limit_buckets),
+        (17, "operator-tokens", _migrate_017_operator_tokens),
     )
     applied = {
         row["revision"]
@@ -1561,6 +1575,22 @@ def _migrate_015_otp_last_used_step(conn) -> None:
     columns = {row["name"] for row in conn.execute("PRAGMA table_info(otp_secrets)")}
     if "last_used_step" not in columns:
         conn.execute("ALTER TABLE otp_secrets ADD COLUMN last_used_step INTEGER")
+
+
+def _migrate_017_operator_tokens(conn) -> None:
+    """Short-lived tokens for scripts that act as a person, replacing pasted session cookies."""
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS operator_tokens (
+            id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            token_hash TEXT NOT NULL UNIQUE,
+            label TEXT,
+            created_at TEXT NOT NULL,
+            expires_at TEXT NOT NULL,
+            revoked_at TEXT,
+            last_used_at TEXT
+        )"""
+    )
 
 
 def _migrate_016_rate_limit_buckets(conn) -> None:

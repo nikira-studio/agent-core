@@ -3,6 +3,7 @@ import time
 import pytest
 
 from app.branding import APP_NAME, CREDENTIAL_PREFIX
+from tests.conftest import csrf_headers
 
 
 @pytest.fixture
@@ -87,7 +88,7 @@ def test_admin_settings_shows_maintenance_never_run(admin_client):
 
 
 def test_admin_settings_shows_maintenance_last_run_after_manual_trigger(admin_client):
-    r = admin_client.post("/api/backup/maintenance")
+    r = admin_client.post("/api/backup/maintenance", headers=csrf_headers(admin_client))
     assert r.status_code == 200, r.json()
 
     html = admin_client.get("/settings").text
@@ -131,6 +132,7 @@ def test_vector_settings_api_reads_generic_as_ollama(admin_client):
         "/api/dashboard/vector-settings",
         json={"vector_provider": "generic", "vector_model": "nomic-embed-text",
               "vector_url": "http://localhost:11434"},
+        headers=csrf_headers(admin_client),
     )
     assert r.status_code == 200
     assert r.json()["data"]["settings"]["vector_provider"] == "ollama"
@@ -145,6 +147,7 @@ def test_vector_settings_api_reads_generic_as_ollama(admin_client):
     r = admin_client.post(
         "/api/dashboard/vector-settings",
         json={"vector_provider": "cohere", "vector_model": "m", "vector_url": "http://x"},
+        headers=csrf_headers(admin_client),
     )
     assert r.status_code == 400 and r.json()["error"]["code"] == "INVALID_PROVIDER"
 
@@ -161,6 +164,7 @@ def test_vector_settings_api_saves_openai_auth_settings(admin_client):
             "vector_auth_type": "bearer",
             "vector_api_key": "test-key",
         },
+        headers=csrf_headers(admin_client),
     )
     assert r.status_code == 200
     data = r.json()["data"]["settings"]
@@ -313,6 +317,7 @@ def test_first_run_browser_path_reaches_otp_and_dashboard(test_client, clean_db)
     enroll = test_client.post(
         "/api/auth/otp/enroll",
         json={"current_password": "testpassword123"},
+        headers=csrf_headers(test_client),
     )
     assert enroll.status_code == 200
     data = enroll.json()["data"]
@@ -322,6 +327,7 @@ def test_first_run_browser_path_reaches_otp_and_dashboard(test_client, clean_db)
     confirm = test_client.post(
         "/api/auth/otp/confirm",
         json={"otp_code": pyotp.TOTP(data["secret"]).now()},
+        headers=csrf_headers(test_client),
     )
     assert confirm.status_code == 200, confirm.json()
     assert confirm.json()["data"]["message"] == "OTP enabled"
@@ -334,25 +340,29 @@ def test_otp_enrollment_requires_code_confirmation(authenticated_client):
     import pyotp
     from app.services.auth_service import is_otp_enrolled
 
-    missing_password = authenticated_client.post("/api/auth/otp/enroll", json={})
-    assert missing_password.status_code == 422
+    no_pw_given = authenticated_client.post(
+        "/api/auth/otp/enroll", json={}, headers=csrf_headers(authenticated_client)
+    )
+    assert no_pw_given.status_code == 422
 
     wrong_password = authenticated_client.post(
         "/api/auth/otp/enroll",
         json={"current_password": "wrongpassword"},
+        headers=csrf_headers(authenticated_client),
     )
     assert wrong_password.status_code == 403
 
     enroll = authenticated_client.post(
         "/api/auth/otp/enroll",
         json={"current_password": "testpassword123"},
+        headers=csrf_headers(authenticated_client),
     )
     assert enroll.status_code == 200
     data = enroll.json()["data"]
     assert is_otp_enrolled("testuser") is False
 
     bad = authenticated_client.post(
-        "/api/auth/otp/confirm", json={"otp_code": "000000"}
+        "/api/auth/otp/confirm", json={"otp_code": "000000"}, headers=csrf_headers(authenticated_client)
     )
     assert bad.status_code == 401
     assert is_otp_enrolled("testuser") is False
@@ -360,6 +370,7 @@ def test_otp_enrollment_requires_code_confirmation(authenticated_client):
     good = authenticated_client.post(
         "/api/auth/otp/confirm",
         json={"otp_code": pyotp.TOTP(data["secret"]).now()},
+        headers=csrf_headers(authenticated_client),
     )
     assert good.status_code == 200, good.json()
     assert is_otp_enrolled("testuser") is True
@@ -383,18 +394,21 @@ def test_otp_reset_keeps_existing_otp_active_until_confirmation(authenticated_cl
     reset_without_otp = authenticated_client.post(
         "/api/auth/otp/enroll",
         json={"current_password": "testpassword123"},
+        headers=csrf_headers(authenticated_client),
     )
     assert reset_without_otp.status_code == 400
 
     reset_wrong_otp = authenticated_client.post(
         "/api/auth/otp/enroll",
         json={"current_password": "testpassword123", "otp_code": "000000"},
+        headers=csrf_headers(authenticated_client),
     )
     assert reset_wrong_otp.status_code == 403
 
     pending = authenticated_client.post(
         "/api/auth/otp/enroll",
         json={"current_password": "testpassword123", "otp_code": original_code},
+        headers=csrf_headers(authenticated_client),
     )
     assert pending.status_code == 200
     assert is_otp_enrolled("testuser") is True
@@ -406,6 +420,7 @@ def test_otp_reset_keeps_existing_otp_active_until_confirmation(authenticated_cl
     confirm = authenticated_client.post(
         "/api/auth/otp/confirm",
         json={"otp_code": pyotp.TOTP(pending.json()["data"]["secret"]).now()},
+        headers=csrf_headers(authenticated_client),
     )
     assert confirm.status_code == 200, confirm.json()
     assert is_otp_enrolled("testuser") is True
@@ -433,6 +448,7 @@ def test_otp_disable_allows_reenroll(authenticated_client):
             "current_password": "testpassword123",
             "otp_code": pyotp.TOTP(secret).now(),
         },
+        headers=csrf_headers(authenticated_client),
     )
     assert disable.status_code == 200, disable.json()
     assert is_otp_enrolled("testuser") is False
@@ -440,6 +456,7 @@ def test_otp_disable_allows_reenroll(authenticated_client):
     reenroll = authenticated_client.post(
         "/api/auth/otp/enroll",
         json={"current_password": "testpassword123"},
+        headers=csrf_headers(authenticated_client),
     )
     assert reenroll.status_code == 200
     assert "secret" in reenroll.json()["data"]
@@ -449,6 +466,7 @@ def test_change_password_endpoint(authenticated_client):
     r = authenticated_client.post(
         "/api/auth/password",
         json={"current_password": "testpassword123", "new_password": "newpassword456"},
+        headers=csrf_headers(authenticated_client),
     )
     assert r.status_code == 200
     assert r.json()["ok"] is True
@@ -458,6 +476,7 @@ def test_change_password_wrong_current_fails(authenticated_client):
     r = authenticated_client.post(
         "/api/auth/password",
         json={"current_password": "wrongpassword", "new_password": "newpassword456"},
+        headers=csrf_headers(authenticated_client),
     )
     assert r.status_code == 400
     assert r.json()["ok"] is False
@@ -472,6 +491,7 @@ def test_admin_can_create_and_update_user(admin_client):
             "display_name": "New User",
             "role": "user",
         },
+        headers=csrf_headers(admin_client),
     )
     assert create.status_code == 201, create.json()
     user_id = create.json()["data"]["user"]["id"]
@@ -483,6 +503,7 @@ def test_admin_can_create_and_update_user(admin_client):
             "display_name": "Renamed User",
             "role": "admin",
         },
+        headers=csrf_headers(admin_client),
     )
     assert update.status_code == 200, update.json()
 
@@ -561,7 +582,7 @@ def test_admin_delete_user_cascades_owned_data(admin_client):
         "cleanup-agent", created["id"], "Cleanup task", "workspace:cleanup-workspace"
     )
 
-    r = admin_client.delete("/api/auth/users/cleanup-user")
+    r = admin_client.delete("/api/auth/users/cleanup-user", headers=csrf_headers(admin_client))
     assert r.status_code == 200, r.json()
 
     with get_db() as conn:
@@ -619,6 +640,7 @@ def test_admin_can_update_system_behavior_settings(admin_client):
     r = admin_client.post(
         "/api/dashboard/system-settings",
         json={"scratchpad_retention_days": "14"},
+        headers=csrf_headers(admin_client),
     )
     assert r.status_code == 200, r.json()
 
@@ -640,6 +662,7 @@ def test_admin_can_update_retracted_retention_days(admin_client):
             "retracted_retention_days": "45",
             "solo_mode_enabled": "false",
         },
+        headers=csrf_headers(admin_client),
     )
     assert r.status_code == 200, r.json()
 
@@ -658,6 +681,7 @@ def test_retracted_retention_days_omitted_is_backward_compatible(admin_client):
     r = admin_client.post(
         "/api/dashboard/system-settings",
         json={"scratchpad_retention_days": "14", "solo_mode_enabled": "false"},
+        headers=csrf_headers(admin_client),
     )
     assert r.status_code == 200, r.json()
 
@@ -670,6 +694,7 @@ def test_retracted_retention_days_rejects_out_of_range(admin_client):
             "retracted_retention_days": "0",
             "solo_mode_enabled": "false",
         },
+        headers=csrf_headers(admin_client),
     )
     assert r.status_code == 400
     assert r.json()["error"]["code"] == "INVALID_RETRACTED_RETENTION"
@@ -679,6 +704,7 @@ def test_system_behavior_settings_validate_real_ranges(admin_client):
     r = admin_client.post(
         "/api/dashboard/system-settings",
         json={"scratchpad_retention_days": "0", "solo_mode_enabled": "maybe"},
+        headers=csrf_headers(admin_client),
     )
     assert r.status_code == 400
     assert r.json()["ok"] is False
@@ -726,6 +752,7 @@ def test_user_settings_saves_timezone(authenticated_client):
     r = authenticated_client.post(
         "/api/dashboard/user-settings",
         json={"timezone": "America/New_York"},
+        headers=csrf_headers(authenticated_client),
     )
     assert r.status_code == 200
     assert r.json()["data"]["timezone"] == "America/New_York"
@@ -736,6 +763,7 @@ def test_user_settings_rejects_invalid_timezone(authenticated_client):
     r = authenticated_client.post(
         "/api/dashboard/user-settings",
         json={"timezone": "Mars/Olympus_Mons"},
+        headers=csrf_headers(authenticated_client),
     )
     assert r.status_code == 400
     assert r.json()["error"]["code"] == "INVALID_TIMEZONE"
@@ -745,10 +773,14 @@ def test_user_settings_clears_timezone(authenticated_client):
     from app.services.auth_service import get_user_by_id
 
     authenticated_client.post(
-        "/api/dashboard/user-settings", json={"timezone": "Europe/London"}
+        "/api/dashboard/user-settings",
+        json={"timezone": "Europe/London"},
+        headers=csrf_headers(authenticated_client),
     )
     r = authenticated_client.post(
-        "/api/dashboard/user-settings", json={"timezone": ""}
+        "/api/dashboard/user-settings",
+        json={"timezone": ""},
+        headers=csrf_headers(authenticated_client),
     )
     assert r.status_code == 200
     assert get_user_by_id("testuser")["timezone"] is None

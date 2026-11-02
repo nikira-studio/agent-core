@@ -1,6 +1,7 @@
 from unittest.mock import patch
 
 from app.branding import BACKUP_KEY_HEADER
+from tests.conftest import operator_token_for
 
 
 def test_backup_export_no_longer_requires_otp(test_client, admin_token):
@@ -32,11 +33,9 @@ def test_backup_export_requires_admin(test_client):
         "Backup User",
         role="user",
     )
-    session = auth_service.create_session(user["id"])
-
     r = test_client.post(
         "/api/backup/export",
-        headers={"Authorization": f"Bearer {session['session_id']}"},
+        headers={"Authorization": f"Bearer {operator_token_for(user['id'])}"},
     )
     assert r.status_code in (400, 403), (
         f"expected 400 or 403, got {r.status_code}: {r.json()}"

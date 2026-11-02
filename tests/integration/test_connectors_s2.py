@@ -1,6 +1,8 @@
 
 import json
 
+from tests.conftest import operator_token_for
+
 
 class TestConnectorMCPTools:
     def test_connectors_list_returns_seeded_types(self, test_client, admin_token):
@@ -1132,7 +1134,7 @@ class TestConnectorScopeEnforcement:
     def test_create_binding_rejects_unreadable_linked_credential(
         self, test_client, clean_db
     ):
-        from app.services.auth_service import create_user, create_session
+        from app.services.auth_service import create_user
         from app.services.credential_service import create_credential
 
         create_user(
@@ -1141,7 +1143,7 @@ class TestConnectorScopeEnforcement:
         create_user(
             "other", "other@test.local", "testpassword123", "Other User", "user"
         )
-        other_session = create_session("other")["session_id"]
+        other_token = operator_token_for("other")
         credential = create_credential(
             "user:owner",
             "owner-token",
@@ -1151,7 +1153,7 @@ class TestConnectorScopeEnforcement:
 
         r = test_client.post(
             "/api/connector-bindings",
-            headers={"Authorization": f"Bearer {other_session}"},
+            headers={"Authorization": f"Bearer {other_token}"},
             json={
                 "connector_type_id": "generic_http",
                 "name": "forbidden-binding",

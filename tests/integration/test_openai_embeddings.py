@@ -5,6 +5,7 @@ import pytest
 
 from app.services import embedding_service, reembed_service
 from app.services.vector_settings_service import save_vector_settings
+from tests.conftest import csrf_headers
 
 
 class _Resp:
@@ -107,26 +108,32 @@ def admin_client(test_client, clean_db):
 def test_model_list_route_for_openai(admin_client, openai_backend):
     calls, _ = openai_backend
     r = admin_client.post("/api/dashboard/vector-models",
-                          json={"provider": "openai", "url": "https://embed.example/v1"})
+                          json={"provider": "openai", "url": "https://embed.example/v1"},
+                          headers=csrf_headers(admin_client))
     assert r.status_code == 200
     assert r.json()["data"] == {"models": ["text-embedding-3-small", "gpt-4o"], "provider": "openai"}
     assert calls[-1][2] == {"Authorization": "Bearer sk-saved"}
 
     # A URL that is not saved gets the key typed into the form, never the saved one.
-    admin_client.post("/api/dashboard/vector-models", json={"provider": "openai", "url": "https://new.example/v1"})
+    admin_client.post("/api/dashboard/vector-models", json={"provider": "openai", "url": "https://new.example/v1"},
+                      headers=csrf_headers(admin_client))
     assert calls[-1][1] == "https://new.example/v1/models" and calls[-1][2] == {}
     admin_client.post("/api/dashboard/vector-models", json={
-        "provider": "openai", "url": "https://new.example/v1", "auth_type": "bearer", "api_key": "sk-typed"})
+        "provider": "openai", "url": "https://new.example/v1", "auth_type": "bearer", "api_key": "sk-typed"},
+        headers=csrf_headers(admin_client))
     assert calls[-1][2] == {"Authorization": "Bearer sk-typed"}
 
 
 def test_model_list_route_reports_failures(admin_client, openai_backend):
     _, state = openai_backend
-    assert admin_client.post("/api/dashboard/vector-models", json={"url": "ftp://x"}).status_code == 400
+    assert admin_client.post("/api/dashboard/vector-models", json={"url": "ftp://x"},
+                             headers=csrf_headers(admin_client)).status_code == 400
     assert admin_client.post("/api/dashboard/vector-models",
-                             json={"url": "https://embed.example/v1", "provider": "cohere"}).status_code == 400
+                             json={"url": "https://embed.example/v1", "provider": "cohere"},
+                             headers=csrf_headers(admin_client)).status_code == 400
     state["status"] = 401
-    r = admin_client.post("/api/dashboard/vector-models", json={"url": "https://embed.example/v1"})
+    r = admin_client.post("/api/dashboard/vector-models", json={"url": "https://embed.example/v1"},
+                           headers=csrf_headers(admin_client))
     assert r.status_code == 502 and "needs an API key" in r.json()["error"]["message"]
 
 
@@ -138,7 +145,8 @@ def test_model_list_route_for_ollama(admin_client, monkeypatch):
         return _Resp(200, {"models": [{"name": "nomic-embed-text:latest"}]})
 
     monkeypatch.setattr(httpx, "get", fake_get)
-    r = admin_client.post("/api/dashboard/vector-models", json={"provider": "ollama", "url": "http://ollama.test:11434"})
+    r = admin_client.post("/api/dashboard/vector-models", json={"provider": "ollama", "url": "http://ollama.test:11434"},
+                          headers=csrf_headers(admin_client))
     assert r.json()["data"]["models"] == ["nomic-embed-text:latest"]
     assert seen == ["http://ollama.test:11434/api/tags"]
 
@@ -225,7 +233,8 @@ def test_unreachable_backend_says_so(clean_db, monkeypatch):
 def test_model_list_route_explains_a_missing_v1(admin_client, monkeypatch):
     _gateway(monkeypatch)
     r = admin_client.post("/api/dashboard/vector-models",
-                          json={"provider": "openai", "url": "http://gateway.test:4000"})
+                          json={"provider": "openai", "url": "http://gateway.test:4000"},
+                          headers=csrf_headers(admin_client))
     assert r.status_code == 502
     assert "usually end in /v1" in r.json()["error"]["message"]
 
@@ -354,12 +363,14 @@ def test_query_prefix_goes_on_searches_only(clean_db, monkeypatch):
 def test_query_prefix_is_saved_from_the_form_and_shown(admin_client):
     r = admin_client.post("/api/dashboard/vector-settings", json={
         "vector_provider": "openai", "vector_url": "http://gateway.test/v1", "vector_model": "m",
-        "vector_auth_type": "none", "vector_query_prefix": "query: "})
+        "vector_auth_type": "none", "vector_query_prefix": "query: "},
+        headers=csrf_headers(admin_client))
     assert r.status_code == 200
     assert r.json()["data"]["settings"]["vector_query_prefix"] == "query: "
     assert 'id="vector-query-prefix" value="query: "' in admin_client.get("/settings").text
 
     r = admin_client.post("/api/dashboard/vector-settings", json={
         "vector_provider": "openai", "vector_url": "http://gateway.test/v1", "vector_model": "m",
-        "vector_auth_type": "none", "vector_query_prefix": "q" * 101})
+        "vector_auth_type": "none", "vector_query_prefix": "q" * 101},
+        headers=csrf_headers(admin_client))
     assert r.status_code == 400
