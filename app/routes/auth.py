@@ -43,11 +43,18 @@ router = APIRouter(prefix="/api/auth", tags=["auth"])
 
 
 def get_client_ip(request: Request) -> str:
-    if request.client and request.client.host in settings.trusted_proxy_list:
-        forwarded = request.headers.get("X-Forwarded-For")
-        if forwarded:
-            return forwarded.split(",")[0].strip()
-    return request.client.host if request.client else "unknown"
+    """The caller's address. Behind a trusted proxy it comes from X-Forwarded-For,
+    read right to left: a proxy appends the address it saw, so everything left of
+    the last untrusted hop was written by the client and can be forged."""
+    direct = request.client.host if request.client else "unknown"
+    trusted = settings.trusted_proxy_list
+    if direct not in trusted:
+        return direct
+    hops = [h.strip() for h in (request.headers.get("X-Forwarded-For") or "").split(",") if h.strip()]
+    for hop in reversed(hops):
+        if hop not in trusted:
+            return hop
+    return direct
 
 
 def _request_is_https(request: Request | None) -> bool:

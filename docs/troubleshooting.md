@@ -52,6 +52,17 @@ SQLite allows one writer at a time. If you're seeing lock errors, you probably h
 
 ## Authentication
 
+### Login says too many failed attempts
+
+Failed logins are limited per client address and per account, and the count is kept in the database, so a restart does not clear it. Behind a reverse proxy without `AGENT_CORE_TRUSTED_PROXIES`, every client shares one address, so failures from anything can lock everyone out until the limit refills (about one attempt per minute). Set `AGENT_CORE_TRUSTED_PROXIES` to the proxy's address. To clear the lockout now, from the host:
+
+```bash
+docker exec agent-core python3 -c "from app.database import get_db
+with get_db() as c: c.execute(\"DELETE FROM rate_limit_buckets WHERE bucket_key LIKE 'login_failed:%' OR bucket_key LIKE 'otp_failed:%'\"); c.commit()"
+```
+
+Adjust the container name to your install.
+
 ### My agent key returns `401`
 
 Possible causes:

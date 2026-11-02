@@ -99,3 +99,24 @@ def test_reset_clears_shared_buckets(clean_db):
         RL.check("user", "203.0.113.9", "login_failed")
     RL.reset()
     assert RL.check("user", "203.0.113.9", "login_failed")[0] is True
+
+
+def test_client_ip_reads_forwarded_for_right_to_left(monkeypatch):
+    from types import SimpleNamespace
+
+    from app.routes.auth import get_client_ip
+
+    monkeypatch.setattr(settings, "TRUSTED_PROXIES", "10.0.0.2,10.0.0.3")
+
+    def req(direct, xff=None):
+        return SimpleNamespace(client=SimpleNamespace(host=direct),
+                               headers={"X-Forwarded-For": xff} if xff else {})
+
+    # A client-written leftmost entry is ignored; the proxy's appended hop counts.
+    assert get_client_ip(req("10.0.0.2", "1.2.3.4, 198.51.100.9")) == "198.51.100.9"
+    # Chained trusted proxies are skipped.
+    assert get_client_ip(req("10.0.0.2", "1.2.3.4, 198.51.100.9, 10.0.0.3")) == "198.51.100.9"
+    # Untrusted direct callers can't use the header at all.
+    assert get_client_ip(req("203.0.113.5", "1.2.3.4")) == "203.0.113.5"
+    # A trusted proxy with no header is the caller.
+    assert get_client_ip(req("10.0.0.2")) == "10.0.0.2"
