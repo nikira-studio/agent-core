@@ -189,5 +189,7 @@ def test_the_trusted_device_copy_follows_the_setting(test_client, admin_token, m
     from app.config import settings
 
     monkeypatch.setattr(settings, "TRUSTED_DEVICE_DAYS", 90)
+    monkeypatch.setattr(settings, "TRUSTED_DEVICE_IDLE_DAYS", 21)
     _browser_admin(test_client)
-    assert "for 90 days" in test_client.get("/approvals").text
+    html = test_client.get("/approvals").text
+    assert "at least every 21 days" in html and "at most 90 days in all" in html

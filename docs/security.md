@@ -158,7 +158,7 @@ An agent that should prepare an admin change but not make it holds the `admin_pr
 - Secret values are never proposed. The person types them on the approval page.
 - An agent can have at most 10 approvals pending (50 in total), so a flood of harmless proposals cannot bury a real one.
 - Changes that widen what an agent can do (`agent.create`, `agent.update`, `credential_grant.create`, `binding.create`, `binding.update`, `connector_type.actions`: a binding hands its credential's power to every agent that can use it) cannot be approved from a trusted device; sign in to the dashboard for those.
-- **Trust this device** (Approvals page) issues a separate 14-day session in a cookie that is HttpOnly, SameSite=Strict and limited to the Approvals paths. The rest of the dashboard refuses it. Revoke devices with `DELETE /api/approvals/trusted-devices/{id}`.
+- **Trust this device** (Approvals page) issues a separate session that lapses after 7 unused days (`AGENT_CORE_TRUSTED_DEVICE_IDLE_DAYS`), with a hard cap of 14 days (`AGENT_CORE_TRUSTED_DEVICE_DAYS`) in a cookie that is HttpOnly, SameSite=Strict and limited to the Approvals paths. The rest of the dashboard refuses it. Revoke devices with `DELETE /api/approvals/trusted-devices/{id}`.
 
 ## Rate limits
 

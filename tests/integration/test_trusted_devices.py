@@ -160,3 +160,48 @@ def test_every_operation_that_widens_an_agent_needs_a_dashboard_signin():
     widening = {n for n in admin_registry.names() if admin_registry.get(n).needs_dashboard_signin}
     assert widening == {"agent.create", "agent.update", "credential_grant.create",
                         "binding.create", "binding.update", "connector_type.actions"}
+
+
+def test_trust_slides_with_use_up_to_the_cap(test_client, admin_token, monkeypatch):
+    from datetime import timedelta
+
+    from app.config import settings
+    from app.services import auth_service
+    from app.time_utils import utc_now
+
+    monkeypatch.setattr(settings, "TRUSTED_DEVICE_DAYS", 90)
+    monkeypatch.setattr(settings, "TRUSTED_DEVICE_IDLE_DAYS", 21)
+    start = utc_now()
+    cookie = auth_service.trust_device("admin")["session_id"]
+
+    def at(days):
+        # Both clocks the service reads: "now" for expiry, and the stamp it
+        # writes when a session is used.
+        now = start + timedelta(days=days)
+        monkeypatch.setattr(auth_service, "utc_now", lambda: now)
+        monkeypatch.setattr(auth_service, "utc_now_iso", lambda: now.isoformat())
+
+    def trusted():
+        return auth_service.approvals_session(type("R", (), {"cookies": {"approvals_session": cookie}})()) is not None
+
+    for day in (20, 40, 60, 80):   # used every 20 days: stays trusted past the idle window
+        at(day)
+        assert trusted(), day
+    at(91)                          # the hard cap ends it even though it was just used
+    assert not trusted()
+
+    fresh = auth_service.trust_device("admin")["session_id"]
+    at(0)
+    cookie = fresh
+    assert trusted()
+    at(22)                          # unused for longer than the idle window
+    assert not trusted()
+
+
+def test_idle_window_never_exceeds_the_cap(monkeypatch):
+    from app.config import settings
+    from app.services.auth_service import trusted_device_idle_minutes
+
+    monkeypatch.setattr(settings, "TRUSTED_DEVICE_DAYS", 10)
+    monkeypatch.setattr(settings, "TRUSTED_DEVICE_IDLE_DAYS", 30)
+    assert trusted_device_idle_minutes() == 10 * 24 * 60

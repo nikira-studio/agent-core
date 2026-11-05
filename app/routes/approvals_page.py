@@ -287,7 +287,8 @@ def approvals_page(request: Request, session: dict = Depends(_approvals_session)
 <div class="card">
   <h3>Trusted devices</h3>
   <p class="text-muted" style="font-size:0.85rem">
-    A trusted device can open and decide approvals without signing in, for """ + str(int(settings.TRUSTED_DEVICE_DAYS)) + """ days, and nothing else.
+    A trusted device can open and decide approvals without signing in, and nothing else. It stays trusted while it is
+    used at least every """ + str(max(1, min(int(settings.TRUSTED_DEVICE_IDLE_DAYS), int(settings.TRUSTED_DEVICE_DAYS)))) + """ days, and for at most """ + str(int(settings.TRUSTED_DEVICE_DAYS)) + """ days in all.
     Changes that widen what an agent can do still need a dashboard sign-in. Trust only a device you control.
   </p>
   <button type="button" class="btn" id="trust-this-device">Trust this device</button>

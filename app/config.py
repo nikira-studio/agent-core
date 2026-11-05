@@ -19,6 +19,10 @@ class Settings(BaseSettings):
     # pages accept, so a person can approve from their phone without signing
     # in each time. It also expires after this many days without use.
     TRUSTED_DEVICE_DAYS: int = 14
+    # ...and lapses sooner if it goes unused this long. Each use restarts the
+    # idle clock, up to the TRUSTED_DEVICE_DAYS cap, so a phone in daily use
+    # stays trusted and a lost one stops working within this many days.
+    TRUSTED_DEVICE_IDLE_DAYS: int = 7
     SHARED_SCOPE_AGENTS: str = ""
     TRUSTED_PROXIES: str = ""
     STALE_THRESHOLD_MINUTES: int = 5

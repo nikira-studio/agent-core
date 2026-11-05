@@ -730,6 +730,14 @@ def csrf_token_for_session_token(session_token: str) -> Optional[str]:
 # no sign-in, while the rest of the dashboard still does.
 
 
+def trusted_device_idle_minutes() -> int:
+    """How long a trusted device may go unused: the idle setting, never more
+    than the lifetime cap."""
+    from app.config import settings
+
+    return max(1, min(settings.TRUSTED_DEVICE_IDLE_DAYS, settings.TRUSTED_DEVICE_DAYS)) * 24 * 60
+
+
 def trust_device(user_id: str) -> dict:
     from app.config import settings
 
@@ -747,7 +755,7 @@ def approvals_session(request) -> Optional[dict]:
     if session:
         return session
     return validate_session(request.cookies.get(TRUSTED_DEVICE_COOKIE) or "",
-                            inactivity_minutes=settings.TRUSTED_DEVICE_DAYS * 24 * 60, approvals=True)
+                            inactivity_minutes=trusted_device_idle_minutes(), approvals=True)
 
 
 def list_trusted_devices(user_id: str) -> list[dict]:
