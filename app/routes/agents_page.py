@@ -103,7 +103,7 @@ def agents_page(request: Request, session: dict = Depends(require_auth)):
         return (
             '<div class="form-group"><label>What this agent may do</label>' + controls +
             '<p class="form-hint">Scopes decide which data an agent can reach; these decide which kinds of action it may attempt. '
-            'The last two start off for new agents. Changes apply to the next request; reconnect an MCP client to refresh its tool list.</p></div>'
+            'Read credential values and Propose admin changes start off for new agents. Changes apply to the next request; reconnect an MCP client to refresh its tool list.</p></div>'
         )
 
     capability_create_html = capability_controls("ca")
