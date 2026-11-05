@@ -823,3 +823,32 @@ def test_a_regular_user_sees_only_their_account_without_tabs(authenticated_clien
 def test_the_activity_prune_lives_in_settings_not_on_the_activity_page(admin_client):
     assert "Prune History" not in admin_client.get("/activity").text
     assert "Clear old activity" in admin_client.get("/settings").text
+
+
+def test_a_form_that_owns_only_some_settings_can_save_just_those(admin_client):
+    """The Webhooks retry policy posts only its own four values."""
+    from app.services import webhook_settings_service
+
+    r = admin_client.post(
+        "/api/dashboard/system-settings",
+        json={
+            "webhook_retry_max_attempts": "9",
+            "webhook_retry_initial_seconds": "2",
+            "webhook_retry_max_seconds": "60",
+            "webhook_retry_jitter_seconds": "1",
+        },
+        headers=csrf_headers(admin_client),
+    )
+    assert r.status_code == 200, r.json()
+    assert webhook_settings_service.retry_policy()["webhook_retry_max_attempts"] == 9
+    assert 'id="webhook-retry-max-attempts" min="1" max="100" value="9"' in admin_client.get("/webhooks").text
+
+
+def test_a_partial_save_still_rejects_a_bad_value(admin_client):
+    r = admin_client.post(
+        "/api/dashboard/system-settings",
+        json={"webhook_retry_max_attempts": "0"},
+        headers=csrf_headers(admin_client),
+    )
+    assert r.status_code == 400
+    assert r.json()["error"]["code"] == "INVALID_WEBHOOK_RETRY"

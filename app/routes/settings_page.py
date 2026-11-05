@@ -122,22 +122,26 @@ async def update_dashboard_system_settings(
     from app.routes.auth import get_client_ip
 
     body = await request.json()
-    retention_raw = str(body.get("scratchpad_retention_days", "")).strip()
-
-    try:
-        retention_days = int(retention_raw)
-    except ValueError:
-        return error_response(
-            "INVALID_RETENTION",
-            "Scratchpad retention must be a whole number of days",
-            400,
-        )
-    if retention_days < 1 or retention_days > 365:
-        return error_response(
-            "INVALID_RETENTION",
-            "Scratchpad retention must be between 1 and 365 days",
-            400,
-        )
+    settings_to_save = {}
+    # Every field is optional: a form that owns only some settings (the Webhooks
+    # retry policy) sends only those.
+    if "scratchpad_retention_days" in body:
+        retention_raw = str(body.get("scratchpad_retention_days", "")).strip()
+        try:
+            retention_days = int(retention_raw)
+        except ValueError:
+            return error_response(
+                "INVALID_RETENTION",
+                "Scratchpad retention must be a whole number of days",
+                400,
+            )
+        if retention_days < 1 or retention_days > 365:
+            return error_response(
+                "INVALID_RETENTION",
+                "Scratchpad retention must be between 1 and 365 days",
+                400,
+            )
+        settings_to_save["scratchpad_retention_days"] = str(retention_days)
 
     # Optional (backward compatible): only validate/save if the caller sent it,
     # so existing callers that don't yet know about this field are unaffected.
@@ -159,9 +163,6 @@ async def update_dashboard_system_settings(
                 400,
             )
 
-    settings_to_save = {
-        "scratchpad_retention_days": str(retention_days),
-    }
     if retracted_retention_days is not None:
         settings_to_save["retracted_retention_days"] = str(retracted_retention_days)
 
