@@ -110,7 +110,7 @@ Agents with the **Other users can use this scope** option enabled are visible re
 
 ## Step 5: Connect your tool
 
-The fastest way to connect an agent to your tool is the **Integrations** page at `http://localhost:3500/integrations`. Select your user, workspace, agent, and target tool, and it generates the exact config or `CLAUDE.md` content you need to paste in.
+The fastest way to connect an agent to your tool is the **Connect** page at `http://localhost:3500/integrations`. Select your user, workspace, agent, and target tool, and it generates the exact config or `CLAUDE.md` content you need to paste in.
 
 You do **not** need to create a `CLAUDE.md` or `AGENTS.md` file before the verification step. The verification prompt works as soon as the agent has MCP access and the right scopes.
 

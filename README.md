@@ -220,7 +220,7 @@ uvicorn app.main:app --reload --port 3500
 
 ## Connect your first agent
 
-Go to **Agents → New Agent** in the dashboard, give it a name, and copy the API key. It's shown once. Then head to the **Integrations** page to get a ready-to-paste config for your specific tool.
+Go to **Agents → New Agent** in the dashboard, give it a name, and copy the API key. It's shown once. Then head to the **Connect** page to get a ready-to-paste config for your specific tool.
 
 For MCP-compatible clients (Claude Code, Cursor, Claude Desktop):
 

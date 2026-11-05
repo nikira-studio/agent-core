@@ -520,8 +520,8 @@ def agents_page(request: Request, session: dict = Depends(require_auth)):
             closeModal('create-agent-modal');
             document.getElementById('rotate-modal-body').innerHTML =
               '<div class="alert alert-success">Agent created successfully.</div>' +
-              '<p class="text-muted">Generate a one-time connection key and tool config from Integrations when you are ready to connect this agent.</p>' +
-              '<a class="btn" href="/integrations?agent_id=' + encodeURIComponent(j.data.agent.id) + '">Go to Integrations</a>';
+              '<p class="text-muted">Generate a one-time connection key and tool config from the Connect page when you are ready to connect this agent.</p>' +
+              '<a class="btn" href="/integrations?agent_id=' + encodeURIComponent(j.data.agent.id) + '">Connect this agent</a>';
             openModal('rotate-modal');
           } else {
             const message = j.error?.message || 'Failed to create agent';

@@ -126,15 +126,15 @@ def render_page(
     # (heading, [(route, label)]). Routes keep their old paths when a page is renamed.
     nav_groups = [
         ("", [("/", "Overview")]),
-        ("Work", [("/activity", "Activity"), ("/approvals", "Approvals")]),
-        ("People and access", [("/users", "Users"), ("/agents", "Agents"), ("/workspaces", "Workspaces")]),
-        ("Connect", [
-            ("/integrations", "Connect a tool"),
-            ("/connectors", "Services"),
-            ("/credentials", "Credentials"),
-            ("/webhooks", "Webhooks"),
+        ("Work", [("/activity", "Activity"), ("/approvals", "Approvals"), ("/memory", "Memory")]),
+        ("Access", [
+            ("/users", "Users"),
+            ("/agents", "Agents"),
+            ("/workspaces", "Workspaces"),
+            ("/integrations", "Connect"),
         ]),
-        ("Records and system", [("/memory", "Memory"), ("/audit", "Audit"), ("/settings", "Settings")]),
+        ("Capabilities", [("/connectors", "Services"), ("/credentials", "Credentials")]),
+        ("System", [("/audit", "Audit"), ("/webhooks", "Webhooks"), ("/settings", "Settings")]),
     ]
     admin_only = {"/users", "/audit", "/webhooks"}
 

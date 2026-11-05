@@ -12,7 +12,7 @@ What an admin does, in order, and where the dashboard sends them today.
 |---|---|---|---|
 | 1 | Sign in and see what Agent Core is for | **Overview**: a "Capability Snapshot", a search box, recent activity | Nothing says what to do next. A fresh install shows empty tables. |
 | 2 | Add an agent | **Agents** → Create Agent | Done: pick a role (Assistant, Service agent, Proposer, Custom) instead of seven permission boxes. |
-| 3 | Connect that agent's tool to Core | **Integrations** (to be renamed Connect a tool): choose a user, workspace and agent, then copy the generated key and config | Separate page from Agents. The agent form ends with a link to it. Easy to miss. |
+| 3 | Connect that agent's tool to Core | **Integrations** (renamed Connect): choose a user, workspace and agent, then copy the generated key and config | Separate page from Agents. The agent form ends with a link to it. Easy to miss. |
 | 4 | Give it a credential or an outside service | **Credentials** (store a secret), then **Connectors** (to be renamed Services: add a service, then add a binding to it) | Three places for one idea: "let this agent use that service". |
 | 5 | See what it did | **Activity** | Fine. |
 | 6 | Approve something it proposed | **Approvals**, or a phone link for a trusted device | Only appears once something is pending. Nothing on Overview points to it. |
@@ -41,15 +41,15 @@ A page that answers two or more questions is flagged. Those are the merge or spl
 
 ## Proposed sections
 
-The sidebar has thirteen flat entries. Group them under four headings; every page stays where it is, so no link or bookmark breaks.
+The sidebar has thirteen flat entries. Group them under headings; every page stays where it is, so no link or bookmark breaks.
 
 - **Home**: Overview.
-- **Work** (things to do): Activity, Approvals.
-- **People and access**: Users, Agents, Workspaces.
-- **Connect**: Connect a tool, Services, Credentials, Webhooks.
-- **Records and system**: Memory, Audit, Settings.
+- **Work** (things to do): Activity, Approvals, Memory (its Clean-up suggestions are the part a person acts on).
+- **Access** (who and what can get in): Users, Agents, Workspaces, Connect.
+- **Capabilities** (what agents can do beyond remembering): Services, Credentials.
+- **System**: Audit, Webhooks, Settings. Webhooks carry events between Core and outside systems and are admin-only, like Audit.
 
-Two pages are renamed in the sidebar and headings, because a stranger cannot tell them apart: **Integrations → Connect a tool** (how an AI tool connects to Core) and **Connectors → Services** (the outside services agents can use). The routes `/integrations` and `/connectors` stay. Credentials keeps its name.
+Two pages are renamed in the sidebar and headings, because a stranger cannot tell them apart: **Integrations → Connect** (generates the key and config an agent's tool uses to sign in to Core) and **Connectors → Services** (the outside services agents can use). The routes `/integrations` and `/connectors` stay. Credentials keeps its name.
 
 Regular users already see a subset (no Users, Audit, Webhooks); the grouping applies to what they see.
 
@@ -112,7 +112,7 @@ Memory Clean-up stays on the page but is introduced as "Suggestions waiting for 
 
 ## Integrations
 
-Keep as the page that generates a connection, but reach it from Agents through the **Connect** button (it opens with that agent chosen) and from the end of "Create Agent". The three selectors (user, workspace, agent) are explained: whose memory the tool reads, which shared space, and which agent identity it signs in as.
+Keep as the page (Connect) that generates a connection, but reach it from Agents through the **Connect** button (it opens with that agent chosen) and from the end of "Create Agent". The three selectors (user, workspace, agent) are explained: whose memory the tool reads, which shared space, and which agent identity it signs in as.
 
 ## Pages with no structural change
 
@@ -129,7 +129,7 @@ The first-five-minutes walk-through still sends an admin through Credentials, Se
 ## How the work is done
 
 1. This audit, reviewed first.
-2. One branch per item, each reviewed before it is merged, in this order: Agents leftovers with the sidebar grouping and the two renames, Overview (including the header search), Settings split and moves (taking in trusted devices and activity pruning), Services, Webhooks, Memory, Connect a tool. Empty-state sentences are added on each page as it is touched.
+2. One branch per item, each reviewed before it is merged, in this order: Agents leftovers with the sidebar grouping and the two renames, Overview (including the header search), Settings split and moves (taking in trusted devices and activity pruning), Services, Webhooks, Memory, Connect. Empty-state sentences are added on each page as it is touched.
 3. As each page is touched, every control that remains gets one line of in-page help, and this document is updated with that page's final controls and what was removed, merged or moved. The final version is the walk-through a reviewer reads to ask "would a stranger's install understand this?".
 
 ## Status
@@ -137,7 +137,7 @@ The first-five-minutes walk-through still sends an admin through Credentials, Se
 | Item | Status |
 |---|---|
 | Agents: role choice, shorter forms, role badge | Built and deployed |
-| Sidebar grouping, Connect a tool and Services names | Built and deployed |
+| Sidebar grouping (Work, Access, Capabilities, System), Connect and Services names | Built and deployed; regrouped and Connect renamed to Connect on branch feat/sidebar-wording |
 | Trusted devices off by default | Built and deployed |
 | Overview: Waiting on you, Health, Getting started, Search | Built and deployed. The header search on every page was not built: the existing Overview search stays, since a second place to search is a new mechanism. |
 | Settings split into four tabs; proposal caps out of the UI; activity pruning and trusted devices moved in | Built, in review. The webhook retry policy stays in Data and backup until the Webhooks page is reworked. |

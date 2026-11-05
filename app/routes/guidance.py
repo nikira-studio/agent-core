@@ -20,7 +20,7 @@ def _setup_markdown(request: Request) -> str:
     base_url = public_base_url(request)
     return f"""# {APP_NAME} setup
 
-Connect an MCP client to `{base_url}/mcp` with a bearer API key. Create the key from the dashboard's Integrations page. Keep it in the client's secret store, never in a prompt or project file.
+Connect an MCP client to `{base_url}/mcp` with a bearer API key. Create the key from the dashboard's Connect page. Keep it in the client's secret store, never in a prompt or project file.
 
 The server filters tools by the agent's standing capabilities. Capability changes apply to the next request. Reconnect the MCP client to refresh any cached tool list.
 

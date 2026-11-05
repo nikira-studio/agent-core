@@ -205,7 +205,7 @@ def create_agent(
             "capabilities": agent_service.parse_capabilities(agent.get("capabilities_json")),
             "is_active": agent["is_active"],
         },
-        "next_step": "Generate a one-time connection key and config from Integrations.",
+        "next_step": "Generate a one-time connection key and config from the Connect page.",
     }, status_code=201)
 
 

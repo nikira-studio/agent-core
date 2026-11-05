@@ -4,7 +4,7 @@ Agent Core exposes memory, credentials, connector actions, and activity tracking
 
 This doc is about wiring tools up. For what the pieces are and why they behave as they do, read [How It Works](how-it-works.md) first.
 
-The dashboard **Integrations** page at `/integrations` generates ready-to-paste configs for specific tools and is usually the fastest path. This doc explains what's happening under the hood and covers cases the generator doesn't handle. The current presets include Claude Code, Codex, Cursor, Windsurf, Antigravity, and a generic MCP/REST path.
+The dashboard **Connect** page at `/integrations` generates ready-to-paste configs for specific tools and is usually the fastest path. This doc explains what's happening under the hood and covers cases the generator doesn't handle. The current presets include Claude Code, Codex, Cursor, Windsurf, Antigravity, and a generic MCP/REST path.
 
 Start small. First connect an agent over MCP and use a workspace for durable shared memory. Add stored credentials when a local tool needs a secret, then add connector bindings when Agent Core should run an external action. Activities, workspaces, and webhooks build on that path when you need them.
 
@@ -53,7 +53,7 @@ To check that a public endpoint is reachable, request `https://<host>/mcp` witho
 
 ### Check a connection
 
-The dashboard **Integrations** page separates one-time client connection from reusable workspace instructions. Use **Test connection details** to confirm that the current server exposes the expected `/mcp` endpoint. If the browser still holds a one-time key that you generated there, the check also confirms that key without saving or displaying it.
+The dashboard **Connect** page separates one-time client connection from reusable workspace instructions. Use **Test connection details** to confirm that the current server exposes the expected `/mcp` endpoint. If the browser still holds a one-time key that you generated there, the check also confirms that key without saving or displaying it.
 
 When the browser has no saved key, use the generated **Verification Prompt** in the configured client. Agent Core stores only a hash of each agent key, so the dashboard cannot recover an existing key to test it.
 
@@ -483,7 +483,7 @@ Some MCP hosts defer tool loading until the session explicitly discovers them. I
 
 **CLAUDE.md snippet:**
 
-The **Integrations** page generates a full `CLAUDE.md` snippet tailored to your agent and workspace. Paste it into your repo's `CLAUDE.md` to give Claude Code context about what's available, which scopes to use, when to search memory, and how to handle credentials. Here's a minimal version to get started:
+The **Connect** page generates a full `CLAUDE.md` snippet tailored to your agent and workspace. Paste it into your repo's `CLAUDE.md` to give Claude Code context about what's available, which scopes to use, when to search memory, and how to handle credentials. Here's a minimal version to get started:
 
 ```markdown
 ## Agent Core
@@ -561,7 +561,7 @@ Restart Cursor after saving.
 
 Use **Assistants** when an agent manages its own MCP configuration. The generated text is a concise onboarding guide, not a replacement for repository instructions. It gives the agent its connection values, scope rules, and the minimum Agent Core workflow. Use the generated `AGENTS.md` or `CLAUDE.md` for the full operating contract in a repository.
 
-If you select a workspace on the Integrations page, the prompt directs durable shared memory to that workspace. Without a workspace, it tells the agent to request one before it stores owner-facing or shared facts. The agent scope remains private scratch space.
+If you select a workspace on the Connect page, the prompt directs durable shared memory to that workspace. Without a workspace, it tells the agent to request one before it stores owner-facing or shared facts. The agent scope remains private scratch space.
 
 For Hermes, add the generated server to `mcp_servers.agent_core` in `$HERMES_HOME/config.yaml` or `~/.hermes/config.yaml`. Other assistants use their normal MCP configuration location.
 
@@ -617,7 +617,7 @@ Every MCP-compatible tool needs the same two things: the endpoint URL and the `A
 
 ## Generating integration files from the dashboard
 
-The **Integrations** page (`/integrations`) generates everything you need for a specific tool in one place:
+The **Connect** page (`/integrations`) generates everything you need for a specific tool in one place:
 
 - Ready-to-paste MCP JSON
 - `CLAUDE.md` or `AGENTS.md` content with instructions for the agent
