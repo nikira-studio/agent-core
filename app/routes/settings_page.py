@@ -760,7 +760,7 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
         <p><strong>Role:</strong> {escape_html(session.get("role") or "user")}</p>
       </div>
       <div class="card">
-        <h3>Security</h3>
+        <h3>Sign-in</h3>
         <div class="form-group">
           <a href="/settings/password" class="btn btn-secondary">Change Password</a>
         </div>

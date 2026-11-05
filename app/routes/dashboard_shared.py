@@ -249,7 +249,9 @@ def render_page(
 
 
 _STATIC_DIR = Path(__file__).resolve().parent.parent / "dashboard" / "static"
-_ASSET_LINK = re.compile(r'(/static/(?:css|js)/[A-Za-z0-9_.\-]+)\?v=[A-Za-z0-9_.\-]+')
+# Only real stylesheet and script references: a file name with an extension, inside href= or src=.
+# Text on a page that merely looks like one (a memory, a credential name) is left alone.
+_ASSET_LINK = re.compile(r'((?:href|src)=")(/static/(?:css|js)/[A-Za-z0-9_\-]+\.(?:css|js))\?v=[A-Za-z0-9_.\-]+')
 _asset_hashes: dict[str, tuple[int, str]] = {}
 
 
@@ -257,21 +259,23 @@ def _asset_version(url_path: str) -> str | None:
     """Short content hash of one static file, recomputed only when the file changes."""
     file = _STATIC_DIR / url_path.removeprefix("/static/")
     try:
+        if not file.is_file():
+            return None
         mtime = file.stat().st_mtime_ns
+        cached = _asset_hashes.get(url_path)
+        if cached and cached[0] == mtime:
+            return cached[1]
+        digest = hashlib.sha256(file.read_bytes()).hexdigest()[:10]
     except OSError:
         return None
-    cached = _asset_hashes.get(url_path)
-    if cached and cached[0] == mtime:
-        return cached[1]
-    digest = hashlib.sha256(file.read_bytes()).hexdigest()[:10]
     _asset_hashes[url_path] = (mtime, digest)
     return digest
 
 
 def _versioned_assets(html: str) -> str:
     def swap(match):
-        version = _asset_version(match.group(1))
-        return f"{match.group(1)}?v={version}" if version else match.group(0)
+        version = _asset_version(match.group(2))
+        return f"{match.group(1)}{match.group(2)}?v={version}" if version else match.group(0)
 
     return _ASSET_LINK.sub(swap, html)
 

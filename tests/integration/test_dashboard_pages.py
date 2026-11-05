@@ -423,3 +423,15 @@ def test_credentials_rows_have_no_wide_reference_column_and_offer_a_copy_button(
     assert "<th>Reference</th>" not in html
     assert f'data-copy-reference="{entry["reference_name"]}"' in html
     assert "stack-table" in html  # one block per credential on a phone
+
+
+def test_text_that_looks_like_an_asset_link_cannot_break_a_page(authenticated_client):
+    from app.routes.dashboard_shared import _versioned_assets
+    from app.services import credential_service
+
+    # Not a file, a directory, a missing file, and prose: none may raise or be rewritten.
+    for text in ("/static/css/..?v=1", "/static/js/.?v=1", "/static/css/nope.css?v=1", "see /static/css/dashboard.css?v=1 here"):
+        assert _versioned_assets(text) == text
+    credential_service.create_credential("user:admin", "see /static/css/..?v=1 and /static/js/..?v=2", "not-shown")
+    page = authenticated_client.get("/credentials")
+    assert page.status_code == 200 and "/static/css/..?v=1" in page.text
