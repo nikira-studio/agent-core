@@ -552,19 +552,20 @@ def agents_page(request: Request, session: dict = Depends(require_auth)):
     </div></div>
     <div class="card">
       <h3>Agent Access</h3>
-      <p class="text-muted access-summary">An agent always has its private scope and read access to its active principal's user scope. To share memory with other agents and people, add a workspace.</p>
+      <p class="text-muted access-summary">An agent always has its private scope and read access to its active principal's user scope. To share memory with other agents and people, add a workspace. To give an agent more to do, change its role or access with <strong>Edit</strong> on its row. Create a new agent only for a separate tool or identity that needs its own key and its own history.</p>
     </div>
 
     <div class="card">
       <h3>All Agents</h3>
 <table><thead><tr><th>Agent</th><th>Status</th><th>Access</th><th>Created</th><th class="actions-cell">Actions</th></tr></thead>
-        <tbody>{rows or "<tr><td colspan=5 class=empty>No agents yet.</td></tr>"}</tbody></table>
+        <tbody>{rows or "<tr><td colspan=5 class=empty>No agents yet. Create one for each tool or script that should have its own key and history.</td></tr>"}</tbody></table>
     </div>
 
     <!-- Create Agent Modal -->
     <div class="modal-overlay" id="create-agent-modal" style="display:none">
       <div class="modal modal-wide">
         <h3>Create Agent</h3>
+        <p class="form-hint" style="margin-bottom:12px">Does an existing agent already do this job? Then use <strong>Edit</strong> on its row to give it what it needs. A new agent is for a separate tool or identity.</p>
         <form id="create-agent-form" onsubmit="createAgent(event)">
           <div class="form-section">
             <div class="form-row">

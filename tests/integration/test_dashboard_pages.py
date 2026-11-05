@@ -391,3 +391,12 @@ def test_every_field_on_the_reworked_forms_has_a_line_of_help(authenticated_clie
         if not _hint_follows(authenticated_client.get(path).text, element_id)
     ]
     assert not missing, missing
+
+
+def test_agents_and_workspaces_pages_prefer_extending_what_exists(authenticated_client):
+    agents = authenticated_client.get("/agents").text
+    assert "Create a new agent only for a separate tool or identity" in agents
+    assert "Does an existing agent already do this job?" in agents
+    workspaces = authenticated_client.get("/workspaces").text
+    assert "is the normal way to share" in workspaces
+    assert "Does an existing workspace already fit?" in workspaces
