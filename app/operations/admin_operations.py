@@ -35,9 +35,12 @@ register("credential_grant.revoke", "Revoke a credential grant",
          credential_consumers.revoke_grant, fingerprint=_row("credential_consumer_grants", "grant_id"))
 register("credential.create", "Store a new credential (the person enters the value)",
          credentials.create_entry, person_fields=("value",))
-register("binding.create", "Bind a connector to a credential in a scope", connectors.create_binding)
+register("binding.create", "Bind a connector to a credential in a scope", connectors.create_binding,
+         needs_dashboard_signin=True)
 register("binding.update", "Change a connector binding",
-         connectors.update_binding, fingerprint=_row("connector_bindings", "binding_id"))
+         connectors.update_binding, fingerprint=_row("connector_bindings", "binding_id"),
+         needs_dashboard_signin=True)
 register("connector_type.actions", "Enable or disable a connector type's actions",
-         connectors.update_connector_type_actions, fingerprint=_row("connector_types", "connector_type_id"))
+         connectors.update_connector_type_actions, fingerprint=_row("connector_types", "connector_type_id"),
+         needs_dashboard_signin=True)
 register("adapter.install", "Install a connector adapter", connectors.install_adapter)

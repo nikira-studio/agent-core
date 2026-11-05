@@ -152,3 +152,11 @@ def test_widening_changes_need_a_dashboard_signin(test_client, admin_token):
     _browser_admin(test_client)
     r = test_client.post(f"/api/approvals/{approval_id}/decide", json={"approve": True}, headers=csrf_headers(test_client))
     assert r.json()["data"]["approval"]["status"] == "done"
+
+
+def test_every_operation_that_widens_an_agent_needs_a_dashboard_signin():
+    from app.operations import admin_registry
+
+    widening = {n for n in admin_registry.names() if admin_registry.get(n).needs_dashboard_signin}
+    assert widening == {"agent.create", "agent.update", "credential_grant.create",
+                        "binding.create", "binding.update", "connector_type.actions"}
