@@ -26,8 +26,10 @@ def webhooks_page(request: Request, session: dict = Depends(require_auth)):
         )
 
     from app.services import inbound_webhook_service as inbound_svc
+    from app.services import webhook_settings_service
 
     webhooks = wh_svc.list_webhooks()
+    retry = webhook_settings_service.retry_policy()
     event_types = wh_svc.WEBHOOK_EVENT_TYPES
 
     base_url = public_base_url(request)
@@ -73,7 +75,7 @@ def webhooks_page(request: Request, session: dict = Depends(require_auth)):
         )
 
     if not rows:
-        rows = "<tr><td colspan='5' style='text-align:center;color:var(--text-muted)'>No webhooks registered yet.</td></tr>"
+        rows = "<tr><td colspan='5' style='text-align:center;color:var(--text-muted)'>No webhooks yet. Add one so another system hears about events here, such as alerts or workflow triggers.</td></tr>"
 
     inbound_key_status_html = (
         f"<span class='badge badge-active'>Active</span> &nbsp;Generated {inbound_key_created}"
@@ -88,14 +90,16 @@ def webhooks_page(request: Request, session: dict = Depends(require_auth)):
 
     body = f"""
 <div class="page-header">
-  <h1>Webhooks</h1>
-  <button class="btn" onclick="document.getElementById('create-webhook-modal').style.display='flex'">+ New Webhook</button>
+  <div>
+    <h1>Webhooks</h1>
+    <p class="text-muted" style="max-width:760px;margin-top:8px">Webhooks connect {APP_NAME} to other systems in two directions. <strong>Receiving</strong>: another system hands work to an agent. <strong>Sending</strong>: {APP_NAME} tells another system when something happens.</p>
+  </div>
 </div>
 
 <!-- Inbound section -->
+<h2 style="margin-bottom:0.25rem">Receiving</h2>
+<p class="text-muted" style="margin-top:0">Let a tool such as n8n, Zapier or a script create or update work for your agents. It sends a request to the address below with the key.</p>
 <div class="card" style="margin-bottom:1.5rem">
-  <h3 style="margin-top:0">Inbound Receiver</h3>
-  <p>External systems (n8n, Zapier, custom scripts) can push work commands into {APP_NAME} using the inbound webhook endpoint. Authenticate requests with the <code>X-Agent-Core-Inbound-Key</code> header.</p>
   <div style="margin-bottom:1rem">
     <label style="display:block;margin-bottom:0.35rem;font-weight:600">Inbound URL</label>
     <div style="display:flex;gap:0.5rem;align-items:center">
@@ -107,6 +111,7 @@ def webhooks_page(request: Request, session: dict = Depends(require_auth)):
     <span><strong>Key status:</strong> {inbound_key_status_html}</span>
     {inbound_key_btn}
   </div>
+  <p class="form-hint" style="margin:0.5rem 0 0">The sender puts the key in the <code>X-Agent-Core-Inbound-Key</code> header. Rotating the key stops the old one working at once.</p>
   <div id="inbound-key-reveal" style="display:none;margin-top:1rem;padding:0.75rem;background:var(--bg-secondary);border-radius:4px;border-left:3px solid var(--warning-color)">
     <strong>New key (shown once):</strong>
     <code id="inbound-key-value" style="display:block;word-break:break-all;margin:0.35rem 0"></code>
@@ -136,18 +141,36 @@ Content-Type: application/json
 </div>
 
 <!-- Outbound section -->
-<h2 style="margin-bottom:0.75rem">Outbound Notifications</h2>
-<div class="card" style="margin-bottom:1.5rem">
-  <p>Outbound webhook notifications let external systems react to {APP_NAME} events. Each registered endpoint receives a signed HTTP POST when a subscribed event occurs. Webhooks are admin-only. Failed deliveries are retried with backoff and every attempt is logged; webhooks notify, they do not orchestrate.</p>
-  <p><strong>Signing:</strong> Every delivery includes <code>X-Agent-Core-Signature: sha256=&lt;hex&gt;</code> so receivers can verify authenticity using HMAC-SHA256 with the stored secret.</p>
+<div style="display:flex;align-items:flex-end;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:0.5rem">
+  <div>
+    <h2 style="margin-bottom:0.25rem">Sending</h2>
+    <p class="text-muted" style="margin-top:0">Each webhook below is an address that gets a signed message when an event you chose happens.</p>
+  </div>
+  <button class="btn" onclick="document.getElementById('create-webhook-modal').style.display='flex'">+ New Webhook</button>
 </div>
-<div class="card">
+<div class="card" style="margin-bottom:1.5rem">
   <table class="data-table">
     <thead><tr>
       <th>Name</th><th>URL</th><th>Events</th><th>Status</th><th class="actions-cell">Actions</th>
     </tr></thead>
     <tbody id="webhooks-table-body">{rows}</tbody>
   </table>
+  <p class="form-hint" style="margin:0.75rem 0 0">Every message carries <code>X-Agent-Core-Signature: sha256=&lt;hex&gt;</code>, made with the webhook's secret, so the receiver can check it came from here. Webhooks only notify; they do not run anything.</p>
+  <details class="access-details" id="webhook-retry-policy">
+    <summary>Retry policy</summary>
+    <form onsubmit="saveWebhookRetry(event)">
+      <p class="form-hint">When a message fails to send (no connection, a timeout, or a 408, 429 or 5xx answer) it is tried again after a growing wait. Any other error stops it at once. Every attempt is logged.</p>
+      <div class="form-row">
+        <label>Attempts <input type="number" id="webhook-retry-max-attempts" min="1" max="100" value="{retry['webhook_retry_max_attempts']}" style="width:80px"></label>
+        <label>First wait (s) <input type="number" id="webhook-retry-initial-seconds" min="1" max="3600" value="{retry['webhook_retry_initial_seconds']}" style="width:80px"></label>
+        <label>Longest wait (s) <input type="number" id="webhook-retry-max-seconds" min="1" max="86400" value="{retry['webhook_retry_max_seconds']}" style="width:80px"></label>
+        <label>Random extra (s) <input type="number" id="webhook-retry-jitter-seconds" min="0" max="86400" value="{retry['webhook_retry_jitter_seconds']}" style="width:80px"></label>
+      </div>
+      <p class="form-hint">Attempts: how many tries in all. First and longest wait: the gap before the second try, and the most it can grow to. Random extra: up to this many seconds added so retries do not all land together.</p>
+      <button type="submit" class="btn btn-sm">Save</button>
+      <div class="save-result" style="margin-top:8px"></div>
+    </form>
+  </details>
 </div>
 
 <!-- Create webhook modal -->
@@ -161,10 +184,10 @@ Content-Type: application/json
     <label>URL
       <input type="text" id="wh-url" placeholder="https://your-endpoint.example.com/hook">
     </label>
-    <label>Secret <span style="color:var(--text-muted);font-size:0.85em">(used for HMAC-SHA256 signature)</span>
+    <label>Secret <span style="color:var(--text-muted);font-size:0.85em">(signs each message so the receiver can verify it)</span>
       <input type="password" id="wh-secret" placeholder="Enter a strong secret">
     </label>
-    <label>Subscribe to events</label>
+    <label>Send a message when these happen</label>
     <div class="checkbox-group" id="wh-event-types">
       {event_type_options}
     </div>
@@ -253,6 +276,17 @@ function fallbackCopy(text, label) {
   try { document.execCommand('copy'); alert(label + ' copied.'); }
   catch { prompt('Copy this ' + label + ':', text); }
   document.body.removeChild(ta);
+}
+
+async function saveWebhookRetry(e) {
+  e.preventDefault();
+  const ids = ['max-attempts', 'initial-seconds', 'max-seconds', 'jitter-seconds'];
+  const body = {};
+  ids.forEach(id => { body['webhook_retry_' + id.replace('-', '_')] = document.getElementById('webhook-retry-' + id).value; });
+  const j = await apiFetch('/api/dashboard/system-settings', { method: 'POST', body: JSON.stringify(body) });
+  const box = e.target.querySelector('.save-result');
+  if (j.ok) { box.innerHTML = '<div class="alert alert-success">Saved.</div>'; }
+  else { box.innerHTML = ''; showToast(j.error?.message || 'Failed to save retry policy', 'danger'); }
 }
 
 function copyInboundUrl() {

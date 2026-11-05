@@ -277,7 +277,7 @@ class TestInboundDashboard:
     def test_webhooks_page_has_inbound_section(self, admin_client):
         r = admin_client.get("/webhooks")
         assert r.status_code == 200
-        assert "Inbound Receiver" in r.text
+        assert "<h2 style=\"margin-bottom:0.25rem\">Receiving</h2>" in r.text
         assert "X-Agent-Core-Inbound-Key" in r.text
 
     def test_webhooks_page_shows_generate_button_when_no_key(self, admin_client):
@@ -287,3 +287,24 @@ class TestInboundDashboard:
     def test_webhooks_page_shows_rotate_button_after_key_generated(self, admin_client, inbound_key):
         r = admin_client.get("/webhooks")
         assert "rotateInboundKey" in r.text
+
+
+class TestWebhooksPageSections:
+    def test_page_is_split_into_receiving_and_sending(self, admin_client):
+        html = admin_client.get("/webhooks").text
+        assert html.index(">Receiving</h2>") < html.index(">Sending</h2>")
+        assert "No webhooks yet." in html
+
+    def test_retry_policy_lives_on_this_page_not_in_settings(self, admin_client):
+        html = admin_client.get("/webhooks").text
+        policy = html.split('id="webhook-retry-policy"', 1)[1].split("</details>", 1)[0]
+        for field in ("max-attempts", "initial-seconds", "max-seconds", "jitter-seconds"):
+            assert f'id="webhook-retry-{field}"' in policy
+        assert 'id="webhook-retry-max-attempts"' not in admin_client.get("/settings").text
+
+    def test_retry_policy_shows_the_saved_values(self, admin_client):
+        from app.services import system_settings_service
+
+        system_settings_service.write_raw({"webhook_retry_max_attempts": "7"})
+        html = admin_client.get("/webhooks").text
+        assert 'id="webhook-retry-max-attempts" min="1" max="100" value="7"' in html

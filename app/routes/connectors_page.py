@@ -591,7 +591,7 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
     <div class="modal-overlay" id="create-binding-modal" style="display:none">
       <div class="modal">
         <h3>New Binding</h3>
-        <p class="form-hint">A binding lets agents in one scope use a service with one credential.</p>
+        <p class="form-hint" style="margin-bottom:12px">A binding lets agents in one scope use a service with one credential.</p>
         <form id="create-binding-form" onsubmit="createBinding(event)">
           <div class="form-group">
             <label>Service *</label>

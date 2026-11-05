@@ -724,10 +724,6 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
         "episodic_memory_ttl_days": "30",
         "execution_log_retention_days": "30",
         "webhook_log_retention_days": "30",
-        "webhook_retry_max_attempts": "5",
-        "webhook_retry_initial_seconds": "1",
-        "webhook_retry_max_seconds": "300",
-        "webhook_retry_jitter_seconds": "1",
         "memory_dedupe_similarity": "0.92",
         "unconfirmed_inference_days": "90",
         "unconfirmed_inference_min_importance": "0.7",
@@ -748,10 +744,6 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
     episodic_memory_ttl_days = values["episodic_memory_ttl_days"]
     execution_log_retention_days = values["execution_log_retention_days"]
     webhook_log_retention_days = values["webhook_log_retention_days"]
-    webhook_retry_max_attempts = values["webhook_retry_max_attempts"]
-    webhook_retry_initial_seconds = values["webhook_retry_initial_seconds"]
-    webhook_retry_max_seconds = values["webhook_retry_max_seconds"]
-    webhook_retry_jitter_seconds = values["webhook_retry_jitter_seconds"]
     memory_dedupe_similarity = values["memory_dedupe_similarity"]
     unconfirmed_inference_days = values["unconfirmed_inference_days"]
     unconfirmed_inference_min_importance = values["unconfirmed_inference_min_importance"]
@@ -998,17 +990,7 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
         <div class="form-group">
           <label>Webhook delivery log (days)</label>
           {_number("webhook-log-retention-days", webhook_log_retention_days, 0, 365)}
-          <p class="form-hint">Records of notifications sent to other systems. 0 keeps them forever.</p>
-        </div>
-        <div class="form-group">
-          <label>Webhook retries</label>
-          <div class="form-row">
-            <label>Attempts <input type="number" id="webhook-retry-max-attempts" min="1" max="100" value="{escape_html(webhook_retry_max_attempts)}" style="width:80px"></label>
-            <label>First wait (s) <input type="number" id="webhook-retry-initial-seconds" min="1" max="3600" value="{escape_html(webhook_retry_initial_seconds)}" style="width:80px"></label>
-            <label>Longest wait (s) <input type="number" id="webhook-retry-max-seconds" min="1" max="86400" value="{escape_html(webhook_retry_max_seconds)}" style="width:80px"></label>
-            <label>Random extra (s) <input type="number" id="webhook-retry-jitter-seconds" min="0" max="86400" value="{escape_html(webhook_retry_jitter_seconds)}" style="width:80px"></label>
-          </div>
-          <p class="form-hint">When a notification fails to send (no connection, timeout, or a 408, 429 or 5xx answer) it is tried again after a growing wait. Any other error stops it at once.</p>
+          <p class="form-hint">Records of notifications sent to other systems. 0 keeps them forever. Retry settings are on the Webhooks page.</p>
         </div>
         <button type="submit" class="btn">Save</button>
         <div class="save-result" style="margin-top:12px"></div>
@@ -1331,10 +1313,6 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
         consolidation_scan_enabled: document.getElementById('consolidation-scan-enabled').checked ? 'true' : 'false',
         execution_log_retention_days: document.getElementById('execution-log-retention-days').value,
         webhook_log_retention_days: document.getElementById('webhook-log-retention-days').value,
-        webhook_retry_max_attempts: document.getElementById('webhook-retry-max-attempts').value,
-        webhook_retry_initial_seconds: document.getElementById('webhook-retry-initial-seconds').value,
-        webhook_retry_max_seconds: document.getElementById('webhook-retry-max-seconds').value,
-        webhook_retry_jitter_seconds: document.getElementById('webhook-retry-jitter-seconds').value,
       }};
       const j = await apiFetch('/api/dashboard/system-settings', {{
         method: 'POST',

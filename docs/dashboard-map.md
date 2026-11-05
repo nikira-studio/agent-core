@@ -104,7 +104,7 @@ Built (the page is called Services): one **Add a service** button offers the thr
 
 ## Webhooks
 
-Two things, kept on one page but separated into **Receiving** (the inbound URL and key, how to send a command) and **Sending** (outbound notifications, plus the retry policy moved here from Settings). Each gets a one-line introduction.
+Built: **Receiving** (the inbound address, its key, and how to send a command) and **Sending** (the list of webhooks) are two headed sections, each with a one-line introduction. The retry policy moved here from Settings → Data and backup and sits under **Retry policy** beneath the list, with a line on each number. The webhook delivery log retention stays with the other retention fields in Settings. The empty list says what a webhook is for.
 
 ## Memory
 
@@ -140,6 +140,7 @@ The first-five-minutes walk-through still sends an admin through Credentials, Se
 | Sidebar grouping (Work, Access, Capabilities, System), Connect and Services names | Built and deployed; regrouped and Connect renamed to Connect on branch feat/sidebar-wording |
 | Trusted devices off by default | Built and deployed |
 | Overview: Waiting on you, Health, Getting started, Search | Built and deployed. The header search on every page was not built: the existing Overview search stays, since a second place to search is a new mechanism. |
-| Settings split into four tabs; proposal caps out of the UI; activity pruning and trusted devices moved in | Built, in review. The webhook retry policy stays in Data and backup until the Webhooks page is reworked. |
-| Services: Add a service, Advanced fields, collapsed runs, empty states | Built, in review |
+| Settings split into four tabs; proposal caps out of the UI; activity pruning and trusted devices moved in | Built, in review. The webhook retry policy has moved to the Webhooks page. |
+| Services: Add a service, Advanced fields, collapsed runs, empty states | Built and deployed |
+| Webhooks: Receiving and Sending, retry policy moved from Settings | Built, in review |
 | Everything else above | Approved as the plan; branches not yet started |
