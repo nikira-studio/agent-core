@@ -483,10 +483,12 @@ def workspaces_page(request: Request, session: dict = Depends(require_auth)):
           <div class="form-group">
             <label>Name *</label>
             <input type="text" id="cp-name" required>
+            <p class="form-hint">How it appears in lists and in the pickers on other pages.</p>
           </div>
           <div class="form-group">
             <label>Description</label>
             <textarea id="cp-description" rows="2"></textarea>
+            <p class="form-hint">A reminder of what this workspace is for.</p>
           </div>
           <div class="modal-footer">
             <button type="button" class="btn btn-secondary" onclick="closeModal('create-workspace-modal')">Cancel</button>
@@ -504,10 +506,12 @@ def workspaces_page(request: Request, session: dict = Depends(require_auth)):
           <div class="form-group">
             <label>Name</label>
             <input type="text" id="ep-name">
+            <p class="form-hint">How it appears in lists and in the pickers on other pages.</p>
           </div>
           <div class="form-group">
             <label>Description</label>
             <textarea id="ep-description" rows="2"></textarea>
+            <p class="form-hint">A reminder of what this workspace is for.</p>
           </div>
           <div class="form-group">
             <label for="ep-repo-root">Repository folder</label>

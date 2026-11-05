@@ -610,6 +610,7 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
           <div class="form-group">
             <label>Name *</label>
             <input type="text" id="binding-name" placeholder="e.g. Workspace API" autocomplete="off" required>
+            <div class="form-hint">A label for this binding, such as the account or environment it covers.</div>
           </div>
           <div class="form-group">
             <label>Scope *</label>
@@ -634,11 +635,13 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
               <option value="">-- Select stored credential --</option>
               {credential_opts}
             </select>
+            <div class="form-hint">The stored credential Core uses when it calls this service.</div>
           </div>
           <div id="binding-new-credential-fields" style="display:none">
             <div class="form-group">
               <label>Credential Name *</label>
               <input type="text" id="binding-new-credential-name" placeholder="e.g. service-token" autocomplete="off">
+              <div class="form-hint">A name for the new credential, so you can find it on the Credentials page.</div>
             </div>
             <div id="binding-new-credential-editor"></div>
           </div>
@@ -675,12 +678,14 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
           <div class="form-group">
             <label>Name</label>
             <input type="text" id="edit-binding-name" autocomplete="off">
+            <div class="form-hint">A label for this binding, such as the account or environment it covers.</div>
           </div>
           <div class="form-group">
             <label>Scope</label>
             <select id="edit-binding-scope">
               {scope_options}
             </select>
+            <div class="form-hint">Only agents that can reach this scope may use the binding.</div>
           </div>
           <div class="form-group">
             <label>Credential</label>
@@ -688,6 +693,7 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
               <option value="">-- Select --</option>
               {credential_opts}
             </select>
+            <div class="form-hint">The stored credential Core uses when it calls this service.</div>
           </div>
           <details class="access-details">
             <summary>Advanced</summary>
@@ -721,10 +727,12 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
           <div class="form-group">
             <label>Spec URL</label>
             <input type="url" id="import-spec-url" placeholder="https://example.com/openapi.json">
+            <div class="form-hint">Where the API's OpenAPI file lives. Use this, or paste or upload the file below.</div>
           </div>
           <div class="form-group">
             <label>Or paste JSON / upload file</label>
             <textarea id="import-spec-json" rows="6" placeholder='Paste OpenAPI JSON here, or use the file picker below'></textarea>
+            <div class="form-hint">For a spec that has no web address. JSON or YAML.</div>
           </div>
           <div class="form-group">
             <input type="file" id="import-spec-file" accept=".json,.yaml,.yml" onchange="handleSpecFile(event)">
@@ -732,6 +740,7 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
           <div class="form-group">
             <label>Display Name (optional)</label>
             <input type="text" id="import-spec-name" placeholder="e.g. Example REST API" autocomplete="off">
+            <div class="form-hint">How it appears in the catalog.</div>
           </div>
           <div id="import-spec-preview" class="card" style="display:none;margin:12px 0 0 0"></div>
           <div class="form-hint">
@@ -759,14 +768,17 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
           <div class="form-group">
             <label>Server URL</label>
             <input type="url" id="import-mcp-url" placeholder="https://mcp.example.com/mcp" required>
+            <div class="form-hint">The MCP server's web address, usually ending in <code>/mcp</code>.</div>
           </div>
           <div class="form-group">
             <label>Display Name (optional)</label>
             <input type="text" id="import-mcp-name" placeholder="e.g. Context7 MCP" autocomplete="off">
+            <div class="form-hint">How it appears in the catalog.</div>
           </div>
           <div class="form-group">
             <label>Description (optional)</label>
             <input type="text" id="import-mcp-description" placeholder="What this MCP server does" autocomplete="off">
+            <div class="form-hint">Optional. A line shown with it in the catalog.</div>
           </div>
           <div class="form-group">
             <label>Transport</label>
@@ -774,10 +786,12 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
               <option value="streamable_http" selected>streamable_http (recommended)</option>
               <option value="http">http</option>
             </select>
+            <div class="form-hint">Leave this on streamable_http unless the server's own documentation says otherwise.</div>
           </div>
           <div class="form-group">
             <label>Timeout (ms)</label>
             <input type="number" id="import-mcp-timeout" min="1000" step="1000" value="60000">
+            <div class="form-hint">How long Core waits for the server to answer before giving up. 60000 is one minute.</div>
           </div>
           <div class="form-group">
             <label>Discovery Auth (optional)</label>
@@ -803,10 +817,12 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
           <div class="form-group">
             <label>Display Name</label>
             <input type="text" id="http-display-name" placeholder="e.g. OpenRouter" required autocomplete="off">
+            <div class="form-hint">How it appears in the catalog.</div>
           </div>
           <div class="form-group">
             <label>Base URL</label>
             <input type="url" id="http-base-url" placeholder="https://openrouter.ai/api/v1" required>
+            <div class="form-hint">The address every call starts from, before the specific path.</div>
           </div>
           <div class="form-group">
             <label>Auth Type</label>
@@ -816,6 +832,7 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
               <option value="query">Query parameter</option>
               <option value="none">None</option>
             </select>
+            <div class="form-hint">How the service expects its key. Choose Bearer unless its documentation says otherwise.</div>
           </div>
           <div class="form-group" id="http-auth-header-group">
             <label>Auth Header Name</label>
@@ -830,6 +847,7 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
           <div class="form-group">
             <label>Extra Headers (optional, JSON)</label>
             <textarea id="http-extra-headers" rows="3" placeholder='{{"X-Custom-Header":"value"}}'></textarea>
+            <div class="form-hint">Headers sent with every call, as JSON. Keep secrets out of here; store them as a credential.</div>
           </div>
           <button type="submit" class="btn btn-primary">Add service</button>
           <button type="button" class="btn btn-secondary" onclick="closeModal('add-http-modal')">Cancel</button>

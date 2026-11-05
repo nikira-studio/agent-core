@@ -803,6 +803,7 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
       <div class="form-group">
         <label for="op-token-label">Label</label>
         <input type="text" id="op-token-label" maxlength="100" placeholder="what it is for" style="max-width:360px">
+        <p class="form-hint">A reminder of what the token is for, shown in the list.</p>
       </div>
       <div class="form-group">
         <label for="op-token-minutes">Valid for</label>
@@ -811,6 +812,7 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
           <option value="30" selected>30 minutes</option>
           <option value="60">60 minutes</option>
         </select>
+        <p class="form-hint">After this long the token stops working on its own.</p>
       </div>
       <button type="button" class="btn" onclick="createOperatorToken()">Create Token</button>
       <div id="op-token-result" style="margin-top:12px"></div>
@@ -1032,6 +1034,7 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
             <option value="ollama" {"selected" if vector_provider == "ollama" else ""}>Ollama</option>
             <option value="openai" {"selected" if vector_provider == "openai" else ""}>OpenAI-compatible</option>
           </select>
+          <p class="form-hint">Where embeddings come from: a local Ollama server, or any service with an OpenAI-style API.</p>
         </div>
         <div class="form-group">
           <label>Model</label>
@@ -1064,6 +1067,7 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
             <option value="bearer" {"selected" if vector_auth_type == "bearer" else ""}>Bearer Token</option>
             <option value="api_key" {"selected" if vector_auth_type == "api_key" else ""}>API Key</option>
           </select>
+          <p class="form-hint">How the endpoint expects the key below. Use None for a local server.</p>
         </div>
         <div class="form-group">
           <label>API Key</label>
@@ -1102,6 +1106,7 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
           <div class="form-group">
             <label>Backup file *</label>
             <input type="file" id="restore-file" accept=".zip,.enc,.zip.enc" required>
+            <p class="form-hint">The backup you exported earlier (a .zip, or .enc if it was encrypted).</p>
           </div>
           <div class="form-group">
             <label>Backup Key</label>
@@ -1515,6 +1520,7 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
       <div class="form-group">
         <label for="prune-activity-before">Delete tasks older than</label>
         <input type="date" id="prune-activity-before" style="max-width:200px">
+        <p class="form-hint">Only finished, cancelled and blocked tasks older than this date are deleted.</p>
       </div>
       <button type="button" class="btn btn-danger" onclick="pruneActivity()">Delete</button>
       <div id="prune-activity-result" style="margin-top:12px"></div>

@@ -576,11 +576,13 @@ def agents_page(request: Request, session: dict = Depends(require_auth)):
               <div class="form-group">
                 <label>Display name *</label>
                 <input type="text" id="ca-display-name" required>
+                <p class="form-hint">The name shown in lists.</p>
               </div>
             </div>
             <div class="form-group">
               <label>Description</label>
               <input type="text" id="ca-description" placeholder="What is this agent for?">
+              <p class="form-hint">A reminder of what this agent is for.</p>
             </div>
           </div>
           <div id="ca-capability-controls">{capability_create_html}</div>
@@ -609,10 +611,12 @@ def agents_page(request: Request, session: dict = Depends(require_auth)):
               <div class="form-group">
                 <label>Display name</label>
                 <input type="text" id="edit-display-name">
+                <p class="form-hint">The name shown in lists.</p>
               </div>
               <div class="form-group">
                 <label>Description</label>
                 <input type="text" id="edit-description">
+                <p class="form-hint">A reminder of what this agent is for.</p>
               </div>
             </div>
             <p class="form-hint">Owner: <span id="edit-owner"></span> · Default user: <span id="edit-default-user"></span></p>

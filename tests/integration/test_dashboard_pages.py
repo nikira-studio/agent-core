@@ -361,3 +361,33 @@ def test_services_page_run_history_is_collapsed(authenticated_client):
     html = authenticated_client.get("/connectors").text
     assert '<details class="card" id="executions">' in html
     assert "<details class=\"card\" id=\"executions\" open" not in html
+
+
+def _hint_follows(html, element_id):
+    """True when the control with this id is followed by a help line before the next control."""
+    after = html.split(f'id="{element_id}"', 1)[1]
+    nxt = min((i for i in (after.find("<input"), after.find("<select"), after.find("<textarea"), after.find("<button")) if i != -1), default=len(after))
+    return "form-hint" in after[:nxt]
+
+
+def test_every_field_on_the_reworked_forms_has_a_line_of_help(authenticated_client):
+    expected = {
+        "/connectors": [
+            "import-spec-url", "import-spec-json", "import-spec-name", "import-mcp-url", "import-mcp-name",
+            "import-mcp-description", "import-mcp-transport", "import-mcp-timeout", "http-display-name",
+            "http-base-url", "http-auth-type", "http-extra-headers", "binding-name", "binding-credential",
+            "binding-config", "edit-binding-name", "edit-binding-scope", "edit-binding-credential",
+            "edit-binding-config",
+        ],
+        "/agents": ["ca-display-name", "ca-description", "edit-display-name", "edit-description"],
+        "/settings": ["op-token-label", "op-token-minutes", "vector-provider", "vector-auth-type", "prune-activity-before"],
+        "/workspaces": ["cp-name", "cp-description", "ep-name", "ep-description"],
+        "/users": ["eu-display-name", "eu-email", "eu-role", "eu-password"],
+    }
+    missing = [
+        f"{path} {element_id}"
+        for path, ids in expected.items()
+        for element_id in ids
+        if not _hint_follows(authenticated_client.get(path).text, element_id)
+    ]
+    assert not missing, missing

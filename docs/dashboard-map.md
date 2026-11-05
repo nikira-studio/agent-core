@@ -118,6 +118,10 @@ Built (the page is called Connect): reached from the **Connect** button on each 
 
 Users, Workspaces, Credentials, Audit. Each still needs its controls explained in place; that happens when each is touched (below).
 
+## In-page help
+
+Each control that remains on a reworked page carries one line saying what it is for, right under it. The test `test_every_field_on_the_reworked_forms_has_a_line_of_help` lists the Services, Agents, Settings, Workspaces and Users fields that must keep theirs, so a new field cannot be added without it. The Webhooks name and address fields carry theirs in the label, and the Memory, Connect, Overview and Settings forms were written with theirs. Pages that already had help on every control (Activity's Assign work, Audit's prune date, the Credentials forms) were left alone. The Credentials page stays as it is until the owner has used it from a phone.
+
 ## Empty states
 
 A fresh public install is mostly empty tables. Every page gets one sentence when it has nothing to show: what the page will show, and the one action to get started (for example, on Services: "No services yet. Add one so agents can act in an outside system.").
@@ -145,4 +149,5 @@ The first-five-minutes walk-through still sends an admin through Credentials, Se
 | Webhooks: Receiving and Sending, retry policy moved from Settings | Built and deployed |
 | Memory: Suggestions waiting for you, grouped detail, Advanced | Built and deployed |
 | Connect: Who is connecting?, a line for each selector | Built, in review |
-| Still to do | The summary for the owner: section map, what was removed, merged or moved, and one line of help for every control. The Credentials page stays as it is until the owner has used it from a phone. |
+| Help under every remaining control | Built, in review |
+| Still to do | The summary for the owner: section map, what was removed, merged or moved (this document), and a clean-up of anything the owner finds unclear in use. The Credentials page stays as it is until the owner has used it from a phone. |
