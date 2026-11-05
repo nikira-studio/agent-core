@@ -183,3 +183,11 @@ def test_the_list_offers_trusting_this_device_only_to_a_dashboard_signin(test_cl
     phone = test_client.get("/approvals", follow_redirects=False)
     assert phone.status_code == 200
     assert 'id="trust-this-device"' not in phone.text  # a trusted device can't trust more
+
+
+def test_the_trusted_device_copy_follows_the_setting(test_client, admin_token, monkeypatch):
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "TRUSTED_DEVICE_DAYS", 90)
+    _browser_admin(test_client)
+    assert "for 90 days" in test_client.get("/approvals").text

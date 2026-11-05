@@ -281,11 +281,13 @@ def approvals_page(request: Request, session: dict = Depends(_approvals_session)
     # device itself sees neither.
     extra_js = ""
     if session.get("channel") == "dashboard":
+        from app.config import settings
+
         body += """
 <div class="card">
   <h3>Trusted devices</h3>
   <p class="text-muted" style="font-size:0.85rem">
-    A trusted device can open and decide approvals without signing in, for 14 days, and nothing else.
+    A trusted device can open and decide approvals without signing in, for """ + str(int(settings.TRUSTED_DEVICE_DAYS)) + """ days, and nothing else.
     Changes that widen what an agent can do still need a dashboard sign-in. Trust only a device you control.
   </p>
   <button type="button" class="btn" id="trust-this-device">Trust this device</button>
