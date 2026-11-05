@@ -650,7 +650,7 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
             <div class="form-group">
               <label>Extra settings (JSON, optional)</label>
               <textarea id="binding-config" rows="2" placeholder='{{"repo": "owner/name"}}'></textarea>
-              <div class="form-hint">Non-secret settings such as <code>base_url</code> or <code>default_params</code>. Leave blank unless the service's setup notes ask for them.</div>
+              <div class="form-hint">Non-secret settings such as <code>base_url</code> or <code>default_params</code>. Leave blank unless the service's setup notes ask for them. A service that signs in with a username and password, or has a self-signed certificate, is set up here too: see "A service that signs in first" in the integrations guide.</div>
             </div>
             <div class="form-group" id="binding-mcp-endpoint-group" style="display:none">
               <label>Different MCP server address</label>
@@ -700,7 +700,7 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
             <div class="form-group">
               <label>Extra settings (JSON)</label>
               <textarea id="edit-binding-config" rows="2"></textarea>
-              <div class="form-hint">Non-secret settings such as <code>base_url</code> or <code>default_params</code>. Leave blank unless the service's setup notes ask for them.</div>
+              <div class="form-hint">Non-secret settings such as <code>base_url</code> or <code>default_params</code>. Leave blank unless the service's setup notes ask for them. A service that signs in with a username and password, or has a self-signed certificate, is set up here too: see "A service that signs in first" in the integrations guide.</div>
             </div>
             <div class="form-group" id="edit-binding-mcp-endpoint-group" style="display:none">
               <label>Different MCP server address</label>

@@ -1314,7 +1314,14 @@ def execute_binding_action(
 
     provider_type = connector_type.get("provider_type") or "openapi"
     executor = _resolve_executor(connector_type)
-    uses_session = bool(executor and getattr(executor, "needs_session", False))
+    wants_session = getattr(executor, "wants_session", None)
+    uses_session = bool(
+        executor
+        and (
+            getattr(executor, "needs_session", False)
+            or (callable(wants_session) and wants_session(binding_config))
+        )
+    )
 
     def _run_once() -> dict:
         nonlocal cred
@@ -1384,9 +1391,14 @@ def execute_binding_action(
                     try:
                         return _do_execute(session)
                     except (SessionExpiredError, AuthExpiredError):
+                        # A signing-in HTTP service needs the type's base_url too,
+                        # which the executor config carries and the raw binding
+                        # config does not.
                         refreshed = executor.refresh_session(
                             cred,
-                            binding_config,
+                            _build_executor_config(binding, connector_type)
+                            if callable(wants_session)
+                            else binding_config,
                             session,
                         )
                         _sessions.save_session(

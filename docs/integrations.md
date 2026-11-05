@@ -205,6 +205,29 @@ Use this when the service does not publish an OpenAPI spec and you just need to 
 
 The connector type stores the base URL. Binding `config_json` is optional and only needed when you want to override the target per binding or set a custom `test_url`.
 
+#### A service that signs in first
+
+Some self-hosted services (network controllers, admin panels) have no API key. You sign in with a username and password and the service answers with a session cookie. For these, put the sign-in in the binding's **Advanced → Extra settings (JSON)**. The credential stays a single stored secret; Agent Core signs in, keeps the cookie in its encrypted session cache, sends it on later calls, and signs in again by itself when the service drops it. The cookie never appears in a response, the execution log or the audit trail.
+
+```json
+{
+  "base_url": "https://controller.example:8443",
+  "login": {
+    "path": "/api/login",
+    "body": {"username": "{{credential.username}}", "password": "{{credential.password}}"}
+  },
+  "credential_split": ":",
+  "allowed": ["GET /api/s/default/stat/sta", "GET /api/s/default/stat/health"],
+  "tls": {"pin_sha256": "<fingerprint of the service's certificate>"}
+}
+```
+
+- **`login`**: a POST to `path` with the body shown. `{{credential.username}}` and `{{credential.password}}` come from the stored credential: either a JSON credential with `username` and `password` fields, or one `username:password` string when `credential_split` is `":"`. The split is on the first colon only, so a password that contains colons still works.
+- **`allowed`**: the only requests this binding will ever send, as exact `METHOD /path` entries. Anything else, including a different method, a query string or `..`, is refused before it leaves Agent Core. List only reads and the binding is read-only. Without `allowed`, any path on the service can be called.
+- **`tls.pin_sha256`**: for a service with a self-signed certificate. Agent Core accepts that one certificate and no other, so it is not the same as turning checking off. If the service later presents a different certificate (an update can regenerate it) the call fails with a message saying so and showing the new fingerprint; replace the pin once you have confirmed the change is expected.
+- **Test**: **Test** on a signing-in binding only signs in and reports signed in or failed. It returns no cookie and no body.
+- If the service is on your own network, add its host to `AGENT_CORE_ALLOWED_INTERNAL_HOSTS`.
+
 #### Calling an HTTP connector from an agent
 
 Agents call HTTP connectors with `connectors_run`. The action is a method and path pair: `METHOD /path`. Any params that are not transport keys (`method`, `path`, `url`, `headers`, `query`) are automatically bundled as the JSON request body.

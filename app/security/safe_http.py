@@ -1,5 +1,6 @@
 """Outbound HTTP helpers with redirect and DNS-rebinding protection."""
 
+import hashlib
 import http.client
 import socket
 import ssl
@@ -23,6 +24,39 @@ class ResponseTooLargeError(ValueError):
     def __init__(self, limit: int):
         super().__init__(f"upstream response exceeded {limit} bytes")
         self.limit = limit
+
+
+class CertificatePinError(ValueError):
+    """The service presented a certificate other than the one that was pinned."""
+
+    def __init__(self, presented: str):
+        super().__init__(
+            "The service's certificate has changed since it was pinned. If you expect "
+            "that (for example after an update), re-pin it in this binding's Advanced "
+            f"settings. The certificate it presented now has the fingerprint {presented}."
+        )
+        self.presented = presented
+
+
+def normalize_pin(pin: str) -> str:
+    """Lower-case hex of a SHA-256 fingerprint, with any colons or spaces removed."""
+    return "".join(ch for ch in str(pin).lower() if ch in "0123456789abcdef")
+
+
+class _PinnedHTTPSConnection(http.client.HTTPSConnection):
+    """HTTPS to one certificate: the chain is not checked, the fingerprint is."""
+
+    def __init__(self, *args, pin: str, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._pin = pin
+
+    def connect(self):
+        super().connect()
+        der = self.sock.getpeercert(binary_form=True) or b""
+        presented = hashlib.sha256(der).hexdigest()
+        if presented != self._pin:
+            self.close()
+            raise CertificatePinError(presented)
 
 
 def read_capped(resp, limit: int | None = None, truncate: bool = False) -> bytes:
@@ -63,8 +97,21 @@ def _connect_address(
         raise
 
 
-def _connection(target: ResolvedUrl, family: int, sockaddr: tuple, timeout: float):
-    if target.scheme == "https":
+def _connection(
+    target: ResolvedUrl,
+    family: int,
+    sockaddr: tuple,
+    timeout: float,
+    tls_pin: str | None = None,
+):
+    if target.scheme == "https" and tls_pin:
+        context = ssl.create_default_context()
+        context.check_hostname = False
+        context.verify_mode = ssl.CERT_NONE
+        conn = _PinnedHTTPSConnection(
+            target.host, target.port, timeout=timeout, context=context, pin=tls_pin
+        )
+    elif target.scheme == "https":
         conn = http.client.HTTPSConnection(
             target.host,
             target.port,
@@ -87,8 +134,18 @@ def _request_parts(req: urllib.request.Request | str):
     return str(req), "GET", None, {}
 
 
-def safe_urlopen(req: urllib.request.Request | str, timeout: float = 30):
-    """Open an HTTP(S) URL using the exact IP address that passed validation."""
+def safe_urlopen(
+    req: urllib.request.Request | str,
+    timeout: float = 30,
+    tls_pin: str | None = None,
+):
+    """Open an HTTP(S) URL using the exact IP address that passed validation.
+
+    `tls_pin` is the SHA-256 fingerprint of the one certificate to accept, for a
+    service with a self-signed certificate; without it the normal check applies.
+    """
+    if tls_pin:
+        tls_pin = normalize_pin(tls_pin)
     url, method, data, headers = _request_parts(req)
     for redirect_count in range(_MAX_REDIRECTS + 1):
         target = resolve_public_url(url)
@@ -97,11 +154,13 @@ def safe_urlopen(req: urllib.request.Request | str, timeout: float = 30):
         last_error: Exception | None = None
         response = None
         for family, sockaddr in target.addresses:
-            conn = _connection(target, family, sockaddr, timeout)
+            conn = _connection(target, family, sockaddr, timeout, tls_pin)
             try:
                 conn.request(method, path, body=data, headers=headers)
                 response = conn.getresponse()
                 break
+            except CertificatePinError:
+                raise
             except OSError as exc:
                 last_error = exc
                 conn.close()
