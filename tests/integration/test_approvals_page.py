@@ -167,3 +167,19 @@ def test_a_proposal_in_a_scope_the_person_cannot_read_is_not_shown(test_client, 
     r = test_client.get(f"/approvals/{approval_id}")
     assert r.status_code == 404, r.status_code
     assert "Widen target-agent" not in r.text
+
+
+def test_the_list_offers_trusting_this_device_only_to_a_dashboard_signin(test_client, admin_token):
+    from app.services.auth_service import trust_device
+
+    _browser_admin(test_client)
+    html = test_client.get("/approvals").text
+    assert 'id="trust-this-device"' in html and "/api/approvals/trust-device" in html
+    assert "onclick" not in html.split('id="trusted-device-list"')[1]  # ids travel in data attributes
+
+    device = trust_device("admin")
+    test_client.cookies.clear()
+    test_client.cookies.set("approvals_session", device["session_id"], path="/")
+    phone = test_client.get("/approvals", follow_redirects=False)
+    assert phone.status_code == 200
+    assert 'id="trust-this-device"' not in phone.text  # a trusted device can't trust more
