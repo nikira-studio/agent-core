@@ -84,9 +84,14 @@ class GenericHttpConnector(BaseConnector):
                 }
                 if body:
                     merged_params["body"] = body
-        refused = self._check_allowed(config, merged_params)
+        refused = self._check_allowed(config, merged_params, login=bool(login))
         if refused:
             return refused
+        if "allowed" in config or login:
+            # A fixed request list means the request is exactly what the binding
+            # says: a caller's own headers (a method override, a different Host)
+            # could turn an allowed read into something else.
+            merged_params.pop("headers", None)
         if not login:
             return self._call(credential, config, merged_params)
         if not session or not session.get("cookies"):
@@ -115,11 +120,22 @@ class GenericHttpConnector(BaseConnector):
         return None
 
     @staticmethod
-    def _check_allowed(config: dict, params: dict) -> Optional[dict]:
-        """With an `allowed` list, only those exact requests are ever sent."""
+    def _check_allowed(config: dict, params: dict, login: bool = False) -> Optional[dict]:
+        """With an `allowed` list, only those exact requests are ever sent.
+
+        A binding that signs in must have one: the session cookie is worth more
+        than any single call, so it never goes with a request nobody listed.
+        """
         allowed = config.get("allowed")
-        if allowed is None:
+        if allowed is None and not login:
             return None
+        if login and not (isinstance(allowed, list) and allowed):
+            return {
+                "success": False,
+                "error": "This signing-in service needs a fixed list of allowed requests. "
+                "Add an \"allowed\" list in the binding's Advanced settings.",
+                "error_code": "REQUEST_NOT_ALLOWED",
+            }
         listed = {str(entry).strip() for entry in allowed} if isinstance(allowed, list) else set()
         method = str(params.get("method") or "GET").upper()
         path = params.get("path")

@@ -229,3 +229,45 @@ def test_a_pinned_self_signed_certificate_is_accepted_and_a_changed_one_is_not(t
         assert fingerprint in result["error"]  # so the person can see what it is now
     finally:
         server.shutdown()
+
+
+def test_a_signing_in_binding_without_an_allowed_list_sends_nothing(stub):
+    connector = GenericHttpConnector()
+    config = json.loads(_config(stub))
+    session = connector.refresh_session(GOOD, json.dumps(config), None)["session"]
+    before = len(stub.requests)
+    for missing in (None, []):
+        loose = dict(config)
+        loose.pop("allowed")
+        if missing is not None:
+            loose["allowed"] = missing
+        for action in ("GET /api/data", "POST /api/write", "call_endpoint"):
+            result = connector.execute(
+                action, {"method": "DELETE", "path": "/api/data"} if action == "call_endpoint" else {},
+                GOOD, json.dumps(loose), session=session,
+            )
+            assert result["error_code"] == "REQUEST_NOT_ALLOWED"
+            assert "fixed list of allowed requests" in result["error"]
+    assert len(stub.requests) == before and stub.writes == 0
+
+
+def test_caller_headers_are_ignored_when_requests_are_fixed(stub):
+    seen = []
+
+    class _Echo(_Stub):
+        def do_GET(self):
+            seen.append({k.lower(): v for k, v in self.headers.items()})
+            super().do_GET()
+
+    stub.RequestHandlerClass = _Echo
+    connector = GenericHttpConnector()
+    config = _config(stub, headers={"X-Fixed": "from-binding"})
+    session = connector.refresh_session(GOOD, config, None)["session"]
+    result = connector.execute(
+        "GET /api/data",
+        {"headers": {"X-HTTP-Method-Override": "DELETE", "Host": "elsewhere.example", "X-Fixed": "caller"}},
+        GOOD, config, session=session,
+    )
+    assert result["success"]
+    assert "x-http-method-override" not in seen[-1] and seen[-1]["x-fixed"] == "from-binding"
+    assert not seen[-1]["host"].startswith("elsewhere")
