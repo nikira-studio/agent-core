@@ -435,3 +435,14 @@ def test_text_that_looks_like_an_asset_link_cannot_break_a_page(authenticated_cl
     credential_service.create_credential("user:admin", "see /static/css/..?v=1 and /static/js/..?v=2", "not-shown")
     page = authenticated_client.get("/credentials")
     assert page.status_code == 200 and "/static/css/..?v=1" in page.text
+
+
+def test_credential_row_buttons_share_a_line_and_scopes_break_only_at_the_colon(authenticated_client):
+    from app.services import credential_service
+
+    credential_service.create_credential("workspace:home-network", "a_long_credential_name", "not-shown")
+    html = authenticated_client.get("/credentials").text
+    assert "<span>workspace:</span><wbr><span>home-network</span>" in html  # never splits home-network
+    assert "a_<wbr>long_<wbr>credential_<wbr>name" in html
+    css = open("app/dashboard/static/css/dashboard.css").read()
+    assert ".actions-cell .btn { vertical-align: middle; }" in css  # text and icon buttons on one baseline

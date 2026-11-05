@@ -23,6 +23,14 @@ router = APIRouter()
 EXPIRY_WARNING_DAYS = 14
 
 
+def scope_html(scope: str) -> str:
+    """A scope that may wrap only after its colon, never inside a name such as home-network."""
+    kind, sep, name = scope.partition(":")
+    if not sep:
+        return f"<span>{escape_html(scope)}</span>"
+    return f"<span>{escape_html(kind)}:</span><wbr><span>{escape_html(name)}</span>"
+
+
 def _expiry_cell(expires_at) -> str:
     """What an operator needs to know about a credential's lifetime at a glance.
 
@@ -138,10 +146,10 @@ def credentials_page(request: Request, session: dict = Depends(require_auth)):
             )
         credential_rows += f"""
         <tr data-credential-id="{e["id"]}">
-          <td>{escape_html(e.get("name", ""))}
+          <td>{escape_html(e.get("name", "")).replace("_", "_<wbr>")}
             <div class='text-muted' style='font-size:0.8rem'>{origin}</div>
             <button type='button' class='btn btn-sm btn-link' data-copy-reference="{escape_html(e.get("reference_name", ""))}" title="Copy {escape_html(e.get("reference_name", ""))}">Copy reference</button></td>
-          <td data-label='Scope'><code class='scope-code'>{escape_html(e.get("scope", ""))}</code></td>
+          <td data-label='Scope'><code class='scope-code'>{scope_html(e.get("scope", ""))}</code></td>
           <td data-label='Expires'>{_expiry_cell(e.get("expires_at"))}</td>
           {used_cell}
           <td class='actions-cell'>
@@ -180,10 +188,10 @@ def credentials_page(request: Request, session: dict = Depends(require_auth)):
       <tbody>{request_rows}</tbody></table>
     </div>"""
 
-    used_header = "<th>Used by</th>" if ctx.is_admin else ""
+    used_header = "<th class='col-used'>Used by</th>" if ctx.is_admin else ""
     if credential_entries:
         credentials_html = f"""
-        <table class='stack-table'><thead><tr><th>Name</th><th>Scope</th><th>Expires</th>{used_header}<th class='actions-cell'>Actions</th></tr></thead>
+        <table class='stack-table'><thead><tr><th>Name</th><th class='col-scope'>Scope</th><th class='col-expires'>Expires</th>{used_header}<th class='actions-cell col-actions'>Actions</th></tr></thead>
         <tbody>{credential_rows}</tbody></table>"""
     else:
         credentials_html = "<div class='empty'>No credentials yet.</div>"

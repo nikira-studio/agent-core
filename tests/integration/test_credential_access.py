@@ -87,7 +87,7 @@ def test_the_credentials_page_shows_who_uses_each_one_to_an_admin(admin):
     entry = _entry()
     admin.post("/api/credential-consumers/grants", json={"consumer_agent_id": "svc-a", "entry_id": entry["id"], "allow_write": False}, headers=csrf_headers(admin))
     html = admin.get("/credentials").text
-    assert "<th>Used by</th>" in html and f"data-credential-access='{entry['id']}'" in html
+    assert "<th class='col-used'>Used by</th>" in html and f"data-credential-access='{entry['id']}'" in html
     assert "SVC-A" in html
     dialog = html.split('id="access-modal"', 1)[1]
     assert "One credential per service" in dialog and "Use a separate credential only for a different account" in dialog
@@ -101,7 +101,7 @@ def test_a_regular_user_gets_no_access_controls_and_no_access_data(admin):
     admin.cookies.clear()
     admin.cookies.set("session_token", create_session("regular", channel="dashboard")["session_id"])
     assert "data-credential-access" not in admin.get("/credentials").text
-    assert "<th>Used by</th>" not in admin.get("/credentials").text
+    assert "<th class='col-used'>Used by</th>" not in admin.get("/credentials").text
     assert admin.get(f"/api/credential-consumers/entries/{entry['id']}/access").status_code == 403
 
 

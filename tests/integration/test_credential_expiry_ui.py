@@ -80,7 +80,7 @@ def test_the_forms_offer_an_expiry(test_client, admin_token):
     page = test_client.get("/credentials", headers=_headers(admin_token)).text
     assert 'id="credential-expires"' in page, "no expiry on the create form"
     assert 'id="edit-credential-expires"' in page, "no expiry on the edit form"
-    assert "<th>Expires</th>" in page
+    assert "<th class='col-expires'>Expires</th>" in page
 
 
 def test_provenance_is_shown_on_the_row(test_client, admin_token):

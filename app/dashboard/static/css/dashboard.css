@@ -1902,9 +1902,8 @@ th.activity-actions-header {
 /* Visual pass: keep wide content inside its card, tidy small screens. */
 .card:has(table) { overflow-x: auto; }
 .section-header { flex-wrap: wrap; }
-.chip-trunc { display: inline-block; max-width: 11rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; }
-.scope-code { white-space: nowrap; }
-@media (max-width: 768px) { .scope-code { white-space: normal; overflow-wrap: anywhere; } }
+.chip-trunc { display: inline-block; max-width: 8rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; }
+.scope-code span { white-space: nowrap; }
 .btn-link { background: none; border: 0; padding: 0; margin-top: 2px; color: var(--accent); font-size: 0.78rem; cursor: pointer; display: block; }
 .btn-link:hover { text-decoration: underline; }
 .audit-action-cell { width: 200px; }
@@ -1928,18 +1927,40 @@ th.activity-actions-header {
       radial-gradient(farthest-side at 0 50%, rgba(0,0,0,0.25), transparent) left center / 12px 100% no-repeat scroll,
       radial-gradient(farthest-side at 100% 50%, rgba(0,0,0,0.25), transparent) right center / 12px 100% no-repeat scroll;
   }
-  /* The Credentials list becomes one block per credential, so Access and Edit are never off-screen. */
-  .stack-table, .stack-table tbody, .stack-table tr, .stack-table td { display: block; width: 100%; }
-  .stack-table thead { display: none; }
-  .stack-table tr { padding: 10px 0; border-bottom: 1px solid var(--border); }
-  .stack-table td { border: 0; padding: 3px 0; }
-  .stack-table td[data-label]::before { content: attr(data-label); display: inline-block; min-width: 4.5rem; color: var(--muted); font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.05em; }
-  .stack-table td.actions-cell { display: flex; gap: 6px; flex-wrap: wrap; padding-top: 8px; }
 }
+
 /* Webhook addresses wrap instead of stretching the table (on a phone the table scrolls instead). */
 @media (min-width: 769px) {
   .url-cell { display: inline-block; max-width: 22rem; overflow-wrap: anywhere; word-break: break-all; }
 }
 @media (max-width: 768px) {
   .url-cell { white-space: nowrap; }
+}
+
+/* Row buttons share one line: the icon button must not sit on a different baseline from text buttons. */
+.actions-cell .btn { vertical-align: middle; }
+.actions-cell .icon-delete-btn { display: inline-flex; align-items: center; justify-content: center; }
+
+/* The Credentials table carries five columns: tighter cell padding so it fits a laptop window. */
+@media (min-width: 1101px) {
+  .stack-table td, .stack-table th { padding-left: 10px; padding-right: 10px; }
+}
+@media (min-width: 1101px) {
+  /* Fixed columns: the name takes what is left and wraps, so the row always fits its card. */
+  .stack-table { table-layout: fixed; }
+  .stack-table th.col-scope { width: 130px; }
+  .stack-table th.col-expires { width: 72px; }
+  .stack-table th.col-used { width: 140px; }
+  .stack-table th.col-actions { width: 180px; }
+  .stack-table td:first-child { overflow-wrap: anywhere; }
+}
+
+/* Below a wide window the Credentials list becomes one block per credential, so Access, Edit and delete never sit off-screen. */
+@media (max-width: 1100px) {
+  .stack-table, .stack-table tbody, .stack-table tr, .stack-table td { display: block; width: 100%; }
+  .stack-table thead { display: none; }
+  .stack-table tr { padding: 10px 0; border-bottom: 1px solid var(--border); }
+  .stack-table td { border: 0; padding: 3px 0; }
+  .stack-table td[data-label]::before { content: attr(data-label); display: inline-block; min-width: 4.5rem; color: var(--muted); font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.05em; }
+  .stack-table td.actions-cell { display: flex; gap: 6px; flex-wrap: wrap; padding-top: 8px; }
 }
