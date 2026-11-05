@@ -375,10 +375,14 @@ def dashboard_home(request: Request, session: dict = Depends(require_auth)):
             ("Give it a service", "/connectors", False, "Optional: let it act in an outside system, such as GitHub."),
             ("Watch it work", "/activity", bool(recent_activity), "Its tasks and handoffs appear here."),
         ]
-        started_html = '<div class="card" id="overview-getting-started"><h3>Getting started</h3><ol>' + "".join(
-            f"<li{' style=\"opacity:.6\"' if done else ''}><a href='{href}'>{label}</a> <span class='text-muted'>{note}</span></li>"
-            for label, href, done, note in steps
-        ) + "</ol></div>"
+        step_items = []
+        for label, href, done, note in steps:
+            style = " style='opacity:.6'" if done else ""
+            step_items.append(f"<li{style}><a href='{href}'>{label}</a> <span class='text-muted'>{note}</span></li>")
+        started_html = (
+            '<div class="card" id="overview-getting-started"><h3>Getting started</h3><ol>'
+            + "".join(step_items) + "</ol></div>"
+        )
 
     search_html = """
     <div class="card">
