@@ -149,6 +149,15 @@ A script that must act as a person everywhere, for example one that creates cred
 
 State-changing requests that rely on the session cookie must carry an `X-CSRF-Token` header. Dashboard pages add it automatically.
 
+## Approvals
+
+An agent that should prepare an admin change but not make it holds the `admin_propose` capability. It proposes named operations (the allowlist is in `app/operations/admin_operations.py`); a signed-in admin approves on the **Approvals** page, and the bundle runs as that person in one all-or-nothing transaction. The audit records the person as actor and the agent as proposer.
+
+- Deciding takes the browser cookie only. Any `Authorization` header, whether an agent key, an operator token or a Bearer session, is refused, and the request needs the CSRF token and a matching `Origin`.
+- An approval changes only what it was proposed against: if a target changed in between, it fails and applies nothing.
+- Secret values are never proposed. The person types them on the approval page.
+- **Trust this device** (Approvals page) issues a separate 30-day session in a cookie that is HttpOnly, SameSite=Strict and limited to the Approvals paths. The rest of the dashboard refuses it. Revoke devices with `DELETE /api/approvals/trusted-devices/{id}`.
+
 ## Rate limits
 
 Rate limits protect against runaway agents and misconfigured automation. Limits are token buckets. The failed-login and failed-OTP limits are kept in the database, so every worker counts the same attempts and a restart does not reset them; the others are in process memory and reset on restart. Login limits are counted per client address and per account. Behind a reverse proxy, set `AGENT_CORE_TRUSTED_PROXIES` to the proxy's address, or every client arrives from the proxy and shares one per-address bucket.

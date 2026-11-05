@@ -133,6 +133,7 @@ def render_page(
         ("/credentials", "Credentials"),
         ("/integrations", "Integrations"),
         ("/activity", "Activity"),
+        ("/approvals", "Approvals"),
         ("/audit", "Audit"),
         ("/webhooks", "Webhooks"),
         ("/settings", "Settings"),

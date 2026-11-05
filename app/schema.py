@@ -19,9 +19,33 @@ CREATE TABLE IF NOT EXISTS sessions (
     expires_at TEXT NOT NULL,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
     last_activity TEXT DEFAULT CURRENT_TIMESTAMP,
-    channel TEXT NOT NULL DEFAULT 'dashboard' CHECK (channel IN ('dashboard', 'pending_otp')),
+    channel TEXT NOT NULL DEFAULT 'dashboard' CHECK (channel IN ('dashboard', 'pending_otp', 'approvals')),
     FOREIGN KEY (user_id) REFERENCES users(id)
 );
+
+-- Approvals: admin changes an agent proposed, held until a person decides.
+-- operations_enc is the encrypted list of {name, params}; it can hold
+-- sensitive configuration, so it is never stored in clear.
+CREATE TABLE IF NOT EXISTS approvals (
+    id TEXT PRIMARY KEY,
+    status TEXT NOT NULL CHECK (status IN ('pending', 'executing', 'done', 'failed', 'rejected', 'expired')),
+    title TEXT NOT NULL,
+    note TEXT,
+    scope TEXT NOT NULL,
+    proposed_by TEXT NOT NULL,
+    proposed_execution_id TEXT,
+    operations_enc TEXT NOT NULL,
+    fingerprints_json TEXT NOT NULL,
+    request_hash TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    decided_by TEXT,
+    decided_at TEXT,
+    decision_note TEXT,
+    result_json TEXT,
+    error TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_approvals_status ON approvals(status, scope);
 
 -- Operator tokens: short-lived Bearer tokens a signed-in person mints for
 -- scripts that act as that person. Only a hash is stored.
@@ -541,6 +565,8 @@ def _apply_schema_migrations(conn) -> None:
         (15, "single-use-otp-codes", _migrate_015_otp_last_used_step),
         (16, "shared-login-rate-limits", _migrate_016_rate_limit_buckets),
         (17, "operator-tokens", _migrate_017_operator_tokens),
+        (18, "approvals", _migrate_018_approvals),
+        (19, "trusted-device-sessions", _migrate_019_trusted_device_sessions),
     )
     applied = {
         row["revision"]
@@ -1575,6 +1601,57 @@ def _migrate_015_otp_last_used_step(conn) -> None:
     columns = {row["name"] for row in conn.execute("PRAGMA table_info(otp_secrets)")}
     if "last_used_step" not in columns:
         conn.execute("ALTER TABLE otp_secrets ADD COLUMN last_used_step INTEGER")
+
+
+def _migrate_019_trusted_device_sessions(conn) -> None:
+    """Allow the 'approvals' session channel. SQLite cannot alter a CHECK
+    constraint, so the table is rebuilt with the same columns and rows."""
+    sql = conn.execute("SELECT sql FROM sqlite_master WHERE name = 'sessions'").fetchone()
+    if sql is None or "'approvals'" in sql[0]:
+        return
+    conn.execute(
+        """CREATE TABLE sessions_rebuilt (
+            id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            expires_at TEXT NOT NULL,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            last_activity TEXT DEFAULT CURRENT_TIMESTAMP,
+            channel TEXT NOT NULL DEFAULT 'dashboard' CHECK (channel IN ('dashboard', 'pending_otp', 'approvals')),
+            FOREIGN KEY (user_id) REFERENCES users(id)
+        )"""
+    )
+    conn.execute(
+        "INSERT INTO sessions_rebuilt (id, user_id, expires_at, created_at, last_activity, channel) "
+        "SELECT id, user_id, expires_at, created_at, last_activity, channel FROM sessions"
+    )
+    conn.execute("DROP TABLE sessions")
+    conn.execute("ALTER TABLE sessions_rebuilt RENAME TO sessions")
+
+
+def _migrate_018_approvals(conn) -> None:
+    """Admin changes agents propose and people approve."""
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS approvals (
+            id TEXT PRIMARY KEY,
+            status TEXT NOT NULL CHECK (status IN ('pending', 'executing', 'done', 'failed', 'rejected', 'expired')),
+            title TEXT NOT NULL,
+            note TEXT,
+            scope TEXT NOT NULL,
+            proposed_by TEXT NOT NULL,
+            proposed_execution_id TEXT,
+            operations_enc TEXT NOT NULL,
+            fingerprints_json TEXT NOT NULL,
+            request_hash TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            expires_at TEXT NOT NULL,
+            decided_by TEXT,
+            decided_at TEXT,
+            decision_note TEXT,
+            result_json TEXT,
+            error TEXT
+        )"""
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_approvals_status ON approvals(status, scope)")
 
 
 def _migrate_017_operator_tokens(conn) -> None:

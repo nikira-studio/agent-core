@@ -55,6 +55,7 @@ class RateLimiter:
         ("login_failed", "user"): RateLimitConfig(10, 1.0 / 60),
         ("otp_failed", "user"): RateLimitConfig(5, 1.0 / 300),
         ("inbound_webhook", "ip"): RateLimitConfig(60, 1.0),
+        ("approval_decide", "user"): RateLimitConfig(30, 1.0 / 2),
     }
 
     # Limits that guard sign-in. Kept in the database so every worker and every

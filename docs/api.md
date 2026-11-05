@@ -72,6 +72,13 @@ Agent API keys start with `ac_sk_`. Broker credentials start with `ac_broker_`. 
 | `GET` | `/api/auth/operator-tokens` | Browser session | List your active operator tokens |
 | `DELETE` | `/api/auth/operator-tokens/{id}` | Browser session | Revoke one of your operator tokens |
 | `POST` | `/api/auth/password` | Session | Change password |
+| `POST` | `/api/approvals` | Agent key (`admin_propose`) | Propose a bundle of admin operations for a person to approve |
+| `GET` | `/api/approvals` | Session or key | List approvals in scopes you can read (`status`, default `pending`) |
+| `GET` | `/api/approvals/{id}` | Session or key | Status, decision note and result of one approval |
+| `POST` | `/api/approvals/{id}/decide` | Browser session or trusted device | Approve (runs the bundle as you) or reject; cookie only, needs `X-CSRF-Token` |
+| `POST` | `/api/approvals/trust-device` | Browser session | Make this browser a trusted device for approvals |
+| `GET` | `/api/approvals/trusted-devices` | Browser session | List your trusted devices |
+| `DELETE` | `/api/approvals/trusted-devices/{id}` | Browser session | Revoke a trusted device |
 | `POST` | `/api/auth/otp/enroll` | Session + password | Start TOTP enrollment and receive QR data. Reset also requires current OTP. |
 | `POST` | `/api/auth/otp/confirm` | Session | Confirm the first TOTP code and enable OTP |
 | `POST` | `/api/auth/otp/verify` | Pending session | Verify OTP during login |

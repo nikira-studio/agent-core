@@ -15,6 +15,10 @@ class Settings(BaseSettings):
     ENCRYPTION_KEY: str = "auto"
     SESSION_DURATION_HOURS: int = 8
     INACTIVITY_TIMEOUT_MINUTES: int = 30
+    # A trusted device holds a long-lived session that only the Approvals
+    # pages accept, so a person can approve from their phone without signing
+    # in each time. It also expires after this many days without use.
+    TRUSTED_DEVICE_DAYS: int = 30
     SHARED_SCOPE_AGENTS: str = ""
     TRUSTED_PROXIES: str = ""
     STALE_THRESHOLD_MINUTES: int = 5

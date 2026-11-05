@@ -235,7 +235,12 @@ def attention_list(
         without_task_ref=without_task_ref,
         limit=min(max(limit, 0), 200),
     )
-    return success_response({"items": items, "count": len(items)})
+    from app.services import approval_service
+
+    # Pending approvals are the other thing a person must act on. They are a
+    # separate list because they are not activities; each links to its page.
+    approvals = approval_service.list_for_scopes(authorized_scopes, "pending", min(max(limit, 1), 200))
+    return success_response({"items": items, "count": len(items), "approvals": approvals})
 
 
 def _attention_scopes(ctx: EffectiveAuthority, requested: Optional[list[str]]):

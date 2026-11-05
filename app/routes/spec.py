@@ -260,6 +260,30 @@ def spec(
             "inputSchema": {},
         },
         {
+            "name": "approval_propose",
+            "description": (
+                "Propose admin changes for a person to approve; nothing runs until a signed-in "
+                "admin approves, then all operations run together as that person. Requires the "
+                "admin_propose capability; secret values are never proposed."
+            ),
+            "inputSchema": {
+                "scope": "string",
+                "title": "string",
+                "note": "string?",
+                "operations": "object[]",
+                "execution_id": "string?",
+                "expiry_hours": "integer?",
+            },
+        },
+        {
+            "name": "approval_get",
+            "description": (
+                "Status of an approval you proposed or can read, with the person's decision note "
+                "and the result; read-only, agents cannot decide approvals."
+            ),
+            "inputSchema": {"approval_id": "string"},
+        },
+        {
             "name": "workspace_sync",
             "description": "Synchronize workspace context and changes for one agent execution",
             "inputSchema": {

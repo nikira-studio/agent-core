@@ -44,8 +44,10 @@ from app.routes import (
     auth_pages_router,
     settings_page_router,
     webhooks_page_router,
+    approvals_page_router,
     events_router,
     webhooks_router,
+    approvals_router,
 )
 from app.database import DatabaseUnavailable
 from app.security.exceptions import APIError
@@ -116,7 +118,9 @@ def create_app() -> FastAPI:
             and "authorization" not in request.headers
             and request.url.path not in CSRF_EXEMPT_PATHS
         ):
-            cookie = request.cookies.get("session_token")
+            # The trusted-device cookie authenticates Approvals requests the
+            # same way the dashboard cookie does, so it needs the same token.
+            cookie = request.cookies.get("session_token") or request.cookies.get("approvals_session")
             if cookie:
                 import hmac
 
@@ -254,6 +258,7 @@ def create_app() -> FastAPI:
     app.include_router(health_router, tags=["health"])
     app.include_router(spec_router, tags=["spec"])
     app.include_router(auth_router, tags=["auth"])
+    app.include_router(approvals_router, tags=["approvals"])
     app.include_router(agents_router, tags=["agents"])
     app.include_router(workspaces_router, tags=["workspaces"])
     app.include_router(credentials_router, tags=["credentials"])
@@ -284,6 +289,7 @@ def create_app() -> FastAPI:
     app.include_router(auth_pages_router, tags=["auth_pages"])
     app.include_router(settings_page_router, tags=["settings_page"])
     app.include_router(webhooks_page_router, tags=["webhooks_page"])
+    app.include_router(approvals_page_router, tags=["approvals_page"])
     app.include_router(dashboard_api_router, tags=["dashboard_api"])
     app.include_router(backup_router, tags=["backup"])
     app.include_router(events_router, tags=["events"])

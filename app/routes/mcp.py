@@ -76,6 +76,8 @@ _TOOL_CAPABILITIES = {
         )
     },
     **{name: "credentials" for name in ("credential_get", "credential_list", "credential_request")},
+    "approval_propose": "admin_propose",
+    "approval_get": "coordination",
     **{
         name: "connectors_read"
         for name in (
@@ -454,6 +456,49 @@ MANIFEST = {
                         },
                     },
                 },
+            },
+        },
+        {
+            "name": "approval_propose",
+            "description": (
+                "Propose admin changes for a person to approve: one or more named operations "
+                "(agent.create, agent.update, credential_grant.create, credential_grant.revoke, "
+                "credential.create, binding.create, binding.update, connector_type.actions, adapter.install), "
+                "each with the params the matching admin API takes. Nothing runs until a signed-in admin "
+                "approves; then all operations run together as that person, or none do. Never include "
+                "secret values: credential.create leaves out value, which the person types when approving. "
+                "Returns the approval id; check it with approval_get. Requires the admin_propose capability."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "scope": {"type": "string", "description": "A scope you can write; people who read it see the request."},
+                    "title": {"type": "string", "maxLength": 200, "description": "What the change is, in one line."},
+                    "note": {"type": "string", "maxLength": 2000, "description": "Why, for the person deciding."},
+                    "operations": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {"name": {"type": "string"}, "params": {"type": "object"}},
+                            "required": ["name", "params"],
+                        },
+                    },
+                    "execution_id": {"type": "string"},
+                    "expiry_hours": {"type": "integer", "minimum": 1, "maximum": 168},
+                },
+                "required": ["scope", "title", "operations"],
+            },
+        },
+        {
+            "name": "approval_get",
+            "description": (
+                "Status of an approval you proposed or can read: pending, done, failed, rejected or expired, "
+                "with the person's decision note and the result. Read-only; agents cannot decide approvals."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {"approval_id": {"type": "string"}},
+                "required": ["approval_id"],
             },
         },
         {
@@ -2071,6 +2116,22 @@ async def _run_custom_mcp_tool(body: dict, ctx: EffectiveAuthority):
                     payload["since_last_active"] = digest
             return JSONResponse(content={"ok": True, "data": payload}, status_code=201)
 
+    elif tool in ("approval_propose", "approval_get"):
+        from pydantic import ValidationError
+
+        from app.routes.approvals import ProposalRequest, propose_for, view_for
+        from app.security.exceptions import APIError
+
+        try:
+            if tool == "approval_propose":
+                body = ProposalRequest.model_validate(
+                    {k: params[k] for k in ProposalRequest.model_fields if k in params})
+                return JSONResponse(content={"ok": True, "data": {"approval": propose_for(ctx, body)}})
+            return JSONResponse(content={"ok": True, "data": {"approval": view_for(ctx, params["approval_id"])}})
+        except APIError as exc:
+            return _mcp_error(exc.code, exc.message, exc.status_code)
+        except ValidationError as exc:
+            return _mcp_error("INVALID_PARAMS", str(exc.errors()[0]["msg"]), 400)
     elif tool == "activity_handoff_resolve":
         reason = " ".join(str(params.get("reason") or "").split())
         if not reason:
@@ -2232,8 +2293,11 @@ async def _run_custom_mcp_tool(body: dict, ctx: EffectiveAuthority):
             without_task_ref=bool(params.get("without_task_ref")),
             limit=limit,
         )
+        from app.services import approval_service
+
+        approvals = approval_service.list_for_scopes(authorized_scopes, "pending", limit or 1)
         return JSONResponse(
-            content={"ok": True, "data": {"items": items, "count": len(items)}}
+            content={"ok": True, "data": {"items": items, "count": len(items), "approvals": approvals}}
         )
 
     elif tool == "activity_pickup":

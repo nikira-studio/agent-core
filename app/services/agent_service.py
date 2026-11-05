@@ -31,7 +31,7 @@ def _with_own_scope(agent_id: str, scopes: list[str]) -> list[str]:
 # "clear it back to NULL / Option A" (explicit None) in update_agent.
 _UNSET = object()
 LEGACY_CAPABILITIES = ["memory", "coordination", "credentials", "connectors_read", "connectors_execute"]
-ALL_CAPABILITIES = [*LEGACY_CAPABILITIES, "credentials_resolve"]
+ALL_CAPABILITIES = [*LEGACY_CAPABILITIES, "credentials_resolve", "admin_propose"]
 
 
 def parse_capabilities(value: Optional[str]) -> list[str]:

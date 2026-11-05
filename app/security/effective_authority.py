@@ -21,7 +21,7 @@ RESOURCE_OPERATIONS: dict[str, frozenset[str]] = {
     "credential": frozenset({"read", "write", "reference", "reveal"}),
 }
 
-ALL_CAPABILITIES = frozenset({"memory", "coordination", "credentials", "connectors_read", "connectors_execute", "credentials_resolve"})
+ALL_CAPABILITIES = frozenset({"memory", "coordination", "credentials", "connectors_read", "connectors_execute", "credentials_resolve", "admin_propose"})
 RESOURCE_CAPABILITIES: dict[tuple[str, str], str] = {
     ("memory", "read"): "memory", ("memory", "write"): "memory",
     ("activity", "read"): "coordination", ("activity", "create"): "coordination",

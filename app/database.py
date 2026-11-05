@@ -3,6 +3,7 @@ import sqlite3
 import threading
 from pathlib import Path
 from contextlib import contextmanager
+from contextvars import ContextVar
 from collections.abc import Generator
 
 from app.branding import ENV_PREFIX
@@ -145,13 +146,95 @@ def get_connection() -> sqlite3.Connection:
     return conn
 
 
+class _SharedConnection:
+    """The connection of an all-or-nothing unit (see `all_or_nothing`), as the
+    code inside it sees it. Commits and transactions that code opens become
+    savepoints, so its own error handling still works, but nothing is final
+    until the whole unit commits."""
+
+    def __init__(self, conn: sqlite3.Connection):
+        self._conn = conn
+        self._savepoints: list[str] = []
+
+    def execute(self, sql, *args):
+        if sql.lstrip()[:5].upper() == "BEGIN":
+            name = f"unit_{len(self._savepoints)}"
+            self._savepoints.append(name)
+            return self._conn.execute(f"SAVEPOINT {name}")
+        return self._conn.execute(sql, *args)
+
+    def commit(self) -> None:
+        if self._savepoints:
+            self._conn.execute(f"RELEASE {self._savepoints.pop()}")
+
+    def rollback(self) -> None:
+        if self._savepoints:
+            name = self._savepoints.pop()
+            self._conn.execute(f"ROLLBACK TO {name}")
+            self._conn.execute(f"RELEASE {name}")
+        # Outside any savepoint a rollback means the unit fails; the error that
+        # caused it propagates and all_or_nothing rolls everything back.
+
+    def close(self) -> None:
+        pass
+
+    def __getattr__(self, name):
+        return getattr(self._conn, name)
+
+
+_shared_unit: "ContextVar[tuple[int, _SharedConnection] | None]" = ContextVar("shared_db_unit", default=None)
+
+
+@contextmanager
+def all_or_nothing() -> Generator[None, None, None]:
+    """Run a block whose database writes either all happen or none do.
+
+    Every get_db() in the same thread inside the block shares one connection
+    and one write transaction, committed when the block ends and rolled back if
+    it raises. Used to apply an approved bundle of admin operations as a whole.
+    """
+    import threading
+
+    if _shared_unit.get() is not None:
+        raise RuntimeError("all_or_nothing blocks do not nest")
+    _enter_unit()
+    try:
+        conn = get_connection()
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            token = _shared_unit.set((threading.get_ident(), _SharedConnection(conn)))
+            try:
+                yield
+                conn.commit()
+            except BaseException:
+                conn.rollback()
+                raise
+            finally:
+                _shared_unit.reset(token)
+        finally:
+            conn.close()
+    finally:
+        _leave_unit()
+
+
 @contextmanager
 def get_db() -> Generator[sqlite3.Connection, None, None]:
     """One unit of database work, and the thing a restore waits for.
 
     The gate is entered before the connection is opened and left after it is
-    closed, so a restore can never begin while a connection is alive.
+    closed, so a restore can never begin while a connection is alive. Inside an
+    all_or_nothing block it is that block's shared connection instead.
     """
+    shared = _shared_unit.get()
+    if shared is not None:
+        import threading
+
+        # SQLite connections stay in the thread that opened them. Work moved
+        # to another thread gets its own connection and waits on the unit's
+        # write lock, so it fails rather than escaping the unit.
+        if shared[0] == threading.get_ident():
+            yield shared[1]
+            return
     _enter_unit()
     try:
         conn = get_connection()

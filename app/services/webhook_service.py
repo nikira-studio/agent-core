@@ -28,6 +28,7 @@ WEBHOOK_EVENT_TYPES = (
     "activity_recovered",
     "activity_handoff_resolved",
     "connector_executed",
+    "approval_requested",
 )
 
 DELIVERY_TIMEOUT_SECONDS = 5

@@ -231,6 +231,8 @@ def test_create_schema_records_and_skips_applied_revision(monkeypatch):
         {"revision": 15, "name": "single-use-otp-codes"},
         {"revision": 16, "name": "shared-login-rate-limits"},
         {"revision": 17, "name": "operator-tokens"},
+        {"revision": 18, "name": "approvals"},
+        {"revision": 19, "name": "trusted-device-sessions"},
     ]
     assert conn.execute(
         "SELECT 1 FROM sqlite_master WHERE type='table' AND name='credential_resolution_daily'"

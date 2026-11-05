@@ -935,7 +935,7 @@ def test_mcp_rejects_parameter_types_that_do_not_match_the_manifest(
 
 def test_every_declared_requirement_is_enforced(test_client, agent_token):
     """Each tool that declares required params rejects a call with none."""
-    from app.routes.mcp import _REQUIRED_PARAMS
+    from app.routes.mcp import _REQUIRED_PARAMS, _TOOL_CAPABILITIES
 
     for tool, required in _REQUIRED_PARAMS.items():
         if not required:
@@ -946,7 +946,10 @@ def test_every_declared_requirement_is_enforced(test_client, agent_token):
             json={"tool": tool, "params": {}},
         )
         assert r.status_code != 500, f"{tool} returned a 500 for missing params"
-        assert r.json()["error"]["code"] == "INVALID_PARAMS", tool
+        # The test agent lacks admin_propose, so that tool refuses before
+        # looking at params, which is the order it should check in.
+        expected = "CAPABILITY_DENIED" if _TOOL_CAPABILITIES.get(tool) == "admin_propose" else "INVALID_PARAMS"
+        assert r.json()["error"]["code"] == expected, tool
 
 
 def test_a_complete_call_still_works(test_client, agent_token):
