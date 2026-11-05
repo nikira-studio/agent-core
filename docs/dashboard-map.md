@@ -12,8 +12,8 @@ What an admin does, in order, and where the dashboard sends them today.
 |---|---|---|---|
 | 1 | Sign in and see what Agent Core is for | **Overview**: a "Capability Snapshot", a search box, recent activity | Nothing says what to do next. A fresh install shows empty tables. |
 | 2 | Add an agent | **Agents** → Create Agent | Done: pick a role (Assistant, Service agent, Proposer, Custom) instead of seven permission boxes. |
-| 3 | Connect that agent's tool to Core | **Integrations**: choose a user, workspace and agent, then copy the generated key and config | Separate page from Agents. The agent form ends with a link to it. Easy to miss. |
-| 4 | Give it a credential or an outside service | **Credentials** (store a secret), then **Connectors** (add a service, then add a binding to it) | Three places for one idea: "let this agent use that service". |
+| 3 | Connect that agent's tool to Core | **Integrations** (to be renamed Connect a tool): choose a user, workspace and agent, then copy the generated key and config | Separate page from Agents. The agent form ends with a link to it. Easy to miss. |
+| 4 | Give it a credential or an outside service | **Credentials** (store a secret), then **Connectors** (to be renamed Services: add a service, then add a binding to it) | Three places for one idea: "let this agent use that service". |
 | 5 | See what it did | **Activity** | Fine. |
 | 6 | Approve something it proposed | **Approvals**, or a phone link for a trusted device | Only appears once something is pending. Nothing on Overview points to it. |
 
@@ -33,8 +33,8 @@ A page that answers two or more questions is flagged. Those are the merge or spl
 | Connectors | Which outside services can agents use? | Yes: the catalog, the bindings (who may use it, with which credential), recent executions, and three kinds of import. |
 | Credentials | Which secrets are stored? | No. |
 | Integrations | How do I connect an AI tool to Core? | No, but it is one step of "add an agent" kept on its own page. |
-| Activity | What are agents doing and what did they do? | Yes: workspace sync status, assigning work, pruning history. |
-| Approvals | What is waiting for my decision? | Yes: trusted-device management shares the page. |
+| Activity | What are agents doing and what did they do? | Yes today: workspace sync status, assigning work, pruning history. Fixed below. |
+| Approvals | What is waiting for my decision? | Yes today: trusted-device management shares the page. Fixed by moving it to Settings → Account. |
 | Audit | What happened, and who did it? | No (export and prune are tools for the same question). |
 | Webhooks | How does Core talk to the outside, and the outside to Core? | Yes: an inbound receiver and outbound notifications. |
 | Settings | (see below) | Yes: about eight. |
@@ -44,10 +44,12 @@ A page that answers two or more questions is flagged. Those are the merge or spl
 The sidebar has thirteen flat entries. Group them under four headings; every page stays where it is, so no link or bookmark breaks.
 
 - **Home**: Overview.
-- **Work**: Activity, Approvals, Memory.
+- **Work** (things to do): Activity, Approvals.
 - **People and access**: Users, Agents, Workspaces.
-- **Connect**: Integrations, Connectors, Credentials, Webhooks.
-- **Records and system**: Audit, Settings.
+- **Connect**: Connect a tool, Services, Credentials, Webhooks.
+- **Records and system**: Memory, Audit, Settings.
+
+Two pages are renamed in the sidebar and headings, because a stranger cannot tell them apart: **Integrations → Connect a tool** (how an AI tool connects to Core) and **Connectors → Services** (the outside services agents can use). The routes `/integrations` and `/connectors` stay. Credentials keeps its name.
 
 Regular users already see a subset (no Users, Audit, Webhooks); the grouping applies to what they see.
 
@@ -56,7 +58,8 @@ Regular users already see a subset (no Users, Audit, Webhooks); the grouping app
 | Today | Proposal |
 |---|---|
 | "Capability Snapshot" (what it counts is not obvious to a newcomer) | Replace with one **Waiting on you** list: pending approvals, handoffs that need a person, credential requests, Memory Clean-up items, each linking to where it is decided. This is the data `attention_list` already returns. |
-| "Operational Search" | Memory, Audit and Activity each have their own search or filter, so three searches answer "find something". Keep the page searches; drop this one or make it one box in the header that searches all three. |
+| "Operational Search" | Becomes one search box in the header, on every page, that searches Memory, Audit and Activity. The page searches stay. |
+| "Is everything working?" (lost with the Capability Snapshot) | A small **Health strip** under Waiting on you: Core version and health, failing bindings, failed webhooks in the last 24 hours, broker status. Each item links to its page. |
 | Recent Activity | Keep. |
 
 ## Settings
@@ -65,9 +68,9 @@ Settings is the page with the least structure: account, security, preferences, o
 
 | Section | Holds | Its question |
 |---|---|---|
-| **Account** | Name and email, timezone, operator tokens | Who am I and how do my scripts sign in? |
+| **Account** | Name and email, timezone, operator tokens, trusted devices (moved from Approvals) | Who am I, and how do my scripts and devices sign in? |
 | **Memory** | Vector search and re-embed, duplicate warning, the Memory Clean-up settings (unconfirmed-inference days and importance, consolidation scan) | How does search and review behave? |
-| **Data and backup** | Retention (scratchpad, retracted records, episodic expiry, connector log, webhook log) in one group, Run Maintenance, backup and restore, startup checks | What is kept, for how long, and how do I back it up? |
+| **Data and backup** | Retention (scratchpad, retracted records, episodic expiry, connector log, webhook log) in one group, pruning activity history (moved from Activity), Run Maintenance, backup and restore, startup checks | What is kept, for how long, and how do I back it up? |
 | **Security** | Encryption key (status, rotate, restore), broker credential, secrets snapshot | How are stored secrets protected? |
 
 Individual changes:
@@ -82,6 +85,12 @@ Individual changes:
 | Secrets snapshot | **Keep** under Security, add one line on what the statuses mean | Unexplained table today. |
 | Encryption key: Check status, Rotate, Restore | **Keep**, each with a line on when to use it | Rotate re-encrypts everything; Restore is for a lost key. Different situations, one block of three buttons. |
 | Broker: Rotate broker credential | **Keep**, one line: "Use this if a local tool that resolves references should lose access." | |
+
+## Approvals and Activity
+
+**Approvals** keeps one question, "what is waiting for my decision". Its trusted-devices card moves to Settings → Account; the Approvals page links there for a person who wants to trust a phone.
+
+**Activity** keeps **Assign work**, the one human action on the page. Pruning history moves to Settings → Data and backup beside the retention controls. Workspace sync status becomes one line in the page header (for example "3 workspaces in sync, 1 behind") that expands, not a section of its own.
 
 ## Agents
 
@@ -107,12 +116,20 @@ Keep as the page that generates a connection, but reach it from Agents through t
 
 ## Pages with no structural change
 
-Users, Workspaces, Credentials, Activity, Approvals, Audit. Each still needs its controls explained in place; that happens when each is touched (below).
+Users, Workspaces, Credentials, Audit. Each still needs its controls explained in place; that happens when each is touched (below).
+
+## Empty states
+
+A fresh public install is mostly empty tables. Every page gets one sentence when it has nothing to show: what the page will show, and the one action to get started (for example, on Services: "No services yet. Add one so agents can act in an outside system.").
+
+## Next item, not this pass: one flow for step 4
+
+The first-five-minutes walk-through still sends an admin through Credentials, Services and a binding to let one agent use one service. The follow-up is a single **Give access to a service** flow started from an agent's row, which creates the binding and, if needed, the credential inline. It is recorded here so it is built after this pass, not forgotten.
 
 ## How the work is done
 
 1. This audit, reviewed first.
-2. One branch per item, each reviewed before it is merged, in this order: Agents leftovers and the sidebar grouping, Overview, Settings split and moves, Connectors, Webhooks, Memory, Integrations.
+2. One branch per item, each reviewed before it is merged, in this order: Agents leftovers with the sidebar grouping and the two renames, Overview (including the header search), Settings split and moves (taking in trusted devices and activity pruning), Services, Webhooks, Memory, Connect a tool. Empty-state sentences are added on each page as it is touched.
 3. As each page is touched, every control that remains gets one line of in-page help, and this document is updated with that page's final controls and what was removed, merged or moved. The final version is the walk-through a reviewer reads to ask "would a stranger's install understand this?".
 
 ## Status
@@ -120,4 +137,4 @@ Users, Workspaces, Credentials, Activity, Approvals, Audit. Each still needs its
 | Item | Status |
 |---|---|
 | Agents: role choice, shorter forms, role badge | Built and deployed |
-| Everything else above | Proposed |
+| Everything else above | Approved as the plan; branches not yet started |
