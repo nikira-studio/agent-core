@@ -277,54 +277,14 @@ def approvals_page(request: Request, session: dict = Depends(_approvals_session)
 </div>
 """
 
-    # Only a dashboard sign-in can trust a device or manage the list; a trusted
-    # device itself sees neither.
-    extra_js = ""
+    # Trusted devices are managed in Settings; only a dashboard sign-in can do it.
     from app.config import settings
 
     if session.get("channel") == "dashboard" and settings.TRUSTED_DEVICES_ENABLED:
         body += """
-<div class="card">
-  <h3>Trusted devices</h3>
-  <p class="text-muted" style="font-size:0.85rem">
-    For approving from a phone without signing in each time. A trusted device can open and decide approvals without signing in, and nothing else. It stays trusted while it is
-    used at least every """ + str(max(1, min(int(settings.TRUSTED_DEVICE_IDLE_DAYS), int(settings.TRUSTED_DEVICE_DAYS)))) + """ days, and for at most """ + str(int(settings.TRUSTED_DEVICE_DAYS)) + """ days in all.
-    Changes that widen what an agent can do still need a dashboard sign-in. Trust only a device you control.
-  </p>
-  <button type="button" class="btn" id="trust-this-device">Trust this device</button>
-  <div id="trusted-device-result" style="margin-top:12px"></div>
-  <div id="trusted-device-list" style="margin-top:12px"></div>
-</div>
+<p class="text-muted" style="font-size:0.85rem">Approving from a phone without signing in? See <a href="/settings#account">Trusted devices in Settings</a>.</p>
 """
-        extra_js = """
-<script>
-async function loadTrustedDevices() {
-  const box = document.getElementById('trusted-device-list');
-  const j = await apiFetch('/api/approvals/trusted-devices');
-  const devices = (j.ok && j.data.devices) || [];
-  if (!devices.length) { box.innerHTML = '<p class="text-muted">No trusted devices.</p>'; return; }
-  box.innerHTML = '<table><thead><tr><th>Added</th><th>Last used</th><th>Expires</th><th></th></tr></thead><tbody>' +
-    devices.map(d => '<tr><td>' + escapeHtml(d.created_at || '') + '</td><td>' + escapeHtml(d.last_activity || '') +
-      '</td><td>' + escapeHtml(d.expires_at || '') + '</td><td><button class="btn btn-sm" data-device-id="' +
-      escapeHtml(d.id) + '">Revoke</button></td></tr>').join('') + '</tbody></table>';
-  box.querySelectorAll('button[data-device-id]').forEach(function(b) {
-    b.addEventListener('click', async function() {
-      await apiFetch('/api/approvals/trusted-devices/' + encodeURIComponent(b.dataset.deviceId), { method: 'DELETE' });
-      loadTrustedDevices();
-    });
-  });
-}
-document.getElementById('trust-this-device').addEventListener('click', async function() {
-  const res = document.getElementById('trusted-device-result');
-  const j = await apiFetch('/api/approvals/trust-device', { method: 'POST' });
-  res.innerHTML = j.ok
-    ? '<div class="alert alert-success">This device is trusted until ' + escapeHtml(j.data.expires_at) + '.</div>'
-    : '<div class="alert alert-danger">' + escapeHtml((j.error && j.error.message) || 'Could not trust this device') + '</div>';
-  loadTrustedDevices();
-});
-loadTrustedDevices();
-</script>
-"""
+    extra_js = ""
     return render_page("Approvals", body, nav_active="/approvals", session=session, extra_js=extra_js)
 
 

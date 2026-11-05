@@ -182,9 +182,10 @@ def test_the_list_offers_trusting_this_device_only_to_a_dashboard_signin(test_cl
     from app.services.auth_service import trust_device
 
     _browser_admin(test_client)
-    html = test_client.get("/approvals").text
+    html = test_client.get("/settings").text
     assert 'id="trust-this-device"' in html and "/api/approvals/trust-device" in html
-    assert "onclick" not in html.split('id="trusted-device-list"')[1]  # ids travel in data attributes
+    assert "onclick" not in html.split('id="trusted-device-list"')[1].split("</section>")[0]  # ids travel in data attributes
+    assert "/settings#account" in test_client.get("/approvals").text  # the Approvals page points there
 
     device = trust_device("admin")
     test_client.cookies.clear()
@@ -200,7 +201,7 @@ def test_the_trusted_device_copy_follows_the_setting(test_client, admin_token, m
     monkeypatch.setattr(settings, "TRUSTED_DEVICE_DAYS", 90)
     monkeypatch.setattr(settings, "TRUSTED_DEVICE_IDLE_DAYS", 21)
     _browser_admin(test_client)
-    html = test_client.get("/approvals").text
+    html = test_client.get("/settings").text
     assert "at least every 21 days" in html and "at most 90 days in all" in html
 
 
@@ -209,13 +210,14 @@ def test_the_card_is_hidden_when_trusted_devices_are_off(test_client, admin_toke
 
     monkeypatch.setattr(settings, "TRUSTED_DEVICES_ENABLED", False)
     _browser_admin(test_client)
-    html = test_client.get("/approvals").text
+    html = test_client.get("/settings").text
     assert 'id="trust-this-device"' not in html and "Trusted devices" not in html
+    assert "Trusted devices" not in test_client.get("/approvals").text
 
 
 def test_the_card_says_what_trusted_devices_are_for(test_client, admin_token):
     _browser_admin(test_client)
-    assert "For approving from a phone without signing in each time" in test_client.get("/approvals").text
+    assert "For approving from a phone without signing in each time" in test_client.get("/settings").text
 
 
 def test_the_overview_lists_a_pending_approval_under_waiting_on_you(test_client, admin_token):

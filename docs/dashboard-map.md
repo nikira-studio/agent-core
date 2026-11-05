@@ -139,5 +139,6 @@ The first-five-minutes walk-through still sends an admin through Credentials, Se
 | Agents: role choice, shorter forms, role badge | Built and deployed |
 | Sidebar grouping, Connect a tool and Services names | Built and deployed |
 | Trusted devices off by default | Built and deployed |
-| Overview: Waiting on you, Health, Getting started, Search | Built, in review. The header search on every page was not built: the existing Overview search stays, since a second place to search is a new mechanism. |
+| Overview: Waiting on you, Health, Getting started, Search | Built and deployed. The header search on every page was not built: the existing Overview search stays, since a second place to search is a new mechanism. |
+| Settings split into four tabs; proposal caps out of the UI; activity pruning and trusted devices moved in | Built, in review. The webhook retry policy stays in Data and backup until the Webhooks page is reworked. |
 | Everything else above | Approved as the plan; branches not yet started |

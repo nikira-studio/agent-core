@@ -68,13 +68,13 @@ def test_admin_settings_exposes_real_system_behavior_controls(admin_client):
     r = admin_client.get("/settings")
     assert r.status_code == 200
     html = r.text
-    assert "Scratchpad Retention" in html
+    assert "Scratchpad notes (days)" in html
     assert "scratchpad-retention-days" in html
     assert "solo-mode-enabled" not in html
     assert "/api/dashboard/system-settings" in html
     assert "Run Maintenance" in html
     assert "Scratchpad memories pruned" in html
-    assert "Retracted/Superseded Record Retention" in html
+    assert "Retracted and replaced memories (days)" in html
     assert 'id="retracted-retention-days"' in html
     assert 'value="30"' in html
 
@@ -799,3 +799,27 @@ def test_session_carries_timezone(clean_db):
     session = create_session("tzuser", channel="dashboard")
     validated = validate_session(session["session_id"])
     assert validated["timezone"] == "Asia/Tokyo"
+
+
+def test_settings_is_grouped_into_tabs_for_an_admin(admin_client):
+    html = admin_client.get("/settings").text
+    for key in ("account", "memory", "data", "security"):
+        assert f'data-tab="{key}"' in html and f'id="tab-{key}"' in html
+    # Each setting sits in the tab that answers its question.
+    memory = html.split('id="tab-memory"')[1].split("</section>")[0]
+    data = html.split('id="tab-data"')[1].split("</section>")[0]
+    security = html.split('id="tab-security"')[1].split("</section>")[0]
+    assert "vector-model" in memory and "unconfirmed-inference-days" in memory
+    assert "scratchpad-retention-days" in data and "Run Maintenance" in data and "pruneActivity" in data
+    assert "Encryption Key" in security and "Rotate Broker Credential" in security
+
+
+def test_a_regular_user_sees_only_their_account_without_tabs(authenticated_client):
+    html = authenticated_client.get("/settings").text
+    assert 'id="tab-account"' in html
+    assert 'data-tab="memory"' not in html and 'id="tab-security"' not in html
+
+
+def test_the_activity_prune_lives_in_settings_not_on_the_activity_page(admin_client):
+    assert "Prune History" not in admin_client.get("/activity").text
+    assert "Clear old activity" in admin_client.get("/settings").text

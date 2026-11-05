@@ -626,12 +626,16 @@ def test_settings_page_renders_new_consolidation_controls(test_client, admin_tok
     for needle in (
         "unconfirmed-inference-days",
         "unconfirmed-inference-min-importance",
-        "proposal-pending-cap-per-rule",
-        "proposal-pending-cap-total",
-        "proposal-generation-budget-per-run",
         "consolidation-scan-enabled",
     ):
         assert needle in r.text, f"missing control: {needle}"
+    # The three queue limits are configuration only; the defaults are the answer.
+    for needle in (
+        "proposal-pending-cap-per-rule",
+        "proposal-pending-cap-total",
+        "proposal-generation-budget-per-run",
+    ):
+        assert needle not in r.text, f"control should not be in the UI: {needle}"
 
 
 def test_maintenance_summary_is_persisted_and_readable(clean_db):

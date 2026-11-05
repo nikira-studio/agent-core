@@ -128,12 +128,6 @@ def activity_page(request: Request, session: dict = Depends(require_auth)):
     page_start_act = offset + 1 if total_activities else 0
     page_end_act = offset + len(activities)
     activity_page_info = f"Page {page} of {total_pages} &nbsp;·&nbsp; Showing {page_start_act}–{page_end_act} of {total_activities}"
-    activity_prune_button = (
-        "<button class=\"btn btn-secondary\" onclick=\"openPruneModal('activity', 'Prune Activity History')\">Prune History</button>"
-        if is_admin
-        else ""
-    )
-
     waiting = activity_service.list_needs_human(user_id=scope_user_id)
     waiting_rows = "".join(
         f"<tr><td><div style='white-space:pre-line'>{escape_html(w.get('needs_human') or '')}</div>"
@@ -249,32 +243,6 @@ def activity_page(request: Request, session: dict = Depends(require_auth)):
       if (j.ok) { showToast('Cancelled'); refreshActivity(); }
       else { showToast(j.error.message || 'Failed', 'danger'); }
     }
-    function openPruneModal(resourceType, title) {
-      document.getElementById('prune-resource-type').value = resourceType;
-      document.getElementById('prune-modal-title').textContent = title;
-      document.getElementById('prune-before-date').value = '';
-      document.getElementById('prune-result').innerHTML = '';
-      openModal('prune-modal');
-    }
-    async function submitPrune(e) {
-      e.preventDefault();
-      const resourceType = document.getElementById('prune-resource-type').value;
-      const beforeDate = document.getElementById('prune-before-date').value;
-      if (!beforeDate) { showToast('Pick a cutoff date', 'warning'); return; }
-      if (!confirm('Permanently prune ' + resourceType + ' data older than ' + beforeDate + '?')) return;
-      const j = await apiFetch('/api/dashboard/prune', {
-        method: 'POST',
-        body: JSON.stringify({ resource_type: resourceType, before_date: beforeDate })
-      });
-      if (j.ok) {
-        document.getElementById('prune-result').innerHTML =
-          '<div class="alert alert-success">Deleted <code>' + j.data.deleted_count + '</code> ' + resourceType + ' records older than <code>' + beforeDate + '</code>.</div>';
-        showToast('Prune complete');
-        refreshActivity();
-      } else {
-        showToast(j.error?.message || 'Prune failed', 'danger');
-      }
-    }
     async function doCreateActivity(e) {
       e.preventDefault();
       const agentId = document.getElementById('act-agent').value;
@@ -313,7 +281,6 @@ def activity_page(request: Request, session: dict = Depends(require_auth)):
         f"""
     <div class="page-header"><h1>Activity</h1><div class="page-actions">
         <button class="btn" onclick="openModal('create-activity-modal')">+ Assign Work</button>
-        {activity_prune_button}
     </div></div>
     {waiting_card}
     <div class="card">
@@ -420,24 +387,6 @@ def activity_page(request: Request, session: dict = Depends(require_auth)):
       </div>
     </div>
 
-    <div class="modal-overlay" id="prune-modal" style="display:none">
-      <div class="modal">
-        <h3 id="prune-modal-title">Prune Data</h3>
-        <form id="prune-form" onsubmit="submitPrune(event)">
-          <input type="hidden" id="prune-resource-type" value="">
-          <div class="form-group">
-            <label>Delete records older than *</label>
-            <input type="date" id="prune-before-date" required>
-            <p class="form-hint">This is a manual maintenance action. It only deletes terminal activity records older than the selected date; active tasks are left alone.</p>
-          </div>
-          <div id="prune-result" style="margin-top:8px"></div>
-          <div class="modal-footer">
-            <button type="button" class="btn btn-secondary" onclick="closeModal('prune-modal')">Cancel</button>
-            <button type="submit" class="btn btn-danger">Prune</button>
-          </div>
-        </form>
-      </div>
-    </div>
     """,
         "/activity",
         js,

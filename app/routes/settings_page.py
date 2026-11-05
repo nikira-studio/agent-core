@@ -8,6 +8,7 @@ from fastapi import APIRouter, Request, Depends
 from pydantic import BaseModel
 
 from app.branding import CREDENTIAL_PREFIX, ENV_PREFIX
+from app.config import settings as app_settings
 from app.security.dependencies import require_admin
 from app.security.response_helpers import success_response, error_response
 from app.services.auth_service import get_user_by_id
@@ -20,6 +21,75 @@ from app.routes.dashboard_shared import (
 )
 
 router = APIRouter()
+
+
+SETTINGS_TABS_JS = """
+<script>
+(function() {
+  var tabs = document.querySelectorAll('[data-tab]');
+  var panels = document.querySelectorAll('[data-tab-panel]');
+  if (!tabs.length) return;
+  function show(key) {
+    var found = false;
+    panels.forEach(function(p) { if (p.dataset.tabPanel === key) found = true; });
+    if (!found) key = panels[0].dataset.tabPanel;
+    panels.forEach(function(p) { p.hidden = p.dataset.tabPanel !== key; });
+    tabs.forEach(function(t) {
+      var on = t.dataset.tab === key;
+      t.classList.toggle('active', on);
+      t.setAttribute('aria-selected', on ? 'true' : 'false');
+    });
+    try { history.replaceState(null, '', '#' + key); } catch (e) {}
+  }
+  tabs.forEach(function(t) { t.addEventListener('click', function() { show(t.dataset.tab); }); });
+  show((location.hash || '').slice(1));
+})();
+</script>
+"""
+
+PRUNE_JS = """
+<script>
+async function pruneActivity() {
+  var date = document.getElementById('prune-activity-before').value;
+  if (!date) { showToast('Pick a cutoff date', 'warning'); return; }
+  if (!confirm('Permanently delete finished activity older than ' + date + '?')) return;
+  var j = await apiFetch('/api/dashboard/prune', { method: 'POST', body: JSON.stringify({ resource_type: 'activity', before_date: date }) });
+  var box = document.getElementById('prune-activity-result');
+  if (j.ok) { box.innerHTML = '<div class="alert alert-success">Deleted ' + escapeHtml(String(j.data.deleted_count)) + ' tasks older than ' + escapeHtml(date) + '.</div>'; }
+  else { showToast((j.error && j.error.message) || 'Delete failed', 'danger'); }
+}
+</script>
+"""
+
+TRUSTED_DEVICES_JS = """
+<script>
+async function loadTrustedDevices() {
+  const box = document.getElementById('trusted-device-list');
+  const j = await apiFetch('/api/approvals/trusted-devices');
+  const devices = (j.ok && j.data.devices) || [];
+  if (!devices.length) { box.innerHTML = '<p class="text-muted">No trusted devices.</p>'; return; }
+  box.innerHTML = '<table><thead><tr><th>Added</th><th>Last used</th><th>Expires</th><th></th></tr></thead><tbody>' +
+    devices.map(d => '<tr><td>' + escapeHtml(d.created_at || '') + '</td><td>' + escapeHtml(d.last_activity || '') +
+      '</td><td>' + escapeHtml(d.expires_at || '') + '</td><td><button class="btn btn-sm" data-device-id="' +
+      escapeHtml(d.id) + '">Revoke</button></td></tr>').join('') + '</tbody></table>';
+  box.querySelectorAll('button[data-device-id]').forEach(function(b) {
+    b.addEventListener('click', async function() {
+      await apiFetch('/api/approvals/trusted-devices/' + encodeURIComponent(b.dataset.deviceId), { method: 'DELETE' });
+      loadTrustedDevices();
+    });
+  });
+}
+document.getElementById('trust-this-device').addEventListener('click', async function() {
+  const res = document.getElementById('trusted-device-result');
+  const j = await apiFetch('/api/approvals/trust-device', { method: 'POST' });
+  res.innerHTML = j.ok
+    ? '<div class="alert alert-success">This device is trusted until ' + escapeHtml(j.data.expires_at) + '.</div>'
+    : '<div class="alert alert-danger">' + escapeHtml((j.error && j.error.message) || 'Could not trust this device') + '</div>';
+  loadTrustedDevices();
+});
+loadTrustedDevices();
+</script>
+"""
 
 
 class ManualPruneRequest(BaseModel):
@@ -661,9 +731,6 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
         "memory_dedupe_similarity": "0.92",
         "unconfirmed_inference_days": "90",
         "unconfirmed_inference_min_importance": "0.7",
-        "proposal_pending_cap_per_rule": "20",
-        "proposal_pending_cap_total": "50",
-        "proposal_generation_budget_per_run": "20",
         "consolidation_scan_enabled": "1",
     }
     with get_db() as conn:
@@ -688,9 +755,6 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
     memory_dedupe_similarity = values["memory_dedupe_similarity"]
     unconfirmed_inference_days = values["unconfirmed_inference_days"]
     unconfirmed_inference_min_importance = values["unconfirmed_inference_min_importance"]
-    proposal_pending_cap_per_rule = values["proposal_pending_cap_per_rule"]
-    proposal_pending_cap_total = values["proposal_pending_cap_total"]
-    proposal_generation_budget_per_run = values["proposal_generation_budget_per_run"]
     consolidation_scan_enabled = values["consolidation_scan_enabled"] in ("1", "true")
     credential_count = int(count_row["count"] if count_row else 0)
 
@@ -836,7 +900,7 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
         <button class="btn btn-secondary" onclick="openModal('restore-modal')">Restore from Backup</button>
         <button class="btn btn-secondary" onclick="runMaintenance()">Run Maintenance</button>
       </div>
-      <p class="form-hint">Maintenance marks stale activities using <code>{ENV_PREFIX}STALE_THRESHOLD_MINUTES</code>, deletes transient scratchpad memories older than the scratchpad retention setting below, and permanently deletes retracted/superseded memory records past the retention setting below. This does not touch credentials or connector bindings. {schedule_line}</p>
+      <p class="form-hint">Maintenance marks stale activities using <code>{ENV_PREFIX}STALE_THRESHOLD_MINUTES</code>, deletes transient scratchpad memories and permanently deletes retracted or replaced memory records past the retention limits above. This does not touch credentials or connector bindings. {schedule_line}</p>
       <p class="form-hint" id="maintenance-last-run">{last_run_line}</p>
       <div id="backup-result" style="margin-top:12px"></div>
       <hr class=divider>
@@ -868,85 +932,87 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
       <div id="broker-result" style="margin-top:12px"></div>
     </div>"""
 
-    system_settings_html = ""
+    def _number(field_id, value, lo, hi, step=None):
+        step_attr = f' step="{step}"' if step else ""
+        return f'<input type="number" id="{field_id}" min="{lo}" max="{hi}"{step_attr} value="{escape_html(value)}" style="width:120px">'
+
+    memory_behavior_html = ""
+    retention_html = ""
     if is_admin:
-        system_settings_html = f"""
+        memory_behavior_html = f"""
     <div class="card">
-      <h3>System Behavior</h3>
-      <form id="system-settings-form" onsubmit="saveSystemSettings(event)">
+      <h3>Memory behavior</h3>
+      <form onsubmit="saveSystemSettings(event)">
         <div class="form-group">
-          <label>Scratchpad Retention</label>
-          <input type="number" id="scratchpad-retention-days" min="1" max="365" value="{escape_html(scratchpad_retention_days)}" style="width:120px">
-          <p class="form-hint">Used by Run Maintenance. Transient scratchpad memories older than this many days are permanently deleted.</p>
+          <label>Expire work-log memories after (days)</label>
+          {_number("episodic-memory-ttl-days", episodic_memory_ttl_days, 0, 365)}
+          <p class="form-hint">Notes that read like a work log (heartbeats, routine runs, ticket closeouts) expire after this many days instead of living forever. 0 keeps them permanently.</p>
         </div>
         <div class="form-group">
-          <label>Retracted/Superseded Record Retention</label>
-          <input type="number" id="retracted-retention-days" min="1" max="365" value="{escape_html(retracted_retention_days)}" style="width:120px">
-          <p class="form-hint">Used by Run Maintenance. Retracted and superseded memory records are permanently deleted this many days after they stopped being active (not after creation) — giving time to notice and restore an accidental retraction first.</p>
+          <label>Warn about near-duplicate memories above</label>
+          {_number("memory-dedupe-similarity", memory_dedupe_similarity, 0.5, 1, 0.01)}
+          <p class="form-hint">A new memory this similar to an existing one in the same scope is flagged as a possible duplicate, never blocked. Needs vector search. Lower catches more and raises more false alarms.</p>
+        </div>
+        <h4 class="section-title">Memory review</h4>
+        <p class="form-hint">Agent Core asks you to check agent-written facts nobody has confirmed. These settings decide which ones it asks about. The questions appear under Memory Clean-up on the Memory page.</p>
+        <div class="form-group">
+          <label>Ask about unconfirmed facts older than (days)</label>
+          {_number("unconfirmed-inference-days", unconfirmed_inference_days, 1, 90)}
+          <p class="form-hint">1 to 90. Facts you have already confirmed with evidence are never asked about.</p>
         </div>
         <div class="form-group">
-          <label>Episodic Memory Expiry</label>
-          <input type="number" id="episodic-memory-ttl-days" min="0" max="365" value="{escape_html(episodic_memory_ttl_days)}" style="width:120px">
-          <p class="form-hint">Facts and decisions that read as per-occurrence work logs — heartbeat ticks, routine fires, per-run reviews, ticket closeouts — are stored with this expiry instead of living forever. The write still succeeds and the agent is told the content belongs in the activity trail. Set to 0 to store them permanently, like any other record.</p>
-        </div>
-        <div class="form-group">
-          <label>Duplicate Warning Threshold</label>
-          <input type="number" id="memory-dedupe-similarity" min="0.5" max="1" step="0.01" value="{escape_html(memory_dedupe_similarity)}" style="width:120px">
-          <p class="form-hint">Cosine similarity above which a new memory write is flagged as a possible duplicate of an existing record in the same scope. Advisory only — the write is never blocked. Requires vector search; without it no duplicate check runs. Lower catches more, at the cost of false alarms.</p>
-        </div>
-        <div class="form-group">
-          <label>Unconfirmed Inference Cutoff (days)</label>
-          <input type="number" id="unconfirmed-inference-days" min="1" max="90" value="{escape_html(unconfirmed_inference_days)}" style="width:120px">
-          <p class="form-hint">Days an unconfirmed, agent-authored fact must age before the consolidation queue asks about it. Bounds 1–90; default 90. Reviewed facts (confirmed with evidence) skip the queue entirely.</p>
-        </div>
-        <div class="form-group">
-          <label>Unconfirmed Inference Minimum Importance</label>
-          <input type="number" id="unconfirmed-inference-min-importance" min="0" max="1" step="0.05" value="{escape_html(unconfirmed_inference_min_importance)}" style="width:120px">
-          <p class="form-hint">Below this importance, an unconfirmed fact ages out of ranking quietly instead of asking you to fact-check it. Bounds 0–1; default 0.7. Raise it to shrink the review queue to only what would actually be missed.</p>
-        </div>
-        <div class="form-group">
-          <label>Proposal Pending Cap (per rule/scope)</label>
-          <input type="number" id="proposal-pending-cap-per-rule" min="1" max="1000" value="{escape_html(proposal_pending_cap_per_rule)}" style="width:120px">
-          <p class="form-hint">Maximum pending proposals per (rule, scope) pair. Bounds 1–1000; default 20.</p>
-        </div>
-        <div class="form-group">
-          <label>Proposal Pending Cap (installation-wide)</label>
-          <input type="number" id="proposal-pending-cap-total" min="1" max="2000" value="{escape_html(proposal_pending_cap_total)}" style="width:120px">
-          <p class="form-hint">Maximum total pending proposals across all rules and scopes. Bounds 1–2000; default 50.</p>
-        </div>
-        <div class="form-group">
-          <label>Proposal Generation Budget per Run</label>
-          <input type="number" id="proposal-generation-budget-per-run" min="1" max="500" value="{escape_html(proposal_generation_budget_per_run)}" style="width:120px">
-          <p class="form-hint">Maximum new proposals a single generate_proposals call inserts, regardless of cap headroom. Bounds 1–500; default 20.</p>
+          <label>Only ask about facts at least this important</label>
+          {_number("unconfirmed-inference-min-importance", unconfirmed_inference_min_importance, 0, 1, 0.05)}
+          <p class="form-hint">0 to 1. Less important unconfirmed facts quietly drop in search ranking instead of asking you. Raise it for fewer questions.</p>
         </div>
         <label class="checkbox-label">
           <input type="checkbox" id="consolidation-scan-enabled" {"checked" if consolidation_scan_enabled else ""}>
-          Run consolidation queue automatically on the maintenance schedule
+          Look for suggestions automatically on the maintenance schedule
         </label>
-        <p class="form-hint">Off leaves the Memory Clean-up queue to the manual "Check for more" button on the dashboard. Verification still runs unattended either way.</p>
+        <p class="form-hint">Off means suggestions only appear when you press Check for more on the Memory page.</p>
+        <button type="submit" class="btn">Save</button>
+        <div class="save-result" style="margin-top:12px"></div>
+      </form>
+    </div>"""
+
+        retention_html = f"""
+    <div class="card">
+      <h3>How long things are kept</h3>
+      <p class="form-hint" style="margin-top:0">Run Maintenance (below) deletes anything older than these limits. Nothing here touches credentials or service bindings.</p>
+      <form onsubmit="saveSystemSettings(event)">
         <div class="form-group">
-          <label>Connector Execution Log Retention</label>
-          <input type="number" id="execution-log-retention-days" min="0" max="365" value="{escape_html(execution_log_retention_days)}" style="width:120px">
-          <p class="form-hint">Used by Run Maintenance. Records of connector calls older than this are deleted. These are diagnostics, not durable records — response bodies are also capped at 16,000 characters when stored. Set to 0 to keep them forever.</p>
+          <label>Scratchpad notes (days)</label>
+          {_number("scratchpad-retention-days", scratchpad_retention_days, 1, 365)}
+          <p class="form-hint">Temporary notes agents leave for themselves.</p>
         </div>
         <div class="form-group">
-          <label>Webhook Delivery Log Retention</label>
-          <input type="number" id="webhook-log-retention-days" min="0" max="365" value="{escape_html(webhook_log_retention_days)}" style="width:120px">
-          <p class="form-hint">Used by Run Maintenance. Webhook delivery attempts older than this are deleted. Set to 0 to keep them forever.</p>
+          <label>Retracted and replaced memories (days)</label>
+          {_number("retracted-retention-days", retracted_retention_days, 1, 365)}
+          <p class="form-hint">Counted from when the memory stopped being active, so you have time to notice and restore a mistaken retraction.</p>
         </div>
         <div class="form-group">
-          <label>Webhook retry policy</label>
+          <label>Service call log (days)</label>
+          {_number("execution-log-retention-days", execution_log_retention_days, 0, 365)}
+          <p class="form-hint">Records of calls agents made through Services. Diagnostics only. 0 keeps them forever.</p>
+        </div>
+        <div class="form-group">
+          <label>Webhook delivery log (days)</label>
+          {_number("webhook-log-retention-days", webhook_log_retention_days, 0, 365)}
+          <p class="form-hint">Records of notifications sent to other systems. 0 keeps them forever.</p>
+        </div>
+        <div class="form-group">
+          <label>Webhook retries</label>
           <div class="form-row">
             <label>Attempts <input type="number" id="webhook-retry-max-attempts" min="1" max="100" value="{escape_html(webhook_retry_max_attempts)}" style="width:80px"></label>
-            <label>Initial delay (s) <input type="number" id="webhook-retry-initial-seconds" min="1" max="3600" value="{escape_html(webhook_retry_initial_seconds)}" style="width:80px"></label>
-            <label>Maximum delay (s) <input type="number" id="webhook-retry-max-seconds" min="1" max="86400" value="{escape_html(webhook_retry_max_seconds)}" style="width:80px"></label>
-            <label>Jitter (s) <input type="number" id="webhook-retry-jitter-seconds" min="0" max="86400" value="{escape_html(webhook_retry_jitter_seconds)}" style="width:80px"></label>
+            <label>First wait (s) <input type="number" id="webhook-retry-initial-seconds" min="1" max="3600" value="{escape_html(webhook_retry_initial_seconds)}" style="width:80px"></label>
+            <label>Longest wait (s) <input type="number" id="webhook-retry-max-seconds" min="1" max="86400" value="{escape_html(webhook_retry_max_seconds)}" style="width:80px"></label>
+            <label>Random extra (s) <input type="number" id="webhook-retry-jitter-seconds" min="0" max="86400" value="{escape_html(webhook_retry_jitter_seconds)}" style="width:80px"></label>
           </div>
-          <p class="form-hint">Retries network failures, timeouts, 408, 429, and 5xx responses. Other 4xx responses become dead immediately. Retry-After is honored up to the maximum delay.</p>
+          <p class="form-hint">When a notification fails to send (no connection, timeout, or a 408, 429 or 5xx answer) it is tried again after a growing wait. Any other error stops it at once.</p>
         </div>
-        <button type="submit" class="btn">Save Behavior Settings</button>
+        <button type="submit" class="btn">Save</button>
+        <div class="save-result" style="margin-top:12px"></div>
       </form>
-      <div id="system-settings-result" style="margin-top:12px"></div>
     </div>"""
 
     vector_settings_html = ""
@@ -1262,9 +1328,6 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
         memory_dedupe_similarity: document.getElementById('memory-dedupe-similarity').value,
         unconfirmed_inference_days: document.getElementById('unconfirmed-inference-days').value,
         unconfirmed_inference_min_importance: document.getElementById('unconfirmed-inference-min-importance').value,
-        proposal_pending_cap_per_rule: document.getElementById('proposal-pending-cap-per-rule').value,
-        proposal_pending_cap_total: document.getElementById('proposal-pending-cap-total').value,
-        proposal_generation_budget_per_run: document.getElementById('proposal-generation-budget-per-run').value,
         consolidation_scan_enabled: document.getElementById('consolidation-scan-enabled').checked ? 'true' : 'false',
         execution_log_retention_days: document.getElementById('execution-log-retention-days').value,
         webhook_log_retention_days: document.getElementById('webhook-log-retention-days').value,
@@ -1278,7 +1341,8 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
         body: JSON.stringify(body)
       }});
       if (j.ok) {{
-        document.getElementById('system-settings-result').innerHTML = '<div class="alert alert-success">Behavior settings saved.</div>';
+        const box = e.target.querySelector('.save-result');
+        if (box) box.innerHTML = '<div class="alert alert-success">Saved.</div>';
       }} else {{
         showToast(j.error?.message || 'Failed to save settings', 'danger');
       }}
@@ -1463,22 +1527,58 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
     </script>"""
     js = js.replace("{{", "{").replace("}}", "}")
 
+    prune_html = ""
+    if is_admin:
+        prune_html = """
+    <div class="card">
+      <h3>Clear old activity</h3>
+      <p class="form-hint" style="margin-top:0">Permanently deletes finished, cancelled and blocked tasks older than a date you choose. Tasks still in progress are left alone. This is separate from the limits above, which run on their own.</p>
+      <div class="form-group">
+        <label for="prune-activity-before">Delete tasks older than</label>
+        <input type="date" id="prune-activity-before" style="max-width:200px">
+      </div>
+      <button type="button" class="btn btn-danger" onclick="pruneActivity()">Delete</button>
+      <div id="prune-activity-result" style="margin-top:12px"></div>
+    </div>"""
+
+    trusted_devices_html = ""
+    if session.get("channel") == "dashboard" and app_settings.TRUSTED_DEVICES_ENABLED:
+        idle = max(1, min(int(app_settings.TRUSTED_DEVICE_IDLE_DAYS), int(app_settings.TRUSTED_DEVICE_DAYS)))
+        trusted_devices_html = f"""
+    <div class="card">
+      <h3>Trusted devices</h3>
+      <p class="form-hint" style="margin-top:0">For approving from a phone without signing in each time. A trusted device can open and decide approvals, and nothing else. It stays trusted while it is used at least every {idle} days, and for at most {int(app_settings.TRUSTED_DEVICE_DAYS)} days in all. Changes that widen what an agent can do still need a dashboard sign-in. Trust only a device you control.</p>
+      <button type="button" class="btn" id="trust-this-device">Trust this device</button>
+      <div id="trusted-device-result" style="margin-top:12px"></div>
+      <div id="trusted-device-list" style="margin-top:12px"></div>
+    </div>"""
+
+    tabs = [("account", "Account", f"{account_html}{preferences_html}{trusted_devices_html}")]
+    if is_admin:
+        tabs += [
+            ("memory", "Memory", f"{vector_settings_html}{memory_behavior_html}"),
+            ("data", "Data and backup", f"{retention_html}{backup_html}{prune_html}"),
+            ("security", "Security", f"{secrets_snapshot_html}{encryption_key_html}{broker_html}"),
+        ]
+    tab_bar = ""
+    if len(tabs) > 1:
+        tab_bar = '<div class="tabs" role="tablist">' + "".join(
+            f'<button type="button" class="tab" role="tab" data-tab="{key}">{label}</button>' for key, label, _ in tabs
+        ) + "</div>"
+    tab_sections = "".join(
+        f'<section class="tab-panel" id="tab-{key}" data-tab-panel="{key}">{html}</section>' for key, _, html in tabs
+    )
+
     return render_page(
         "Settings",
         f"""
     <div class="page-header"><h1>Settings</h1></div>
-    {account_html}
-    {preferences_html}
-    {secrets_snapshot_html}
-    {system_settings_html}
-    {vector_settings_html}
-    {encryption_key_html}
-    {broker_html}
-    {backup_html}
+    {tab_bar}
+    {tab_sections}
     {admin_modals}
     """,
         "/settings",
-        js,
+        js + SETTINGS_TABS_JS + (TRUSTED_DEVICES_JS if trusted_devices_html else "") + (PRUNE_JS if prune_html else ""),
         session=session,
     )
 

@@ -1865,3 +1865,31 @@ th.activity-actions-header {
   color: var(--muted);
   padding: 12px 12px 4px;
 }
+
+/* === Tabs === */
+.tabs {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 16px;
+}
+.tabs .tab {
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--muted);
+  padding: 8px 14px;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+.tabs .tab:hover {
+  color: var(--text);
+}
+.tabs .tab.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+.tab-panel[hidden] {
+  display: none;
+}
