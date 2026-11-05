@@ -108,7 +108,7 @@ Built: **Receiving** (the inbound address, its key, and how to send a command) a
 
 ## Memory
 
-Memory Clean-up stays on the page but is introduced as "Suggestions waiting for you", and its count also appears on Overview's Waiting on you. In the memory detail view, group the fourteen fields into **What it says** (content, class, scope, topic), **How sure** (confidence, importance, last confirmed, status) and **Where it came from** (provenance, anchor, version history); slot key, valid from and valid to go under **Advanced** with a line each.
+Built: the review queue is titled **Suggestions waiting for you** and sits above the records whenever something is waiting (below them otherwise), with the Overview "Waiting on you" list pointing at it. In the memory detail view the fields are grouped under **What it says** (content, class, scope, topic, standing context), **How sure** (confidence, importance, last confirmed, status) and **Where it came from** (created, anchor, provenance, version history), each with one line of help; slot key, valid from and valid to sit under **Advanced**. The Save Memory form has the same Advanced group, and an empty page says how memories get there.
 
 ## Integrations
 
@@ -142,5 +142,6 @@ The first-five-minutes walk-through still sends an admin through Credentials, Se
 | Overview: Waiting on you, Health, Getting started, Search | Built and deployed. The header search on every page was not built: the existing Overview search stays, since a second place to search is a new mechanism. |
 | Settings split into four tabs; proposal caps out of the UI; activity pruning and trusted devices moved in | Built, in review. The webhook retry policy has moved to the Webhooks page. |
 | Services: Add a service, Advanced fields, collapsed runs, empty states | Built and deployed |
-| Webhooks: Receiving and Sending, retry policy moved from Settings | Built, in review |
+| Webhooks: Receiving and Sending, retry policy moved from Settings | Built and deployed |
+| Memory: Suggestions waiting for you, grouped detail, Advanced | Built, in review |
 | Everything else above | Approved as the plan; branches not yet started |

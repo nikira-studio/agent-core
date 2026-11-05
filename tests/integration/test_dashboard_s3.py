@@ -43,7 +43,7 @@ class TestMemoryPage:
     def test_memory_supersession_chain_section(self, admin_client):
         r = admin_client.get("/memory")
         assert "mem-chain-content" in r.text
-        assert "Version History" in r.text
+        assert "Version history" in r.text
 
 
 class TestAgentsPage:

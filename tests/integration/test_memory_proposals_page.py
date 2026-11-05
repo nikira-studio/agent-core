@@ -125,3 +125,19 @@ def test_proposal_content_is_escaped_in_the_page(test_client, admin_token):
     html = _page(test_client, admin_token)
     assert "<script>alert('xss')</script>" not in html
     assert "&lt;script&gt;" in html
+
+
+def test_memory_detail_groups_its_fields_and_tucks_the_expert_ones(test_client, admin_token):
+    html = _page(test_client, admin_token)
+    detail = html.split('id="memory-detail-modal"', 1)[1]
+    order = [detail.index(t) for t in ("What it says", "How sure", "Where it came from", "Advanced")]
+    assert order == sorted(order)
+    advanced = detail.split("<summary", 1)[1].split("</details>", 1)[0]
+    for field in ("mem-detail-slot-key", "mem-detail-valid-from", "mem-detail-valid-to"):
+        assert field in advanced
+    assert "Suggestions waiting for you" in html
+
+
+def test_the_active_records_table_is_closed_before_the_next_card(test_client, admin_token):
+    html = _page(test_client, admin_token)
+    assert '</tbody></table>\n      <input type="hidden" id="current-scope"' in html

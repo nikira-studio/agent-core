@@ -184,7 +184,7 @@ def memory_page(request: Request, session: dict = Depends(require_auth)):
 
     records_rows = (
         "".join(active_row(r) for r in active_records)
-        or "<tr><td colspan=5 class=empty>No active records.</td></tr>"
+        or "<tr><td colspan=5 class=empty>No memories yet. Agents save them as they work, or use <strong>Save Memory</strong> above.</td></tr>"
     )
     retracted_rows = "".join(retracted_row(r) for r in retracted_records)
 
@@ -192,6 +192,7 @@ def memory_page(request: Request, session: dict = Depends(require_auth)):
     # card reflects real queue state on load rather than appearing empty until
     # a fetch lands.
     review_html = ""
+    review_top = ""
     if is_admin:
         from app.services import memory_proposal_service
 
@@ -330,16 +331,16 @@ def memory_page(request: Request, session: dict = Depends(require_auth)):
                 scope_group(scope, items)
                 for scope, items in sorted(groups.items())
             )
-            or '<p class="text-muted">Nothing to look at right now.</p>'
+            or '<p class="text-muted">Nothing to look at right now. Memory Clean-up will suggest anything that looks out of date or repeated.</p>'
         )
 
         review_html = f"""
     <div class="card">
       <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
-        <h3 style="margin:0">Memory Clean-up <span id="proposal-count" class="text-muted" style="font-weight:normal;font-size:0.8rem">({len(pending)} to look at)</span></h3>
+        <h3 style="margin:0">Suggestions waiting for you <span id="proposal-count" class="text-muted" style="font-weight:normal;font-size:0.8rem">({len(pending)} to look at)</span></h3>
         <button class="btn btn-secondary" onclick="generateProposals()">Check for more</button>
       </div>
-      <p class="text-muted" style="font-size:0.85rem;margin:8px 0 12px">Memories that may no longer be worth keeping — one-off job logs, ticket notes, repeats, or details that go out of date. Each one asks you a question. Nothing changes until you answer, and anything hidden can be restored from Retracted Records below.</p>
+      <p class="text-muted" style="font-size:0.85rem;margin:8px 0 12px">Memory Clean-up looks for memories that may no longer be worth keeping — one-off job logs, ticket notes, repeats, or details that go out of date. Each one asks you a question. Nothing changes until you answer, and anything hidden can be restored from Retracted Records below.</p>
       <div id="proposal-list">{proposals_html}</div>
       <details style="margin-top:12px">
         <summary class="text-muted" style="cursor:pointer">How good these suggestions have been</summary>
@@ -349,6 +350,9 @@ def memory_page(request: Request, session: dict = Depends(require_auth)):
       </details>
     </div>
     """
+        if pending:  # what needs a person goes above the records
+            review_top, review_html = review_html, ""
+
 
     js = (
         """
@@ -675,6 +679,8 @@ def memory_page(request: Request, session: dict = Depends(require_auth)):
       </details>
     </div>
 
+    {review_top}
+
     <!-- Active Records -->
     <div class="card">
       <h3>Active Records <span id="mem-count" class="text-muted" style="font-weight:normal;font-size:0.8rem">({len(active_records)})</span></h3>
@@ -682,7 +688,7 @@ def memory_page(request: Request, session: dict = Depends(require_auth)):
       <table><thead><tr><th>Class</th><th>Content</th><th>Scope</th><th>State</th><th class="actions-cell">Actions</th></tr></thead>
       <tbody id="mem-results-body">
         {records_rows}
-      </tbody>
+      </tbody></table>
       <input type="hidden" id="current-scope" value="{user_scope}">
     </div>
 
@@ -737,11 +743,8 @@ def memory_page(request: Request, session: dict = Depends(require_auth)):
             </div>
           </div>
           <details style="margin-top:4px">
-            <summary class="text-muted" style="cursor:pointer">More options</summary>
+            <summary class="text-muted" style="cursor:pointer">More options (topic, confidence, importance)</summary>
             <div class="form-row" style="margin-top:10px">
-              <div class="form-group">
-                <p class="form-hint">Optional tag for searches and filtering.</p>
-              </div>
               <div class="form-group">
                 <label>Topic</label>
                 <input type="text" id="mem-topic" placeholder="e.g. style" autocomplete="off">
@@ -760,23 +763,26 @@ def memory_page(request: Request, session: dict = Depends(require_auth)):
                 <p class="form-hint">Higher values rank earlier when results are similar.</p>
               </div>
             </div>
+          </details>
+          <details style="margin-top:4px">
+            <summary class="text-muted" style="cursor:pointer">Advanced</summary>
             <div class="form-row">
               <div class="form-group">
-                <label>Preference Slot Key</label>
+                <label>Slot key</label>
                 <input type="text" id="mem-slot-key" placeholder="e.g. style" autocomplete="off">
-                <p class="form-hint">Optional. Use for preferences when you want one active value per slot.</p>
+                <p class="form-hint">Optional. For preferences: saving a new value with the same slot key replaces the old one, so only one stays active.</p>
               </div>
             </div>
             <div class="form-row">
               <div class="form-group">
                 <label>Valid From</label>
                 <input type="datetime-local" id="mem-valid-from">
-                <p class="form-hint">Optional start time for the record's usefulness window.</p>
+                <p class="form-hint">Optional. When this became true in the world. Leave blank if it always has been.</p>
               </div>
               <div class="form-group">
                 <label>Valid To</label>
                 <input type="datetime-local" id="mem-valid-to">
-                <p class="form-hint">Optional end time for the record's usefulness window.</p>
+                <p class="form-hint">Optional. When it stops being true. Leave blank if it has no end.</p>
               </div>
             </div>
           </details>
@@ -792,42 +798,48 @@ def memory_page(request: Request, session: dict = Depends(require_auth)):
     <div class="modal-overlay" id="memory-detail-modal" style="display:none">
       <div class="modal" style="max-width:600px">
         <h3>Memory Detail</h3>
+        <h4 class="form-section-title">What it says</h4>
         <div class="form-group"><label>Content</label><div id="mem-detail-content" style="background:var(--bg);padding:8px;border-radius:6px;white-space:pre-wrap;max-height:200px;overflow-y:auto"></div></div>
         <div class="form-row">
-          <div class="form-group"><label>Class</label><span id="mem-detail-class" class="badge"></span></div>
-          <div class="form-group"><label>Scope</label><code id="mem-detail-scope"></code></div>
+          <div class="form-group"><label>Class</label><span id="mem-detail-class" class="badge"></span><p class="form-hint">Fact, decision, preference or scratchpad.</p></div>
+          <div class="form-group"><label>Scope</label><code id="mem-detail-scope"></code><p class="form-hint">Who can read it.</p></div>
         </div>
         <div class="form-row">
-        <div class="form-group"><label>Topic</label><span id="mem-detail-topic"></span></div>
-      </div>
-      <div class="form-row">
-        <div class="form-group"><label>Anchor</label><span id="mem-detail-anchor" class="text-muted"></span></div>
-        <div class="form-group"><label>Standing context</label><span id="mem-detail-pinned"></span></div>
-      </div>
-      <div class="form-row">
-        <div class="form-group"><label>Confidence</label><span id="mem-detail-confidence"></span></div>
-        <div class="form-group"><label>Importance</label><span id="mem-detail-importance"></span></div>
-      </div>
+          <div class="form-group"><label>Topic</label><span id="mem-detail-topic"></span></div>
+          <div class="form-group"><label>Standing context</label><span id="mem-detail-pinned"></span><p class="form-hint">Pinned records are shown to every agent in the scope.</p></div>
+        </div>
+        <h4 class="form-section-title">How sure</h4>
         <div class="form-row">
-          <div class="form-group"><label>Status</label><span id="mem-detail-status" class="badge"></span></div>
+          <div class="form-group"><label>Confidence</label><span id="mem-detail-confidence"></span><p class="form-hint">How sure it is that this is right (1 is certain).</p></div>
+          <div class="form-group"><label>Importance</label><span id="mem-detail-importance"></span><p class="form-hint">Higher ranks earlier in search results.</p></div>
+        </div>
+        <div class="form-row">
+          <div class="form-group"><label>Last confirmed</label><span id="mem-detail-last-confirmed" class="text-muted"></span><p class="form-hint">When someone last checked it is still true.</p></div>
+          <div class="form-group"><label>Status</label><span id="mem-detail-status" class="badge"></span><p class="form-hint">Whether agents still use it.</p></div>
+        </div>
+        <h4 class="form-section-title">Where it came from</h4>
+        <div class="form-row">
           <div class="form-group"><label>Created</label><span id="mem-detail-created" class="text-muted"></span></div>
-        </div>
-        <div class="form-row">
-          <div class="form-group"><label>Slot Key</label><code id="mem-detail-slot-key"></code></div>
-          <div class="form-group"><label>Last Confirmed At</label><span id="mem-detail-last-confirmed" class="text-muted"></span></div>
-        </div>
-        <div class="form-row">
-          <div class="form-group"><label>Valid From</label><span id="mem-detail-valid-from" class="text-muted"></span></div>
-          <div class="form-group"><label>Valid To</label><span id="mem-detail-valid-to" class="text-muted"></span></div>
+          <div class="form-group"><label>Anchor</label><span id="mem-detail-anchor" class="text-muted"></span><p class="form-hint">The file, host or service a later check compares it with.</p></div>
         </div>
         <div class="form-group">
           <label>Provenance</label>
           <pre id="mem-detail-provenance" style="display:none;background:var(--bg);padding:8px;border-radius:6px;white-space:pre-wrap;max-height:180px;overflow:auto"></pre>
         </div>
+        <details style="margin-top:4px">
+          <summary class="text-muted" style="cursor:pointer">Advanced</summary>
+          <div class="form-row" style="margin-top:10px">
+            <div class="form-group"><label>Slot key</label><code id="mem-detail-slot-key"></code><p class="form-hint">For preferences: only one record per slot stays active.</p></div>
+          </div>
+          <div class="form-row">
+            <div class="form-group"><label>Valid from</label><span id="mem-detail-valid-from" class="text-muted"></span><p class="form-hint">When it became true in the world.</p></div>
+            <div class="form-group"><label>Valid to</label><span id="mem-detail-valid-to" class="text-muted"></span><p class="form-hint">When it stops being true.</p></div>
+          </div>
+        </details>
         <input type="hidden" id="mem-detail-id" value="">
         <div id="mem-detail-supersede" class="alert alert-warning" style="display:none"></div>
         <div>
-          <h4 style="margin-top:12px">Version History</h4>
+          <h4 class="form-section-title" style="margin-top:12px">Version history</h4>
           <p class="text-muted" style="margin:4px 0 10px;font-size:0.85rem">Current record and any earlier versions it replaced.</p>
           <div id="mem-chain-content" style="font-size:0.85rem;max-height:220px;overflow:auto"></div>
         </div>
