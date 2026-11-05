@@ -408,7 +408,7 @@ Restoration is rejected if any stored encrypted entry cannot be decrypted with t
 
 ### Credential requests
 
-An agent calls the MCP `credential_request` tool. People see open requests at `GET /api/credentials/requests` and fill one with `POST /api/credentials/requests/{id}/fulfill` (`value`, optional `label` and `expires_at`) or decline it with `POST /api/credentials/requests/{id}/cancel`. Both need a human session with write access to the scope.
+An agent calls the MCP `credential_request` tool. People see open requests at `GET /api/credentials/requests` and fill one with `POST /api/credentials/requests/{id}/fulfill` (`value`, optional `label` and `expires_at`) or decline it with `POST /api/credentials/requests/{id}/cancel`. Both need a human session with write access to the scope. The one exception: the agent that opened a request can take it back while it is unfilled with the same `POST /api/credentials/requests/{id}/cancel` call using its own key (the response status is `withdrawn` and the audit log records `credential_request_withdrawn`). Taking a request back is not a refusal, so the agent may ask again later; it cannot cancel another agent's request or a filled one.
 
 ## Connector types
 

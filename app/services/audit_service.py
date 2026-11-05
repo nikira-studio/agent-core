@@ -66,6 +66,7 @@ AUDIT_ACTIONS = (
     "handoff_superseded",
     "credential_requested",
     "credential_request_fulfilled",
+    "credential_request_withdrawn",
     "activity_update",
     "activity_pickup",
     "activity_heartbeat",

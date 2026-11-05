@@ -77,7 +77,11 @@ def request_credential(
                     "Use it there if you can read that scope, or ask them before requesting it again."
                 ),
             }
-        if latest and latest["status"] == "cancelled":
+        if (
+            latest
+            and latest["status"] == "cancelled"
+            and not str(latest["resolved_by"] or "").startswith(WITHDRAWN_PREFIX)
+        ):
             # A person said no. Asking again by itself would just nag; they can
             # still add the credential directly, which the check above finds.
             return {
@@ -200,6 +204,23 @@ def fulfill(
         )
         conn.commit()
     return entry
+
+
+# resolved_by of a request the asking agent took back itself. It is not a refusal,
+# so the same request may be raised again later.
+WITHDRAWN_PREFIX = "agent:"
+
+
+def withdraw(request_id: str, *, agent_id: str) -> bool:
+    """The agent that opened a request takes it back while it is still unfilled."""
+    with get_db() as conn:
+        cursor = conn.execute(
+            """UPDATE credential_requests SET status = 'cancelled', resolved_at = ?, resolved_by = ?
+            WHERE id = ? AND status = 'pending' AND requested_by_agent_id = ?""",
+            (utc_now_iso(), f"{WITHDRAWN_PREFIX}{agent_id}", request_id, agent_id),
+        )
+        conn.commit()
+        return cursor.rowcount > 0
 
 
 def cancel(request_id: str, *, user_id: str) -> bool:

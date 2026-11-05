@@ -116,3 +116,57 @@ def test_listing_closes_a_request_answered_without_the_fill_button(test_client, 
     assert test_client.get("/api/credentials/requests", headers=admin).json()["data"]["requests"] == []
     page = test_client.get("/credentials", headers=admin)
     assert "Requested by agents" not in page.text
+
+
+def _second_agent(admin_token):
+    with get_db() as conn:
+        owner_id = conn.execute("SELECT id FROM users LIMIT 1").fetchone()["id"]
+    created = agent_service.create_agent(
+        agent_id="other-agent", display_name="Other Agent", owner_user_id=owner_id,
+        read_scopes=[SCOPE], write_scopes=[SCOPE],
+    )
+    return {"Authorization": f"Bearer {created[1]}"}
+
+
+def test_an_agent_can_withdraw_its_own_unfilled_request_and_ask_again_later(test_client, admin_token):
+    agent = _agent(admin_token)
+    admin = {"Authorization": f"Bearer {admin_token}"}
+    request_id = _request(test_client, agent).json()["data"]["request_id"]
+
+    withdrawn = test_client.post(f"/api/credentials/requests/{request_id}/cancel", headers=agent)
+    assert withdrawn.status_code == 200, withdrawn.json()
+    assert withdrawn.json()["data"]["status"] == "withdrawn"
+    assert test_client.get("/api/credentials/requests", headers=admin).json()["data"]["requests"] == []
+
+    # Taking it back is not a refusal: the agent may open the same request again.
+    again = _request(test_client, agent).json()["data"]
+    assert again["status"] == "pending" and again["created"] is True and again["request_id"] != request_id
+
+    with get_db() as conn:
+        event = conn.execute(
+            "SELECT actor_id, resource_id, details_json FROM audit_log WHERE action = 'credential_request_withdrawn'"
+        ).fetchone()
+    assert event["actor_id"] == "req-agent" and event["resource_id"] == request_id
+    assert "github-token" in event["details_json"]
+
+
+def test_an_agent_cannot_withdraw_anyone_elses_request_or_a_filled_one(test_client, admin_token):
+    agent = _agent(admin_token)
+    other = _second_agent(admin_token)
+    admin = {"Authorization": f"Bearer {admin_token}"}
+    request_id = _request(test_client, agent).json()["data"]["request_id"]
+
+    assert test_client.post(f"/api/credentials/requests/{request_id}/cancel", headers=other).status_code == 404
+    still = test_client.get("/api/credentials/requests", headers=admin).json()["data"]["requests"]
+    assert [r["id"] for r in still] == [request_id]
+
+    test_client.post(f"/api/credentials/requests/{request_id}/fulfill", headers=admin, json={"value": "v"})
+    assert test_client.post(f"/api/credentials/requests/{request_id}/cancel", headers=agent).status_code == 404
+
+
+def test_a_person_declining_is_still_a_refusal_the_agent_cannot_reopen(test_client, admin_token):
+    agent = _agent(admin_token)
+    admin = {"Authorization": f"Bearer {admin_token}"}
+    request_id = _request(test_client, agent).json()["data"]["request_id"]
+    assert test_client.post(f"/api/credentials/requests/{request_id}/cancel", headers=admin).status_code == 200
+    assert _request(test_client, agent).json()["data"]["status"] == "declined"

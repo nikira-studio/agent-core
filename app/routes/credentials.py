@@ -160,6 +160,19 @@ def cancel_credential_request(request_id: str, ctx: EffectiveAuthority = Depends
     pending = credential_request_service.get_request(request_id)
     if not pending or pending["status"] != "pending":
         return error_response("NOT_FOUND", "No pending request with that id", 404)
+    if ctx.actor_type == "agent":
+        # An agent may take back a request it opened itself, and nothing else.
+        if not ctx.agent_id or pending["requested_by_agent_id"] != ctx.agent_id:
+            return error_response("NOT_FOUND", "No pending request with that id", 404)
+        if not credential_request_service.withdraw(request_id, agent_id=ctx.agent_id):
+            return error_response("NOT_FOUND", "No pending request with that id", 404)
+        audit_service.write_event(
+            actor_type=ctx.actor_type, actor_id=ctx.actor_id,
+            action="credential_request_withdrawn", resource_type="credential_request",
+            resource_id=request_id, result="success",
+            details={"scope": pending["scope"], "name": pending["name"]},
+        )
+        return success_response({"request_id": request_id, "status": "withdrawn"})
     denied = _person_with_write(ctx, pending["scope"])
     if denied:
         return denied
