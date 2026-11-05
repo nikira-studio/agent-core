@@ -68,6 +68,18 @@ class TestAgentsPage:
         for key in ("memory", "coordination"):
             assert "checked" in re.search(rf'<input[^>]*id="ca-capability-{key}"[^>]*>', html).group(0)
 
+    def test_agent_forms_offer_roles_with_the_boxes_behind_a_custom_choice(self, admin_client):
+        import re
+
+        html = admin_client.get("/agents").text
+        for prefix in ("ca", "edit"):
+            for role in ("assistant", "service", "proposer", "custom"):
+                assert f'name="{prefix}-role" data-role="{role}"' in html
+            assert f'id="{prefix}-role-custom" hidden' in html
+        # A new agent starts as an assistant.
+        assert re.search(r'name="ca-role" data-role="assistant" checked', html)
+        assert "ROLE_PRESETS" in html and "function syncRole" in html
+
     def test_agents_table_shows_owner_metadata(self, admin_client):
         from app.services.agent_service import create_agent
 
@@ -117,8 +129,8 @@ class TestAgentsPage:
             in r.text
         )
         assert "const privateScope = 'agent:' + agentId" in r.text
-        assert "Use least-privileged service-agent preset" in r.text
-        assert "inherited owner user read scope" in r.text
+        assert "Reset to private access only" in r.text
+        assert "cannot be removed" in r.text
         assert 'data-scope="user:admin" checked data-required-scope="true" disabled' in r.text
         assert "function applyLeastPrivilegedPreset" in r.text
         assert 'id="ca-authority-preview"' in r.text

@@ -73,10 +73,26 @@ def agents_page(request: Request, session: dict = Depends(require_auth)):
     edit_recall_html = build_scope_list("edit-recall")
 
     def capability_controls(prefix):
+        roles = [
+            ("assistant", "Assistant",
+             "An AI assistant or coding agent. Remembers things, tracks its work and handoffs, and can use your connected services."),
+            ("service", "Service agent",
+             "A script or system that only fetches the specific stored credentials an admin has granted it. No memory, no connectors."),
+            ("proposer", "Proposer",
+             "Suggests admin changes, such as a new agent or connector. Nothing happens until a person approves it on the Approvals page."),
+            ("custom", "Custom",
+             "Choose each permission yourself."),
+        ]
+        cards = "".join(
+            f'<label class="role-card"><input type="radio" name="{prefix}-role" data-role="{key}"'
+            f'{" checked" if key == "assistant" else ""}> '
+            f'<span><strong>{name}</strong><small>{description}</small></span></label>'
+            for key, name, description in roles
+        )
         # (key, name, what it lets the agent do, starts checked on the create form)
         groups = [
             ("Everyday work", [
-                ("memory", "Memory", "Search, read and write memory records in the scopes above.", True),
+                ("memory", "Memory", "Search, read and write memory records in the scopes below.", True),
                 ("coordination", "Coordination", "Track its own work: activity records, handoffs, the session briefing, workspace sync and approval status.", True),
             ]),
             ("Credentials", [
@@ -84,7 +100,7 @@ def agents_page(request: Request, session: dict = Depends(require_auth)):
                 ("credentials_resolve", "Read credential values", "Fetch a stored value over HTTPS, one exact entry at a time, and only the entries an admin has granted it. For small service agents; leave off for assistants.", False),
             ]),
             ("Connectors", [
-                ("connectors_read", "Connector discovery", "See which external services and actions are set up. Implied by Run connector actions.", True),
+                ("connectors_read", "Connector discovery", "See which external services and actions are set up. Always on when Run connector actions is on.", True),
                 ("connectors_execute", "Run connector actions", "Have Agent Core perform actions in external services for it, using the credentials in your bindings.", True),
             ]),
             ("Administration", [
@@ -101,13 +117,41 @@ def agents_page(request: Request, session: dict = Depends(require_auth)):
                     f'<span><strong>{name}</strong><br><small class="form-hint">{description}</small></span></label>'
                 )
         return (
-            '<div class="form-group"><label>What this agent may do</label>' + controls +
-            '<p class="form-hint">Scopes decide which data an agent can reach; these decide which kinds of action it may attempt. '
-            'Read credential values and Propose admin changes start off for new agents. Changes apply to the next request; reconnect an MCP client to refresh its tool list.</p></div>'
+            '<div class="form-section"><h4 class="form-section-title">What will this agent do?</h4>'
+            f'<div class="role-cards">{cards}</div>'
+            f'<div class="role-custom" id="{prefix}-role-custom" hidden>{controls}</div>'
+            '<p class="form-hint">Scopes decide which data an agent can reach; this decides which kinds of action it may attempt. '
+            'Changes apply to the next request; reconnect an MCP client to refresh its tool list.</p></div>'
         )
 
     capability_create_html = capability_controls("ca")
     capability_edit_html = capability_controls("edit")
+
+    def access_section(prefix, read_html, write_html, recall_html, create):
+        recall_checked = " checked" if create else ""
+        recall_hidden = ' style="display:none"' if create else ""
+        read_hint = (
+            "Your personal scope is inherited and cannot be removed."
+            if create else
+            "Its private scope and its owner's personal scope are automatic. Tick extra places it may read from."
+        )
+        return (
+            '<div class="form-section"><h4 class="form-section-title">What can it reach?</h4>'
+            f'<details class="access-details"><summary>Memory access <span class="text-muted" id="{prefix}-access-summary"></span></summary>'
+            '<p class="form-hint">An agent always has its own private scope. Add workspaces to share memory with other agents and people.</p>'
+            f'<div class="form-group"><label>Can Read From</label>{read_html}<p class="form-hint">{read_hint}</p></div>'
+            f'<div class="form-group"><label>Can Write To</label>{write_html}'
+            '<p class="form-hint">Only where the agent may save new memory or credentials. Use workspaces for sharing; writing to a personal scope is an advanced choice.</p></div>'
+            '<div class="form-group"><label>Default recall</label>'
+            f'<label class="checkbox-label"><input type="checkbox" id="{prefix}-recall-all"{recall_checked}> '
+            '<span>Search everything this agent can read</span></label>'
+            f'<div id="{prefix}-recall-wrap"{recall_hidden}>{recall_html}'
+            '<p class="form-hint">Unticked, searches cover only the scopes ticked here (plus its own). Any other readable scope can still be searched by name.</p></div></div>'
+            '</details></div>'
+        )
+
+    create_access_html = access_section("ca", ca_read_html, ca_write_html, ca_recall_html, True)
+    edit_access_html = access_section("edit", edit_read_html, edit_write_html, edit_recall_html, False)
 
     def agent_row(a):
         active = a.get("is_active")
@@ -193,7 +237,6 @@ def agents_page(request: Request, session: dict = Depends(require_auth)):
       });
       const recallAll = document.getElementById('ca-recall-all');
       if (recallAll) recallAll.checked = false;
-      document.querySelectorAll('#create-agent-form [data-capability]').forEach(input => input.checked = input.dataset.capability === 'memory' || input.dataset.capability === 'coordination');
       toggleRecallPicker('ca');
       createAuthorityPreview();
     }
@@ -266,7 +309,7 @@ def agents_page(request: Request, session: dict = Depends(require_auth)):
         form.querySelectorAll('input, select, textarea').forEach(input => {
           if (input.type === 'hidden') return;
           if (input.id === 'edit-agent-id') return;
-          if (input.id === 'edit-display-name' || input.id === 'edit-description' || input.dataset.capability) {
+          if (input.id === 'edit-display-name' || input.id === 'edit-description' || input.dataset.capability || input.dataset.role) {
             input.disabled = readOnly;
           }
         });
@@ -288,6 +331,7 @@ def agents_page(request: Request, session: dict = Depends(require_auth)):
       document.getElementById('edit-owner').textContent = a.owner_user_id || '-';
       document.getElementById('edit-default-user').textContent = a.default_user_id || a.owner_user_id || '-';
       setSelectedCapabilities('edit', a.capabilities || []);
+      syncRole('edit');
       const readScopes = JSON.parse(a.read_scopes_json || '[]');
       const writeScopes = JSON.parse(a.write_scopes_json || '[]');
       setSelectedScopes('edit-read-scopes', readScopes);
@@ -308,6 +352,7 @@ def agents_page(request: Request, session: dict = Depends(require_auth)):
       if (recallAll) recallAll.disabled = Boolean(readOnly);
       toggleRecallPicker('edit');
       setAgentModalReadOnly(Boolean(readOnly));
+      updateAccessSummary('edit');
       // Hide and disable the agent's own scope row: self-access is implicit.
       ['edit-read-scopes', 'edit-write-scopes', 'edit-recall-scopes'].forEach(containerId => {
         const isRecall = containerId === 'edit-recall-scopes';
@@ -356,6 +401,47 @@ def agents_page(request: Request, session: dict = Depends(require_auth)):
         const wrap = document.getElementById(prefix + '-recall-wrap');
         if (wrap) wrap.style.display = (all && all.checked) ? 'none' : '';
       }
+      const ROLE_PRESETS = {
+        assistant: ['memory', 'coordination', 'credentials', 'connectors_read', 'connectors_execute'],
+        service: ['credentials_resolve'],
+        proposer: ['coordination', 'admin_propose'],
+      };
+      function applyRole(prefix, role) {
+        if (ROLE_PRESETS[role]) setSelectedCapabilities(prefix, ROLE_PRESETS[role]);
+        const custom = document.getElementById(prefix + '-role-custom');
+        if (custom) custom.hidden = role !== 'custom';
+      }
+      function syncRole(prefix) {
+        const caps = getSelectedCapabilities(prefix).slice().sort().join(',');
+        const match = Object.keys(ROLE_PRESETS).find(r => ROLE_PRESETS[r].slice().sort().join(',') === caps);
+        const role = match || 'custom';
+        const radio = document.querySelector('input[name="' + prefix + '-role"][data-role="' + role + '"]');
+        if (radio) radio.checked = true;
+        applyRole(prefix, role);
+      }
+      function updateAccessSummary(prefix) {
+        const el = document.getElementById(prefix + '-access-summary');
+        if (!el) return;
+        const own = 'agent:' + (prefix === 'ca' ? normalizeAgentId(document.getElementById('ca-id')?.value) : document.getElementById('edit-agent-id').textContent);
+        const principal = prefix === 'edit' ? 'user:' + document.getElementById('edit-default-user').textContent : '';
+        const count = id => Array.from(document.querySelectorAll('#' + id + ' input:checked'))
+          .filter(i => !i.dataset.requiredScope && i.dataset.scope !== own && i.dataset.scope !== principal).length;
+        const r = count(prefix + '-read-scopes'), w = count(prefix + '-write-scopes');
+        el.textContent = '(' + (r || w ? r + ' extra to read, ' + w + ' to write' : 'private scope only') + ')';
+      }
+      document.addEventListener('change', function(ev) {
+        const t = ev.target;
+        if (t.id && t.id.endsWith('-recall-all')) toggleRecallPicker(t.id.replace('-recall-all', ''));
+        if (t.dataset && t.dataset.role) applyRole(t.name.replace('-role', ''), t.dataset.role);
+        if (t.dataset && t.dataset.capability === 'connectors_execute' && t.checked) {
+          const read = document.getElementById(t.id.replace('execute', 'read'));
+          if (read) read.checked = true;
+        }
+        const form = t.closest && t.closest('form');
+        if (form && (form.id === 'create-agent-form' || form.id === 'edit-agent-form')) {
+          updateAccessSummary(form.id === 'create-agent-form' ? 'ca' : 'edit');
+        }
+      });
       function normalizeAgentId(value) {
         return (value || '').trim().toLowerCase();
       }
@@ -441,7 +527,7 @@ def agents_page(request: Request, session: dict = Depends(require_auth)):
           showToast(message, 'danger');
         }
       }
-      document.addEventListener('DOMContentLoaded', createAuthorityPreview);
+      document.addEventListener('DOMContentLoaded', function() { createAuthorityPreview(); updateAccessSummary('ca'); });
     </script>"""
     js = js.replace("__IS_ADMIN__", str(is_admin).lower())
 
@@ -464,44 +550,31 @@ def agents_page(request: Request, session: dict = Depends(require_auth)):
 
     <!-- Create Agent Modal -->
     <div class="modal-overlay" id="create-agent-modal" style="display:none">
-      <div class="modal">
+      <div class="modal modal-wide">
         <h3>Create Agent</h3>
         <form id="create-agent-form" onsubmit="createAgent(event)">
-          <div class="form-group">
-            <label>Agent ID *</label>
-            <input type="text" id="ca-id" pattern="[a-z0-9_\\-]+" placeholder="e.g. coding-agent" required>
-            <p class="form-hint">Lowercase letters, numbers, hyphens, underscores only.</p>
-          </div>
-          <div class="form-group">
-            <label>Display Name *</label>
-            <input type="text" id="ca-display-name" required>
-          </div>
-          <div class="form-group">
-            <label>Description</label>
-            <input type="text" id="ca-description">
+          <div class="form-section">
+            <div class="form-row">
+              <div class="form-group">
+                <label>Agent ID *</label>
+                <input type="text" id="ca-id" pattern="[a-z0-9_\\-]+" placeholder="e.g. coding-agent" required>
+                <p class="form-hint">Lowercase letters, numbers, hyphens, underscores.</p>
+              </div>
+              <div class="form-group">
+                <label>Display name *</label>
+                <input type="text" id="ca-display-name" required>
+              </div>
+            </div>
+            <div class="form-group">
+              <label>Description</label>
+              <input type="text" id="ca-description" placeholder="What is this agent for?">
+            </div>
           </div>
           <div id="ca-capability-controls">{capability_create_html}</div>
+          {create_access_html}
           <div class="form-group">
-            <button type="button" class="btn btn-sm btn-secondary" onclick="applyLeastPrivilegedPreset()">Use least-privileged service-agent preset</button>
-            <p class="form-hint">Private agent read/write scope, inherited owner user read scope, no workspace or shared scopes. You can add explicit authority afterward.</p>
-          </div>
-          <div class="form-group">
-            <label>Can Read From</label>
-            {ca_read_html}
-            <p class="form-hint">The active principal's user scope is inherited and cannot be removed. The agent's private scope is also always included.</p>
-          </div>
-          <div class="form-group">
-            <label>Can Write To</label>
-            {ca_write_html}
-            <p class="form-hint">Grant write access only where the agent should be allowed to save new memory or credentials. Use workspace scopes for multi-user collaboration. User write is available only as an explicit advanced choice.</p>
-          </div>
-          <div class="form-group">
-            <label>Default Recall Scopes</label>
-            <label class="checkbox-label"><input type="checkbox" id="ca-recall-all" checked onchange="toggleRecallPicker('ca')"> <span>Recall from <strong>all</strong> scopes this agent can read</span></label>
-            <div id="ca-recall-wrap" style="display:none">
-              {ca_recall_html}
-              <p class="form-hint"><strong>Checked</strong> = recall from everything the agent can read (the default — same as before this setting existed). <strong>Uncheck</strong> to recall only the scopes ticked below. The agent's own scope is always included, and any other readable scope stays reachable on demand via <code>memory_search(scope=…)</code>.</p>
-            </div>
+            <button type="button" class="btn btn-sm btn-secondary" onclick="applyLeastPrivilegedPreset()">Reset to private access only</button>
+            <span class="form-hint">Clears every extra scope; the agent keeps its private scope and its owner's read access.</span>
           </div>
           <div id="ca-authority-preview" class="form-hint" style="white-space:normal"></div>
           <div id="create-agent-error" class="alert alert-danger" style="display:none"></div>
@@ -515,46 +588,24 @@ def agents_page(request: Request, session: dict = Depends(require_auth)):
 
     <!-- Edit Agent Modal -->
     <div class="modal-overlay" id="edit-agent-modal" style="display:none">
-      <div class="modal">
+      <div class="modal modal-wide">
         <h3><span id="edit-agent-modal-title">Edit Agent</span>: <span id="edit-agent-id"></span></h3>
         <form id="edit-agent-form" onsubmit="submitEditAgent(event)">
-          <div class="form-group">
-            <label>Display Name</label>
-            <input type="text" id="edit-display-name">
-          </div>
-          <div class="form-group">
-            <label>Description</label>
-            <input type="text" id="edit-description">
+          <div class="form-section">
+            <div class="form-row">
+              <div class="form-group">
+                <label>Display name</label>
+                <input type="text" id="edit-display-name">
+              </div>
+              <div class="form-group">
+                <label>Description</label>
+                <input type="text" id="edit-description">
+              </div>
+            </div>
+            <p class="form-hint">Owner: <span id="edit-owner"></span> · Default user: <span id="edit-default-user"></span></p>
           </div>
           <div id="edit-capability-controls">{capability_edit_html}</div>
-          <div class="form-row">
-            <div class="form-group">
-              <label>Owner</label>
-              <span id="edit-owner" class="text-muted"></span>
-            </div>
-            <div class="form-group">
-              <label>Default User</label>
-              <span id="edit-default-user" class="text-muted"></span>
-            </div>
-          </div>
-          <div class="form-group">
-            <label>Can Read From</label>
-            {edit_read_html}
-            <p class="form-hint">The agent's private scope is automatic and hidden here. Its active principal's user scope is inherited and locked. Checked items are extra places this agent can retrieve from.</p>
-          </div>
-          <div class="form-group">
-            <label>Can Write To</label>
-            {edit_write_html}
-            <p class="form-hint">Checked items are extra places this agent can save to.</p>
-          </div>
-          <div class="form-group">
-            <label>Default Recall Scopes</label>
-            <label class="checkbox-label"><input type="checkbox" id="edit-recall-all" onchange="toggleRecallPicker('edit')"> <span>Recall from <strong>all</strong> scopes this agent can read</span></label>
-            <div id="edit-recall-wrap">
-              {edit_recall_html}
-              <p class="form-hint"><strong>Checked</strong> = recall from everything the agent can read (the default — same as before this setting existed). <strong>Uncheck</strong> to recall only the scopes ticked below. The agent's own scope is always included, and any other readable scope stays reachable on demand via <code>memory_search(scope=…)</code>.</p>
-            </div>
-          </div>
+          {edit_access_html}
           <div class="modal-footer">
             <button type="button" class="btn btn-secondary" onclick="closeModal('edit-agent-modal')">Cancel</button>
             <button id="edit-agent-save" type="submit" class="btn">Save Changes</button>

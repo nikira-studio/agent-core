@@ -1771,3 +1771,88 @@ th.activity-actions-header {
   color: var(--text);
   font-family: monospace;
 }
+
+/* === Agent forms === */
+.modal.modal-wide {
+  max-width: 680px;
+}
+.form-section {
+  margin-bottom: 20px;
+}
+.form-section-title {
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  margin: 0 0 8px;
+}
+.role-cards {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.role-card {
+  display: flex !important;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+  font-size: 0.85rem !important;
+  color: var(--text) !important;
+  margin-bottom: 0 !important;
+}
+.role-card input {
+  width: 16px !important;
+  height: 16px !important;
+  margin: 3px 0 0 !important;
+  flex-shrink: 0;
+}
+.role-card strong,
+.role-card small {
+  display: block;
+}
+.role-card small {
+  margin-top: 2px;
+  font-size: 0.75rem;
+  color: var(--muted);
+  font-weight: normal;
+}
+.role-card:has(input:checked) {
+  border-color: var(--accent);
+  box-shadow: var(--focus-ring);
+}
+.role-custom {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+}
+.capability-group {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin: 10px 0 4px;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 2px;
+}
+.capability-group:first-child {
+  margin-top: 0;
+}
+.checkbox-label.checkbox-label-top,
+.role-custom .checkbox-label {
+  align-items: flex-start;
+}
+.access-details > summary {
+  cursor: pointer;
+  font-size: 0.9rem;
+  padding: 8px 0;
+}
+@media (max-width: 600px) {
+  .role-cards {
+    grid-template-columns: 1fr;
+  }
+}
