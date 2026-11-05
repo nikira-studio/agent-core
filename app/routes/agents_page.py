@@ -1,5 +1,6 @@
 """Agents dashboard page."""
 
+import json
 from urllib.parse import quote
 
 from fastapi import APIRouter, Request, Depends
@@ -13,6 +14,20 @@ from app.routes.dashboard_shared import (
 )
 
 router = APIRouter()
+
+# The roles offered on the create and edit forms, as the capability sets they tick.
+ROLE_PRESETS = {
+    "assistant": ["memory", "coordination", "credentials", "connectors_read", "connectors_execute"],
+    "service": ["credentials_resolve"],
+    "proposer": ["coordination", "admin_propose"],
+}
+ROLE_NAMES = {"assistant": "Assistant", "service": "Service agent", "proposer": "Proposer", "custom": "Custom"}
+
+
+def role_of(capabilities) -> str:
+    """The role whose capability set matches exactly, else 'custom'."""
+    wanted = set(capabilities)
+    return next((role for role, caps in ROLE_PRESETS.items() if set(caps) == wanted), "custom")
 
 
 @router.get("/agents")
@@ -181,6 +196,8 @@ def agents_page(request: Request, session: dict = Depends(require_auth)):
                 toggle_btn = f"<button type='button' class='btn btn-sm btn-secondary' data-agent-reactivate='{escape_html(a['id'])}'>Reactivate</button>"
         else:
             toggle_btn = ""
+        role = role_of(agent_service.parse_capabilities(a.get("capabilities_json")))
+        role_badge = f"<span class='badge badge-info' title='What this agent may do. Open Edit to change it.'>{ROLE_NAMES[role]}</span>"
         owner_id = a.get("owner_user_id", "")
         default_user_id = a.get("default_user_id", "") or owner_id
         if can_manage:
@@ -196,7 +213,7 @@ def agents_page(request: Request, session: dict = Depends(require_auth)):
             )
         return (
             f"<tr>"
-            f"<td><strong>{escape_html(a.get('display_name', ''))}</strong><br><code>{escape_html(a['id'])}</code>"
+            f"<td><strong>{escape_html(a.get('display_name', ''))}</strong> {role_badge}<br><code>{escape_html(a['id'])}</code>"
             f"<div class='text-muted'>Owner: {escape_html(owner_id)} · Default user: {escape_html(default_user_id)}</div></td>"
             f"<td>{status_badge}</td>"
             f"<td>{access_summary}</td>"
@@ -401,11 +418,7 @@ def agents_page(request: Request, session: dict = Depends(require_auth)):
         const wrap = document.getElementById(prefix + '-recall-wrap');
         if (wrap) wrap.style.display = (all && all.checked) ? 'none' : '';
       }
-      const ROLE_PRESETS = {
-        assistant: ['memory', 'coordination', 'credentials', 'connectors_read', 'connectors_execute'],
-        service: ['credentials_resolve'],
-        proposer: ['coordination', 'admin_propose'],
-      };
+      const ROLE_PRESETS = __ROLE_PRESETS__;
       function applyRole(prefix, role) {
         if (ROLE_PRESETS[role]) setSelectedCapabilities(prefix, ROLE_PRESETS[role]);
         const custom = document.getElementById(prefix + '-role-custom');
@@ -529,7 +542,7 @@ def agents_page(request: Request, session: dict = Depends(require_auth)):
       }
       document.addEventListener('DOMContentLoaded', function() { createAuthorityPreview(); updateAccessSummary('ca'); });
     </script>"""
-    js = js.replace("__IS_ADMIN__", str(is_admin).lower())
+    js = js.replace("__IS_ADMIN__", str(is_admin).lower()).replace("__ROLE_PRESETS__", json.dumps(ROLE_PRESETS))
 
     return render_page(
         "Agents",

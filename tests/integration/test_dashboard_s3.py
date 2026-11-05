@@ -80,6 +80,17 @@ class TestAgentsPage:
         assert re.search(r'name="ca-role" data-role="assistant" checked', html)
         assert "ROLE_PRESETS" in html and "function syncRole" in html
 
+    def test_the_agent_list_shows_each_agents_role(self, admin_client):
+        from app.services.agent_service import create_agent
+
+        create_agent("svc", "Svc", "admin", capabilities=["credentials_resolve"])
+        create_agent("prop", "Prop", "admin", capabilities=["coordination", "admin_propose"])
+        create_agent("odd", "Odd", "admin", capabilities=["memory"])
+        create_agent("helper", "Helper", "admin")
+        html = admin_client.get("/agents").text
+        for name in ("Service agent", "Proposer", "Custom", "Assistant"):
+            assert f">{name}</span>" in html, name
+
     def test_agents_table_shows_owner_metadata(self, admin_client):
         from app.services.agent_service import create_agent
 
