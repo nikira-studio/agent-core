@@ -13,9 +13,9 @@ Use an adapter when you want to add a service that **doesn't fit the simpler pat
 
 | Path | When |
 |---|---|
-| **Import API Spec** (OpenAPI) | the service publishes a clean REST spec |
-| **Import MCP Server** | the service is already a native MCP server |
-| **Add HTTP Connector** | one-off authenticated HTTP, no per-action schemas needed |
+| **Add a service → From an API spec** (OpenAPI) | the service publishes a clean REST spec |
+| **Add a service → From an MCP server** | the service is already a native MCP server |
+| **Add a service → A plain web service** | one-off authenticated HTTP, no per-action schemas needed |
 | **Adapter** | session handshakes, OAuth refresh, multi-field credentials, CLI tools, named actions with schemas, anything you want to share with others |
 
 You write one manifest; the engine handles per-action input schemas, OAuth refresh, session-handshake retry, request templating, response extraction, and produces a shareable artifact that survives upgrades.
@@ -39,7 +39,7 @@ The Browse Adapters page at **`/connectors/adapters`** lists adapters from both 
 
 ### 1. Browse Adapters page (easiest)
 
-1. Go to **`/connectors`** → click **Browse Adapters** (or visit `/connectors/adapters` directly).
+1. Go to **`/connectors`** → click the **adapters** link in the Service Catalog note (or visit `/connectors/adapters` directly).
 2. Pick an adapter from the list. Each entry shows its description, version, backend (`http`/`mcp`/`cli`), and whether its `requires` (binaries, env vars) are satisfied.
 3. Click **Install**. If it's a system adapter, Agent Core copies it from `app/adapter_templates/` into `data/adapters/`, seeds the connector type, and records the installation. If it's already in `data/adapters/`, the install just seeds and records. If the page later shows **Update**, clicking it refreshes the installed copy in place without changing bindings. The Update button appears when the available template version differs from the installed version.
 4. The new connector type now shows in your `/connectors` catalog.

@@ -393,7 +393,7 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
         <tbody>{bindings_rows}</tbody></table>"""
     else:
         bindings_html = (
-            "<div class='empty'>No connector bindings yet. Create one below.</div>"
+            "<div class='empty'>No bindings yet. Use <strong>Add Binding</strong> on a service above to let agents use it.</div>"
         )
 
     execution_rows_html = ""
@@ -423,7 +423,7 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
           <tbody>{execution_rows_html}</tbody>
         </table>"""
     else:
-        executions_html = "<div class='empty'>No connector executions yet. Test a binding or run an action to populate this view.</div>"
+        executions_html = "<div class='empty'>Nothing has run yet. Test a binding or run an action and it will appear here.</div>"
 
     ct_cards = ""
     for ct in connector_types:
@@ -516,91 +516,92 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
           </div>
         </div>"""
 
+    quick_start_html = "" if visible_binding_count else """<div class="card">
+      <div class="section-header">
+        <h3>Getting a service working</h3>
+        <div class="section-note">Four steps, shown until the first binding exists.</div>
+      </div>
+      <ol style="margin:0;padding-left:20px;line-height:1.6">
+        <li>Add the service with the <strong>Add a service</strong> button above.</li>
+        <li>Store its key or token on the <a href="/credentials">Credentials</a> page.</li>
+        <li>Create a binding: it says which scope may use the service, and with which credential.</li>
+        <li>Test the binding, then ask an agent to use it.</li>
+      </ol>
+    </div>"""
+
     body = f"""
     <div class="page-header">
       <div>
         <h1>Services</h1>
         <p class="text-muted" style="max-width:760px;margin-top:8px">
-          Manage the service catalog agents can call, along with the credentials and bindings that
-          make each capability available in the right scope.
+          The outside services agents can use. Add a service, then create a binding to say who may
+          use it and with which credential.
         </p>
       </div>
       <div class="page-actions">
-        <a class="btn btn-secondary" href="/credentials">+ New Credential</a>
-        <a class="btn btn-secondary" href="/connectors/directory">Browse API Directory</a>
-        <a class="btn btn-secondary" href="/connectors/adapters">Browse Adapters</a>
         <div class="dropdown" style="display:inline-block;position:relative">
-          <button class="btn btn-secondary" onclick="toggleDropdown(this)" type="button">+ Add <span style="font-size:0.8em">&#9662;</span></button>
-          <div class="dropdown-menu" style="display:none;position:absolute;right:0;top:100%;background:#fff;border:1px solid #ddd;border-radius:4px;box-shadow:0 2px 8px rgba(0,0,0,0.15);z-index:1000;min-width:200px;text-align:left">
-            <button class="dropdown-item" style="display:block;width:100%;padding:10px 16px;border:none;background:none;text-align:left;cursor:pointer;font-size:14px" onclick="resetImportPreview();openModal('import-spec-modal');closeAllDropdowns()">Import API Spec</button>
-            <button class="dropdown-item" style="display:block;width:100%;padding:10px 16px;border:none;background:none;text-align:left;cursor:pointer;font-size:14px" onclick="openModal('import-mcp-modal');closeAllDropdowns()">Import MCP Server</button>
-            <button class="dropdown-item" style="display:block;width:100%;padding:10px 16px;border:none;background:none;text-align:left;cursor:pointer;font-size:14px" onclick="openModal('add-http-modal');closeAllDropdowns()">Add HTTP Connector</button>
+          <button class="btn btn-primary" onclick="toggleDropdown(this)" type="button">Add a service <span style="font-size:0.8em">&#9662;</span></button>
+          <div class="dropdown-menu" style="display:none;position:absolute;right:0;top:100%;background:#fff;border:1px solid #ddd;border-radius:4px;box-shadow:0 2px 8px rgba(0,0,0,0.15);z-index:1000;min-width:280px;text-align:left">
+            <button class="dropdown-item" style="display:block;width:100%;padding:10px 16px;border:none;background:none;text-align:left;cursor:pointer;font-size:14px" onclick="resetImportPreview();openModal('import-spec-modal');closeAllDropdowns()">From an API spec<br><small class="text-muted">Most web services publish one (an OpenAPI file).</small></button>
+            <button class="dropdown-item" style="display:block;width:100%;padding:10px 16px;border:none;background:none;text-align:left;cursor:pointer;font-size:14px" onclick="openModal('import-mcp-modal');closeAllDropdowns()">From an MCP server<br><small class="text-muted">A tool server that already speaks MCP.</small></button>
+            <button class="dropdown-item" style="display:block;width:100%;padding:10px 16px;border:none;background:none;text-align:left;cursor:pointer;font-size:14px" onclick="openModal('add-http-modal');closeAllDropdowns()">A plain web service<br><small class="text-muted">Just a web address and how to sign in.</small></button>
           </div>
         </div>
       </div>
     </div>
 
     <div class="stat-grid">
-      <a class="stat-card stat-link" href="#service-catalog"><div class="value">{connector_type_count}</div><div class="label">Connector Types</div></a>
-      <a class="stat-card stat-link" href="#bindings"><div class="value">{visible_binding_count}</div><div class="label">Visible Bindings</div></a>
-      <a class="stat-card stat-link" href="#bindings"><div class="value">{enabled_binding_count}</div><div class="label">Enabled Bindings</div></a>
-      <a class="stat-card stat-link" href="#executions"><div class="value">{failed_binding_count}</div><div class="label">Bindings with Errors</div></a>
-      <a class="stat-card stat-link" href="#service-catalog"><div class="value">{sum(max(len(connector_service.normalize_action_names(ct.get("supported_actions"))) - len(ct.get("disabled_actions") or []), 0) for ct in connector_types)}</div><div class="label">Enabled Actions</div></a>
+      <a class="stat-card stat-link" href="#service-catalog"><div class="value">{connector_type_count}</div><div class="label">Services</div></a>
+      <a class="stat-card stat-link" href="#bindings"><div class="value">{visible_binding_count}</div><div class="label">Bindings</div></a>
+      <a class="stat-card stat-link" href="#bindings"><div class="value">{enabled_binding_count}</div><div class="label">Enabled bindings</div></a>
+      <a class="stat-card stat-link" href="#bindings"><div class="value">{failed_binding_count}</div><div class="label">Bindings with errors</div></a>
+      <a class="stat-card stat-link" href="#service-catalog"><div class="value">{sum(max(len(connector_service.normalize_action_names(ct.get("supported_actions"))) - len(ct.get("disabled_actions") or []), 0) for ct in connector_types)}</div><div class="label">Enabled actions</div></a>
     </div>
 
-    <div class="card">
-      <div class="section-header">
-        <h3>Quick Start</h3>
-        <div class="section-note">The simplest path for most users.</div>
-      </div>
-      <ol style="margin:0;padding-left:20px;line-height:1.6">
-        <li>Create a credential for the service you want to use.</li>
-        <li>Create a binding for that credential in the right scope.</li>
-        <li>Test the binding, then ask an agent to use it through MCP.</li>
-      </ol>
-    </div>
+    {quick_start_html}
 
      <div class="card" id="service-catalog">
       <div class="section-header" style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px">
         <div>
           <h3>Service Catalog</h3>
-          <div class="section-note">Built-in connector types and imported connector types are shared across the instance.</div>
+          <div class="section-note">Built-in and added services, shared across this install. Ready-made ones are in the <a href="/connectors/directory">API directory</a> and <a href="/connectors/adapters">adapters</a>.</div>
         </div>
-        <button type="button" class="btn btn-sm btn-secondary" onclick="checkHealth(this)">Check Health</button>
+        <button type="button" class="btn btn-sm btn-secondary" onclick="checkHealth(this)" title="Test every enabled binding now">Check Health</button>
       </div>
-      <div class="connector-types-grid">{ct_cards or "<div class='empty'>No connector types yet. <a href='/connectors/directory'>Browse the API Directory</a> or import a custom spec.</div>"}</div>
+      <div class="connector-types-grid">{ct_cards or "<div class='empty'>No services yet. Add one so agents can act in an outside system, or browse the <a href='/connectors/directory'>API directory</a>.</div>"}</div>
     </div>
 
     <div class="card" id="bindings">
       <div class="section-header">
         <h3>Bindings</h3>
-        <div class="section-note">How a capability becomes available inside a scope.</div>
+        <div class="section-note">A binding says which scope may use a service, and with which credential.</div>
       </div>
       <div id="bindings-list">{bindings_html}</div>
     </div>
 
-    <div class="card" id="executions">
-      <div class="section-header">
-        <h3>Recent Executions</h3>
-        <div class="section-note">What the service layer has actually run recently.</div>
-      </div>
-      <div id="executions-list">{executions_html}</div>
-    </div>
+    <details class="card" id="executions">
+      <summary class="section-header" style="cursor:pointer">
+        <h3 style="display:inline">Recent runs ({len(visible_executions)})</h3>
+        <span class="section-note" style="margin-left:8px">What agents and tests have run through bindings. Click to open.</span>
+      </summary>
+      <div id="executions-list" style="margin-top:12px">{executions_html}</div>
+    </details>
 
     <!-- Create Binding Modal -->
     <div class="modal-overlay" id="create-binding-modal" style="display:none">
       <div class="modal">
         <h3>New Binding</h3>
+        <p class="form-hint">A binding lets agents in one scope use a service with one credential.</p>
         <form id="create-binding-form" onsubmit="createBinding(event)">
           <div class="form-group">
-            <label>Connector Type *</label>
+            <label>Service *</label>
             <select id="binding-connector-type" required onchange="bindingConnectorTypeChanged()">
               <option value="">-- Select --</option>
               {connector_type_opts}
             </select>
           </div>
           <div class="form-group">
-            <div id="binding-recipe" class="form-hint">Choose a connector type to see the required credential and config fields.</div>
+            <div id="binding-recipe" class="form-hint">Choose a service to see which credential it needs.</div>
           </div>
           <div class="form-group" id="binding-setup-group" style="display:none">
             <label>Setup Instructions</label>
@@ -616,9 +617,11 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
               <option value="">Select scope...</option>
               {scope_options}
             </select>
+            <div class="form-hint">Only agents that can reach this scope may use the binding.</div>
           </div>
           <div class="form-group">
             <label>Credential</label>
+            <div class="form-hint">The key or token Core uses for this service. Agents never see it.</div>
             <select id="binding-credential-mode" onchange="toggleBindingCredentialMode()">
               <option value="none">No credential</option>
               <option value="existing">Use stored credential</option>
@@ -639,25 +642,22 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
             </div>
             <div id="binding-new-credential-editor"></div>
           </div>
-          <div class="form-group">
-            <label>Config (JSON, optional)</label>
-            <textarea id="binding-config" rows="2" placeholder='{{"repo": "owner/name"}}'></textarea>
-            <div class="form-hint">
-              Optional non-secret settings for this binding, such as <code>base_url</code>,
-              <code>default_params</code>, <code>auth_header</code>, or <code>test_url</code>.
-              Leave it blank if the credential and connector type are enough.
-              For adapters with their own request paths, point <code>base_url</code> at the
-              service root, not the final RPC endpoint.
+          <details class="access-details">
+            <summary>Advanced</summary>
+            <div class="form-group">
+              <label>Extra settings (JSON, optional)</label>
+              <textarea id="binding-config" rows="2" placeholder='{{"repo": "owner/name"}}'></textarea>
+              <div class="form-hint">Non-secret settings such as <code>base_url</code> or <code>default_params</code>. Leave blank unless the service's setup notes ask for them.</div>
             </div>
-          </div>
-          <div class="form-group" id="binding-mcp-endpoint-group" style="display:none">
-            <label>Native MCP Endpoint Override</label>
-            <input type="url" id="binding-mcp-endpoint" placeholder="https://instance.example/mcp" autocomplete="off">
-            <div class="form-hint">Optional. Agent Core checks the deployment's strict tool contract before saving. Description-only changes are accepted; different tools or schemas require a separate connector type.</div>
-          </div>
+            <div class="form-group" id="binding-mcp-endpoint-group" style="display:none">
+              <label>Different MCP server address</label>
+              <input type="url" id="binding-mcp-endpoint" placeholder="https://instance.example/mcp" autocomplete="off">
+              <div class="form-hint">Use another server for this binding only. It must offer the same tools, or add it as a separate service.</div>
+            </div>
+          </details>
           <div class="form-group">
             <label class="checkbox-label">
-              <input type="checkbox" id="binding-enabled" checked> Enabled
+              <input type="checkbox" id="binding-enabled" checked> Enabled <span class="form-hint">(untick to pause it without deleting)</span>
             </label>
           </div>
           <button type="submit" class="btn btn-primary">Create Binding</button>
@@ -689,25 +689,22 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
               {credential_opts}
             </select>
           </div>
-          <div class="form-group">
-            <label>Config (JSON)</label>
-            <textarea id="edit-binding-config" rows="2"></textarea>
-            <div class="form-hint">
-              Optional non-secret settings for this binding, such as <code>base_url</code>,
-              <code>default_params</code>, <code>auth_header</code>, or <code>test_url</code>.
-              Leave it blank if the credential and connector type are enough.
-              For adapters with their own request paths, point <code>base_url</code> at the
-              service root, not the final RPC endpoint.
+          <details class="access-details">
+            <summary>Advanced</summary>
+            <div class="form-group">
+              <label>Extra settings (JSON)</label>
+              <textarea id="edit-binding-config" rows="2"></textarea>
+              <div class="form-hint">Non-secret settings such as <code>base_url</code> or <code>default_params</code>. Leave blank unless the service's setup notes ask for them.</div>
             </div>
-          </div>
-          <div class="form-group" id="edit-binding-mcp-endpoint-group" style="display:none">
-            <label>Native MCP Endpoint Override</label>
-            <input type="url" id="edit-binding-mcp-endpoint" placeholder="https://instance.example/mcp" autocomplete="off">
-            <div class="form-hint">Leave blank to use the connector type endpoint. Saving an override checks the strict tool contract.</div>
-          </div>
+            <div class="form-group" id="edit-binding-mcp-endpoint-group" style="display:none">
+              <label>Different MCP server address</label>
+              <input type="url" id="edit-binding-mcp-endpoint" placeholder="https://instance.example/mcp" autocomplete="off">
+              <div class="form-hint">Leave blank to use the service's own address. A different one must offer the same tools.</div>
+            </div>
+          </details>
           <div class="form-group">
             <label class="checkbox-label">
-              <input type="checkbox" id="edit-binding-enabled"> Enabled
+              <input type="checkbox" id="edit-binding-enabled"> Enabled <span class="form-hint">(untick to pause it without deleting)</span>
             </label>
           </div>
           <button type="submit" class="btn btn-primary">Save Changes</button>
@@ -756,7 +753,7 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
         <div style="background:var(--bg-secondary);border-left:3px solid var(--warning-color);padding:0.6rem 0.85rem;border-radius:4px;margin-bottom:1rem;font-size:0.875em">
           <strong>HTTP transport only.</strong> {APP_NAME} connects to MCP servers over HTTP — it cannot launch local processes.
           Servers configured with <code>command</code>/<code>args</code> (stdio) are not supported here.
-          Use <strong>+ Add HTTP Connector</strong> for REST APIs, or run a stdio server behind an HTTP bridge first.
+          Use <strong>Add a service → A plain web service</strong> for REST APIs, or run a stdio server behind an HTTP bridge first.
         </div>
         <form id="import-mcp-form" onsubmit="importMcpServer(event)">
           <div class="form-group">
@@ -801,7 +798,7 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
     <!-- Add HTTP Connector Modal -->
     <div class="modal-overlay" id="add-http-modal" style="display:none">
       <div class="modal">
-        <h3>Add HTTP Connector</h3>
+        <h3>Add a plain web service</h3>
         <form id="add-http-form" onsubmit="addHttpConnector(event)">
           <div class="form-group">
             <label>Display Name</label>
@@ -834,7 +831,7 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
             <label>Extra Headers (optional, JSON)</label>
             <textarea id="http-extra-headers" rows="3" placeholder='{{"X-Custom-Header":"value"}}'></textarea>
           </div>
-          <button type="submit" class="btn btn-primary">Add Connector</button>
+          <button type="submit" class="btn btn-primary">Add service</button>
           <button type="button" class="btn btn-secondary" onclick="closeModal('add-http-modal')">Cancel</button>
         </form>
       </div>
@@ -920,7 +917,7 @@ async def connectors_adapters_page(
         </p>
       </div>
       <div class="page-actions">
-        <a class="btn btn-secondary" href="/connectors">&larr; Back to Connectors</a>
+        <a class="btn btn-secondary" href="/connectors">&larr; Back to Services</a>
       </div>
     </div>
 
@@ -1011,7 +1008,7 @@ def connectors_help_page(request: Request, session: dict = Depends(require_auth)
     </div>
 
     <div style="margin-top:16px">
-      <a href="/connectors" class="btn btn-secondary">Back to Connectors</a>
+      <a href="/connectors" class="btn btn-secondary">Back to Services</a>
     </div>
     """
     body = body.replace("Agent Core", APP_NAME)
@@ -1027,12 +1024,12 @@ def connectors_directory_page(
     <div class="page-header">
       <h1>API Directory</h1>
         <div class="page-actions">
-        <a class="btn btn-secondary" href="/connectors">&larr; Back to Connectors</a>
+        <a class="btn btn-secondary" href="/connectors">&larr; Back to Services</a>
         <div class="dropdown" style="display:inline-block;position:relative">
-          <button class="btn btn-secondary" onclick="toggleDropdown(this)" type="button">+ Add <span style="font-size:0.8em">&#9662;</span></button>
+          <button class="btn btn-secondary" onclick="toggleDropdown(this)" type="button">Add a service <span style="font-size:0.8em">&#9662;</span></button>
           <div class="dropdown-menu" style="display:none;position:absolute;right:0;top:100%;background:#fff;border:1px solid #ddd;border-radius:4px;box-shadow:0 2px 8px rgba(0,0,0,0.15);z-index:1000;min-width:200px;text-align:left">
-            <button class="dropdown-item" style="display:block;width:100%;padding:10px 16px;border:none;background:none;text-align:left;cursor:pointer;font-size:14px" onclick="resetImportPreview();openModal('import-spec-modal');closeAllDropdowns()">Import API Spec</button>
-            <button class="dropdown-item" style="display:block;width:100%;padding:10px 16px;border:none;background:none;text-align:left;cursor:pointer;font-size:14px" onclick="openModal('directory-import-mcp-modal');closeAllDropdowns()">Import MCP Server</button>
+            <button class="dropdown-item" style="display:block;width:100%;padding:10px 16px;border:none;background:none;text-align:left;cursor:pointer;font-size:14px" onclick="resetImportPreview();openModal('import-spec-modal');closeAllDropdowns()">From an API spec</button>
+            <button class="dropdown-item" style="display:block;width:100%;padding:10px 16px;border:none;background:none;text-align:left;cursor:pointer;font-size:14px" onclick="openModal('directory-import-mcp-modal');closeAllDropdowns()">From an MCP server</button>
           </div>
         </div>
       </div>

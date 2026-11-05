@@ -100,7 +100,7 @@ Still to do: the "Agent Access" card above the list repeats help that now lives 
 
 ## Connectors
 
-One page holds four jobs. Proposed: keep one page, make the top of it one **Add a service** button that offers the three existing ways (from an API spec, from an MCP server, a plain HTTP service) instead of three buttons plus Quick Start plus the catalog's own Add Binding. Tuck "Native MCP endpoint override" and the JSON config field in bindings under **Advanced** with one line each. Execution history stays, collapsed under the binding it belongs to.
+Built (the page is called Services): one **Add a service** button offers the three ways (from an API spec, from an MCP server, a plain web service), each with a line saying when to use it. The credentials button and the two browse buttons left the header; the API directory and adapters are linked from the Service Catalog note, and Credentials from the quick-start steps. The extra-settings JSON and the MCP-server override moved under **Advanced** in the binding forms, each with one line of help. Recent runs are a collapsed section; each binding keeps its own History button. The quick start shows only until the first binding exists. Counts are labelled in plain words (Services, Bindings, Enabled bindings, Bindings with errors, Enabled actions).
 
 ## Webhooks
 
@@ -141,4 +141,5 @@ The first-five-minutes walk-through still sends an admin through Credentials, Se
 | Trusted devices off by default | Built and deployed |
 | Overview: Waiting on you, Health, Getting started, Search | Built and deployed. The header search on every page was not built: the existing Overview search stays, since a second place to search is a new mechanism. |
 | Settings split into four tabs; proposal caps out of the UI; activity pruning and trusted devices moved in | Built, in review. The webhook retry policy stays in Data and backup until the Webhooks page is reworked. |
+| Services: Add a service, Advanced fields, collapsed runs, empty states | Built, in review |
 | Everything else above | Approved as the plan; branches not yet started |

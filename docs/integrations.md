@@ -154,13 +154,13 @@ Agents are not granted user-scope or workspace write by default. If an assistant
 
 ## Connector setup in Agent Core
 
-There are four ways to add a connector, all behind a single **+ Add Connector** dropdown on `/connectors`:
+There are four ways to add a connector, all behind a single **Add a service** button on `/connectors` (Services):
 
 | Method | Use when… |
 |---|---|
-| **Import API Spec** | the service publishes a REST OpenAPI/Swagger spec |
-| **Import MCP Server** | the service is a native MCP server (HTTP transport) |
-| **Add HTTP Connector** | the service is plain authenticated HTTP and you just need a base URL |
+| **Add a service → From an API spec** | the service publishes a REST OpenAPI/Swagger spec |
+| **Add a service → From an MCP server** | the service is a native MCP server (HTTP transport) |
+| **Add a service → A plain web service** | the service is plain authenticated HTTP and you just need a base URL |
 | **Adapters** | you want to browse the built-in templates or local adapter folders on the Browse Adapters page and install one into the service catalog; see [Adapters](#adapters) |
 
 For browsing pre-curated catalogs, the **Browse API Directory** page lists 2000+ public OpenAPI specs (powered by apis.guru) you can one-click import.
@@ -168,7 +168,7 @@ For browsing pre-curated catalogs, the **Browse API Directory** page lists 2000+
 ### OpenAPI import
 
 - Go to `/connectors`
-- Click **+ Add Connector → Import API Spec**
+- Click **Add a service → From an API spec**
 - Paste a URL, upload a file, or paste the JSON/YAML directly
 - Click **Preview Spec**: this shows the connector name, auth type, base server URL, operation count, and any warnings before anything is saved
 - Click **Import API** to commit the import
@@ -194,7 +194,7 @@ If you enable `AGENT_CORE_BLOCK_INTERNAL_HOSTS=true`, add `AGENT_CORE_ALLOWED_IN
 Use this when the service does not publish an OpenAPI spec and you just need to make authenticated HTTP calls to a known base URL. This creates a built-in HTTP connector backed by Agent Core's `generic_http` engine; no spec import required.
 
 - Go to `/connectors`
-- Click **+ Add Connector → Add HTTP Connector**
+- Click **Add a service → A plain web service**
 - Enter a display name and base URL
 - Choose an auth type:
   - **Bearer**: injects `Authorization: Bearer <credential>` (default; works for most REST APIs)
@@ -250,7 +250,7 @@ The binding test in the dashboard hits the base URL directly (e.g. `GET https://
 **Setup:**
 
 1. Create a credential with your OpenRouter API key
-2. Click `+ Add HTTP Connector` with:
+2. Click **Add a service → A plain web service** with:
    - Display name: `OpenRouter`
    - Base URL: `https://openrouter.ai/api/v1`
    - Auth type: `Bearer`
@@ -292,7 +292,7 @@ Check the [OpenRouter model list](https://openrouter.ai/models) for which models
 ### MCP server import
 
 - Go to `/connectors`
-- Click **+ Add Connector → Import MCP Server**
+- Click **Add a service → From an MCP server**
 - Enter the MCP endpoint URL, transport, and optional discovery headers
 - Refresh later if the server's tool set changes
 - Create a binding to a stored credential if the server needs one
@@ -303,7 +303,7 @@ The MCP import is server-side only: it discovers and stores the tool list in Age
 
 Adapters are the fourth way to add a connector, for services that don't fit OpenAPI/MCP cleanly: OAuth refresh, session handshakes, multi-field credentials, CLI wrappers. An adapter is a single JSON **manifest** that describes a service's actions, auth, and request shape; Agent Core's built-in engines interpret it at runtime, so installing one adds no Python and survives upgrades.
 
-**Quick install:** go to `/connectors` → **Browse Adapters** → pick one (e.g. `transmission`, `google_workspace`, `github_cli`) → click **Install** → bind a credential and call actions like any other connector. If a newer bundled template is available later, the same page shows **Update** and refreshes the installed copy in place without changing bindings.
+**Quick install:** go to `/connectors` → the **adapters** link in the Service Catalog note → pick one (e.g. `transmission`, `google_workspace`, `github_cli`) → click **Install** → bind a credential and call actions like any other connector. If a newer bundled template is available later, the same page shows **Update** and refreshes the installed copy in place without changing bindings.
 
 #### Google Workspace (one connector for six Google services)
 
@@ -333,7 +333,7 @@ Uninstall behavior is split by source: system adapters remove the installed copy
 Agent Core connects to MCP servers over HTTP. It cannot launch local processes. If your MCP client config uses `command` and `args` fields (stdio transport), that server cannot be imported directly. Options:
 
 - Run the stdio server behind an HTTP bridge such as `mcp-proxy` and register the bridge URL
-- Use **+ Add HTTP Connector** instead if the underlying service exposes a plain REST API
+- Use **Add a service → A plain web service** instead if the underlying service exposes a plain REST API
 
 Common stdio-based servers that fall into this category: `playwright-mcp`, `chrome-devtools-mcp`, `sequential-thinking`, and most `npx`-launched servers.
 
@@ -374,7 +374,7 @@ MCP bindings can also carry `timeout_ms` in config JSON for slow servers. The en
 **Setup:**
 
 1. Create a credential with your Context7 API key
-2. Click `+ Import MCP Server` with:
+2. Click **Add a service → From an MCP server** with:
    - URL: `https://mcp.context7.com/mcp`
    - Transport: `streamable_http`
    - Discovery auth header: `CONTEXT7_API_KEY` / value: your raw key

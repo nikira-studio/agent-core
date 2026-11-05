@@ -171,7 +171,7 @@ def test_connectors_page_surfaces_credentials_workflow(authenticated_client):
     # Connectors links out to credential management and offers inline
     # credential selection on the binding form; full credential CRUD lives
     # on /credentials (see test_credentials_page_surfaces_credential_forms).
-    assert "New Credential" in html
+    assert "Create new credential" in html
     assert "Import MCP Server" in html
     assert "Preview Spec" in html
     # JS wiring (incl. /api/credentials/entries) now lives in the static bundle.
@@ -334,3 +334,30 @@ def test_a_fresh_install_shows_getting_started(authenticated_client):
     html = authenticated_client.get("/").text
     assert 'id="overview-getting-started"' in html
     assert "Add an agent" in html and "Connect its tool" in html
+
+
+def test_services_page_has_one_add_entry_and_explains_itself(authenticated_client):
+    html = authenticated_client.get("/connectors").text
+    assert html.count("Add a service") >= 2  # the button, and the quick-start step
+    header = html.split('class="page-actions"', 1)[1].split("stat-grid", 1)[0]
+    for way in ("From an API spec", "From an MCP server", "A plain web service"):
+        assert way in header
+    assert "+ New Credential" not in header and "Browse Adapters" not in header
+    assert "No bindings yet." in html  # built-in services exist, bindings do not
+    assert "Getting a service working" in html  # nothing is bound yet
+
+
+def test_services_page_tucks_expert_fields_under_advanced(authenticated_client):
+    html = authenticated_client.get("/connectors").text
+    create = html.split('id="create-binding-modal"', 1)[1].split('id="edit-binding-modal"', 1)[0]
+    advanced = create.split("<summary>Advanced</summary>", 1)[1].split("</details>", 1)[0]
+    assert 'id="binding-config"' in advanced and 'id="binding-mcp-endpoint"' in advanced
+    edit = html.split('id="edit-binding-modal"', 1)[1].split('id="import-spec-modal"', 1)[0]
+    advanced = edit.split("<summary>Advanced</summary>", 1)[1].split("</details>", 1)[0]
+    assert 'id="edit-binding-config"' in advanced and 'id="edit-binding-mcp-endpoint"' in advanced
+
+
+def test_services_page_run_history_is_collapsed(authenticated_client):
+    html = authenticated_client.get("/connectors").text
+    assert '<details class="card" id="executions">' in html
+    assert "<details class=\"card\" id=\"executions\" open" not in html
