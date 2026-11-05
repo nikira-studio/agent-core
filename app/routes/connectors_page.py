@@ -519,7 +519,7 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
     body = f"""
     <div class="page-header">
       <div>
-        <h1>Connectors</h1>
+        <h1>Services</h1>
         <p class="text-muted" style="max-width:760px;margin-top:8px">
           Manage the service catalog agents can call, along with the credentials and bindings that
           make each capability available in the right scope.
@@ -898,7 +898,7 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
         '<script src="/static/js/adapter-actions.js?v=20260902"></script>'
         '<script src="/static/js/connectors.js?v=20260902"></script>'
     )
-    return render_page("Connectors", body, "/connectors", extra_js, session=session)
+    return render_page("Services", body, "/connectors", extra_js, session=session)
 
 
 @router.get("/connectors/adapters")

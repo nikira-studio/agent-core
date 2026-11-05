@@ -798,7 +798,7 @@ def integrations_page(
     )
     body = f"""
     <div class="page-header setup-page-header">
-      <h1>Integrations</h1>
+      <h1>Connect a tool</h1>
       <p class="subtitle">Generate setup instructions, environment variables, MCP config, and AI-facing prompts for connecting tools to {APP_NAME}.</p>
       <div class="text-muted" style="font-size:0.86rem;margin-top:8px">
         Current tool preset: <strong>{escape_html(tool_label)}</strong>. The main presets are Claude Code, Codex, Cursor, Windsurf, Antigravity, and Generic MCP/REST. The generated outputs in this page are the canonical setup files and prompts.
@@ -879,7 +879,7 @@ def integrations_page(
     """
 
     return render_page(
-        "Integrations", body, page_path, _agent_setup_extra_js(base_url), session=session
+        "Connect a tool", body, page_path, _agent_setup_extra_js(base_url), session=session
     )
 
 

@@ -22,7 +22,7 @@ def test_integrations_page_requires_auth(test_client, clean_db):
 def test_integrations_route_is_current_page(admin_client):
     r = admin_client.get("/integrations", follow_redirects=False)
     assert r.status_code == 200
-    assert "<h1>Integrations</h1>" in r.text
+    assert "<h1>Connect a tool</h1>" in r.text
 
 
 def test_integrations_nav_has_single_setup_entry(admin_client):
@@ -30,14 +30,14 @@ def test_integrations_nav_has_single_setup_entry(admin_client):
     assert r.status_code == 200
     html = r.text
     assert 'href="/integrations"' in html
-    assert "<span>Integrations</span>" in html
+    assert "<span>Connect a tool</span>" in html
 
 
 def test_integrations_page_is_current_workflow(admin_client):
     r = admin_client.get("/integrations")
     assert r.status_code == 200
     html = r.text
-    assert "<h1>Integrations</h1>" in html
+    assert "<h1>Connect a tool</h1>" in html
     assert f"Generate setup instructions, environment variables, MCP config, and AI-facing prompts for connecting tools to {APP_NAME}." in html
     assert 'action="/integrations"' in html
     assert 'id="user_id"' in html

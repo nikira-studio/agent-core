@@ -235,13 +235,16 @@ def test_dashboard_nav_order_and_admin_audit_placement(authenticated_client):
     html = r.text
     expected = [
         '<a href="/" class="active" aria-current="page"><span>Overview</span></a>',
+        '<a href="/activity" class=""><span>Activity</span></a>',
+        '<a href="/approvals" class=""><span>Approvals</span></a>',
         '<a href="/users" class=""><span>Users</span></a>',
         '<a href="/agents" class=""><span>Agents</span></a>',
         '<a href="/workspaces" class=""><span>Workspaces</span></a>',
+        '<a href="/integrations" class=""><span>Connect a tool</span></a>',
+        '<a href="/connectors" class=""><span>Services</span></a>',
+        '<a href="/credentials" class=""><span>Credentials</span></a>',
+        '<a href="/webhooks" class=""><span>Webhooks</span></a>',
         '<a href="/memory" class=""><span>Memory</span></a>',
-        '<a href="/connectors" class=""><span>Connectors</span></a>',
-        '<a href="/integrations" class=""><span>Integrations</span></a>',
-        '<a href="/activity" class=""><span>Activity</span></a>',
         '<a href="/audit" class=""><span>Audit</span></a>',
         '<a href="/settings" class=""><span>Settings</span></a>',
     ]

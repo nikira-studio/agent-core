@@ -1856,3 +1856,12 @@ th.activity-actions-header {
     grid-template-columns: 1fr;
   }
 }
+
+/* === Sidebar groups === */
+.sidebar nav .nav-heading {
+  font-size: 0.65rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  padding: 12px 12px 4px;
+}

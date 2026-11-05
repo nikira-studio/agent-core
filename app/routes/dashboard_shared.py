@@ -123,35 +123,35 @@ def render_page(
 ) -> HTMLResponse:
     is_admin = bool(session and session.get("role") == "admin")
     extra_js = extra_js.replace("{{", "{").replace("}}", "}")
-    nav_items = [
-        ("/", "Overview"),
-        ("/users", "Users"),
-        ("/agents", "Agents"),
-        ("/workspaces", "Workspaces"),
-        ("/memory", "Memory"),
-        ("/connectors", "Connectors"),
-        ("/credentials", "Credentials"),
-        ("/integrations", "Integrations"),
-        ("/activity", "Activity"),
-        ("/approvals", "Approvals"),
-        ("/audit", "Audit"),
-        ("/webhooks", "Webhooks"),
-        ("/settings", "Settings"),
+    # (heading, [(route, label)]). Routes keep their old paths when a page is renamed.
+    nav_groups = [
+        ("", [("/", "Overview")]),
+        ("Work", [("/activity", "Activity"), ("/approvals", "Approvals")]),
+        ("People and access", [("/users", "Users"), ("/agents", "Agents"), ("/workspaces", "Workspaces")]),
+        ("Connect", [
+            ("/integrations", "Connect a tool"),
+            ("/connectors", "Services"),
+            ("/credentials", "Credentials"),
+            ("/webhooks", "Webhooks"),
+        ]),
+        ("Records and system", [("/memory", "Memory"), ("/audit", "Audit"), ("/settings", "Settings")]),
     ]
-    if not is_admin:
-        nav_items = [
-            (href, label)
-            for href, label in nav_items
-            if href not in {"/users", "/audit", "/webhooks"}
-        ]
-    nav_html = "\n".join(
-        (
-            f'<a href="{href}" class="active" aria-current="page"><span>{label}</span></a>'
-            if nav_active == href
-            else f'<a href="{href}" class=""><span>{label}</span></a>'
-        )
-        for href, label in nav_items
-    )
+    admin_only = {"/users", "/audit", "/webhooks"}
+
+    def nav_link(href, label):
+        if nav_active == href:
+            return f'<a href="{href}" class="active" aria-current="page"><span>{label}</span></a>'
+        return f'<a href="{href}" class=""><span>{label}</span></a>'
+
+    nav_parts = []
+    for heading, items in nav_groups:
+        links = [nav_link(href, label) for href, label in items if is_admin or href not in admin_only]
+        if not links:
+            continue
+        if heading:
+            nav_parts.append(f'<div class="nav-heading">{heading}</div>')
+        nav_parts.extend(links)
+    nav_html = "\n".join(nav_parts)
 
     sidebar_html = ""
     if show_sidebar:

@@ -203,7 +203,7 @@ def agents_page(request: Request, session: dict = Depends(require_auth)):
         if can_manage:
             action_buttons = (
                 f"<button type='button' class='btn btn-sm btn-secondary' data-agent-edit='{escape_html(a['id'])}'>Edit</button>"
-                f"<a class='btn btn-sm btn-secondary' href='/integrations?agent_id={quote(a['id'])}'>Integrations</a>"
+                f"<a class='btn btn-sm btn-secondary' href='/integrations?agent_id={quote(a['id'])}'>Connect</a>"
                 f"{toggle_btn}"
                 f"<button type='button' class='btn btn-sm btn-danger icon-delete-btn' data-agent-purge='{escape_html(a['id'])}' title='Permanently delete' aria-label='Permanently delete'>{get_icon('delete')}</button>"
             )
@@ -552,7 +552,7 @@ def agents_page(request: Request, session: dict = Depends(require_auth)):
     </div></div>
     <div class="card">
       <h3>Agent Access</h3>
-      <p class="text-muted access-summary">An agent always has its private scope and read access to its active principal's user scope. User-scope write access is never inherited. Administrators may explicitly grant another user's scope; use workspaces for ordinary shared collaboration.</p>
+      <p class="text-muted access-summary">An agent always has its private scope and read access to its active principal's user scope. To share memory with other agents and people, add a workspace.</p>
     </div>
 
     <div class="card">
