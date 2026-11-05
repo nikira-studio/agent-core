@@ -4,8 +4,11 @@ Page rendering, auth, HTML escaping, and small formatting/pagination utilities
 used across the dashboard page modules.
 """
 
+import hashlib
 import json
+import re
 from datetime import datetime, timezone
+from pathlib import Path
 
 from fastapi import Request, HTTPException
 from fastapi.responses import HTMLResponse
@@ -193,7 +196,7 @@ def render_page(
             "if(!hd.has(h))hd.set(h,t);init.headers=hd;}return f.call(this,input,init);};})();</script>"
         )
 
-    return HTMLResponse(
+    response = HTMLResponse(
         f"""<!DOCTYPE html>
 <html>
 <head>
@@ -236,6 +239,41 @@ def render_page(
 </html>""",
         status_code=status_code,
     )
+    # A stylesheet or script that changed must reach the browser that cached the old
+    # one: the version in each /static link is the file's own content hash, so no one
+    # has to remember to bump it by hand.
+    body = _versioned_assets(response.body.decode("utf-8")).encode("utf-8")
+    response.body = body
+    response.headers["content-length"] = str(len(body))
+    return response
+
+
+_STATIC_DIR = Path(__file__).resolve().parent.parent / "dashboard" / "static"
+_ASSET_LINK = re.compile(r'(/static/(?:css|js)/[A-Za-z0-9_.\-]+)\?v=[A-Za-z0-9_.\-]+')
+_asset_hashes: dict[str, tuple[int, str]] = {}
+
+
+def _asset_version(url_path: str) -> str | None:
+    """Short content hash of one static file, recomputed only when the file changes."""
+    file = _STATIC_DIR / url_path.removeprefix("/static/")
+    try:
+        mtime = file.stat().st_mtime_ns
+    except OSError:
+        return None
+    cached = _asset_hashes.get(url_path)
+    if cached and cached[0] == mtime:
+        return cached[1]
+    digest = hashlib.sha256(file.read_bytes()).hexdigest()[:10]
+    _asset_hashes[url_path] = (mtime, digest)
+    return digest
+
+
+def _versioned_assets(html: str) -> str:
+    def swap(match):
+        version = _asset_version(match.group(1))
+        return f"{match.group(1)}?v={version}" if version else match.group(0)
+
+    return _ASSET_LINK.sub(swap, html)
 
 
 def _parse_manual_prune_cutoff(before_date: str) -> tuple[str, str]:
@@ -276,7 +314,7 @@ def _build_pagination(page: int, total_pages: int, extra_qs: str = "") -> str:
     for p in sorted(show):
         if prev_shown and p - prev_shown > 1:
             nums_html += "<span style='padding:0 4px;color:var(--text-muted)'>…</span>"
-        active_style = "background:var(--accent-color);color:#fff;" if p == page else ""
+        active_style = "background:var(--accent);color:#fff;" if p == page else ""
         nums_html += f"<a href='{page_url(p)}' class='btn btn-sm btn-secondary' style='min-width:32px;{active_style}'>{p}</a>"
         prev_shown = p
 

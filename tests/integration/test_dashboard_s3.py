@@ -400,8 +400,8 @@ class TestAuditPage:
         )
         r = admin_client.get("/audit?result=failure")
         assert r.status_code == 200
-        assert "<code>session_login</code>" in r.text
-        assert "<code>memory_write</code>" not in r.text
+        assert "<code>session_<wbr>login</code>" in r.text
+        assert "<code>memory_<wbr>write</code>" not in r.text
 
     def test_audit_snapshot_uses_event_breakdown(self, admin_client):
         r = admin_client.get("/audit")

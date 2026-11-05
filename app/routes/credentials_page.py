@@ -109,7 +109,9 @@ def credentials_page(request: Request, session: dict = Depends(require_auth)):
 
     def used_by_cell(entry_id: str) -> str:
         names = holders.get(entry_id, [])
-        chips = "".join(f"<span class='badge badge-info'>{escape_html(n)}</span> " for n in names[:4])
+        chips = "".join(
+            f"<span class='badge badge-info chip-trunc' title='{escape_html(n)}'>{escape_html(n)}</span> " for n in names[:4]
+        )
         more = f"<span class='text-muted'>+{len(names) - 4} more</span> " if len(names) > 4 else ""
         n_services = service_counts.get(entry_id, 0)
         services = f"<div class='text-muted' style='font-size:0.8rem'>{n_services} service{'s' if n_services != 1 else ''}</div>" if n_services else ""
@@ -129,7 +131,7 @@ def credentials_page(request: Request, session: dict = Depends(require_auth)):
         )
         used_cell = access_button = ""
         if ctx.is_admin:
-            used_cell = "<td>" + used_by_cell(e["id"]) + "</td>"
+            used_cell = "<td data-label='Used by'>" + used_by_cell(e["id"]) + "</td>"
             access_button = (
                 "<button type='button' class='btn btn-sm btn-secondary' data-credential-access='"
                 + escape_html(e["id"]) + "'>Access</button>"
@@ -137,10 +139,10 @@ def credentials_page(request: Request, session: dict = Depends(require_auth)):
         credential_rows += f"""
         <tr data-credential-id="{e["id"]}">
           <td>{escape_html(e.get("name", ""))}
-            <div class='text-muted' style='font-size:0.8rem'>{origin}</div></td>
-          <td><code>{escape_html(e.get("scope", ""))}</code></td>
-          <td><code>{escape_html(e.get("reference_name", ""))}</code></td>
-          <td>{_expiry_cell(e.get("expires_at"))}</td>
+            <div class='text-muted' style='font-size:0.8rem'>{origin}</div>
+            <button type='button' class='btn btn-sm btn-link' data-copy-reference="{escape_html(e.get("reference_name", ""))}" title="Copy {escape_html(e.get("reference_name", ""))}">Copy reference</button></td>
+          <td data-label='Scope'><code class='scope-code'>{escape_html(e.get("scope", ""))}</code></td>
+          <td data-label='Expires'>{_expiry_cell(e.get("expires_at"))}</td>
           {used_cell}
           <td class='actions-cell'>
             {access_button}
@@ -181,7 +183,7 @@ def credentials_page(request: Request, session: dict = Depends(require_auth)):
     used_header = "<th>Used by</th>" if ctx.is_admin else ""
     if credential_entries:
         credentials_html = f"""
-        <table><thead><tr><th>Name</th><th>Scope</th><th>Reference</th><th>Expires</th>{used_header}<th class='actions-cell'>Actions</th></tr></thead>
+        <table class='stack-table'><thead><tr><th>Name</th><th>Scope</th><th>Expires</th>{used_header}<th class='actions-cell'>Actions</th></tr></thead>
         <tbody>{credential_rows}</tbody></table>"""
     else:
         credentials_html = "<div class='empty'>No credentials yet.</div>"

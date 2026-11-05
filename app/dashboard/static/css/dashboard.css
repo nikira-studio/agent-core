@@ -1898,3 +1898,47 @@ th.activity-actions-header {
 .access-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 6px 0; border-bottom: 1px solid var(--border, rgba(128,128,128,0.2)); }
 .access-row .btn { margin-left: auto; }
 .access-row a { font-weight: 500; }
+
+/* Visual pass: keep wide content inside its card, tidy small screens. */
+.card:has(table) { overflow-x: auto; }
+.section-header { flex-wrap: wrap; }
+.chip-trunc { display: inline-block; max-width: 11rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; }
+.scope-code { overflow-wrap: anywhere; }
+.btn-link { background: none; border: 0; padding: 0; margin-top: 2px; color: var(--accent); font-size: 0.78rem; cursor: pointer; display: block; }
+.btn-link:hover { text-decoration: underline; }
+.audit-action-cell { width: 200px; }
+.audit-resource-cell { width: 130px; }
+@media (max-width: 768px) {
+  .sidebar nav .nav-heading { display: none; }
+}
+/* The main column may shrink below its widest table; the card then scrolls instead of widening the page. */
+.main { min-width: 0; }
+@media (max-width: 768px) {
+  .directory-controls { flex-wrap: wrap; }
+  .dir-search-input, .dir-category-select { min-width: 0; max-width: 100%; flex: 1 1 100%; }
+}
+
+/* Phones: a wide table scrolls sideways, and the edges shadow to say so. */
+@media (max-width: 768px) {
+  table:not(.stack-table) {
+    background:
+      linear-gradient(to right, var(--panel) 30%, transparent) left center / 36px 100% no-repeat local,
+      linear-gradient(to left, var(--panel) 30%, transparent) right center / 36px 100% no-repeat local,
+      radial-gradient(farthest-side at 0 50%, rgba(0,0,0,0.25), transparent) left center / 12px 100% no-repeat scroll,
+      radial-gradient(farthest-side at 100% 50%, rgba(0,0,0,0.25), transparent) right center / 12px 100% no-repeat scroll;
+  }
+  /* The Credentials list becomes one block per credential, so Access and Edit are never off-screen. */
+  .stack-table, .stack-table tbody, .stack-table tr, .stack-table td { display: block; width: 100%; }
+  .stack-table thead { display: none; }
+  .stack-table tr { padding: 10px 0; border-bottom: 1px solid var(--border); }
+  .stack-table td { border: 0; padding: 3px 0; }
+  .stack-table td[data-label]::before { content: attr(data-label); display: inline-block; min-width: 4.5rem; color: var(--muted); font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.05em; }
+  .stack-table td.actions-cell { display: flex; gap: 6px; flex-wrap: wrap; padding-top: 8px; }
+}
+/* Webhook addresses wrap instead of stretching the table (on a phone the table scrolls instead). */
+@media (min-width: 769px) {
+  .url-cell { display: inline-block; max-width: 22rem; overflow-wrap: anywhere; word-break: break-all; }
+}
+@media (max-width: 768px) {
+  .url-cell { white-space: nowrap; }
+}

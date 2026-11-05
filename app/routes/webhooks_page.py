@@ -55,7 +55,7 @@ def webhooks_page(request: Request, session: dict = Depends(require_auth)):
         wh_id = wh["id"]
         rows += (
             "<tr>"
-            f"<td><strong>{escape_html(wh['name'])}</strong></td>"
+            f"<td style='min-width:9rem'><strong>{escape_html(wh['name'])}</strong></td>"
             f"<td><code class='url-cell'>{escape_html(wh['url'])}</code></td>"
             f"<td>{events_str}</td>"
             f"<td>{enabled_badge}</td>"
@@ -98,7 +98,7 @@ def webhooks_page(request: Request, session: dict = Depends(require_auth)):
 
 <!-- Inbound section -->
 <h2 style="margin-bottom:0.25rem">Receiving</h2>
-<p class="text-muted" style="margin-top:0">Let a tool such as n8n, Zapier or a script create or update work for your agents. It sends a request to the address below with the key.</p>
+<p class="text-muted" style="margin-top:0;margin-bottom:0.75rem">Let a tool such as n8n, Zapier or a script create or update work for your agents. It sends a request to the address below with the key.</p>
 <div class="card" style="margin-bottom:1.5rem">
   <div style="margin-bottom:1rem">
     <label style="display:block;margin-bottom:0.35rem;font-weight:600">Inbound URL</label>
@@ -141,10 +141,10 @@ Content-Type: application/json
 </div>
 
 <!-- Outbound section -->
-<div style="display:flex;align-items:flex-end;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:0.5rem">
+<div style="display:flex;align-items:flex-end;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:0.75rem">
   <div>
     <h2 style="margin-bottom:0.25rem">Sending</h2>
-    <p class="text-muted" style="margin-top:0">Each webhook below is an address that gets a signed message when an event you chose happens.</p>
+    <p class="text-muted" style="margin-top:0;margin-bottom:0">Each webhook below is an address that gets a signed message when an event you chose happens.</p>
   </div>
   <button class="btn" onclick="document.getElementById('create-webhook-modal').style.display='flex'">+ New Webhook</button>
 </div>

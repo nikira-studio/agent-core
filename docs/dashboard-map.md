@@ -143,6 +143,7 @@ The first-five-minutes walk-through still sends an admin through Credentials, Se
 1. This audit, reviewed first.
 2. One branch per item, each reviewed before it is merged, in this order: Agents leftovers with the sidebar grouping and the two renames, Overview (including the header search), Settings split and moves (taking in trusted devices and activity pruning), Services, Webhooks, Memory, Connect. Empty-state sentences are added on each page as it is touched.
 3. As each page is touched, every control that remains gets one line of in-page help, and this document is updated with that page's final controls and what was removed, merged or moved. The final version is the walk-through a reviewer reads to ask "would a stranger's install understand this?".
+4. **A page change is not done until its screenshots have been looked at, at desktop and phone width.** Passing tests is not the bar; the rendered page is. `scripts/ui_sweep.py` signs in as an admin on a copy or throwaway install, opens every page (and each Settings tab) at both widths, saves the screenshots, and flags anything wider than its card or any page that scrolls sideways. Open the images, check long names and empty states, and send before and after shots with the change. Stylesheet and script links carry their file's own content hash, so a changed file reaches browsers that cached the old one without anyone bumping a version by hand.
 
 ## Status
 

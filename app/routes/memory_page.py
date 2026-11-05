@@ -213,7 +213,7 @@ def memory_page(request: Request, session: dict = Depends(require_auth)):
 
             memory_blocks = "".join(
                 f'<blockquote style="margin:8px 0;padding:8px 12px;border-left:3px solid var(--border);'
-                f'background:var(--bg-subtle)">{escape_html(r.get("content_preview") or "")}'
+                f'background:var(--panel2)">{escape_html(r.get("content_preview") or "")}'
                 f'<br><span class="text-muted" style="font-size:0.8rem">'
                 f"{escape_html(r.get('topic') or 'no topic')} · {escape_html(r.get('scope') or '')}"
                 f" · <code>{escape_html(r.get('id') or '')}</code></span></blockquote>"

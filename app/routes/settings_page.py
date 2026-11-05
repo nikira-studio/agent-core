@@ -973,7 +973,7 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
         retention_html = f"""
     <div class="card">
       <h3>How long things are kept</h3>
-      <p class="form-hint" style="margin-top:0">Run Maintenance (below) deletes anything older than these limits. Nothing here touches credentials or service bindings.</p>
+      <p class="form-hint" style="margin-top:0;margin-bottom:14px">Run Maintenance (below) deletes anything older than these limits. Nothing here touches credentials or service bindings.</p>
       <form onsubmit="saveSystemSettings(event)">
         <div class="form-group">
           <label>Scratchpad notes (days)</label>
@@ -1516,7 +1516,7 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
         prune_html = """
     <div class="card">
       <h3>Clear old activity</h3>
-      <p class="form-hint" style="margin-top:0">Permanently deletes finished, cancelled and blocked tasks older than a date you choose. Tasks still in progress are left alone. This is separate from the limits above, which run on their own.</p>
+      <p class="form-hint" style="margin-top:0;margin-bottom:14px">Permanently deletes finished, cancelled and blocked tasks older than a date you choose. Tasks still in progress are left alone. This is separate from the limits above, which run on their own.</p>
       <div class="form-group">
         <label for="prune-activity-before">Delete tasks older than</label>
         <input type="date" id="prune-activity-before" style="max-width:200px">

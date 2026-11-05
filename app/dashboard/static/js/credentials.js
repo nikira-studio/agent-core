@@ -293,3 +293,20 @@ document.addEventListener('DOMContentLoaded', () => {
   const agent = new URLSearchParams(location.search).get('agent');
   if (agent) openAgentAccess(agent);
 });
+
+// The reference (AC_SECRET_...) is a name, not the secret; copying it is how it is used.
+document.addEventListener('click', async (ev) => {
+  const btn = ev.target.closest('[data-copy-reference]');
+  if (!btn) return;
+  ev.preventDefault();
+  const text = btn.dataset.copyReference;
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch (e) {
+    const area = document.createElement('textarea');
+    area.value = text; area.style.position = 'fixed'; area.style.opacity = '0';
+    document.body.appendChild(area); area.select();
+    try { document.execCommand('copy'); } finally { area.remove(); }
+  }
+  showToast('Reference copied', 'success');
+});

@@ -400,3 +400,26 @@ def test_agents_and_workspaces_pages_prefer_extending_what_exists(authenticated_
     workspaces = authenticated_client.get("/workspaces").text
     assert "is the normal way to share" in workspaces
     assert "Does an existing workspace already fit?" in workspaces
+
+
+def test_static_links_carry_the_files_own_version_so_a_changed_stylesheet_reaches_the_browser(authenticated_client):
+    import hashlib
+    import re
+    from pathlib import Path
+
+    html = authenticated_client.get("/").text
+    css = re.search(r'/static/css/dashboard\.css\?v=([0-9a-f]+)', html)
+    assert css, "the stylesheet link must carry a content version"
+    expected = hashlib.sha256(Path("app/dashboard/static/css/dashboard.css").read_bytes()).hexdigest()[:10]
+    assert css.group(1) == expected
+    assert "20260828" not in html  # no hand-set version left behind
+
+
+def test_credentials_rows_have_no_wide_reference_column_and_offer_a_copy_button(authenticated_client):
+    from app.services import credential_service
+
+    entry = credential_service.create_credential("user:admin", "wide-name-" + "x" * 40, "not-shown")
+    html = authenticated_client.get("/credentials").text
+    assert "<th>Reference</th>" not in html
+    assert f'data-copy-reference="{entry["reference_name"]}"' in html
+    assert "stack-table" in html  # one block per credential on a phone
