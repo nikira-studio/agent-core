@@ -60,7 +60,7 @@ def test_integrations_page_loads(integrations_client):
     r = integrations_client.get("/integrations")
     assert r.status_code == 200
     html = r.text
-    assert "Connect" in html
+    assert "<h1>Connect</h1>" in html
     assert "Generate setup instructions" in html
     assert "Current tool preset" in html
     assert 'href="/integrations?' in html
