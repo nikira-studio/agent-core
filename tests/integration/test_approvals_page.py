@@ -216,3 +216,13 @@ def test_the_card_is_hidden_when_trusted_devices_are_off(test_client, admin_toke
 def test_the_card_says_what_trusted_devices_are_for(test_client, admin_token):
     _browser_admin(test_client)
     assert "For approving from a phone without signing in each time" in test_client.get("/approvals").text
+
+
+def test_the_overview_lists_a_pending_approval_under_waiting_on_you(test_client, admin_token):
+    approval_id = _proposal(test_client, admin_token)
+    _browser_admin(test_client)
+
+    html = test_client.get("/").text
+    waiting = html.split('id="overview-waiting"', 1)[1].split("</table>", 1)[0]
+    assert "Widen target-agent" in waiting and "ops-agent" in waiting
+    assert f"/approvals/{approval_id}" in waiting

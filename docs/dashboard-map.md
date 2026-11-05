@@ -137,4 +137,7 @@ The first-five-minutes walk-through still sends an admin through Credentials, Se
 | Item | Status |
 |---|---|
 | Agents: role choice, shorter forms, role badge | Built and deployed |
+| Sidebar grouping, Connect a tool and Services names | Built and deployed |
+| Trusted devices off by default | Built and deployed |
+| Overview: Waiting on you, Health, Getting started, Search | Built, in review. The header search on every page was not built: the existing Overview search stays, since a second place to search is a new mechanism. |
 | Everything else above | Approved as the plan; branches not yet started |

@@ -54,9 +54,9 @@ def test_overview_page_has_operational_search(admin_client):
     r = admin_client.get("/")
     assert r.status_code == 200
     html = r.text
-    assert "Operational Search" in html
+    assert "<h3>Search</h3>" in html
     assert 'id="dashboard-search-query"' in html
-    assert "Search memory, activities, connector types, and visible bindings." in html
+    assert "Find a memory, a task or a service." in html
 
 
 def test_legacy_integrations_wizard_is_removed(admin_client):

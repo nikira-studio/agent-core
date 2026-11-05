@@ -5,7 +5,6 @@ from fastapi import APIRouter, Request, Depends
 from pydantic import BaseModel
 
 from app.branding import APP_NAME, JS_WINDOW_EVENT
-from app.config import settings
 from app.security.context import RequestContext
 from app.security.dependencies import get_request_context
 from app.security.response_helpers import success_response, error_response
@@ -217,10 +216,61 @@ async def dashboard_search(
     )
 
 
+def _waiting_rows(session: dict, is_admin: bool, attention: list[dict]) -> list[tuple[str, str, str]]:
+    """What is waiting on this person: (what it is, the text, where to deal with it)."""
+    from app.services import (
+        activity_service,
+        approval_service,
+        credential_request_service,
+        memory_proposal_service,
+    )
+
+    rows: list[tuple[str, str, str]] = []
+    if is_admin:
+        for a in approval_service.list_for_scopes(None, "pending", 5):
+            rows.append(("Approval", f"{a['title']} (proposed by {a['proposed_by']})", f"/approvals/{a['id']}"))
+    for h in activity_service.list_needs_human(user_id=None if is_admin else session["user_id"], limit=5):
+        rows.append(("Handoff", f"{h['agent_id']} asks: {(h.get('needs_human') or '')[:140]}", "/activity"))
+    for a in attention[:5]:
+        rows.append((str(a.get("status", "")).capitalize(), (a.get("task_description") or "")[:140], "/activity"))
+    if is_admin:
+        for r in credential_request_service.list_pending()[:5]:
+            rows.append(("Credential", f"{r.get('requested_by_agent_id') or 'An agent'} needs {r['name']} in {r['scope']}", "/credentials"))
+        suggestions = len(memory_proposal_service.list_proposals(status="pending", limit=200))
+        if suggestions:
+            rows.append(("Memory", f"{suggestions} suggestion{'s' if suggestions != 1 else ''} to review", "/memory"))
+    return rows
+
+
+def _health_items(is_admin: bool) -> list[tuple[str, str, str, bool]]:
+    """(label, value, where to look, is it fine) for the admin's health strip."""
+    from datetime import datetime, timedelta, timezone
+
+    from app.branding import APP_VERSION
+    from app.database import get_db
+    from app.services import broker_service
+
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
+    with get_db() as conn:
+        failing = conn.execute(
+            "SELECT COUNT(*) FROM connector_bindings WHERE enabled = 1 AND COALESCE(last_error, '') != ''"
+        ).fetchone()[0]
+        dead = conn.execute(
+            "SELECT COUNT(*) FROM webhook_delivery_log WHERE status = 'dead' AND COALESCE(last_attempt_at, created_at) >= ?",
+            (cutoff,),
+        ).fetchone()[0]
+    broker = broker_service.get_broker_credential_hash() is not None
+    return [
+        ("Agent Core", f"version {APP_VERSION}, running", "", True),
+        ("Services", "all working" if not failing else f"{failing} failing", "/connectors", not failing),
+        ("Webhooks", "no failures in 24 hours" if not dead else f"{dead} failed in 24 hours", "/webhooks", not dead),
+        ("Broker credential", "set" if broker else "not set", "/settings", broker),
+    ]
+
+
 @router.get("/")
 def dashboard_home(request: Request, session: dict = Depends(require_auth)):
     from app.services import activity_service
-    from app.services import connector_service
     from app.services.agent_service import list_agents
     from app.services.workspace_service import list_workspaces
     from app.database import get_db
@@ -232,7 +282,6 @@ def dashboard_home(request: Request, session: dict = Depends(require_auth)):
     if is_admin:
         agents = list_agents()
         workspaces = list_workspaces()
-        connector_types = connector_service.list_connector_types()
         agent_count = len([a for a in agents if a.get("is_active")])
         workspace_count = len([p for p in workspaces if p.get("is_active")])
         with get_db() as conn:
@@ -251,7 +300,6 @@ def dashboard_home(request: Request, session: dict = Depends(require_auth)):
     else:
         agents = list_agents(owner_user_id=session["user_id"])
         workspaces = list_workspaces(owner_user_id=session["user_id"])
-        connector_types = connector_service.list_connector_types()
         agent_count = len([a for a in agents if a.get("is_active")])
         workspace_count = len([p for p in workspaces if p.get("is_active")])
         with get_db() as conn:
@@ -274,14 +322,7 @@ def dashboard_home(request: Request, session: dict = Depends(require_auth)):
         )
 
     memory_count = int(counts["memory_count"])
-    enabled_connector_binding_count = int(counts["binding_count"])
-    connector_execution_count = int(counts["execution_count"])
     active_task_count = int(counts["task_count"])
-    connector_type_count = len(connector_types)
-    enabled_action_count = sum(
-        max(len(ct.get("supported_actions") or []) - len(ct.get("disabled_actions") or []), 0)
-        for ct in connector_types
-    )
     users_card = ""
     if is_admin:
         user_count = int(counts["user_count"])
@@ -293,55 +334,66 @@ def dashboard_home(request: Request, session: dict = Depends(require_auth)):
       <a class="stat-card stat-link" href="/agents"><div class="value">{agent_count}</div><div class="label">Active Agents</div></a>
       <a class="stat-card stat-link" href="/workspaces"><div class="value">{workspace_count}</div><div class="label">Active Workspaces</div></a>
       <a class="stat-card stat-link" href="/activity" id="stat-open-activities"><div class="value">{active_task_count}</div><div class="label">Open Activities</div></a>
-      <a class="stat-card stat-link" href="/activity" id="stat-stale-blocked"><div class="value">{len(attention)}</div><div class="label">Needs Attention</div></a>
       <a class="stat-card stat-link" href="/memory"><div class="value">{memory_count}</div><div class="label">Memory Records</div></a>
     </div>"""
 
-    capability_html = f"""
-    <div class="card">
-      <div class="section-header">
-        <h3>Capability Snapshot</h3>
-        <div class="section-note">What your agents can actually call right now.</div>
-      </div>
-      <div class="stat-grid">
-        <a class="stat-card stat-link" href="/connectors"><div class="value">{connector_type_count}</div><div class="label">Connector Types</div></a>
-        <a class="stat-card stat-link" href="/connectors"><div class="value">{enabled_connector_binding_count}</div><div class="label">Enabled Bindings</div></a>
-        <a class="stat-card stat-link" href="/connectors"><div class="value">{enabled_action_count}</div><div class="label">Enabled Actions</div></a>
-        <a class="stat-card stat-link" href="/connectors"><div class="value">{connector_execution_count}</div><div class="label">Connector Executions</div></a>
-      </div>
+    waiting = _waiting_rows(session, is_admin, attention)
+    if waiting:
+        waiting_body = "<table><tbody>" + "".join(
+            f"<tr><td><span class='badge'>{escape_html(kind)}</span></td><td>{escape_html(text)}</td>"
+            f"<td><a href='{escape_html(href)}'>Open</a></td></tr>"
+            for kind, text, href in waiting
+        ) + "</tbody></table>"
+    else:
+        waiting_body = '<p class="text-muted" style="margin:0">Nothing is waiting on you.</p>'
+    attention_html = f"""
+    <div class="card attention-card" id="overview-waiting">
+      <h3>Waiting on you</h3>
+      <p class="text-muted" style="margin-top:-6px">Decisions and requests that need a person. Each row links to where you deal with it.</p>
+      {waiting_body}
     </div>"""
+
+    health_html = ""
+    if is_admin:
+        health_html = (
+            '<div class="card" id="overview-health"><h3>Health</h3><div class="stat-grid">'
+            + "".join(
+                (f"<a class='stat-card stat-link' href='{escape_html(href)}'>" if href else "<div class='stat-card'>")
+                + f"<div class='label'>{escape_html(label)}</div>"
+                + f"<div class='{'' if ok else 'text-danger'}'>{escape_html(value)}</div>"
+                + ("</a>" if href else "</div>")
+                for label, value, href, ok in _health_items(is_admin)
+            )
+            + "</div></div>"
+        )
+
+    started_html = ""
+    if is_admin and (agent_count == 0 or not recent_activity):
+        steps = [
+            ("Add an agent", "/agents", agent_count > 0, "An agent is one AI tool's identity in Agent Core."),
+            ("Connect its tool", "/integrations", bool(recent_activity), "Copy the key and settings into the tool."),
+            ("Give it a service", "/connectors", False, "Optional: let it act in an outside system, such as GitHub."),
+            ("Watch it work", "/activity", bool(recent_activity), "Its tasks and handoffs appear here."),
+        ]
+        started_html = '<div class="card" id="overview-getting-started"><h3>Getting started</h3><ol>' + "".join(
+            f"<li{' style=\"opacity:.6\"' if done else ''}><a href='{href}'>{label}</a> <span class='text-muted'>{note}</span></li>"
+            for label, href, done, note in steps
+        ) + "</ol></div>"
 
     search_html = """
     <div class="card">
       <div class="section-header">
-        <h3>Operational Search</h3>
-        <div class="section-note">Search memory, activities, connector types, and visible bindings.</div>
+        <h3>Search</h3>
+        <div class="section-note">Find a memory, a task or a service.</div>
       </div>
       <form onsubmit="runDashboardSearch(event)" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-        <input type="text" id="dashboard-search-query" class="search-input" placeholder="Search by task, memory, connector, or binding..." style="min-width:260px;flex:1" autocomplete="off">
+        <input type="text" id="dashboard-search-query" class="search-input" placeholder="Search memories, tasks and services..." style="min-width:260px;flex:1" autocomplete="off">
         <button type="submit" class="btn">Search</button>
         <button type="button" class="btn btn-secondary" onclick="clearDashboardSearch()">Clear</button>
       </form>
-      <p class="text-muted" style="margin:10px 0 0">This looks at the live operational state agents can actually use, then points you back to the right page.</p>
       <div id="dashboard-search-results" style="margin-top:14px">
-        <div class="empty">Search operational state to find memory, work, and connector visibility.</div>
+        <div class="empty">Type a word to search memories, tasks and services.</div>
       </div>
-    </div>"""
-
-    attention_html = ""
-    if attention:
-        attention_rows = "".join(
-            f"<tr><td>{escape_html(a.get('task_description', '')[:60])}</td>"
-            f"<td><span class='badge badge-{escape_html(a.get('status', 'stale'))}'>{escape_html(a.get('status', ''))}</span></td>"
-            f"<td>{escape_html(a.get('assigned_agent_id', ''))}</td>"
-            f"<td><a href='/activity'>Open</a></td></tr>"
-            for a in attention
-        )
-        attention_html = f"""
-    <div class="card attention-card" id="overview-needs-attention">
-      <h3>Needs Attention</h3>
-      <p class="text-muted" style="margin-top:-6px">Currently blocked or stale work from the last {settings.ATTENTION_LOOKBACK_DAYS} days. Resolved retries are excluded.</p>
-      <table><thead><tr><th>Task</th><th>Status</th><th>Agent</th><th></th></tr></thead><tbody>{attention_rows}</tbody></table>
     </div>"""
 
     activity_rows = (
@@ -368,14 +420,14 @@ def dashboard_home(request: Request, session: dict = Depends(require_auth)):
     <div class="page-header">
       <h1>Overview</h1>
       <p class="text-muted" style="max-width:760px;margin-top:8px">
-        {APP_NAME} is the local capability layer for your agents. This page gives you a quick read on
-      memory, connectors, activity, and the services your agents can actually use.
+        {APP_NAME} gives your AI agents shared memory, a record of their work, and safe access to your services and credentials. Start with what is waiting on you.
       </p>
     </div>
-    {stat_cards}
-    {capability_html}
-    {search_html}
+    {started_html}
     {attention_html}
+    {health_html}
+    {stat_cards}
+    {search_html}
     <div class="card">
       <div class="section-header">
         <h3>Recent Activity</h3>
@@ -394,8 +446,6 @@ def dashboard_home(request: Request, session: dict = Depends(require_auth)):
       var data = j.data || {{}};
       var openEl = document.getElementById('stat-open-activities');
       if (openEl) openEl.querySelector('.value').textContent = data.active_count || 0;
-      var staleEl = document.getElementById('stat-stale-blocked');
-      if (staleEl) staleEl.querySelector('.value').textContent = data.attention_count || 0;
       var tbody = document.getElementById('overview-activity-tbody');
       if (!tbody) return;
       var recent = (data.recent || []).slice(0, 6);
@@ -470,7 +520,7 @@ def dashboard_home(request: Request, session: dict = Depends(require_auth)):
       const input = document.getElementById('dashboard-search-query');
       const results = document.getElementById('dashboard-search-results');
       input.value = '';
-      results.innerHTML = '<div class="empty">Search operational state to find memory, work, and connector visibility.</div>';
+      results.innerHTML = '<div class="empty">Type a word to search memories, tasks and services.</div>';
       input.focus();
     }}
     </script>

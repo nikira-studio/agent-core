@@ -111,9 +111,10 @@ def test_overview_surfaces_operational_sections(authenticated_client):
     assert "Users" in html
     assert "Active Agents" in html
     assert "Open Activities" in html
-    assert "Needs Attention" in html
+    assert "Waiting on you" in html
     assert "Memory Records" in html
-    assert "Capability Snapshot" in html
+    assert "Capability Snapshot" not in html
+    assert "Health" in html
     assert "Recent Activity" in html
     assert "View Activity" in html
     assert "Quick Actions" not in html
@@ -145,11 +146,10 @@ def test_overview_attention_omits_resolved_and_historical_activities(authenticat
         conn.commit()
 
     html = authenticated_client.get("/").text
-    attention = html.split('id="overview-needs-attention"', 1)[1].split("</table>", 1)[0]
+    attention = html.split('id="overview-waiting"', 1)[1].split("</table>", 1)[0]
     assert "Current blocker" in attention
     assert "Old blocked task" not in attention
     assert "Resolved retry" not in attention
-    assert "Resolved retries are excluded." in attention
 
 
 def test_admin_activity_summary_keeps_global_overview_scope(authenticated_client):
@@ -306,3 +306,31 @@ def test_workspace_edit_modal_has_collaborator_panel_and_separate_save_form(auth
     # Workspace save does not trigger collaborator actions
     assert "submitEditProject" in html
     assert html.index("submitEditProject") != html.index("data-workspace-collaborator-form")
+
+
+def test_overview_says_so_when_nothing_is_waiting_and_shows_health(authenticated_client):
+    html = authenticated_client.get("/").text
+    assert "Nothing is waiting on you." in html
+    health = html.split('id="overview-health"', 1)[1]
+    for label in ("Agent Core", "Services", "Webhooks", "Broker credential"):
+        assert label in health
+
+
+def test_overview_health_counts_a_failing_binding_and_a_dead_webhook(authenticated_client):
+    from app.database import get_db
+    from app.routes.overview_page import _health_items
+
+    with get_db() as conn:
+        conn.execute(
+            "INSERT INTO webhook_delivery_log (webhook_id, event_id, event_type, payload_json, status, last_attempt_at) "
+            "VALUES ('w', 'e', 'x', '{}', 'dead', datetime('now'))"
+        )
+        conn.commit()
+    items = {label: (value, ok) for label, value, _href, ok in _health_items(True)}
+    assert items["Webhooks"] == ("1 failed in 24 hours", False)
+
+
+def test_a_fresh_install_shows_getting_started(authenticated_client):
+    html = authenticated_client.get("/").text
+    assert 'id="overview-getting-started"' in html
+    assert "Add an agent" in html and "Connect its tool" in html
