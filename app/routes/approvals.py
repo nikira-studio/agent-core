@@ -96,6 +96,8 @@ def trust_this_device(request: Request):
     from app.services import audit_service
     from app.services.auth_service import TRUSTED_DEVICE_COOKIE, TRUSTED_DEVICE_COOKIE_PATHS, trust_device
 
+    if not settings.TRUSTED_DEVICES_ENABLED:
+        raise APIError("TRUSTED_DEVICES_OFF", "Trusted devices are turned off on this install", 403)
     session = _browser_session(request)
     device = trust_device(session["user_id"])
     response = JSONResponse({"ok": True, "data": {"device_id": device["db_session_id"],

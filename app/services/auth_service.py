@@ -754,6 +754,8 @@ def approvals_session(request) -> Optional[dict]:
                                inactivity_minutes=settings.INACTIVITY_TIMEOUT_MINUTES)
     if session:
         return session
+    if not settings.TRUSTED_DEVICES_ENABLED:
+        return None
     return validate_session(request.cookies.get(TRUSTED_DEVICE_COOKIE) or "",
                             inactivity_minutes=trusted_device_idle_minutes(), approvals=True)
 

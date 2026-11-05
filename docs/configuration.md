@@ -28,6 +28,7 @@ These control how long dashboard logins stay active.
 | `AGENT_CORE_SESSION_DURATION_HOURS` | `8` | Maximum session lifetime before requiring a new login |
 | `AGENT_CORE_INACTIVITY_TIMEOUT_MINUTES` | `30` | How long a session can sit idle before expiring |
 | `AGENT_CORE_COOKIE_SECURE` | `false` | Set to `true` if Agent Core is served over HTTPS or behind a TLS proxy. Makes browser cookies require a secure connection |
+| `AGENT_CORE_TRUSTED_DEVICES_ENABLED` | `false` | Turn on **Trust this device** on the Approvals page, so a phone can open and decide approvals without signing in each time. Off, the button and card are hidden, the endpoint refuses, and any device trusted earlier stops being accepted. |
 | `AGENT_CORE_TRUSTED_DEVICE_DAYS` | `14` | The longest a trusted device (Approvals page, Trust this device) stays signed in for approvals, and nothing else, however much it is used. Revoke any device from the Approvals page |
 | `AGENT_CORE_TRUSTED_DEVICE_IDLE_DAYS` | `7` | A trusted device that goes unused this long lapses; each use restarts the clock, up to the cap above |
 | `AGENT_CORE_TRUSTED_PROXIES` | *(empty)* | Comma-separated proxy IPs that may supply `X-Forwarded-For` for login rate-limit identity. Set it behind a reverse proxy, or every client shares the proxy's per-address login limit |

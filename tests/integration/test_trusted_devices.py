@@ -7,6 +7,13 @@ from tests.integration.test_approvals import _browser_admin, _propose, _setup, _
 import pytest
 
 
+@pytest.fixture(autouse=True)
+def trusted_devices_on(monkeypatch):
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "TRUSTED_DEVICES_ENABLED", True)
+
+
 @pytest.fixture
 def routine_agent_update(monkeypatch):
     """Treat agent.update as routine, so the phone flow can be tested with a real
@@ -205,3 +212,27 @@ def test_idle_window_never_exceeds_the_cap(monkeypatch):
     monkeypatch.setattr(settings, "TRUSTED_DEVICE_DAYS", 10)
     monkeypatch.setattr(settings, "TRUSTED_DEVICE_IDLE_DAYS", 30)
     assert trusted_device_idle_minutes() == 10 * 24 * 60
+
+
+def test_off_by_default_nothing_can_be_trusted_and_a_trusted_session_stops_working(test_client, admin_token, monkeypatch):
+    from app.config import settings
+
+    _browser_admin(test_client)
+    _trust(test_client)
+    cookie = next(c for c in test_client.cookies.jar if c.name == "approvals_session").value
+    _phone(test_client, cookie)
+    assert test_client.get("/approvals", follow_redirects=False).status_code == 200
+
+    monkeypatch.setattr(settings, "TRUSTED_DEVICES_ENABLED", False)
+    # The trusted session is no longer accepted...
+    assert test_client.get("/approvals", follow_redirects=False).status_code in (302, 401)
+    # ...and a dashboard sign-in cannot make a new one.
+    _browser_admin(test_client)
+    r = test_client.post("/api/approvals/trust-device", headers=csrf_headers(test_client))
+    assert r.status_code == 403 and r.json()["error"]["code"] == "TRUSTED_DEVICES_OFF"
+
+
+def test_the_setting_defaults_to_off():
+    from app.config import Settings
+
+    assert Settings.model_fields["TRUSTED_DEVICES_ENABLED"].default is False

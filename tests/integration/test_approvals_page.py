@@ -4,6 +4,8 @@ The proposal itself comes from an agent; the decision comes from a person in
 the dashboard. These tests look at the page a person opens.
 """
 
+import pytest
+
 from tests.conftest import csrf_headers
 from tests.integration.test_approvals import (
     _browser_admin,
@@ -11,6 +13,13 @@ from tests.integration.test_approvals import (
     _setup,
     _update_target,
 )
+
+
+@pytest.fixture(autouse=True)
+def trusted_devices_on(monkeypatch):
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "TRUSTED_DEVICES_ENABLED", True)
 
 
 def _proposal(test_client, admin_token, operations=None, title="Widen target-agent"):
@@ -193,3 +202,17 @@ def test_the_trusted_device_copy_follows_the_setting(test_client, admin_token, m
     _browser_admin(test_client)
     html = test_client.get("/approvals").text
     assert "at least every 21 days" in html and "at most 90 days in all" in html
+
+
+def test_the_card_is_hidden_when_trusted_devices_are_off(test_client, admin_token, monkeypatch):
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "TRUSTED_DEVICES_ENABLED", False)
+    _browser_admin(test_client)
+    html = test_client.get("/approvals").text
+    assert 'id="trust-this-device"' not in html and "Trusted devices" not in html
+
+
+def test_the_card_says_what_trusted_devices_are_for(test_client, admin_token):
+    _browser_admin(test_client)
+    assert "For approving from a phone without signing in each time" in test_client.get("/approvals").text
