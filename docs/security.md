@@ -156,7 +156,9 @@ An agent that should prepare an admin change but not make it holds the `admin_pr
 - Deciding takes the browser cookie only. Any `Authorization` header, whether an agent key, an operator token or a Bearer session, is refused, and the request needs the CSRF token and a matching `Origin`.
 - An approval changes only what it was proposed against: if a target changed in between, it fails and applies nothing.
 - Secret values are never proposed. The person types them on the approval page.
-- **Trust this device** (Approvals page) issues a separate 30-day session in a cookie that is HttpOnly, SameSite=Strict and limited to the Approvals paths. The rest of the dashboard refuses it. Revoke devices with `DELETE /api/approvals/trusted-devices/{id}`.
+- An agent can have at most 10 approvals pending (50 in total), so a flood of harmless proposals cannot bury a real one.
+- Changes that widen what an agent can do (`agent.create`, `agent.update`, `credential_grant.create`) cannot be approved from a trusted device; sign in to the dashboard for those.
+- **Trust this device** (Approvals page) issues a separate 14-day session in a cookie that is HttpOnly, SameSite=Strict and limited to the Approvals paths. The rest of the dashboard refuses it. Revoke devices with `DELETE /api/approvals/trusted-devices/{id}`.
 
 ## Rate limits
 

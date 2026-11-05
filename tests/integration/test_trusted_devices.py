@@ -4,6 +4,23 @@ from tests.conftest import csrf_headers
 from tests.integration.test_approvals import _browser_admin, _propose, _setup, _update_target
 
 
+import pytest
+
+
+@pytest.fixture
+def routine_agent_update(monkeypatch):
+    """Treat agent.update as routine, so the phone flow can be tested with a real
+    handler; the widening rule itself is tested separately."""
+    import dataclasses
+
+    from app.operations import admin_registry
+
+    admin_registry.get("agent.update")
+    op = admin_registry._REGISTRY["agent.update"]
+    monkeypatch.setitem(admin_registry._REGISTRY, "agent.update",
+                        dataclasses.replace(op, needs_dashboard_signin=False))
+
+
 def _trust(client):
     r = client.post("/api/approvals/trust-device", headers=csrf_headers(client))
     assert r.status_code == 200, r.text
@@ -27,7 +44,7 @@ def test_trusting_sets_a_strict_path_limited_cookie(test_client, admin_token):
         assert "HttpOnly" in c and "SameSite=strict" in c.replace("samesite", "SameSite").replace("Strict", "strict")
 
 
-def test_trusted_device_can_decide_without_signing_in(test_client, admin_token):
+def test_trusted_device_can_decide_without_signing_in(test_client, admin_token, routine_agent_update):
     key = _setup(test_client, admin_token)
     approval_id = _propose(test_client, key, [_update_target("from the phone")]).json()["data"]["approval"]["id"]
     _browser_admin(test_client)
@@ -97,7 +114,7 @@ def test_a_trusted_device_expires(test_client, admin_token, monkeypatch):
     assert auth_service.validate_session(cookie, approvals=True, inactivity_minutes=10**6) is None
 
 
-def test_phone_flow_through_the_page(test_client, admin_token):
+def test_phone_flow_through_the_page(test_client, admin_token, routine_agent_update):
     """Open the approval page with only the device cookie, use the CSRF token
     the page embeds, and decide: no sign-in anywhere."""
     import re
@@ -118,3 +135,20 @@ def test_phone_flow_through_the_page(test_client, admin_token):
     assert r.status_code == 200 and r.json()["data"]["approval"]["status"] == "done"
     # The same device still cannot open other dashboard pages.
     assert test_client.get("/settings", follow_redirects=False).status_code in (302, 303, 307)
+
+
+def test_widening_changes_need_a_dashboard_signin(test_client, admin_token):
+    key = _setup(test_client, admin_token)
+    approval_id = _propose(test_client, key, [_update_target("widen")]).json()["data"]["approval"]["id"]
+    _browser_admin(test_client)
+    _trust(test_client)
+    cookie = next(c for c in test_client.cookies.jar if c.name == "approvals_session").value
+    _phone(test_client, cookie)
+    from app.services.auth_service import CSRF_HEADER, csrf_token_for_session_token
+    csrf = {CSRF_HEADER: csrf_token_for_session_token(cookie)}
+    r = test_client.post(f"/api/approvals/{approval_id}/decide", json={"approve": True}, headers=csrf)
+    assert r.status_code == 403 and r.json()["error"]["code"] == "DASHBOARD_SIGNIN_REQUIRED"
+    # Still pending, so the dashboard can approve it.
+    _browser_admin(test_client)
+    r = test_client.post(f"/api/approvals/{approval_id}/decide", json={"approve": True}, headers=csrf_headers(test_client))
+    assert r.json()["data"]["approval"]["status"] == "done"

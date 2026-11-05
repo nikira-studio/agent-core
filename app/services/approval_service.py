@@ -23,6 +23,10 @@ from app.time_utils import utc_now, utc_now_iso
 
 DEFAULT_EXPIRY_HOURS = 24
 MAX_OPERATIONS = 20
+# A flooded queue is the way to slip a real request past a one-tap approver, so
+# an agent and the whole server can only hold this many pending at once.
+MAX_PENDING_PER_AGENT = 10
+MAX_PENDING_TOTAL = 50
 # An approval left "executing" this long was interrupted (a crash or restart
 # mid-run). The unit rolled back with the process, so it is marked failed and
 # never re-run.
@@ -85,6 +89,14 @@ def propose(*, agent_id: str, scope: str, title: str, operations: list[dict],
         ).fetchone()
         if existing:
             return _public(dict(existing))
+        mine = conn.execute("SELECT COUNT(*) FROM approvals WHERE status = 'pending' AND proposed_by = ?",
+                            (agent_id,)).fetchone()[0]
+        if mine >= MAX_PENDING_PER_AGENT:
+            raise APIError("TOO_MANY_PENDING",
+                           f"You already have {mine} approvals waiting; wait for a decision before proposing more", 429)
+        total = conn.execute("SELECT COUNT(*) FROM approvals WHERE status = 'pending'").fetchone()[0]
+        if total >= MAX_PENDING_TOTAL:
+            raise APIError("TOO_MANY_PENDING", "Too many approvals are waiting for a person; try again later", 429)
         record = {
             "id": uuid.uuid4().hex,
             "status": "pending",
@@ -210,6 +222,16 @@ def decide(approval_id: str, *, session: dict, approve: bool, note: Optional[str
         return public_view(get(approval_id))
 
     operations = operations_of(row)
+    if session.get("channel") == "approvals":
+        widening = [o["name"] for o in operations if admin_registry.get(o["name"]).needs_dashboard_signin]
+        if widening:
+            # Released again: the person can open the dashboard and approve there.
+            with get_db() as conn:
+                conn.execute("UPDATE approvals SET status = 'pending', decided_by = NULL, decided_at = NULL, "
+                             "decision_note = NULL WHERE id = ? AND status = 'executing'", (approval_id,))
+                conn.commit()
+            raise APIError("DASHBOARD_SIGNIN_REQUIRED",
+                           f"{', '.join(widening)} widens what an agent can do, so sign in to the dashboard to approve it", 403)
     for index, op in enumerate(operations):
         definition = admin_registry.get(op["name"])
         for field_name in definition.person_fields:
@@ -225,14 +247,15 @@ def decide(approval_id: str, *, session: dict, approve: bool, note: Optional[str
         with all_or_nothing():
             for op in operations:
                 results.append({"operation": op["name"], **admin_registry.run(op["name"], op["params"], session, request)})
+            # Status and effects commit together: a crash can never leave an
+            # applied bundle marked as interrupted.
+            with get_db() as conn:
+                conn.execute("UPDATE approvals SET status = 'done', result_json = ? WHERE id = ?",
+                             (json.dumps(_redact(results), default=str), approval_id))
     except admin_registry.OperationFailed as exc:
         return _fail(row, session, f"{exc.operation} was refused ({exc.status}): {_message(exc.body)}. Nothing was applied.")
     except APIError as exc:
         return _fail(row, session, f"{exc.message}. Nothing was applied.")
-    with get_db() as conn:
-        conn.execute("UPDATE approvals SET status = 'done', result_json = ? WHERE id = ?",
-                     (json.dumps(_redact(results), default=str), approval_id))
-        conn.commit()
     audit_service.write_event(actor_type="user", actor_id=session["user_id"], action="approval_approved",
                               resource_type="approval", resource_id=approval_id, result="success",
                               details={"proposed_by": proposed_by, "operations": [o["name"] for o in operations],

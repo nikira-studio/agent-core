@@ -43,6 +43,9 @@ class AdminOperation:
     # so a target changed in between fails the bundle instead of being
     # overwritten.
     fingerprint: Optional[Callable[[dict], Optional[str]]] = None
+    # Authority-widening operations are never approved from a trusted device:
+    # the approver must have signed in to the dashboard.
+    needs_dashboard_signin: bool = False
     path_params: tuple[str, ...] = field(default=())
     body_model: Optional[type[BaseModel]] = None
     body_arg: Optional[str] = None
@@ -73,9 +76,11 @@ def _unwrap_optional(annotation: Any) -> Any:
 
 def register(name: str, summary: str, handler: Callable[..., Any], *,
              person_fields: tuple[str, ...] = (),
-             fingerprint: Optional[Callable[[dict], Optional[str]]] = None) -> AdminOperation:
+             fingerprint: Optional[Callable[[dict], Optional[str]]] = None,
+             needs_dashboard_signin: bool = False) -> AdminOperation:
     path_params, body_model, body_arg = _introspect(handler)
-    op = AdminOperation(name, summary, handler, person_fields, fingerprint, path_params, body_model, body_arg)
+    op = AdminOperation(name, summary, handler, person_fields, fingerprint, needs_dashboard_signin,
+                        path_params, body_model, body_arg)
     _REGISTRY[name] = op
     return op
 

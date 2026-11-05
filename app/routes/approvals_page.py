@@ -19,10 +19,9 @@ from app.routes.dashboard_shared import escape_html, local_dt, render_page, requ
 
 router = APIRouter()
 
-# A parameter whose name looks secret-shaped never shows its value: such a
-# value is the approving person's to type, or it does not belong on a page
-# that someone else can read over a shoulder.
-SECRET_PARAM_MARKERS = ("key", "token", "secret", "password")
+# The approver sees every parameter that will be applied. Hiding one by its
+# name would let a proposal carry a value the person cannot check. Only a
+# person field (typed by the approver, never proposed) is shown as a blank.
 REDACTED = "[hidden]"
 
 # Statuses that are no longer waiting on a person.
@@ -88,11 +87,6 @@ def _status_badge(status: str) -> str:
     return "<span class='badge " + css + "'>" + escape_html(status) + "</span>"
 
 
-def _is_secret_param(name: str) -> bool:
-    lowered = (name or "").lower()
-    return any(marker in lowered for marker in SECRET_PARAM_MARKERS)
-
-
 def _param_text(value: Any) -> str:
     if isinstance(value, (dict, list)):
         return json.dumps(value, sort_keys=True, default=str)
@@ -135,7 +129,7 @@ def _operation_card(index: int, operation: dict, can_decide: bool) -> str:
 
     param_rows = ""
     for key, value in params.items():
-        shown = REDACTED if _is_secret_param(str(key)) else _param_text(value)
+        shown = REDACTED if str(key) in person_fields else _param_text(value)
         param_rows += (
             "<tr>"
             "<td><code>" + escape_html(str(key)) + "</code></td>"

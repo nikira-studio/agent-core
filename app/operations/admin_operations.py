@@ -26,11 +26,11 @@ def _row(table: str, key: str):
     return fingerprint
 
 
-register("agent.create", "Create an agent", agents.create_agent)
+register("agent.create", "Create an agent", agents.create_agent, needs_dashboard_signin=True)
 register("agent.update", "Change an agent's scopes, capabilities or description",
-         agents.update_agent, fingerprint=_row("agents", "agent_id"))
+         agents.update_agent, fingerprint=_row("agents", "agent_id"), needs_dashboard_signin=True)
 register("credential_grant.create", "Let an agent's runtime resolve a credential",
-         credential_consumers.create_grant)
+         credential_consumers.create_grant, needs_dashboard_signin=True)
 register("credential_grant.revoke", "Revoke a credential grant",
          credential_consumers.revoke_grant, fingerprint=_row("credential_consumer_grants", "grant_id"))
 register("credential.create", "Store a new credential (the person enters the value)",

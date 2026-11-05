@@ -80,7 +80,7 @@ def test_the_detail_page_shows_the_operation_summary(test_client, admin_token):
     assert "approved change" in html
 
 
-def test_the_detail_page_hides_a_param_that_looks_like_a_secret(test_client, admin_token):
+def test_the_detail_page_shows_every_param_the_proposal_carries(test_client, admin_token):
     approval_id = _proposal(test_client, admin_token, operations=[{
         "name": "agent.update",
         "params": {
@@ -96,11 +96,8 @@ def test_the_detail_page_hides_a_param_that_looks_like_a_secret(test_client, adm
     _browser_admin(test_client)
 
     html = test_client.get(f"/approvals/{approval_id}").text
-    # The parameter is still listed, so the person knows the operation carries
-    # one; its value is not for a page to show.
-    assert "api_key" in html
-    assert "[hidden]" in html
-    assert "hide-me-1" not in html
+    # Nothing is hidden by its name: the person approves exactly what runs.
+    assert "api_key" in html and "hide-me-1" in html
 
 
 def test_the_admin_is_asked_for_the_values_only_a_person_may_type(test_client, admin_token):

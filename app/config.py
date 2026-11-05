@@ -18,7 +18,7 @@ class Settings(BaseSettings):
     # A trusted device holds a long-lived session that only the Approvals
     # pages accept, so a person can approve from their phone without signing
     # in each time. It also expires after this many days without use.
-    TRUSTED_DEVICE_DAYS: int = 30
+    TRUSTED_DEVICE_DAYS: int = 14
     SHARED_SCOPE_AGENTS: str = ""
     TRUSTED_PROXIES: str = ""
     STALE_THRESHOLD_MINUTES: int = 5

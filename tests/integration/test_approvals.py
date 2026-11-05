@@ -187,3 +187,31 @@ def test_a_pending_approval_is_on_the_attention_list(test_client, admin_token):
     approvals = r.json()["data"]["approvals"]
     assert approval_id in [a["id"] for a in approvals]
 
+
+
+def test_an_agent_cannot_flood_the_queue(test_client, admin_token):
+    key = _setup(test_client, admin_token)
+    for n in range(10):
+        assert _propose(test_client, key, [_update_target(f"change {n}")], title=f"t{n}").status_code == 201
+    r = _propose(test_client, key, [_update_target("one too many")], title="t10")
+    assert r.status_code == 429 and r.json()["error"]["code"] == "TOO_MANY_PENDING"
+    # An identical proposal is still the same one, not a new slot.
+    assert _propose(test_client, key, [_update_target("change 0")], title="t0").status_code == 201
+
+
+def test_status_and_effects_commit_together(test_client, admin_token, monkeypatch):
+    """If recording 'done' fails, the change it records is undone with it."""
+    from app.security.exceptions import APIError
+    from app.services import agent_service, approval_service
+
+    key = _setup(test_client, admin_token)
+    approval_id = _propose(test_client, key, [_update_target("must not stick")]).json()["data"]["approval"]["id"]
+
+    def broken(_results):
+        raise APIError("BOOM", "recording the result failed", 500)
+
+    monkeypatch.setattr(approval_service, "_redact", broken)
+    _browser_admin(test_client)
+    r = test_client.post(f"/api/approvals/{approval_id}/decide", json={"approve": True}, headers=csrf_headers(test_client))
+    assert r.json()["data"]["approval"]["status"] == "failed"
+    assert agent_service.get_agent_by_id("target-agent")["description"] != "must not stick"
