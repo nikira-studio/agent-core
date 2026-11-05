@@ -55,6 +55,19 @@ class TestAgentsPage:
         r = admin_client.get("/agents")
         assert 'id="edit-agent-modal"' in r.text
 
+    def test_capability_boxes_offer_the_opt_in_capabilities_unchecked(self, admin_client):
+        import re
+
+        html = admin_client.get("/agents").text
+        for key in ("admin_propose", "credentials_resolve"):
+            box = re.search(rf'<input[^>]*id="ca-capability-{key}"[^>]*>', html)
+            assert box, key
+            assert "checked" not in box.group(0)  # a new agent never gets it by default
+            assert re.search(rf'<input[^>]*id="edit-capability-{key}"[^>]*>', html), key
+        assert "Propose admin changes" in html and "Nothing happens until a person approves" in html
+        for key in ("memory", "coordination"):
+            assert "checked" in re.search(rf'<input[^>]*id="ca-capability-{key}"[^>]*>', html).group(0)
+
     def test_agents_table_shows_owner_metadata(self, admin_client):
         from app.services.agent_service import create_agent
 

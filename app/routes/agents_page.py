@@ -73,21 +73,37 @@ def agents_page(request: Request, session: dict = Depends(require_auth)):
     edit_recall_html = build_scope_list("edit-recall")
 
     def capability_controls(prefix):
-        labels = [
-            ("memory", "Memory"),
-            ("coordination", "Coordination"),
-            ("credentials", "Credential references"),
-            ("connectors_read", "Connector discovery"),
-            ("connectors_execute", "Run connector actions"),
+        # (key, name, what it lets the agent do, starts checked on the create form)
+        groups = [
+            ("Everyday work", [
+                ("memory", "Memory", "Search, read and write memory records in the scopes above.", True),
+                ("coordination", "Coordination", "Track its own work: activity records, handoffs, the session briefing, workspace sync and approval status.", True),
+            ]),
+            ("Credentials", [
+                ("credentials", "Credential references", "List credentials and ask for the reference an agent uses (AC_SECRET_...). The agent never sees the secret value; Agent Core inserts it when a command or connector runs.", True),
+                ("credentials_resolve", "Read credential values", "Fetch a stored value over HTTPS, one exact entry at a time, and only the entries an admin has granted it. For small service agents; leave off for assistants.", False),
+            ]),
+            ("Connectors", [
+                ("connectors_read", "Connector discovery", "See which external services and actions are set up. Implied by Run connector actions.", True),
+                ("connectors_execute", "Run connector actions", "Have Agent Core perform actions in external services for it, using the credentials in your bindings.", True),
+            ]),
+            ("Administration", [
+                ("admin_propose", "Propose admin changes", "Ask for changes such as new agents, grants or bindings. Nothing happens until a person approves it on the Approvals page.", False),
+            ]),
         ]
-        controls = "".join(
-            f'<label class="checkbox-label"><input type="checkbox" data-capability="{key}" '
-            f'id="{prefix}-capability-{key}" checked> <span>{label}</span></label>'
-            for key, label in labels
-        )
+        controls = ""
+        for heading, items in groups:
+            controls += f'<h4 class="capability-group">{heading}</h4>'
+            for key, name, description, default in items:
+                controls += (
+                    f'<label class="checkbox-label"><input type="checkbox" data-capability="{key}" '
+                    f'id="{prefix}-capability-{key}"{" checked" if default else ""}> '
+                    f'<span><strong>{name}</strong><br><small class="form-hint">{description}</small></span></label>'
+                )
         return (
-            '<div class="form-group"><label>Capabilities</label>' + controls +
-            '<p class="form-hint">Scopes decide which data an agent can reach. Capabilities decide which classes of operations it may attempt. Changes apply to the next request. Reconnect an MCP client to refresh its cached tool list.</p></div>'
+            '<div class="form-group"><label>What this agent may do</label>' + controls +
+            '<p class="form-hint">Scopes decide which data an agent can reach; these decide which kinds of action it may attempt. '
+            'The last two start off for new agents. Changes apply to the next request; reconnect an MCP client to refresh its tool list.</p></div>'
         )
 
     capability_create_html = capability_controls("ca")
