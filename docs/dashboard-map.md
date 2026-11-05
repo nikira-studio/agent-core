@@ -122,6 +122,10 @@ Users, Workspaces, Credentials, Audit. Each still needs its controls explained i
 
 Each control that remains on a reworked page carries one line saying what it is for, right under it. The test `test_every_field_on_the_reworked_forms_has_a_line_of_help` lists the Services, Agents, Settings, Workspaces and Users fields that must keep theirs, so a new field cannot be added without it. The Webhooks name and address fields carry theirs in the label, and the Memory, Connect, Overview and Settings forms were written with theirs. Pages that already had help on every control (Activity's Assign work, Audit's prune date, the Credentials forms) were left alone. The Credentials page stays as it is until the owner has used it from a phone.
 
+## Credentials: who can use it
+
+Built: each credential shows who uses it (agent names and a count of services) to an admin, with one **Access** button. Its dialog has three things in the first view: the agents with access (each removable), a picker to give it to another agent, and the services that use it. A greyed-out agent is listed under "Can't receive it yet" with a link to change its role. Expiry and the write flag sit under **Advanced**. The rule is stated at the top: one credential per service, shared by grant, a separate credential only for a different account or an outside service. From the Agents page a service agent's row links to the same list for that agent.
+
 ## Extend before creating
 
 Adding capability to what already exists is the normal path, so the Agents and Workspaces pages say so where a person decides: the intro card, the Create dialogs ("Does an existing agent already do this job?", "Does an existing workspace already fit?") and the empty lists. A new agent is for a separate tool or identity with its own key and history; a new workspace is for a separate body of work.
@@ -154,5 +158,6 @@ The first-five-minutes walk-through still sends an admin through Credentials, Se
 | Memory: Suggestions waiting for you, grouped detail, Advanced | Built and deployed |
 | Connect: Who is connecting?, a line for each selector | Built, in review |
 | Help under every remaining control | Built and deployed |
-| Extend before creating (Agents and Workspaces wording) | Built, in review |
+| Extend before creating (Agents and Workspaces wording) | Built and deployed |
+| Credentials: Used by column and Access dialog | Built, in review |
 | Still to do | The summary for the owner: section map, what was removed, merged or moved (this document), and a clean-up of anything the owner finds unclear in use. The Credentials page stays as it is until the owner has used it from a phone. |

@@ -1893,3 +1893,8 @@ th.activity-actions-header {
 .tab-panel[hidden] {
   display: none;
 }
+
+/* Who can use a credential */
+.access-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 6px 0; border-bottom: 1px solid var(--border, rgba(128,128,128,0.2)); }
+.access-row .btn { margin-left: auto; }
+.access-row a { font-weight: 500; }

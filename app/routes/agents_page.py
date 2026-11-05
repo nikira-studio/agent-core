@@ -201,9 +201,16 @@ def agents_page(request: Request, session: dict = Depends(require_auth)):
         owner_id = a.get("owner_user_id", "")
         default_user_id = a.get("default_user_id", "") or owner_id
         if can_manage:
+            credentials_link = ""
+            if is_admin and "credentials_resolve" in agent_service.parse_capabilities(a.get("capabilities_json")):
+                credentials_link = (
+                    f"<a class='btn btn-sm btn-secondary' href='/credentials?agent={quote(a['id'])}'"
+                    " title='Choose which stored credentials this agent can use'>Credentials</a>"
+                )
             action_buttons = (
                 f"<button type='button' class='btn btn-sm btn-secondary' data-agent-edit='{escape_html(a['id'])}'>Edit</button>"
                 f"<a class='btn btn-sm btn-secondary' href='/integrations?agent_id={quote(a['id'])}'>Connect</a>"
+                f"{credentials_link}"
                 f"{toggle_btn}"
                 f"<button type='button' class='btn btn-sm btn-danger icon-delete-btn' data-agent-purge='{escape_html(a['id'])}' title='Permanently delete' aria-label='Permanently delete'>{get_icon('delete')}</button>"
             )
@@ -540,7 +547,12 @@ def agents_page(request: Request, session: dict = Depends(require_auth)):
           showToast(message, 'danger');
         }
       }
-      document.addEventListener('DOMContentLoaded', function() { createAuthorityPreview(); updateAccessSummary('ca'); });
+      document.addEventListener('DOMContentLoaded', function() {
+        createAuthorityPreview(); updateAccessSummary('ca');
+        // /agents?edit=<id> opens that agent's role, for links from other pages.
+        const wanted = new URLSearchParams(location.search).get('edit');
+        if (wanted) editAgent(wanted);
+      });
     </script>"""
     js = js.replace("__IS_ADMIN__", str(is_admin).lower()).replace("__ROLE_PRESETS__", json.dumps(ROLE_PRESETS))
 

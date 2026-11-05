@@ -410,6 +410,19 @@ Restoration is rejected if any stored encrypted entry cannot be decrypted with t
 
 An agent calls the MCP `credential_request` tool. People see open requests at `GET /api/credentials/requests` and fill one with `POST /api/credentials/requests/{id}/fulfill` (`value`, optional `label` and `expires_at`) or decline it with `POST /api/credentials/requests/{id}/cancel`. Both need a human session with write access to the scope. The one exception: the agent that opened a request can take it back while it is unfilled with the same `POST /api/credentials/requests/{id}/cancel` call using its own key (the response status is `withdrawn` and the audit log records `credential_request_withdrawn`). Taking a request back is not a refusal, so the agent may ask again later; it cannot cancel another agent's request or a filled one.
 
+### Who can use a credential
+
+A script or service agent (one whose role includes `credentials_resolve`) reads a stored credential through an explicit **grant** on that one credential. The Credentials page manages grants with its **Access** button; the same routes are available to an admin:
+
+| Method | Path | Notes |
+|---|---|---|
+| `POST` | `/api/credential-consumers/grants` | `consumer_agent_id`, `entry_id`, optional `expires_at`, `allow_write` (default false). The agent must be active and have `credentials_resolve`. |
+| `GET` | `/api/credential-consumers/grants?consumer_agent_id=...` | One agent's grants |
+| `GET` | `/api/credential-consumers/entries/{entry_id}/access` | Who can use one credential: agents holding a grant, the services bound to it, agents that could receive it, agents that cannot yet and why, and other agents that can already read its scope. Names and ids only, never the value. |
+| `DELETE` | `/api/credential-consumers/grants/{grant_id}` | Revoke a grant |
+
+Assistants that can read a credential's scope see its reference without a grant. Grants are for agents that resolve the value itself.
+
 ## Connector types
 
 Connector types are the reusable definitions Agent Core builds from imported OpenAPI specs, native MCP servers, the built-in Generic HTTP fallback, and installed adapters. The connector catalog is instance-wide, so imported connector types and installed adapters are visible to other authenticated users in the same Agent Core deployment.

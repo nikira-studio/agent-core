@@ -13,6 +13,8 @@ from app.routes.dashboard_shared import (
     get_icon,
     local_dt,
 )
+from app.database import get_db
+from app.services.credential_service import is_expired
 from app.time_utils import parse_utc_datetime, utc_now
 
 router = APIRouter()
@@ -87,6 +89,32 @@ def credentials_page(request: Request, session: dict = Depends(require_auth)):
         f"{agent_scope_opts}"
     )
 
+    # Who can use each credential, for admins: the grants are theirs to manage.
+    holders: dict[str, list[str]] = {}
+    service_counts: dict[str, int] = {}
+    if ctx.is_admin:
+        agent_names = {a["id"]: a.get("display_name") or a["id"] for a in agents}
+        with get_db() as conn:
+            for g in conn.execute(
+                "SELECT entry_id, consumer_agent_id, expires_at FROM credential_consumer_grants WHERE revoked_at IS NULL"
+            ).fetchall():
+                if not is_expired({"expires_at": g["expires_at"]}):
+                    holders.setdefault(g["entry_id"], []).append(
+                        agent_names.get(g["consumer_agent_id"], g["consumer_agent_id"])
+                    )
+            for r in conn.execute(
+                "SELECT credential_id, COUNT(*) AS n FROM connector_bindings WHERE credential_id IS NOT NULL GROUP BY credential_id"
+            ).fetchall():
+                service_counts[r["credential_id"]] = r["n"]
+
+    def used_by_cell(entry_id: str) -> str:
+        names = holders.get(entry_id, [])
+        chips = "".join(f"<span class='badge badge-info'>{escape_html(n)}</span> " for n in names[:4])
+        more = f"<span class='text-muted'>+{len(names) - 4} more</span> " if len(names) > 4 else ""
+        n_services = service_counts.get(entry_id, 0)
+        services = f"<div class='text-muted' style='font-size:0.8rem'>{n_services} service{'s' if n_services != 1 else ''}</div>" if n_services else ""
+        return f"{chips}{more}{services}" if (names or services) else "<span class='text-muted'>no one yet</span>"
+
     credential_rows = ""
     for e in credential_entries:
         origin = " · ".join(
@@ -99,6 +127,13 @@ def credentials_page(request: Request, session: dict = Depends(require_auth)):
             )
             if part
         )
+        used_cell = access_button = ""
+        if ctx.is_admin:
+            used_cell = "<td>" + used_by_cell(e["id"]) + "</td>"
+            access_button = (
+                "<button type='button' class='btn btn-sm btn-secondary' data-credential-access='"
+                + escape_html(e["id"]) + "'>Access</button>"
+            )
         credential_rows += f"""
         <tr data-credential-id="{e["id"]}">
           <td>{escape_html(e.get("name", ""))}
@@ -106,7 +141,9 @@ def credentials_page(request: Request, session: dict = Depends(require_auth)):
           <td><code>{escape_html(e.get("scope", ""))}</code></td>
           <td><code>{escape_html(e.get("reference_name", ""))}</code></td>
           <td>{_expiry_cell(e.get("expires_at"))}</td>
+          {used_cell}
           <td class='actions-cell'>
+            {access_button}
             <button type='button' class='btn btn-sm btn-secondary' data-credential-edit="{escape_html(e["id"])}">Edit</button>
             <button type='button' class='btn btn-sm btn-danger icon-delete-btn' data-credential-delete="{escape_html(e["id"])}" title='Delete credential' aria-label='Delete credential'>{get_icon("delete")}</button>
           </td>
@@ -141,9 +178,10 @@ def credentials_page(request: Request, session: dict = Depends(require_auth)):
       <tbody>{request_rows}</tbody></table>
     </div>"""
 
+    used_header = "<th>Used by</th>" if ctx.is_admin else ""
     if credential_entries:
         credentials_html = f"""
-        <table><thead><tr><th>Name</th><th>Scope</th><th>Reference</th><th>Expires</th><th class='actions-cell'>Actions</th></tr></thead>
+        <table><thead><tr><th>Name</th><th>Scope</th><th>Reference</th><th>Expires</th>{used_header}<th class='actions-cell'>Actions</th></tr></thead>
         <tbody>{credential_rows}</tbody></table>"""
     else:
         credentials_html = "<div class='empty'>No credentials yet.</div>"
@@ -164,6 +202,58 @@ def credentials_page(request: Request, session: dict = Depends(require_auth)):
     {requests_html}
     <div class="card">
       <div id="credentials-list">{credentials_html}</div>
+    </div>
+
+    <!-- Who can use a credential -->
+    <div class="modal-overlay" id="access-modal" style="display:none">
+      <div class="modal modal-wide">
+        <h3>Who can use <span id="access-name"></span></h3>
+        <p class="form-hint" style="margin-bottom:12px">One credential per service: give it to each agent that needs it instead of storing it again. Use a separate credential only for a different account or an outside service.</p>
+        <h4 class="form-section-title">Agents with access</h4>
+        <div id="access-grants"></div>
+        <div class="form-group">
+          <label for="access-agent">Give access to</label>
+          <div style="display:flex;gap:8px;align-items:center">
+            <select id="access-agent" style="flex:1"></select>
+            <button type="button" class="btn btn-sm" id="access-add">Add</button>
+          </div>
+          <p class="form-hint">An agent can be given a credential when its role includes reading credential values (the Service agent role).</p>
+          <details id="access-cannot" style="display:none"><summary class="text-muted">Can't receive it yet (<span id="access-cannot-count"></span>)</summary><div id="access-cannot-list"></div></details>
+        </div>
+        <h4 class="form-section-title">Services using it</h4>
+        <div id="access-services"></div>
+        <p class="form-hint" id="access-scope-readers"></p>
+        <details class="access-details">
+          <summary>Advanced</summary>
+          <div class="form-group">
+            <label for="access-expires">Access ends on</label>
+            <input type="date" id="access-expires" style="max-width:200px">
+            <p class="form-hint">Optional. Applies to the next agent you add. Leave empty for no end date.</p>
+          </div>
+          <div class="form-group">
+            <label class="checkbox-label"><input type="checkbox" id="access-write"> Allow it to write the value back</label>
+            <p class="form-hint">Off by default. Only for an agent that rotates this secret itself.</p>
+          </div>
+        </details>
+        <div class="modal-footer"><button type="button" class="btn btn-secondary" onclick="closeAccess()">Close</button></div>
+      </div>
+    </div>
+
+    <!-- One agent's credentials, opened from the Agents page -->
+    <div class="modal-overlay" id="agent-access-modal" style="display:none">
+      <div class="modal modal-wide">
+        <h3>What <span id="agent-access-name"></span> can use</h3>
+        <p class="form-hint">Give an agent a credential that is already stored here instead of storing it again.</p>
+        <div id="agent-access-list"></div>
+        <div class="form-group">
+          <label for="agent-access-pick">Give access to</label>
+          <div style="display:flex;gap:8px;align-items:center">
+            <select id="agent-access-pick" style="flex:1"></select>
+            <button type="button" class="btn btn-sm" id="agent-access-add">Add</button>
+          </div>
+        </div>
+        <div class="modal-footer"><button type="button" class="btn btn-secondary" onclick="closeAgentAccess()">Close</button></div>
+      </div>
     </div>
 
     <!-- Fill Credential Request Modal -->
@@ -258,6 +348,6 @@ def credentials_page(request: Request, session: dict = Depends(require_auth)):
     </div>
     """
 
-    extra_js = '<script src="/static/js/credentials.js?v=20261025"></script>'
+    extra_js = '<script src="/static/js/credentials.js?v=20261105"></script>'
 
     return render_page("Credentials", body, "/credentials", extra_js, session=session)

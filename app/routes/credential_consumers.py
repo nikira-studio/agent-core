@@ -43,6 +43,12 @@ def list_grants(consumer_agent_id: str, owner=Depends(require_admin)):
     return success_response_with_headers({"grants": [dict(r) for r in rows[:1000]], "truncated": len(rows) > 1000}, NO_STORE)
 
 
+@router.get("/entries/{entry_id}/access")
+def entry_access(entry_id: str, owner=Depends(require_admin)):
+    """Who can use one credential: agents holding a grant, services bound to it, and who else can read its scope."""
+    return success_response_with_headers(service.entry_access(entry_id), NO_STORE)
+
+
 @router.delete("/grants/{grant_id}")
 def revoke_grant(grant_id: str, owner=Depends(require_admin)):
     return success_response_with_headers(service.revoke_grant(grant_id, owner["user_id"]), NO_STORE)

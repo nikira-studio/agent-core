@@ -122,3 +122,174 @@ document.addEventListener('click', async (event) => {
     if (j.ok) location.reload(); else showToast(j.error?.message || 'Failed', 'danger');
   }
 });
+
+
+// ── Who can use a credential ────────────────────────────────────────────
+// Everything from the server goes in through textContent, never innerHTML.
+let accessEntryId = null;
+let accessChanged = false;
+
+function accessEl(tag, text, cls) {
+  const el = document.createElement(tag);
+  if (text != null) el.textContent = text;
+  if (cls) el.className = cls;
+  return el;
+}
+
+async function openAccess(entryId) {
+  accessEntryId = entryId;
+  accessChanged = false;
+  document.getElementById('access-expires').value = '';
+  document.getElementById('access-write').checked = false;
+  await renderAccess();
+  openModal('access-modal');
+}
+
+function closeAccess() {
+  closeModal('access-modal');
+  if (accessChanged) location.reload();
+}
+
+async function renderAccess() {
+  const j = await apiFetch('/api/credential-consumers/entries/' + encodeURIComponent(accessEntryId) + '/access');
+  if (!j.ok) { showToast(j.error?.message || 'Could not load access', 'danger'); return; }
+  const d = j.data;
+  document.getElementById('access-name').textContent = d.entry.name;
+
+  const grants = document.getElementById('access-grants');
+  grants.replaceChildren();
+  if (!d.grants.length) grants.append(accessEl('p', 'No one yet. Add an agent so it can use this.', 'text-muted'));
+  d.grants.forEach(g => {
+    const row = accessEl('div', null, 'access-row');
+    row.append(accessEl('strong', g.display_name));
+    if (g.expires_at) row.append(accessEl('span', ' until ' + new Date(g.expires_at).toLocaleDateString(), 'text-muted'));
+    if (g.allow_write) row.append(accessEl('span', ' can write', 'badge badge-warning'));
+    const remove = accessEl('button', 'Remove', 'btn btn-sm btn-secondary');
+    remove.type = 'button';
+    remove.addEventListener('click', async () => {
+      const r = await apiFetch('/api/credential-consumers/grants/' + encodeURIComponent(g.id), { method: 'DELETE' });
+      if (r.ok) { accessChanged = true; showToast('Access removed', 'success'); renderAccess(); }
+      else showToast(r.error?.message || 'Could not remove access', 'danger');
+    });
+    row.append(remove);
+    grants.append(row);
+  });
+
+  const pick = document.getElementById('access-agent');
+  pick.replaceChildren();
+  d.candidates.forEach(a => { const o = accessEl('option', a.display_name); o.value = a.id; pick.append(o); });
+  document.getElementById('access-add').disabled = !d.candidates.length;
+  if (!d.candidates.length) { const o = accessEl('option', 'No agent can receive it yet'); o.value = ''; pick.append(o); }
+
+  const cannot = document.getElementById('access-cannot');
+  const list = document.getElementById('access-cannot-list');
+  list.replaceChildren();
+  cannot.style.display = d.cannot_receive.length ? '' : 'none';
+  document.getElementById('access-cannot-count').textContent = d.cannot_receive.length;
+  d.cannot_receive.forEach(a => {
+    const row = accessEl('div', null, 'access-row');
+    row.append(accessEl('span', a.display_name + ' needs the Service agent role or the Read credential values permission. '));
+    const link = accessEl('a', 'Change its role');
+    link.href = '/agents?edit=' + encodeURIComponent(a.id);
+    row.append(link);
+    list.append(row);
+  });
+
+  const services = document.getElementById('access-services');
+  services.replaceChildren();
+  if (!d.services.length) services.append(accessEl('p', 'None. A service uses a credential through a binding.', 'text-muted'));
+  d.services.forEach(sv => {
+    const row = accessEl('div', null, 'access-row');
+    const link = accessEl('a', sv.name + (sv.service ? ' (' + sv.service + ')' : ''));
+    link.href = '/connectors#bindings';
+    row.append(link);
+    if (!sv.enabled) row.append(accessEl('span', ' off', 'text-muted'));
+    services.append(row);
+  });
+
+  const readers = document.getElementById('access-scope-readers');
+  readers.textContent = d.scope_readers.length
+    ? 'Agents that can read ' + d.entry.scope + ' can already see its reference: ' + d.scope_readers.join(', ') + '.'
+    : 'No other agent can read ' + d.entry.scope + ', so only those above can use it.';
+}
+
+document.addEventListener('click', async (ev) => {
+  const open = ev.target.closest('[data-credential-access]');
+  if (open) { ev.preventDefault(); openAccess(open.dataset.credentialAccess); return; }
+  if (ev.target.id === 'access-add') {
+    const agent = document.getElementById('access-agent').value;
+    if (!agent) return;
+    const body = { consumer_agent_id: agent, entry_id: accessEntryId, allow_write: document.getElementById('access-write').checked };
+    const expires = endOfDayUtc(document.getElementById('access-expires').value);
+    if (expires) body.expires_at = expires;
+    const r = await apiFetch('/api/credential-consumers/grants', { method: 'POST', body: JSON.stringify(body) });
+    if (r.ok) { accessChanged = true; showToast('Access given', 'success'); renderAccess(); }
+    else showToast(r.error?.message || 'Could not give access', 'danger');
+  }
+});
+
+// ── One agent's credentials (opened from the Agents page) ─────────────────
+let agentAccessId = null;
+
+function credentialNames() {
+  const names = {};
+  document.querySelectorAll('tr[data-credential-id]').forEach(tr => {
+    names[tr.dataset.credentialId] = tr.querySelector('td').childNodes[0].textContent.trim();
+  });
+  return names;
+}
+
+async function openAgentAccess(agentId) {
+  agentAccessId = agentId;
+  document.getElementById('agent-access-name').textContent = agentId;
+  await renderAgentAccess();
+  openModal('agent-access-modal');
+}
+
+function closeAgentAccess() { closeModal('agent-access-modal'); }
+
+async function renderAgentAccess() {
+  const j = await apiFetch('/api/credential-consumers/grants?consumer_agent_id=' + encodeURIComponent(agentAccessId));
+  if (!j.ok) { showToast(j.error?.message || 'Could not load access', 'danger'); return; }
+  const names = credentialNames();
+  const active = j.data.grants.filter(g => !g.revoked_at && (!g.expires_at || new Date(g.expires_at) > new Date()));
+  const list = document.getElementById('agent-access-list');
+  list.replaceChildren();
+  if (!active.length) list.append(accessEl('p', 'Nothing yet. Add a credential below.', 'text-muted'));
+  active.forEach(g => {
+    const row = accessEl('div', null, 'access-row');
+    row.append(accessEl('strong', names[g.entry_id] || g.entry_id));
+    const remove = accessEl('button', 'Remove', 'btn btn-sm btn-secondary');
+    remove.type = 'button';
+    remove.addEventListener('click', async () => {
+      const r = await apiFetch('/api/credential-consumers/grants/' + encodeURIComponent(g.id), { method: 'DELETE' });
+      if (r.ok) { showToast('Access removed', 'success'); renderAgentAccess(); }
+      else showToast(r.error?.message || 'Could not remove access', 'danger');
+    });
+    row.append(remove);
+    list.append(row);
+  });
+  const held = new Set(active.map(g => g.entry_id));
+  const pick = document.getElementById('agent-access-pick');
+  pick.replaceChildren();
+  Object.entries(names).filter(([id]) => !held.has(id)).forEach(([id, name]) => {
+    const o = accessEl('option', name); o.value = id; pick.append(o);
+  });
+  document.getElementById('agent-access-add').disabled = !pick.options.length;
+}
+
+document.addEventListener('click', async (ev) => {
+  if (ev.target.id !== 'agent-access-add') return;
+  const entry = document.getElementById('agent-access-pick').value;
+  if (!entry) return;
+  const r = await apiFetch('/api/credential-consumers/grants', {
+    method: 'POST', body: JSON.stringify({ consumer_agent_id: agentAccessId, entry_id: entry, allow_write: false }),
+  });
+  if (r.ok) { showToast('Access given', 'success'); renderAgentAccess(); }
+  else showToast(r.error?.message || 'Could not give access', 'danger');
+});
+
+document.addEventListener('DOMContentLoaded', () => {
+  const agent = new URLSearchParams(location.search).get('agent');
+  if (agent) openAgentAccess(agent);
+});

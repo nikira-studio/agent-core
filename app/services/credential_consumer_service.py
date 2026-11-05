@@ -51,6 +51,68 @@ def create_grant(consumer_id, entry_id, owner_id, expires_at=None, allow_write=F
         return dict(conn.execute("SELECT * FROM credential_consumer_grants WHERE id=?", (grant_id,)).fetchone())
 
 
+def entry_access(entry_id):
+    """Who can use one credential, for the dashboard: grants, services, who else can read its scope.
+
+    Names and ids only. Nothing here touches the stored value.
+    """
+    from app.services import agent_service
+
+    with get_db() as conn:
+        entry = conn.execute("SELECT id, name, scope FROM credentials WHERE id=?", (entry_id,)).fetchone()
+        if not entry:
+            raise APIError("NOT_FOUND", "Credential not found", 404)
+        grant_rows = conn.execute(
+            "SELECT id, consumer_agent_id, expires_at, allow_write FROM credential_consumer_grants "
+            "WHERE entry_id=? AND revoked_at IS NULL ORDER BY created_at",
+            (entry_id,),
+        ).fetchall()
+        service_rows = conn.execute(
+            "SELECT b.id, b.name, b.scope, b.enabled, t.display_name AS service "
+            "FROM connector_bindings b LEFT JOIN connector_types t ON t.id = b.connector_type_id "
+            "WHERE b.credential_id=? ORDER BY b.name",
+            (entry_id,),
+        ).fetchall()
+    agents = [a for a in agent_service.list_agents() if a.get("is_active")]
+    names = {a["id"]: a.get("display_name") or a["id"] for a in agents}
+    held = set()
+    grants = []
+    for g in grant_rows:
+        if is_expired({"expires_at": g["expires_at"]}):
+            continue
+        held.add(g["consumer_agent_id"])
+        grants.append({
+            "id": g["id"], "agent_id": g["consumer_agent_id"],
+            "display_name": names.get(g["consumer_agent_id"], g["consumer_agent_id"]),
+            "expires_at": g["expires_at"], "allow_write": bool(g["allow_write"]),
+        })
+    candidates, cannot = [], []
+    scope_readers = []
+    for a in agents:
+        if a["id"] in held:
+            continue
+        caps = agent_service.parse_capabilities(a.get("capabilities_json"))
+        row = {"id": a["id"], "display_name": names[a["id"]]}
+        (candidates if "credentials_resolve" in caps else cannot).append(row)
+        try:
+            readable = json.loads(a.get("read_scopes_json") or "[]")
+        except (TypeError, ValueError):
+            readable = []
+        if entry["scope"] in readable and "credentials" in caps:
+            scope_readers.append(names[a["id"]])
+    return {
+        "entry": {"id": entry["id"], "name": entry["name"], "scope": entry["scope"]},
+        "grants": grants,
+        "services": [
+            {"id": r["id"], "name": r["name"], "service": r["service"], "scope": r["scope"], "enabled": bool(r["enabled"])}
+            for r in service_rows
+        ],
+        "candidates": candidates,
+        "cannot_receive": cannot,
+        "scope_readers": scope_readers,
+    }
+
+
 def revoke_grant(grant_id, owner_id):
     with get_db() as conn:
         conn.execute("BEGIN IMMEDIATE")
