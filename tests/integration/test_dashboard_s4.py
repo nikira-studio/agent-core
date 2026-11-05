@@ -38,7 +38,7 @@ def test_integrations_page_is_current_workflow(admin_client):
     assert r.status_code == 200
     html = r.text
     assert "<h1>Connect</h1>" in html
-    assert f"Generate setup instructions, environment variables, MCP config, and AI-facing prompts for connecting tools to {APP_NAME}." in html
+    assert "Generate setup instructions for connecting an AI tool" in html
     assert 'action="/integrations"' in html
     assert 'id="user_id"' in html
     assert 'id="workspace_id"' in html

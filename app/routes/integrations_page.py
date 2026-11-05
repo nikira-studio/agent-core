@@ -799,21 +799,22 @@ def integrations_page(
     body = f"""
     <div class="page-header setup-page-header">
       <h1>Connect</h1>
-      <p class="subtitle">Generate setup instructions, environment variables, MCP config, and AI-facing prompts for connecting tools to {APP_NAME}.</p>
+      <p class="subtitle">Generate setup instructions for connecting an AI tool such as Claude Code, Cursor or Codex to {APP_NAME} as one of your agents. Choose who is connecting, then copy the result into the tool.</p>
       <div class="text-muted" style="font-size:0.86rem;margin-top:8px">
-        Current tool preset: <strong>{escape_html(tool_label)}</strong>. The main presets are Claude Code, Codex, Cursor, Windsurf, Antigravity, and Generic MCP/REST. The generated outputs in this page are the canonical setup files and prompts.
+        Current tool preset: <strong>{escape_html(tool_label)}</strong>.
       </div>
     </div>
 
     <form method="get" action="{page_path}" class="setup-form" onsubmit="saveSetupScrollPosition()">
       <div class="form-section">
-        <h2>Choose Context</h2>
+        <h2>Who is connecting?</h2>
         <div class="form-row">
           <div class="form-group">
             <label for="user_id">User</label>
             <select id="user_id" name="user_id" onchange="this.form.submit()">
               {user_options}
             </select>
+            <p class="form-hint">Whose personal memory the tool can read.</p>
           </div>
           <div class="form-group">
             <label for="workspace_id">Workspace <span class="text-muted">(optional)</span></label>
@@ -821,6 +822,7 @@ def integrations_page(
               <option value="">-- Optional --</option>
               {project_options}
             </select>
+            <p class="form-hint">The shared space the tool saves team memory in. Without one, the tool is told to ask.</p>
           </div>
         </div>
         <div class="form-row">
@@ -830,7 +832,11 @@ def integrations_page(
               <option value="">-- Select agent --</option>
               {agent_options}
             </select>
-            <p class="form-hint">Identifies which agent connects. Changing this selection only re-renders the preview below — nothing is issued until you press the amber <strong>Generate connection</strong> button, which mints a fresh API key for the selected agent and invalidates the previous one. That button appears only for the outputs that embed a key (MCP Config, Environment Variables, Assistants). CLAUDE.md, AGENTS.md, Instructions and the prompts are repository-level guidance — identical for every agent, and safe to regenerate at any time.</p>
+            <p class="form-hint">The agent identity the tool signs in as. It decides what the tool may read and write.</p>
+            <details class="access-details">
+              <summary>What does Generate connection do?</summary>
+              <p class="form-hint">Changing this selection only re-renders the preview below — nothing is issued until you press the amber <strong>Generate connection</strong> button, which mints a fresh API key for the selected agent and invalidates the previous one. That button appears only for the outputs that embed a key (MCP Config, Environment Variables, Assistants). CLAUDE.md, AGENTS.md, Instructions and the prompts are repository-level guidance — identical for every agent, and safe to regenerate at any time.</p>
+            </details>
           </div>
         </div>
       </div>

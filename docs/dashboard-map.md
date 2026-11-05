@@ -112,7 +112,7 @@ Built: the review queue is titled **Suggestions waiting for you** and sits above
 
 ## Integrations
 
-Keep as the page (Connect) that generates a connection, but reach it from Agents through the **Connect** button (it opens with that agent chosen) and from the end of "Create Agent". The three selectors (user, workspace, agent) are explained: whose memory the tool reads, which shared space, and which agent identity it signs in as.
+Built (the page is called Connect): reached from the **Connect** button on each agent's row and from the end of Create Agent. The selectors sit under **Who is connecting?**, each with a line: the user is whose personal memory the tool can read, the workspace is the shared space it saves team memory in, and the agent is the identity it signs in as. The note about what Generate connection does (it issues a fresh key and invalidates the old one) is folded under the agent selector.
 
 ## Pages with no structural change
 
@@ -143,5 +143,6 @@ The first-five-minutes walk-through still sends an admin through Credentials, Se
 | Settings split into four tabs; proposal caps out of the UI; activity pruning and trusted devices moved in | Built, in review. The webhook retry policy has moved to the Webhooks page. |
 | Services: Add a service, Advanced fields, collapsed runs, empty states | Built and deployed |
 | Webhooks: Receiving and Sending, retry policy moved from Settings | Built and deployed |
-| Memory: Suggestions waiting for you, grouped detail, Advanced | Built, in review |
-| Everything else above | Approved as the plan; branches not yet started |
+| Memory: Suggestions waiting for you, grouped detail, Advanced | Built and deployed |
+| Connect: Who is connecting?, a line for each selector | Built, in review |
+| Still to do | The summary for the owner: section map, what was removed, merged or moved, and one line of help for every control. The Credentials page stays as it is until the owner has used it from a phone. |
