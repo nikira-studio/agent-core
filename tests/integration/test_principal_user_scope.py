@@ -245,3 +245,21 @@ def test_upgrade_keeps_what_agents_could_do_and_says_which_ones(test_client):
     # New agents start with it off.
     agent_service.create_agent("fresh", "Fresh", "person", capabilities=["connectors_execute"])
     assert agent_service.get_agent_by_id("fresh")["inherit_user_bindings"] == 0
+
+
+def test_only_an_admin_or_the_person_themselves_can_let_an_agent_run_that_persons_services(test_client):
+    from tests.conftest import csrf_headers
+
+    auth_service.create_user("boss", "boss@test.local", "testpassword123", "Boss", "user")
+    auth_service.create_user("helper", "helper@test.local", "testpassword123", "Helper", "user")
+    agent_service.create_agent("bosses-agent", "Boss Agent", "helper", default_user_id="boss", capabilities=["connectors_execute"])
+    agent_service.create_agent("own-agent", "Own Agent", "helper", default_user_id="helper", capabilities=["connectors_execute"])
+    test_client.cookies.clear()
+    test_client.cookies.set("session_token", auth_service.create_session("helper")["session_id"])
+    # The helper manages both agents but acts for the boss on one of them.
+    refused = test_client.put("/api/agents/bosses-agent", headers=csrf_headers(test_client), json={"inherit_user_bindings": True})
+    assert refused.status_code == 403
+    assert agent_service.get_agent_by_id("bosses-agent")["inherit_user_bindings"] == 0
+    allowed = test_client.put("/api/agents/own-agent", headers=csrf_headers(test_client), json={"inherit_user_bindings": True})
+    assert allowed.status_code == 200, allowed.text
+    assert agent_service.get_agent_by_id("own-agent")["inherit_user_bindings"] == 1

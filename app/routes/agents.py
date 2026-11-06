@@ -41,6 +41,11 @@ class UpdateAgentRequest(BaseModel):
     inherit_user_bindings: Optional[bool] = None
 
 
+def _may_run_persons_services(session: dict, person_id: Optional[str]) -> bool:
+    """Letting an agent run a person's own services is that person's call, or an admin's."""
+    return _is_admin(session) or session["user_id"] == person_id
+
+
 def _is_admin(session: dict) -> bool:
     return session.get("role") == "admin"
 
@@ -256,6 +261,10 @@ def update_agent(
 
     if not _can_manage_agent(agent, session):
         return error_response("FORBIDDEN", "Access denied", 403)
+    if body.inherit_user_bindings and not _may_run_persons_services(session, agent.get("default_user_id") or agent.get("owner_user_id")):
+        return error_response(
+            "FORBIDDEN", "Only an admin, or the person the agent acts for, can let it run that person's own services", 403
+        )
 
     owner_user_id = agent.get("owner_user_id") or session["user_id"]
     scope_error = _validate_agent_scopes(body.read_scopes, session, agent_id=agent_id, owner_user_id=owner_user_id)
