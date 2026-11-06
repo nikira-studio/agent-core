@@ -726,7 +726,7 @@ def integrations_page(
             checks_html += "<p class='text-muted' style='font-size:0.8rem;margin-top:8px'>Warnings mean something is missing. Review access on the Agents page, or generate the output anyway.</p>"
         else:
             checks_html = (
-                "<div class='check-ok'><span class='check-icon'>&#10003;</span>Everything this agent needs is in place</div>"
+                "<div class='access-checks'><div class='check-ok'><span class='check-icon'>&#10003;</span>Everything this agent needs is in place</div></div>"
                 "<details class='access-details' style='margin-top:8px'><summary>Show the checks</summary>"
                 + checks_html
                 + "</details>"
