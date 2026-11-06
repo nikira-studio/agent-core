@@ -332,7 +332,7 @@ def activity_page(request: Request, session: dict = Depends(require_auth)):
       {activity_pagination_html}
     </div>
 
-    <details class="card" id="workspace-sync" {"open" if execution_rows else ""}>
+    <details class="card card-fold" id="workspace-sync" {"open" if execution_rows else ""}>
       <summary style="cursor:pointer"><h3>Workspace synchronization</h3></summary>
       <p class="text-muted" style="font-size:0.85rem">Which agent sessions are following each workspace's changes, and how far behind they are.</p>
       <div style="overflow-x:auto"><table><thead><tr><th>Agent</th><th>Workspace</th><th>Status</th><th>Last Seen</th><th>Acknowledged</th><th>Unacknowledged</th></tr></thead>

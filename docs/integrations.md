@@ -205,6 +205,10 @@ Use this when the service does not publish an OpenAPI spec and you just need to 
 
 The service stores the base URL. Binding `config_json` is optional and only needed when you want to override the target per binding or set a custom `test_url`.
 
+#### Asking a person first
+
+For a service action you want a person to approve each time (closing a task, sending something), open **Services → View Actions** and tick **Ask a person first**, for every caller or for named agents. A run then waits on the **Approvals** page until a signed-in person approves or rejects it, and the agent is told to wait and check back with `approval_get`. Nothing is held until you turn it on. See [docs/design/approval-gate.md](design/approval-gate.md).
+
 #### A service that signs in first
 
 Some self-hosted services (network controllers, admin panels) have no API key. You sign in with a username and password and the service answers with a session cookie. For these, put the sign-in in the binding's **Advanced → Extra settings (JSON)**. The credential stays a single stored secret; Agent Core signs in, keeps the cookie in its encrypted session cache, sends it on later calls, and signs in again by itself when the service drops it. The cookie never appears in a response, the execution log or the audit trail.

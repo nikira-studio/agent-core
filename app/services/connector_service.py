@@ -1,3 +1,4 @@
+import contextlib
 import json
 import hashlib
 import logging
@@ -782,11 +783,21 @@ def generate_connector_type_tools(
     offset: int = 0,
 ) -> dict:
     def enrich(result: dict) -> dict:
+        from app.services import action_gate_service
+
+        gates = action_gate_service.list_gates(connector_type["id"])
         result = dict(result)
-        result["tools"] = [
-            _with_capability_policy(connector_type, tool)
-            for tool in result.get("tools", [])
-        ]
+        tools = []
+        for tool in result.get("tools", []):
+            tool = _with_capability_policy(connector_type, tool)
+            who = gates.get(tool.get("action") or tool.get("name"))
+            # A person approves each run before it happens; who it holds is
+            # "all" or a list of agents. Separate from the advisory
+            # approval_required field in the capability policy.
+            tool["needs_approval"] = who is not None
+            tool["approval_holds"] = who
+            tools.append(tool)
+        result["tools"] = tools
         return result
 
     if connector_type.get("provider_type") == "mcp":
@@ -1443,6 +1454,38 @@ def execute_binding_action(
     return result
 
 
+# Set only while an approved request runs, so the run is not held a second time.
+_gate_cleared: ContextVar = ContextVar("connector_gate_cleared", default=None)
+
+
+@contextlib.contextmanager
+def gate_cleared(approval_id: str):
+    token = _gate_cleared.set(approval_id)
+    try:
+        yield
+    finally:
+        _gate_cleared.reset(token)
+
+
+def _held_for_approval(binding: Optional[dict], action: str, params: Optional[dict], authority) -> Optional[dict]:
+    """The notice to return instead of running, when a person has to approve this action first."""
+    if _gate_cleared.get() or not binding:
+        return None
+    from app.security.effective_authority import SystemAuthority
+    from app.services import action_gate_service, connector_approval_service
+
+    if isinstance(authority, SystemAuthority):
+        actor_type, actor_id = "system", "system"
+    elif getattr(authority.context, "browser_session", False):
+        return None  # a person acting in their own dashboard is the approver
+    else:
+        actor_type, actor_id = authority.actor_type, authority.actor_id
+    connector_type = get_connector_type(binding["connector_type_id"])
+    if not connector_type or action_gate_service.gate_for(connector_type["id"], action, actor_type, actor_id) is None:
+        return None
+    return connector_approval_service.hold(binding, connector_type, action, params, authority)
+
+
 def execute_authorized_binding_action_with_logging(
     binding_id: str, action: str, params: Optional[dict], authority
 ) -> dict:
@@ -1452,6 +1495,9 @@ def execute_authorized_binding_action_with_logging(
     from app.security.effective_authority import SystemAuthority
 
     if isinstance(authority, SystemAuthority):
+        held = _held_for_approval(get_binding(binding_id), action, params, authority)
+        if held is not None:
+            return held
         token = _execution_authority.set(authority)
         try:
             return execute_binding_action_with_logging(binding_id, action, params)
@@ -1465,6 +1511,9 @@ def execute_authorized_binding_action_with_logging(
         from app.security.exceptions import APIError
 
         raise APIError("SCOPE_DENIED", "Access denied to this binding action", 403)
+    held = _held_for_approval(binding_for_auth, action, params, authority)
+    if held is not None:
+        return held
     token = _execution_authority.set(authority)
     try:
         return execute_binding_action_with_logging(binding_id, action, params)

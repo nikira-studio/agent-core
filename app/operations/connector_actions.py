@@ -64,6 +64,22 @@ def run_connector_action(
     result = connector_service.execute_authorized_binding_action_with_logging(
         binding_id, action, params, authority
     )
+    if result.get("pending_approval"):
+        audit_service.write_event(
+            actor_type=authority.actor_type,
+            actor_id=authority.actor_id,
+            action="connector_action_held",
+            resource_type="connector_binding",
+            resource_id=binding_id,
+            result="success",
+            details={
+                "connector_type_id": binding["connector_type_id"],
+                "action": action,
+                "approval_id": result.get("approval_id"),
+                **authority.safe_attribution(),
+            },
+        )
+        return ConnectorActionOutcome(binding=binding, result=result)
     audit_service.write_event(
         actor_type=authority.actor_type,
         actor_id=authority.actor_id,

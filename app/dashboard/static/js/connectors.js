@@ -867,7 +867,7 @@ function renderActions() {
         const policy = t.capability_policy || {};
         const policyBits = [];
         if (policy.risk_level) policyBits.push('Risk: ' + policy.risk_level);
-        if (policy.approval_required === true) policyBits.push('Approval required');
+        if (policy.approval_required === true) policyBits.push('Its author suggests asking a person first');
         if (policy.idempotent === true) policyBits.push('Idempotent');
         if (Array.isArray(policy.tags) && policy.tags.length) policyBits.push('Tags: ' + policy.tags.join(', '));
         return '<tr>' +
@@ -883,6 +883,7 @@ function renderActions() {
             (t.description ? '<div style="font-size:0.85em;color:var(--muted);margin-top:4px">' + escapeHtml(t.description) + '</div>' : '') +
             (policyBits.length ? '<div style="font-size:0.8em;color:var(--muted);margin-top:4px">' + escapeHtml(policyBits.join(' · ')) + '</div>' : '') +
             (!t.enabled ? '<div class="text-muted" style="font-size:0.8em;margin-top:4px">Disabled</div>' : '') +
+            gateCell(t) +
           '</td>' +
         '</tr>';
       }).join('') + '</tbody>' +
@@ -892,6 +893,69 @@ function renderActions() {
 }
 
 function filterActions() {
+  renderActions();
+}
+
+// "Ask a person first": a gate belongs to the service and the action, not to a binding.
+// A change is saved at once (and recorded with who and when), not with the Save button.
+function gateModal() { return document.getElementById('view-actions-modal'); }
+
+function gateCell(t) {
+  const modal = gateModal();
+  const admin = modal && modal.dataset.admin === '1';
+  const on = !!t.needs_approval;
+  if (!admin) return on ? '<div style="margin-top:6px"><span class="badge badge-stale">asks a person first</span></div>' : '';
+  const enc = encodeURIComponent(t.action);
+  const some = Array.isArray(t.approval_holds);
+  let html = '<div class="gate-cell" data-gate-for="' + enc + '" style="margin-top:8px;padding-top:6px;border-top:1px solid var(--border)">' +
+    '<label class="checkbox-label" style="margin:0"><input type="checkbox" data-gate-on ' + (on ? 'checked ' : '') +
+    'onchange="changeGate(this)"> Ask a person first</label>';
+  if (on) {
+    html += '<div style="margin-top:4px"><select data-gate-who onchange="changeGate(this)">' +
+      '<option value="all"' + (some ? '' : ' selected') + '>Hold every caller</option>' +
+      '<option value="some"' + (some ? ' selected' : '') + '>Hold only these agents</option></select></div>';
+    if (some) {
+      let agents = [];
+      try { agents = JSON.parse(modal.dataset.agents || '[]'); } catch (e) {}
+      html += '<div style="margin-top:4px;display:flex;flex-wrap:wrap;gap:4px 12px">' + agents.map(function(a) {
+        return '<label class="checkbox-label" style="margin:0"><input type="checkbox" data-gate-agent="' + escapeHtml(a.id) + '" ' +
+          (t.approval_holds.indexOf(a.id) >= 0 ? 'checked ' : '') + 'onchange="changeGate(this)"> ' + escapeHtml(a.name) + '</label>';
+      }).join('') + '</div>';
+    }
+    html += '<div class="form-hint" style="margin-top:4px">A run waits on the Approvals page until you approve it. The agent is told to wait.</div>';
+  }
+  return html + '</div>';
+}
+
+async function changeGate(el) {
+  const cell = el.closest('.gate-cell');
+  const action = decodeURIComponent(cell.dataset.gateFor);
+  const enabled = cell.querySelector('[data-gate-on]').checked;
+  const who = cell.querySelector('[data-gate-who]');
+  let actors = 'all';
+  if (enabled && who && who.value === 'some') {
+    actors = Array.prototype.map.call(cell.querySelectorAll('[data-gate-agent]:checked'), function(i) { return i.dataset.gateAgent; });
+    if (!actors.length && el.hasAttribute('data-gate-agent')) {
+      showToast('Pick at least one agent, or hold every caller', 'warning');
+      renderActions();
+      return;
+    }
+    if (!actors.length) actors = [];
+  }
+  if (Array.isArray(actors) && !actors.length) {
+    // "Only these agents" with none picked yet: show the list, save nothing.
+    const item = actionsState.all.find(function(t) { return t.action === action; });
+    if (item) { item.approval_holds = []; item.needs_approval = true; }
+    renderActions();
+    return;
+  }
+  const j = await apiFetch('/api/connector-types/' + actionsState.ctId + '/gates/' + encodeURIComponent(action), {
+    method: 'PUT', body: JSON.stringify({ enabled: enabled, actors: actors }),
+  });
+  if (!j.ok) { showToast(j.error?.message || 'Could not change this', 'danger'); await loadActionsBatch(actionsState.ctId); return; }
+  const item = actionsState.all.find(function(t) { return t.action === action; });
+  if (item) { item.needs_approval = enabled; item.approval_holds = enabled ? actors : null; }
+  showToast(enabled ? 'This action now waits for a person' : 'This action runs straight away', 'success');
   renderActions();
 }
 

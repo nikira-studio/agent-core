@@ -44,6 +44,7 @@ Session tokens are signed with their own random key, `session.key` in the data d
 | `AGENT_CORE_CORS_ORIGINS` | *(empty)* | Comma-separated list of allowed browser origins. Only needed if a separate web frontend needs to make authenticated requests. Example: `http://localhost:5173` |
 | `AGENT_CORE_ALLOWED_IPS` | *(empty)* | Comma-separated IPs or CIDR ranges. When set, requests from any IP not on this list are rejected with `403`. Useful if Agent Core is reachable on a LAN and you want to limit who can connect |
 | `AGENT_CORE_BLOCK_INTERNAL_HOSTS` | `false` | Set to `true` to block service bindings/imports from reaching private, loopback, or link-local hosts. Use this if you want to disable local probing by default |
+| `AGENT_CORE_CONNECTOR_APPROVAL_EXPIRY_HOURS` | `24` | How long a service action that waits for a person's approval stays open before it expires (1 to 168) |
 | `AGENT_CORE_ALLOWED_INTERNAL_HOSTS` | *(empty)* | Comma-separated hostnames that are always allowed even when `AGENT_CORE_BLOCK_INTERNAL_HOSTS=true`. Useful for operator-managed internal services such as `firecrawl` or `searxng` |
 
 ---

@@ -19,6 +19,10 @@ class RequestContext:
     # A coarse, standing ceiling over operation classes. Scopes still decide
     # which records a capability can reach.
     capabilities: Optional[frozenset[str]] = None
+    # True only for a person acting in their own browser (the dashboard cookie
+    # session). A service action that waits for approval does not hold them;
+    # it holds every key, token and script.
+    browser_session: bool = False
 
 
 def build_user_context(session: dict) -> RequestContext:

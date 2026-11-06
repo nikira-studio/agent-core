@@ -166,7 +166,7 @@ def test_every_operation_that_widens_an_agent_needs_a_dashboard_signin():
 
     widening = {n for n in admin_registry.names() if admin_registry.get(n).needs_dashboard_signin}
     assert widening == {"agent.create", "agent.update", "credential_grant.create",
-                        "binding.create", "binding.update", "connector_type.actions"}
+                        "binding.create", "binding.update", "connector_type.actions", "connector_gate.set"}
 
 
 def test_trust_slides_with_use_up_to_the_cap(test_client, admin_token, monkeypatch):

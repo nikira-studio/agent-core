@@ -235,6 +235,79 @@ def _decide_card(approval_id: str) -> str:
     )
 
 
+_SECRET_KEYS = ("key", "token", "secret", "password", "passwd", "authorization", "credential")
+_SECRET_VALUE_PREFIXES = ("ac_sk_", "ac_op_", "AC_SECRET_", "sk-", "ghp_", "github_pat_", "xox", "Bearer ", "Basic ")
+
+
+def _looks_secret(key: str, value: Any) -> bool:
+    if any(word in str(key).lower() for word in _SECRET_KEYS):
+        return True
+    return isinstance(value, str) and value.startswith(_SECRET_VALUE_PREFIXES)
+
+
+def _request_rows(params: Any, prefix: str = "") -> str:
+    """The request as a table of what will be sent, with anything credential-shaped hidden."""
+    if isinstance(params, dict) and params:
+        return "".join(_request_rows(v, f"{prefix}{k}." if isinstance(v, dict) else f"{prefix}{k}") if isinstance(v, dict)
+                       else _param_row(f"{prefix}{k}", v) for k, v in params.items())
+    return _param_row(prefix.rstrip(".") or "(nothing)", params) if prefix or params else ""
+
+
+def _param_row(key: str, value: Any) -> str:
+    shown = REDACTED if _looks_secret(key.split(".")[-1], value) else _param_text(value)
+    return "<tr><td><code>" + escape_html(key) + "</code></td><td style='overflow-wrap:anywhere'>" + escape_html(shown) + "</td></tr>"
+
+
+def _connector_request_cards(row: dict, view: dict) -> str:
+    """A held service action in plain words: who wants to do what, to which service, and exactly what it will send."""
+    from app.services import connector_approval_service, connector_service
+
+    payload = connector_approval_service.payload_of(row)
+    binding = connector_service.get_binding(payload["binding_id"])
+    connector_type = connector_service.get_connector_type(binding["connector_type_id"]) if binding else None
+    sentence = escape_html(connector_approval_service.plain_sentence(row, payload, binding, connector_type))
+    status = view.get("status")
+    if status == "pending":
+        wait = "It waits until " + local_dt(view.get("expires_at")) + ", then it expires."
+    else:
+        wait = ""
+    request_table = _request_rows(payload["params"]) or "<tr><td colspan='2' class='text-muted'>No details are sent.</td></tr>"
+    return (
+        "<div class='card approval-sentence'>"
+        "<p style='font-size:1.05rem;margin:0 0 8px'>" + sentence + "</p>"
+        "<p class='text-muted' style='margin:0'>" + wait + "</p>"
+        "</div>"
+        "<div class='card'>"
+        "<h3>What it will send</h3>"
+        "<p class='text-muted' style='font-size:0.85rem'>Exactly this, once, if you approve. Anything that looks like a key or password is hidden.</p>"
+        "<div class='table-scroll' style='overflow-x:auto'><table><tbody>"
+        "<tr><td style='width:9rem'>Service</td><td>" + escape_html((connector_type or {}).get("display_name") or "") + "</td></tr>"
+        "<tr><td>Action</td><td><code>" + escape_html(payload["action"]) + "</code></td></tr>"
+        "<tr><td>Binding</td><td>" + escape_html((binding or {}).get("name") or payload["binding_id"]) + "</td></tr>"
+        "<tr><td>Workspace</td><td>" + escape_html(row["scope"].replace("workspace:", "")) + "</td></tr>"
+        + request_table +
+        "</tbody></table></div></div>"
+    )
+
+
+def _connector_decide_card(approval_id: str) -> str:
+    safe_id = escape_html(approval_id)
+    return (
+        "<div class='card'>"
+        "<h3>Your decision</h3>"
+        "<p class='text-muted' style='font-size:0.85rem'>Approving runs this one request now, exactly as shown. "
+        "Rejecting runs nothing, and the agent is told so.</p>"
+        "<div class='form-group'>"
+        "<label for='approval-note'>Note for the agent (optional)</label>"
+        "<textarea id='approval-note' rows='2' placeholder='Why you decided this way'></textarea>"
+        "</div>"
+        "<div class='actions-cell approval-buttons'>"
+        "<button type='button' class='btn' data-approval-approve='" + safe_id + "'>Approve and run</button>"
+        "<button type='button' class='btn btn-secondary' data-approval-reject='" + safe_id + "'>Reject</button>"
+        "</div></div>"
+    )
+
+
 def _not_found_page(session: dict):
     return render_page(
         "Approval Not Found",
@@ -311,12 +384,18 @@ def approval_detail_page(
 
     view = approval_service.public_view(row, include_operations=True)
     is_admin = session.get("role") == "admin"
-    can_decide = is_admin and view.get("status") == "pending"
+    is_run = row.get("kind") == "connector_run"
+    if is_run:
+        from app.services import connector_approval_service
 
-    operation_cards = "".join(
-        _operation_card(index, operation, can_decide)
-        for index, operation in enumerate(view.get("operation_details") or [])
-    )
+        can_decide = view.get("status") == "pending" and connector_approval_service.can_decide(session, row["scope"])
+        operation_cards = _connector_request_cards(row, view)
+    else:
+        can_decide = is_admin and view.get("status") == "pending"
+        operation_cards = "".join(
+            _operation_card(index, operation, can_decide)
+            for index, operation in enumerate(view.get("operation_details") or [])
+        )
 
     title = escape_html(view.get("title") or "Approval")
     scope = escape_html(view.get("scope") or "")
@@ -326,22 +405,27 @@ def approval_detail_page(
     created = local_dt(view.get("created_at"))
     expires = local_dt(view.get("expires_at"))
 
-    decide_card = _decide_card(approval_id) if can_decide else ""
+    decide_card = (_connector_decide_card(approval_id) if is_run else _decide_card(approval_id)) if can_decide else ""
     decision_card = "" if can_decide else _decision_card(view)
 
-    body = """
-<div class="page-header"><h1>""" + title + """</h1></div>
+    meta_card = """
 <div class="card">
   <table><tbody>
     <tr><td style="width:180px">Status</td><td>""" + status_badge + """</td></tr>
-    <tr><td>Scope</td><td><code>""" + scope + """</code></td></tr>
-    <tr><td>Proposed by</td><td>""" + proposed_by + """</td></tr>
+    <tr><td>Workspace</td><td><code>""" + scope + """</code></td></tr>
+    <tr><td>Asked by</td><td>""" + proposed_by + """</td></tr>
     <tr><td>Created</td><td>""" + created + """</td></tr>
     <tr><td>Expires</td><td>""" + expires + """</td></tr>
     <tr><td>Note</td><td style="white-space:pre-wrap">""" + note + """</td></tr>
   </tbody></table>
 </div>
-""" + operation_cards + decide_card + decision_card
+"""
+    header = '<div class="page-header"><h1>' + title + '</h1></div>\n'
+    if is_run:
+        # The plain sentence first, then what it sends, then the decision; the bookkeeping last.
+        body = header + operation_cards + decide_card + decision_card + meta_card
+    else:
+        body = header + meta_card + operation_cards + decide_card + decision_card
 
     js = """
 <script>

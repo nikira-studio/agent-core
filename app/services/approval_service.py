@@ -34,7 +34,7 @@ STUCK_AFTER_MINUTES = 10
 
 PUBLIC_FIELDS = (
     "id", "status", "title", "note", "scope", "proposed_by", "created_at", "expires_at",
-    "decided_by", "decided_at", "decision_note", "error",
+    "decided_by", "decided_at", "decision_note", "error", "kind",
 )
 
 
@@ -126,12 +126,12 @@ def propose(*, agent_id: str, scope: str, title: str, operations: list[dict],
     return _public(record)
 
 
-def _announce(record: dict, operations: list[dict]) -> None:
-    from app.services import audit_service
+def _announce(record: dict, operations: list[dict], actor_type: str = "agent") -> None:
+    from app.services import audit_service, webhook_service
     from app.services.event_stream_service import event_hub
 
     audit_service.write_event(
-        actor_type="agent", actor_id=record["proposed_by"], action="approval_requested",
+        actor_type=actor_type, actor_id=record["proposed_by"], action="approval_requested",
         resource_type="approval", resource_id=record["id"], result="success",
         details={"title": record["title"], "operations": [o["name"] for o in operations]},
     )
@@ -139,6 +139,12 @@ def _announce(record: dict, operations: list[dict]) -> None:
         "approval_id": record["id"], "title": record["title"], "scope": record["scope"],
         "proposed_by": record["proposed_by"], "expires_at": record["expires_at"],
         "operations": [o["name"] for o in operations],
+    })
+    # Ids only: whatever carries the link to a person fetches the page itself.
+    webhook_service.dispatch_event("approval_requested", {
+        "approval_id": record["id"], "kind": record.get("kind") or "admin", "scope": record["scope"],
+        "proposed_by": record["proposed_by"], "expires_at": record["expires_at"],
+        "path": f"/approvals/{record['id']}",
     })
 
 
@@ -195,6 +201,11 @@ def decide(approval_id: str, *, session: dict, approve: bool, note: Optional[str
     """Approve (and run) or reject a pending approval as the person in `session`."""
     from app.services import audit_service
 
+    existing = get(approval_id)
+    if existing is not None and existing.get("kind") == "connector_run":
+        from app.services import connector_approval_service
+
+        return connector_approval_service.decide(existing, session=session, approve=approve, note=note)
     if session.get("role") != "admin":
         raise APIError("FORBIDDEN", "Only an admin can decide admin approvals", 403)
     note = (note or "").strip()[:2000] or None

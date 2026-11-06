@@ -66,7 +66,13 @@ def view_for(ctx: EffectiveAuthority, approval_id: str) -> dict:
     row = approval_service.get(approval_id)
     if row is None or not (row["proposed_by"] == ctx.agent_id or _enforcer(ctx).can_read(row["scope"])):
         raise APIError("NOT_FOUND", "No such approval", 404)
-    return approval_service.public_view(row)
+    view = approval_service.public_view(row)
+    from app.services import connector_approval_service
+
+    message = connector_approval_service.terminal_message(row)
+    if message:
+        view["message"] = message
+    return view
 
 
 @router.post("")

@@ -21,6 +21,8 @@ class Settings(BaseSettings):
     TRUSTED_DEVICES_ENABLED: bool = False
     # A trusted device also expires after this many days without use.
     TRUSTED_DEVICE_DAYS: int = 14
+    # How long a held service action waits for a person before it expires.
+    CONNECTOR_APPROVAL_EXPIRY_HOURS: int = 24
     # ...and lapses sooner if it goes unused this long. Each use restarts the
     # idle clock, up to the TRUSTED_DEVICE_DAYS cap, so a phone in daily use
     # stays trusted and a lost one stops working within this many days.

@@ -491,7 +491,7 @@ def test_activity_page_puts_tasks_first_and_synchronization_last(authenticated_c
     assert "Advanced: how many tasks are tied to an agent session" in html
     assert html.index("<h3>Tasks</h3>") < html.index("Advanced: how many tasks")
     # Empty synchronization is closed; assigning a task is still on this page.
-    assert '<details class="card" id="workspace-sync" >' in html
+    assert '<details class="card card-fold" id="workspace-sync" >' in html
     assert "+ Assign a task" in html
 
 

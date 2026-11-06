@@ -77,6 +77,8 @@ Agent API keys start with `ac_sk_`. Broker credentials start with `ac_broker_`. 
 | `GET` | `/api/approvals/{id}` | Session or key | Status, decision note and result of one approval |
 | `POST` | `/api/approvals/{id}/decide` | Browser session or trusted device | Approve (runs the bundle as you) or reject; cookie only, needs `X-CSRF-Token` |
 | `POST` | `/api/approvals/trust-device` | Browser session | Make this browser a trusted device for approvals |
+| `GET` | `/api/connector-types/{id}/gates` | Session or key | Which actions of a service wait for a person, and whom they hold |
+| `PUT` | `/api/connector-types/{id}/gates/{action}` | Browser session, admin | Turn "ask a person first" on or off for one action (`{"enabled": true, "actors": "all" or ["agent-id"]}`); refuses any `Authorization` header, so no key, operator token or bearer session can change a gate |
 | `GET` | `/api/approvals/trusted-devices` | Browser session | List your trusted devices |
 | `DELETE` | `/api/approvals/trusted-devices/{id}` | Browser session | Revoke a trusted device |
 | `POST` | `/api/auth/otp/enroll` | Session + password | Start TOTP enrollment and receive QR data. Reset also requires current OTP. |
@@ -549,6 +551,10 @@ Create:
 ```
 
 In that example, the credential provides the secret token, while `config_json` tells Agent Core which repo context and auth scheme to apply when it turns the binding into a real request. For MCP bindings, `config_json` can also carry per-binding timeout and header overrides used during tool execution.
+
+#### Actions that wait for a person
+
+A person can set an action to **ask a person first** (Services → View Actions). Running it then does not run it: both `connectors_run` and `POST /api/connector-bindings/{id}/run` answer with `{"success": false, "pending_approval": true, "approval_id": "...", "status": "pending", "expires_at": "...", "path": "/approvals/<id>"}`. A caller that sees this should wait, not retry. The request is shown on the Approvals page; a signed-in person with write access to the binding's workspace approves or rejects it there. Read the outcome with `approval_get` (or `GET /api/approvals/{id}`): `status` is `pending`, `done`, `failed`, `rejected` or `expired`, with `decision_note`, `error` and, when it ran, `result`. A rejected, expired or failed request carries a `message` telling the agent to stop and report. Every key, operator token and script is held; the one exception is a person pressing Run in their own dashboard. See [docs/design/approval-gate.md](design/approval-gate.md).
 
 The dashboard's `/connectors` page provides a UI for all of these operations.
 

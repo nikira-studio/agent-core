@@ -6,7 +6,7 @@ import urllib.parse
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, ConfigDict, Field
-from typing import Optional
+from typing import Optional, Union
 
 from app.services import (
     connector_service,
@@ -21,6 +21,7 @@ from app.branding import APP_USER_AGENT
 from app.security.dependencies import get_request_context, require_capability
 from app.security.scope_enforcer import ScopeEnforcer
 from app.security.effective_authority import EffectiveAuthority
+from app.security.exceptions import APIError
 from app.security.public_url import public_base_url
 from app.security.response_helpers import success_response, error_response
 from app.operations.connector_actions import run_connector_action
@@ -669,6 +670,67 @@ def update_connector_type_actions(
         details={"disabled_actions": disabled_actions, "capability_policy_overrides": overrides},
     )
     return success_response({"connector_type": updated})
+
+
+class GateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool
+    # "all" holds every caller; a list holds only those agents.
+    actors: Union[str, list[str]] = "all"
+
+
+@connector_types_router.get("/{connector_type_id}/gates")
+def list_action_gates(connector_type_id: str):
+    """Which actions of this service wait for a person, and whom they hold."""
+    from app.services import action_gate_service
+
+    if not connector_service.get_connector_type(connector_type_id):
+        return error_response("NOT_FOUND", "Service not found", 404)
+    return success_response({"gates": action_gate_service.list_gates(connector_type_id)})
+
+
+@connector_types_router.put("/{connector_type_id}/gates/{action}")
+def set_action_gate(
+    connector_type_id: str,
+    action: str,
+    body: GateRequest,
+    request: Request,
+    ctx: EffectiveAuthority = Depends(get_request_context),
+):
+    """Turn "ask a person first" on or off for one action.
+
+    A person in the dashboard only: any Authorization header (agent key,
+    operator token, bearer login session) is refused, so no script can switch a
+    gate off. An agent can propose the change through the approvals path, where
+    a person approves it in the dashboard.
+    """
+    from app.services import action_gate_service
+
+    if request.headers.get("Authorization"):
+        raise APIError("COOKIE_SESSION_REQUIRED", "Gates are changed by a person in the dashboard", 403)
+    if not ctx.is_admin or ctx.actor_type != "user":
+        return error_response("FORBIDDEN", "Admin access required", 403)
+    ct = connector_service.get_connector_type(connector_type_id)
+    if not ct:
+        return error_response("NOT_FOUND", "Service not found", 404)
+    if action not in set(connector_service.normalize_action_names(ct.get("supported_actions"))):
+        return error_response("INVALID_ACTION", f"Unknown action for this service: {action}", 400)
+    actors = "all" if body.actors == "all" else body.actors
+    if actors != "all" and not isinstance(actors, list):
+        return error_response("INVALID_ACTORS", "Choose 'all' or a list of agents", 400)
+    try:
+        change = action_gate_service.set_gate(
+            connector_type_id, action, enabled=body.enabled, actors=actors, changed_by=ctx.actor_id
+        )
+    except ValueError as exc:
+        return error_response("INVALID_ACTORS", str(exc), 400)
+    audit_service.write_event(
+        actor_type="user", actor_id=ctx.actor_id, action="connector_gate_changed",
+        resource_type="connector_type", resource_id=connector_type_id, result="success",
+        details={"action": action, **change},
+    )
+    return success_response({"gate": change["after"], "before": change["before"]})
 
 
 _APIS_GURU_URL = "https://api.apis.guru/v2/list.json"

@@ -99,7 +99,9 @@ async def get_request_context(
 ) -> EffectiveAuthority:
     if not credentials:
         session = await get_current_session(request, credentials)
-        return permanent_authority(build_user_context(session))
+        context = build_user_context(session)
+        context.browser_session = session.get("channel") == "dashboard"
+        return permanent_authority(context)
 
     token = credentials.credentials
     if token.startswith("ac_sk_"):

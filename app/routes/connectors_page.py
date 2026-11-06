@@ -841,7 +841,7 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
     </div>
 
     <!-- View Actions Modal -->
-    <div class="modal-overlay" id="view-actions-modal" style="display:none">
+    <div class="modal-overlay" id="view-actions-modal" style="display:none" data-admin="{'1' if ctx.is_admin else '0'}" data-agents="{escape_html(json.dumps([{'id': a['id'], 'name': a.get('display_name') or a['id']} for a in agents if a.get('is_active')]) if ctx.is_admin else '[]')}">
       <div class="modal" style="max-width:700px">
         <h3 id="view-actions-title">Actions</h3>
         <div style="display:flex;gap:8px;margin-bottom:12px">

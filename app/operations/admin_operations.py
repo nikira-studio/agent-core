@@ -43,4 +43,6 @@ register("binding.update", "Change a connector binding",
 register("connector_type.actions", "Enable or disable a connector type's actions",
          connectors.update_connector_type_actions, fingerprint=_row("connector_types", "connector_type_id"),
          needs_dashboard_signin=True)
+register("connector_gate.set", "Hold a service action for a person's approval, or stop holding it",
+         connectors.set_action_gate, needs_dashboard_signin=True)
 register("adapter.install", "Install a connector adapter", connectors.install_adapter)

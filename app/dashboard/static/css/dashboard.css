@@ -1976,11 +1976,11 @@ th.activity-actions-header {
 .row-more > summary::-webkit-details-marker { display: none; }
 .row-more[open] > summary { background: var(--border); }
 .row-more-list { display: flex; gap: 6px; margin-top: 6px; }
-details.card > summary { list-style: none; }
-details.card > summary::-webkit-details-marker { display: none; }
-details.card > summary h3 { margin: 0; border-bottom: 0; padding-bottom: 0; display: inline; }
-details.card > summary::before { content: "\25B8\00a0"; color: var(--muted); }
-details.card[open] > summary::before { content: "\25BE\00a0"; }
+details.card-fold > summary { list-style: none; }
+details.card-fold > summary::-webkit-details-marker { display: none; }
+details.card-fold > summary h3 { margin: 0; border-bottom: 0; padding-bottom: 0; display: inline; }
+details.card-fold > summary::before { content: "\25B8\00a0"; color: var(--muted); }
+details.card-fold[open] > summary::before { content: "\25BE\00a0"; }
 
 /* On a phone the task list becomes one block per task instead of a sideways-scrolling table. */
 @media (max-width: 768px) {

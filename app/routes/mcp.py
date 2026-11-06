@@ -759,7 +759,7 @@ MANIFEST = {
         },
         {
             "name": "connectors_run",
-            "description": "Run a connector action server-side using a stored credential; the raw secret is never exposed to the agent",
+            "description": "Run a connector action server-side using a stored credential; the raw secret is never exposed to the agent. If a person asked to approve this action first, the answer is pending_approval with an approval_id: do not retry, check approval_get later (a rejection or expiry means stop and tell the person).",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -960,6 +960,8 @@ def _compact_connector_tool(tool: dict) -> dict:
         "enabled": tool.get("enabled", True),
         "required": list(schema.get("required") or []) if isinstance(schema, dict) else [],
         "capability_policy": tool.get("capability_policy"),
+        # Running it waits for a person: connectors_run answers pending_approval.
+        "needs_approval": bool(tool.get("needs_approval")),
     }
 
 
@@ -2540,6 +2542,8 @@ async def _run_custom_mcp_tool(body: dict, ctx: EffectiveAuthority):
     elif tool == "connectors_summary":
         from app.services import connector_service
 
+        from app.services import action_gate_service
+
         summary = await asyncio.to_thread(
             connector_service.build_capability_summary,
             enforcer,
@@ -2561,6 +2565,11 @@ async def _run_custom_mcp_tool(body: dict, ctx: EffectiveAuthority):
                         "id": c["id"],
                         "display_name": c["display_name"],
                         "action_count": c["action_count"],
+                        **(
+                            {"waits_for_approval": sorted(gates)}
+                            if (gates := action_gate_service.list_gates(c["id"]))
+                            else {}
+                        ),
                         "bindings": [
                             {
                                 "id": b["id"],

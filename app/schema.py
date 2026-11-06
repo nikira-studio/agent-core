@@ -567,6 +567,7 @@ def _apply_schema_migrations(conn) -> None:
         (17, "operator-tokens", _migrate_017_operator_tokens),
         (18, "approvals", _migrate_018_approvals),
         (19, "trusted-device-sessions", _migrate_019_trusted_device_sessions),
+        (20, "connector-run-approvals", _migrate_020_connector_run_approvals),
     )
     applied = {
         row["revision"]
@@ -1626,6 +1627,23 @@ def _migrate_019_trusted_device_sessions(conn) -> None:
     )
     conn.execute("DROP TABLE sessions")
     conn.execute("ALTER TABLE sessions_rebuilt RENAME TO sessions")
+
+
+def _migrate_020_connector_run_approvals(conn) -> None:
+    """Held connector runs share the approvals table; the gate that holds them is per service action."""
+    columns = {row["name"] for row in conn.execute("PRAGMA table_info(approvals)").fetchall()}
+    if "kind" not in columns:
+        conn.execute("ALTER TABLE approvals ADD COLUMN kind TEXT NOT NULL DEFAULT 'admin'")
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS action_gates (
+            connector_type_id TEXT NOT NULL,
+            action TEXT NOT NULL,
+            actors_json TEXT NOT NULL DEFAULT '"all"',
+            created_by TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            PRIMARY KEY (connector_type_id, action)
+        )"""
+    )
 
 
 def _migrate_018_approvals(conn) -> None:
