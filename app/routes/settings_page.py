@@ -1163,7 +1163,7 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
     <div class="modal-overlay" id="broker-rotate-modal" style="display:none">
       <div class="modal">
         <h3>Rotate the local credential helper key</h3>
-        <div class="alert alert-warning"><strong>Keeps working:</strong> agents, services, stored credentials, and any local program that reads the helper key from its file, which picks up the new key by itself.<br>
+        <div class="alert alert-warning"><strong>Keeps working:</strong> agents, services, stored credentials, and any local program that reads the helper key from its file, which picks up the new key the next time it reads the file (the helper wrapper does, each time it starts).<br>
         <strong>Stops working:</strong> any program or script that was given the old helper key by hand, until you give it the new one. The new key is shown once, here, right after you rotate.</div>
         <div class="modal-footer">
           <button type="button" class="btn btn-secondary" onclick="closeModal('broker-rotate-modal')">Cancel</button>
