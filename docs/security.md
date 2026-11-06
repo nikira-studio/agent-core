@@ -114,6 +114,11 @@ The model's context window never contains your actual secret. It's injected at e
 
 An agent acts for a person (its default user) and can read that person's own memory scope. Running the services bound in that personal scope is a separate per-agent setting, `inherit_user_bindings`, off for new agents: without it the agent does not see, resolve or run those services, over MCP or REST. Turn it on only for an agent that really acts as that person, and give service agents their own person instead of a shared one. Upgrading switches it on for agents that could already run services, and writes each to the audit log.
 
+Two known limits, noted and left as they are for now:
+
+- With `inherit_user_bindings` off, credential visibility in the person's own scope is not narrowed by that setting: it controls seeing, resolving and running the services bound there, not what the agent's credential capability can list.
+- The internal write-scope path that services use still includes the person's own scope. The setting is not a boundary against an agent that is allowed to write into that scope, so keep such agents on their own person.
+
 ## Service execution flow
 
 Services are the server-side path for external actions:
