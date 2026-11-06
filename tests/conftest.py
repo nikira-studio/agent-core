@@ -1,7 +1,21 @@
+import atexit
 import os
+import shutil
+import tempfile
+
 import pytest
 
 from app.branding import ENV_PREFIX
+
+# Anything that touches the data directory before a test sets its own (an import, a collected
+# module, a fixture-less test) must land in a scratch directory, never in ./data in the checkout,
+# where it would leave a database or a broker credential next to the source tree.
+_SUITE_DATA_DIR = tempfile.mkdtemp(prefix="agent-core-suite-")
+os.environ[f"{ENV_PREFIX}DATA_PATH"] = _SUITE_DATA_DIR
+from app.config import settings as _suite_settings  # noqa: E402  (already imported by the app package)
+
+_suite_settings.DATA_PATH = _SUITE_DATA_DIR
+atexit.register(shutil.rmtree, _SUITE_DATA_DIR, ignore_errors=True)
 
 
 _original_settings = {}
