@@ -20,6 +20,24 @@ KEY_OPERATION_LOCK = threading.RLock()
 
 _fernet: Optional[MultiFernet] = None
 _keyring: Optional[list[bytes]] = None
+# When the keyring file was last read. With more than one worker, a rotation done in one
+# worker rewrites the file; every other worker notices the new stamp and reloads, so none
+# of them goes on encrypting with a key that is no longer the primary.
+_keyring_stamp: Optional[int] = None
+
+
+def _keyring_file_stamp() -> Optional[int]:
+    try:
+        return os.stat(settings.data_dir / "credential.keyring").st_mtime_ns
+    except OSError:
+        return None
+
+
+def _drop_cache_if_file_changed() -> None:
+    global _fernet, _keyring, _keyring_stamp
+    if _keyring is not None and _keyring_stamp is not None and _keyring_file_stamp() != _keyring_stamp:
+        _fernet = None
+        _keyring = None
 
 
 def write_private_key(path, data: bytes) -> None:
@@ -113,31 +131,35 @@ def reset_key_cache() -> None:
     while the files on disk belong to the restored installation — the database
     and the keys disagree, and nothing says so until the next resolve fails.
     """
-    global _fernet, _keyring
+    global _fernet, _keyring, _keyring_stamp
     _fernet = None
     _keyring = None
+    _keyring_stamp = None
+
+
+def _loaded() -> list[bytes]:
+    global _keyring, _keyring_stamp
+    _drop_cache_if_file_changed()
+    if _keyring is None:
+        _keyring = _load_keyring()
+        _keyring_stamp = _keyring_file_stamp()
+    return _keyring
 
 
 def get_fernet() -> MultiFernet:
-    global _fernet, _keyring
+    global _fernet
+    keys = _loaded()
     if _fernet is None:
-        _keyring = _load_keyring()
-        _fernet = _build_fernet(_keyring)
+        _fernet = _build_fernet(keys)
     return _fernet
 
 
 def get_primary_key() -> bytes:
-    global _keyring
-    if _keyring is None:
-        _keyring = _load_keyring()
-    return _keyring[0]
+    return _loaded()[0]
 
 
 def get_keyring() -> list[bytes]:
-    global _keyring
-    if _keyring is None:
-        _keyring = _load_keyring()
-    return list(_keyring)
+    return list(_loaded())
 
 
 def encrypt_value(plaintext: str) -> str:
@@ -149,14 +171,14 @@ def decrypt_value(ciphertext: str) -> str:
 
 
 def rotate_key() -> tuple[bytes, list[bytes]]:
-    global _fernet, _keyring
-    if _keyring is None:
-        _keyring = _load_keyring()
+    global _fernet, _keyring, _keyring_stamp
+    current = _loaded()
     new_key = Fernet.generate_key()
-    new_keyring = [new_key] + _keyring
+    new_keyring = [new_key] + current
     _keyring = new_keyring
     _fernet = _build_fernet(new_keyring)
     _save_keyring(new_keyring)
+    _keyring_stamp = _keyring_file_stamp()
     key_path = settings.credential_key_path
     backup_path = str(key_path) + ".rotated.bak"
     if os.path.exists(key_path):
