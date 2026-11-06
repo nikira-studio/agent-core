@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from fastapi import APIRouter, Depends
 
 from app.services import (
@@ -13,6 +14,8 @@ from app.services.broker_service import rotate_broker_credential
 from app.security.dependencies import require_admin, get_current_session
 from app.security.response_helpers import success_response, error_response
 
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/dashboard", tags=["dashboard_api"])
 
@@ -155,15 +158,19 @@ def dashboard_activity_summary(session: dict = Depends(get_current_session)):
 @router.post("/broker/rotate")
 async def rotate_broker(session: dict = Depends(require_admin)):
     new_credential = await asyncio.to_thread(rotate_broker_credential)
-    # Who and when; never the credential itself.
-    audit_service.write_event(
-        actor_type="user",
-        actor_id=session["user_id"],
-        action="broker_credential_rotated",
-        resource_type="broker_credential",
-        result="success",
-        details={"previous_credential_retired": True},
-    )
+    # Who and when; never the credential itself. The rotation has already happened, so a failed
+    # audit write must not stop the one-time display of the new credential.
+    try:
+        audit_service.write_event(
+            actor_type="user",
+            actor_id=session["user_id"],
+            action="broker_credential_rotated",
+            resource_type="broker_credential",
+            result="success",
+            details={"previous_credential_retired": True},
+        )
+    except Exception:
+        logger.warning("Could not write the audit event for the helper-key rotation", exc_info=True)
     return success_response(
         {
             "credential": new_credential,

@@ -364,3 +364,14 @@ def test_a_refused_key_restore_is_audited_as_a_failure_without_the_key(test_clie
     events = _events("credential_key_restored")
     assert events and events[0]["result"] == "failure"
     assert bad not in str(events)
+
+
+def test_a_failed_audit_write_does_not_hide_the_new_helper_key(test_client, admin_token, monkeypatch):
+    from app.services import audit_service
+
+    def locked(*args, **kwargs):
+        raise RuntimeError("database is locked")
+
+    monkeypatch.setattr(audit_service, "write_event", locked)
+    r = test_client.post("/api/dashboard/broker/rotate", headers={"Authorization": f"Bearer {admin_token}"})
+    assert r.status_code == 200 and r.json()["data"]["credential"].startswith("ac_broker_")
