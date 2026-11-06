@@ -140,9 +140,16 @@ def test_the_broker_accepts_any_caller_until_a_list_is_set_then_reports_before_i
     assert [e["resource_id"] for e in _audit("broker_caller_refused")] == ["203.0.113.9"]
 
 
-def test_the_broker_is_rate_limited_per_caller(test_client, admin_token):
+def test_only_failed_sign_ins_count_against_an_address(test_client, admin_token):
     codes = [_broker(test_client).status_code for _ in range(63)]
     assert codes[:60] == [401] * 60 and 429 in codes[60:]
+
+
+def test_a_name_that_does_not_resolve_yet_can_still_be_added_when_nothing_is_blocked(test_client, admin_token):
+    headers = {"Authorization": f"Bearer {admin_token}"}
+    r = test_client.post("/api/connector-types/create-http", headers=headers,
+                         json={"display_name": "Later", "base_url": "http://not-yet.invalid/api", "auth_type": "none"})
+    assert r.status_code in (200, 201), r.text
 
 
 def test_settings_and_overview_show_the_limits_quietly(test_client, admin_token):

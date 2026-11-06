@@ -56,8 +56,10 @@ class RateLimiter:
         ("otp_failed", "user"): RateLimitConfig(5, 1.0 / 300),
         ("inbound_webhook", "ip"): RateLimitConfig(60, 1.0),
         ("approval_decide", "user"): RateLimitConfig(30, 1.0 / 2),
-        # The credential broker: a runner resolves a handful of references at start-up.
-        ("broker_resolve", "ip"): RateLimitConfig(60, 1.0),
+        # The credential broker. Failed sign-ins count per address; successful resolves per agent
+        # (a runner resolves a handful of references at start-up).
+        ("broker_auth_failed", "ip"): RateLimitConfig(60, 1.0),
+        ("broker_resolve", "agent"): RateLimitConfig(300, 5.0),
     }
 
     # Limits that guard sign-in. Kept in the database so every worker and every

@@ -1092,9 +1092,11 @@ def create_http_connector(
         return error_response("INVALID_URL", str(e), 400)
     from app.services import network_policy_service
 
+    # Only a private address that is not allowed is refused here. A name that does not resolve
+    # yet is fine to add; it still fails when it is used, as before.
     problem = network_policy_service.check_url(body.base_url)
-    if problem:
-        return error_response("PRIVATE_ADDRESS" if problem.startswith("Blocked:") else "INVALID_URL", problem, 400)
+    if problem and problem.startswith("Blocked:"):
+        return error_response("PRIVATE_ADDRESS", problem, 400)
 
     extra_headers = {}
     if body.headers_json:
