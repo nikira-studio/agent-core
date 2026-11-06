@@ -454,7 +454,7 @@ def test_wording_batch_one_fixes_the_text_that_did_not_match_the_screen(authenti
     assert "{CREDENTIAL_PREFIX}" not in settings and "AC_SECRET_*" in settings
     # The maintenance help sits with its own button, not beside Export Encrypted Backup.
     backup = settings.split("<h2>Backup & Restore</h2>", 1)[1]
-    export_part, maintenance_part = backup.split("<h4 class=\"section-title\">Maintenance</h4>", 1)
+    export_part, maintenance_part = backup.split("<h3 class=\"sub-heading section-title\">Maintenance</h3>", 1)
     assert "Maintenance marks tasks stale" not in export_part
     assert "Run Maintenance" in maintenance_part and "Maintenance marks tasks stale" in maintenance_part
     assert "STALE_THRESHOLD" not in settings

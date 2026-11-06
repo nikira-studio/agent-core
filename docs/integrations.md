@@ -752,7 +752,7 @@ Agents decide when to use a service. Agent Core makes the service available, enf
 
 Agents can report what they're working on so you can see live status in the dashboard. This is especially useful when multiple agents are working in parallel, or when one agent leaves work for another agent in the same workspace.
 
-The dashboard receives activity updates in real time over a server-sent event stream (`GET /api/events`). When an agent creates, updates, cancels, or heartbeats an activity, the overview stat cards (Open tasks, Stale / Blocked) and the recent activity table refresh automatically without any page reload. The activity page shows a "refresh" banner when new events arrive. Service execution completions also surface as a brief indicator on the Services page. No polling is required; the browser opens one persistent connection per session and reconnects automatically on disconnect.
+The dashboard receives activity updates in real time over a server-sent event stream (`GET /api/events`). When an agent creates, updates, cancels, or heartbeats an activity, the Overview recent activity table refreshes automatically without any page reload. The activity page shows a "refresh" banner when new events arrive. Service execution completions also surface as a brief indicator on the Services page. No polling is required; the browser opens one persistent connection per session and reconnects automatically on disconnect.
 
 ```bash
 # Create an activity when you start a task
