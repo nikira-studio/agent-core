@@ -4,6 +4,8 @@ Notable changes to Agent Core are documented here. The format follows [Keep a Ch
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-11-06
+
 **Upgrading from 1.1.0.** Take a backup first. Everyone is signed out once (sessions are now signed with their own key), and a script that sends a person's session token to an admin route must switch to an operator token (Settings → Account); both are described under Security below. The dashboard pages are renamed and regrouped, but every address (`/connectors`, `/integrations` and the rest) still works, so bookmarks and links keep working. Nothing in your data needs migrating for the dashboard changes. A workspace purge keeps its tasks, with their workspace link cleared, and deletes its memories, stored credentials and service bindings; the delete dialogs now say so.
 
 ### Added
