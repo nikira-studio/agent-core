@@ -221,7 +221,6 @@ def test_services_in_a_workspace_the_agent_is_given_are_not_affected(test_client
 
 
 def test_upgrade_keeps_what_agents_could_do_and_says_which_ones(test_client):
-    import json
 
     from app.database import get_db
     from app.schema import _migrate_021_inherit_user_bindings
