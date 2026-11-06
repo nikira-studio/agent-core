@@ -40,7 +40,7 @@ def test_queued_proposal_is_rendered_with_its_evidence(test_client, admin_token)
     assert "decideProposal(" in html
     # Buttons must name what happens to the memory, not the verdict recorded.
     assert "Yes, retract it" in html
-    assert "Retracted Records below" in html
+    assert "Retracted memories below" in html
 
 
 def test_queue_is_grouped_by_scope_and_collapsed(test_client, admin_token):

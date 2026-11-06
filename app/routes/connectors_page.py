@@ -224,7 +224,6 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
     visible_bindings = [b for b in all_bindings if enforcer.can_read(b["scope"])]
     connector_type_count = len(connector_types)
     visible_binding_count = len(visible_bindings)
-    enabled_binding_count = len([b for b in visible_bindings if b.get("enabled")])
     failed_binding_count = len([b for b in visible_bindings if b.get("last_error")])
     readable_scopes = None if ctx.is_admin else enforcer.filter_readable_scopes(ctx.read_scopes)
     with get_db() as conn:
@@ -389,7 +388,7 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
 
     if visible_bindings:
         bindings_html = f"""
-        <table><thead><tr><th>Name</th><th>Type</th><th>Scope</th><th>Status</th><th class='actions-cell'>Actions</th></tr></thead>
+        <table><thead><tr><th>Name</th><th>Type</th><th>Workspace</th><th>Status</th><th class='actions-cell'>Actions</th></tr></thead>
         <tbody>{bindings_rows}</tbody></table>"""
     else:
         bindings_html = (
@@ -474,8 +473,6 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
             health_badge = f'<span class="badge badge-warning" title="Enabled bindings not yet health-checked">{health_n} untested</span>'
         else:
             health_badge = ""
-        guidance = binding_guidance.get(ct["id"], {})
-        recipe_line = _binding_recipe_line(guidance)
         adapter_entry = available_adapters.get(ct["id"])
         adapter_installed = bool(adapter_entry and adapter_entry.get("installed"))
         adapter_update_available = bool(
@@ -492,18 +489,12 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
                 f"<button type='button' class='btn btn-sm btn-primary' "
                 f'data-adapter-update="{escape_html(ct["id"])}">Update</button>'
             )
-        binding_recipe_line = (
-            f'<div style="font-size:0.8em;color:var(--text-muted);margin-top:0.25rem">{escape_html(recipe_line)}</div>'
-            if recipe_line
-            else ""
-        )
         ct_cards += f"""
         <div class='connector-type-card'>
           <div style="padding:0 0 0.5rem">
             <div class='connector-type-name' style="margin:0">{escape_html(ct["display_name"])}</div>
             <div style="font-size:0.8em;color:var(--text-muted);margin-top:0.1rem">{binding_action_line}</div>
             <div class='connector-type-desc' style="margin-top:0.35rem">{escape_html(ct.get("description", "") or "")}</div>
-            {binding_recipe_line}
           </div>
           <div class='connector-type-footer' style="margin-top:auto; display:flex; flex-direction:column; gap:8px; align-items:stretch;">
             <div style="display:flex;align-items:center;gap:0.4rem;min-width:0;overflow:hidden;">{type_chip}{health_badge}{adapter_badges}</div>
@@ -511,7 +502,7 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
               {view_actions_btn}
               <button type='button' class='btn btn-sm btn-secondary' data-newbinding-type-id="{escape_html(ct["id"])}" data-newbinding-name="{escape_html(ct["display_name"])}">Add Binding</button>
               {update_btn}
-              <button type='button' class='btn btn-sm btn-danger icon-delete-btn' data-connector-type-delete="{escape_html(ct["id"])}" title='{ "Uninstall adapter" if adapter_installed else "Delete connector type" }' aria-label='{ "Uninstall adapter" if adapter_installed else "Delete connector type" }'>{get_icon("delete")}</button>
+              <button type='button' class='btn btn-sm btn-danger icon-delete-btn' data-connector-type-delete="{escape_html(ct["id"])}" title='{ "Uninstall adapter" if adapter_installed else "Delete service" }' aria-label='{ "Uninstall adapter" if adapter_installed else "Delete service" }'>{get_icon("delete")}</button>
             </div>
           </div>
         </div>"""
@@ -550,13 +541,7 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
       </div>
     </div>
 
-    <div class="stat-grid">
-      <a class="stat-card stat-link" href="#service-catalog"><div class="value">{connector_type_count}</div><div class="label">Services</div></a>
-      <a class="stat-card stat-link" href="#bindings"><div class="value">{visible_binding_count}</div><div class="label">Bindings</div></a>
-      <a class="stat-card stat-link" href="#bindings"><div class="value">{enabled_binding_count}</div><div class="label">Enabled bindings</div></a>
-      <a class="stat-card stat-link" href="#bindings"><div class="value">{failed_binding_count}</div><div class="label">Bindings with errors</div></a>
-      <a class="stat-card stat-link" href="#service-catalog"><div class="value">{sum(max(len(connector_service.normalize_action_names(ct.get("supported_actions"))) - len(ct.get("disabled_actions") or []), 0) for ct in connector_types)}</div><div class="label">Enabled actions</div></a>
-    </div>
+    <p class="text-muted" id="services-summary" style="margin:0 0 12px">{connector_type_count} service{"" if connector_type_count == 1 else "s"}, {visible_binding_count} binding{"" if visible_binding_count == 1 else "s"}{(", <strong style='color:var(--danger)'>" + str(failed_binding_count) + " with errors</strong>") if failed_binding_count else ""}</p>
 
     {quick_start_html}
 
@@ -564,17 +549,17 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
       <div class="section-header" style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px">
         <div>
           <h3>Service Catalog</h3>
-          <div class="section-note">Built-in and added services, shared across this install. Ready-made ones are in the <a href="/connectors/directory">API directory</a> and <a href="/connectors/adapters">adapters</a>.</div>
+          <div class="section-note">Built-in and added services, shared across this install. Ready-made ones are in the <a href="/connectors/directory">service directory</a> and <a href="/connectors/adapters">ready-made services</a>.</div>
         </div>
         <button type="button" class="btn btn-sm btn-secondary" onclick="checkHealth(this)" title="Test every enabled binding now">Check Health</button>
       </div>
-      <div class="connector-types-grid">{ct_cards or "<div class='empty'>No services yet. Add one so agents can act in an outside system, or browse the <a href='/connectors/directory'>API directory</a>.</div>"}</div>
+      <div class="connector-types-grid">{ct_cards or "<div class='empty'>No services yet. Add one so agents can act in an outside system, or browse the <a href='/connectors/directory'>service directory</a>.</div>"}</div>
     </div>
 
     <div class="card" id="bindings">
       <div class="section-header">
         <h3>Bindings</h3>
-        <div class="section-note">A binding says which scope may use a service, and with which credential.</div>
+        <div class="section-note">A binding says which workspace may use a service, and with which credential.</div>
       </div>
       <div id="bindings-list">{bindings_html}</div>
     </div>
@@ -928,9 +913,9 @@ async def connectors_adapters_page(
     body = f"""
     <div class="page-header">
       <div>
-        <h1>Browse Adapters</h1>
+        <h1>Ready-made services</h1>
         <p class="text-muted" style="max-width:760px;margin-top:8px">
-          Built-in adapter templates and user-local adapter folders available to install into the
+          Ready-made services, built in or kept in a local folder, that you can install into the
           service catalog.
         </p>
       </div>
@@ -942,8 +927,8 @@ async def connectors_adapters_page(
     <div class="card">
       <div class="section-header" style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px">
         <div>
-          <h3>Browse Adapters</h3>
-          <div class="section-note">Install one into the service catalog, then bind it like any other connector.</div>
+          <h3>Ready-made services</h3>
+          <div class="section-note">Install one into the service catalog, then add a binding for it like any other service.</div>
         </div>
         <div class="section-note">{len(adapter_entries)} available</div>
       </div>
@@ -958,13 +943,13 @@ async def connectors_adapters_page(
         '<script src="/static/js/adapter-actions.js?v=20260902"></script>'
         '<script src="/static/js/connectors-adapters.js?v=20260902"></script>'
     )
-    return render_page("Browse Adapters", body, "/connectors", extra_js, session=session)
+    return render_page("Ready-made services", body, "/connectors", extra_js, session=session)
 
 
 @router.get("/connectors/help")
 def connectors_help_page(request: Request, session: dict = Depends(require_auth)):
     body = """
-    <div class="page-header"><h1>Connector Help</h1></div>
+    <div class="page-header"><h1>Services help</h1></div>
 
     <div class="card">
       <h3>What is an OpenAPI Spec?</h3>
@@ -994,8 +979,8 @@ def connectors_help_page(request: Request, session: dict = Depends(require_auth)
       <h3>After Importing</h3>
       <p>Once you import a spec, the workflow is:</p>
       <ol>
-        <li><strong>Create a credential</strong> — store your API key or token (PAT, bearer token, etc.)</li>
-        <li><strong>Create a binding</strong> — link the connector type to your credential and choose a scope</li>
+        <li><strong>Create a credential</strong> — store your API key or token (a personal access token, for example)</li>
+        <li><strong>Create a binding</strong> — link the service to your credential and choose a workspace</li>
         <li><strong>Test the connection</strong> — click Test to verify the credential works</li>
         <li><strong>Use it</strong> — AI agents discover available actions via MCP and execute them through <code>connectors_run</code></li>
       </ol>
@@ -1030,7 +1015,7 @@ def connectors_help_page(request: Request, session: dict = Depends(require_auth)
     </div>
     """
     body = body.replace("Agent Core", APP_NAME)
-    return render_page("Connector Help", body, "/connectors", session=session)
+    return render_page("Services help", body, "/connectors", session=session)
 
 
 @router.get("/connectors/directory")
@@ -1040,7 +1025,7 @@ def connectors_directory_page(
 ):
     body = """
     <div class="page-header">
-      <h1>API Directory</h1>
+      <h1>Service directory</h1>
         <div class="page-actions">
         <a class="btn btn-secondary" href="/connectors">&larr; Back to Services</a>
         <div class="dropdown" style="display:inline-block;position:relative">
@@ -1142,4 +1127,4 @@ def connectors_directory_page(
     <script src="/static/js/connectors-directory.js?v=20260626"></script>
     """
     body = body.replace("Agent Core", APP_NAME)
-    return render_page("API Directory", body, "/connectors", session=session)
+    return render_page("Service directory", body, "/connectors", session=session)

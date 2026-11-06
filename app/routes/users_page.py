@@ -39,9 +39,9 @@ def users_page(request: Request, session: dict = Depends(require_auth)):
 
     def user_row(u):
         otp = (
-            "<span class='badge badge-active'>enrolled</span>"
+            "<span class='badge badge-active'>on</span>"
             if u.get("otp_enrolled")
-            else "<span class='badge badge-inactive'>none</span>"
+            else "<span class='badge badge-inactive'>off</span>"
         )
         is_self = u["id"] == current_user_id
         user_payload = escape_html(
@@ -142,8 +142,8 @@ def users_page(request: Request, session: dict = Depends(require_auth)):
     </div></div>
     <div class="card">
       <h3>All Users</h3>
-      <p class="text-muted" style="margin-bottom:12px">Admin-only view. First-run registration creates the initial admin; after that, admins create users here and assign roles.</p>
-      <table><thead><tr><th>Name</th><th>ID</th><th>Email</th><th>Role</th><th>Status</th><th>OTP</th><th>Created</th><th class="actions-cell">Actions</th></tr></thead>
+      <p class="text-muted" style="margin-bottom:12px">Only admins see this page. Admins add people here and choose their role.</p>
+      <table><thead><tr><th>Name</th><th>ID</th><th>Email</th><th>Role</th><th>Status</th><th>Two-step sign-in</th><th>Created</th><th class="actions-cell">Actions</th></tr></thead>
       <tbody>{rows}</tbody></table>
     </div>
     <div class="modal-overlay" id="create-user-modal" style="display:none">
@@ -156,8 +156,6 @@ def users_page(request: Request, session: dict = Depends(require_auth)):
             <div class="form-group"><label>Role</label><select name="role"><option value="user">User</option><option value="admin">Admin</option></select><p class="form-hint">Admins manage users, audit, webhooks and system settings. Users work in the workspaces they are given.</p></div>
             <div class="form-group"><label>Initial Password</label><input type="password" name="password" minlength="8" autocomplete="new-password" required><p class="form-hint">At least 8 characters. They can change it after signing in.</p></div>
           </div>
-          <div class="form-group"><label><input type="checkbox" id="eu-active" checked> Account active</label><p class="form-hint">Disabling an account revokes its existing sessions immediately.</p></div>
-          <p class="form-hint">Users can change their password after signing in. Admin role grants full dashboard access.</p>
           <div class="modal-footer">
             <button type="button" class="btn btn-secondary" onclick="closeModal('create-user-modal')">Cancel</button>
             <button type="submit" class="btn">Create</button>
@@ -176,6 +174,7 @@ def users_page(request: Request, session: dict = Depends(require_auth)):
             <div class="form-group"><label>Role</label><select id="eu-role"><option value="user">User</option><option value="admin">Admin</option></select><p class="form-hint">Admins manage users, audit, webhooks and system settings. Users work in the workspaces they are given.</p></div>
             <div class="form-group"><label>New Password</label><input type="password" id="eu-password" minlength="8" autocomplete="new-password" placeholder="Leave unchanged"><p class="form-hint">Only fill this in to set a new password for them.</p></div>
           </div>
+          <div class="form-group"><label><input type="checkbox" id="eu-active" checked> Account active</label><p class="form-hint">Turning an account off signs it out everywhere immediately.</p></div>
           <div class="modal-footer">
             <button type="button" class="btn btn-secondary" onclick="closeModal('edit-user-modal')">Cancel</button>
             <button type="submit" class="btn">Save</button>

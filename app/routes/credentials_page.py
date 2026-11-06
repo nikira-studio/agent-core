@@ -201,7 +201,7 @@ def credentials_page(request: Request, session: dict = Depends(require_auth)):
       <div>
         <h1>Credentials</h1>
         <p class="text-muted" style="max-width:640px;margin-top:8px">
-          Encrypted secrets used by connector bindings and agents. Credentials are scoped and never returned raw via the API.
+          Secrets stored encrypted. Agents and services use them by reference; the value is never shown again.
         </p>
       </div>
       <div class="page-actions">
@@ -313,7 +313,7 @@ def credentials_page(request: Request, session: dict = Depends(require_auth)):
           <div class="form-group">
             <label>Expires</label>
             <input type="date" id="credential-expires">
-            <p class="form-hint">Optional. Set it when the secret itself has an end date, so the dashboard can warn you before a connector starts failing.</p>
+            <p class="form-hint">Optional. Set it when the secret itself has an end date, so the dashboard can warn you before a service starts failing.</p>
           </div>
           <button type="submit" class="btn btn-primary">Create Credential</button>
           <button type="button" class="btn btn-secondary" onclick="closeModal('create-credential-modal')">Cancel</button>

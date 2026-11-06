@@ -110,9 +110,9 @@ def test_overview_surfaces_operational_sections(authenticated_client):
     html = r.text
     assert "Users" in html
     assert "Active Agents" in html
-    assert "Open Activities" in html
+    assert "Open tasks" in html
     assert "Waiting on you" in html
-    assert "Memory Records" in html
+    assert "Memories" in html
     assert "Capability Snapshot" not in html
     assert "Health" in html
     assert "Recent Activity" in html
@@ -312,7 +312,7 @@ def test_overview_says_so_when_nothing_is_waiting_and_shows_health(authenticated
     html = authenticated_client.get("/").text
     assert "Nothing is waiting on you." in html
     health = html.split('id="overview-health"', 1)[1]
-    for label in ("Agent Core", "Services", "Webhooks", "Broker credential"):
+    for label in ("Agent Core", "Services", "Webhooks", "Local credential helper"):
         assert label in health
 
 
@@ -395,11 +395,12 @@ def test_every_field_on_the_reworked_forms_has_a_line_of_help(authenticated_clie
 
 def test_agents_and_workspaces_pages_prefer_extending_what_exists(authenticated_client):
     agents = authenticated_client.get("/agents").text
-    assert "Create a new agent only for a separate tool or identity" in agents
+    assert "create a new one only for a separate tool" in agents
     assert "Does an existing agent already do this job?" in agents
     workspaces = authenticated_client.get("/workspaces").text
-    assert "is the normal way to share" in workspaces
-    assert "Does an existing workspace already fit?" in workspaces
+    assert "A workspace is one project's shared memory" in workspaces
+    assert "Create one per project or app." in workspaces
+    assert "Does an existing workspace already fit?" not in workspaces
 
 
 def test_static_links_carry_the_files_own_version_so_a_changed_stylesheet_reaches_the_browser(authenticated_client):
@@ -446,3 +447,38 @@ def test_credential_row_buttons_share_a_line_and_scopes_break_only_at_the_colon(
     assert "a_<wbr>long_<wbr>credential_<wbr>name" in html
     css = open("app/dashboard/static/css/dashboard.css").read()
     assert ".actions-cell .btn { vertical-align: middle; }" in css  # text and icon buttons on one baseline
+
+
+def test_wording_batch_one_fixes_the_text_that_did_not_match_the_screen(authenticated_client):
+    settings = authenticated_client.get("/settings").text
+    assert "{CREDENTIAL_PREFIX}" not in settings and "AC_SECRET_*" in settings
+    # The maintenance help sits with its own button, not beside Export Encrypted Backup.
+    backup = settings.split("<h3>Backup & Restore</h3>", 1)[1]
+    export_part, maintenance_part = backup.split("<h4 class=\"section-title\">Maintenance</h4>", 1)
+    assert "Maintenance marks tasks stale" not in export_part
+    assert "Run Maintenance" in maintenance_part and "Maintenance marks tasks stale" in maintenance_part
+    assert "STALE_THRESHOLD" not in settings
+
+    # Row buttons only render when a task exists, so check the template itself.
+    source = Path("app/routes/activity_page.py").read_text()
+    assert "title='Start'>Start" in source and "title='Reactivate'" not in source and "title='Complete'" not in source
+
+    webhooks = authenticated_client.get("/webhooks").text
+    assert "Outgoing webhooks only notify" in webhooks
+
+    users = authenticated_client.get("/users").text
+    create, edit = users.split('id="edit-user-modal"', 1)
+    assert 'id="eu-active"' not in create and 'id="eu-active"' in edit  # one checkbox, in the dialog that uses it
+    assert "Admin role grants full dashboard access" not in users
+
+
+def test_row_actions_are_plain_buttons_and_the_generate_button_is_the_blue_main_action(authenticated_client):
+    for path in ("/agents", "/workspaces", "/memory"):
+        assert "btn-warning" not in authenticated_client.get(path).text, path
+
+
+def test_delete_asks_for_the_name_and_says_what_goes_with_it(authenticated_client):
+    workspaces = authenticated_client.get("/workspaces").text
+    assert "dataset.memories" in workspaces and "Type the workspace ID to confirm" in workspaces
+    agents = authenticated_client.get("/agents").text
+    assert "Type the agent ID to confirm" in agents and "Its key stops working" in agents

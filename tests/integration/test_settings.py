@@ -31,7 +31,7 @@ def test_settings_page_loads(authenticated_client):
     assert r.status_code == 200
     html = r.text
     assert "Change Password" in html
-    assert "Manage OTP" in html
+    assert "Manage two-step sign-in" in html
     assert "Backup Codes" not in html
 
 
@@ -245,7 +245,7 @@ def test_settings_otp_page_loads(authenticated_client):
     html = r.text
     assert "Two-Factor" in html or "OTP" in html
     assert "startOtpEnrollment" in html
-    assert "Preparing OTP setup" in html
+    assert "Preparing two-step sign-in" in html
     assert "QR code could not be generated" in html
     assert "backup code" not in html
 
@@ -811,7 +811,7 @@ def test_settings_is_grouped_into_tabs_for_an_admin(admin_client):
     security = html.split('id="tab-security"')[1].split("</section>")[0]
     assert "vector-model" in memory and "unconfirmed-inference-days" in memory
     assert "scratchpad-retention-days" in data and "Run Maintenance" in data and "pruneActivity" in data
-    assert "Encryption Key" in security and "Rotate Broker Credential" in security
+    assert "Encryption Key" in security and "Rotate helper key" in security
 
 
 def test_a_regular_user_sees_only_their_account_without_tabs(authenticated_client):

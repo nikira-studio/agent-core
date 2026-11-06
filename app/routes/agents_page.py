@@ -92,9 +92,9 @@ def agents_page(request: Request, session: dict = Depends(require_auth)):
             ("assistant", "Assistant",
              "An AI assistant or coding agent. Remembers things, tracks its work and handoffs, and can use your connected services."),
             ("service", "Service agent",
-             "A script or system that only fetches the specific stored credentials an admin has granted it. No memory, no connectors."),
+             "A script or system that only fetches the specific stored credentials an admin has granted it. No memory, no services."),
             ("proposer", "Proposer",
-             "Suggests admin changes, such as a new agent or connector. Nothing happens until a person approves it on the Approvals page."),
+             "Suggests admin changes, such as a new agent or service. Nothing happens until a person approves it on the Approvals page."),
             ("custom", "Custom",
              "Choose each permission yourself."),
         ]
@@ -107,16 +107,16 @@ def agents_page(request: Request, session: dict = Depends(require_auth)):
         # (key, name, what it lets the agent do, starts checked on the create form)
         groups = [
             ("Everyday work", [
-                ("memory", "Memory", "Search, read and write memory records in the scopes below.", True),
-                ("coordination", "Coordination", "Track its own work: activity records, handoffs, the session briefing, workspace sync and approval status.", True),
+                ("memory", "Memory", "Search, read and write memories in the workspaces below.", True),
+                ("coordination", "Coordination", "Track its own tasks, handoffs, the session briefing, workspace sync and approval status.", True),
             ]),
             ("Credentials", [
-                ("credentials", "Credential references", "List credentials and ask for the reference an agent uses (AC_SECRET_...). The agent never sees the secret value; Agent Core inserts it when a command or connector runs.", True),
+                ("credentials", "Credential references", "List credentials and ask for the reference an agent uses (AC_SECRET_...). The agent never sees the secret value; Agent Core inserts it when a command or service runs.", True),
                 ("credentials_resolve", "Read credential values", "Fetch a stored value over HTTPS, one exact entry at a time, and only the entries an admin has granted it. For small service agents; leave off for assistants.", False),
             ]),
-            ("Connectors", [
-                ("connectors_read", "Connector discovery", "See which external services and actions are set up. Always on when Run connector actions is on.", True),
-                ("connectors_execute", "Run connector actions", "Have Agent Core perform actions in external services for it, using the credentials in your bindings.", True),
+            ("Services", [
+                ("connectors_read", "See services", "See which external services and actions are set up. Always on when Run service actions is on.", True),
+                ("connectors_execute", "Run service actions", "Have Agent Core perform actions in external services for it, using the credentials in your bindings.", True),
             ]),
             ("Administration", [
                 ("admin_propose", "Propose admin changes", "Ask for changes such as new agents, grants or bindings. Nothing happens until a person approves it on the Approvals page.", False),
@@ -184,14 +184,14 @@ def agents_page(request: Request, session: dict = Depends(require_auth)):
         )
         access_summary = (
             f"<span class='scope-tag' title='Implicit private scope'>{escape_html(own_scope)}</span>"
-            f"<span class='scope-tag' title='Inherited principal scope'>{escape_html(principal_scope)}</span>"
+            f"<span class='scope-tag' title='Inherited from its owner'>{escape_html(principal_scope)}</span>"
             f"{shared_badge}"
             f"<span class='text-muted'> + {len(read_extra)} read / {len(write_extra)} write grants</span>"
         )
         can_manage = is_admin or a.get("owner_user_id") == session["user_id"]
         if can_manage:
             if active:
-                toggle_btn = f"<button type='button' class='btn btn-sm btn-warning' data-agent-deactivate='{escape_html(a['id'])}'>Deactivate</button>"
+                toggle_btn = f"<button type='button' class='btn btn-sm btn-secondary' data-agent-deactivate='{escape_html(a['id'])}'>Deactivate</button>"
             else:
                 toggle_btn = f"<button type='button' class='btn btn-sm btn-secondary' data-agent-reactivate='{escape_html(a['id'])}'>Reactivate</button>"
         else:
@@ -247,11 +247,13 @@ def agents_page(request: Request, session: dict = Depends(require_auth)):
       const capabilities = getSelectedCapabilities('ca');
       const preview = document.getElementById('ca-authority-preview');
       if (!preview) return;
-      preview.innerHTML = '<strong>Permanent authority after creation</strong><br>' +
-        'Read: <code>' + escapeHtml(read.join(', ')) + '</code><br>' +
-        'Write: <code>' + escapeHtml(write.join(', ')) + '</code><br>' +
-        'Default recall: <code>' + escapeHtml(recall.join(', ')) + '</code><br>' +
-        'Capabilities: <code>' + escapeHtml(capabilities.join(', ')) + '</code>';
+      preview.innerHTML = '<strong>What this agent will be able to do</strong>' +
+        '<ul style="margin:6px 0 0 18px">' +
+        '<li>Read: <code>' + escapeHtml(read.join(', ')) + '</code></li>' +
+        '<li>Write: <code>' + escapeHtml(write.join(', ')) + '</code></li>' +
+        '<li>Searches by default: <code>' + escapeHtml(recall.join(', ')) + '</code></li>' +
+        '<li>Can use: <code>' + escapeHtml(capabilities.join(', ')) + '</code></li>' +
+        '</ul>';
     }
     function applyLeastPrivilegedPreset() {
       ['ca-read-scopes', 'ca-write-scopes', 'ca-recall-scopes'].forEach(function(containerId) {
@@ -299,7 +301,9 @@ def agents_page(request: Request, session: dict = Depends(require_auth)):
       else { showToast(j.error.message || 'Failed', 'danger'); }
     }
     async function purgeAgent(id) {
-      if (!confirm('PERMANENTLY DELETE this agent? This cannot be undone.')) return;
+      const typed = prompt('PERMANENTLY DELETE the agent "' + id + '"? Its key stops working and its history is removed. This cannot be undone.\\n\\nType the agent ID to confirm:');
+      if (typed === null) return;
+      if (typed.trim() !== id) { showToast('That is not the agent ID. Nothing was deleted.', 'warning'); return; }
       const j = await apiFetch('/api/agents/' + id + '/purge', { method: 'POST' });
       if (j.ok) { 
         showToast('Agent deleted', 'success'); 
@@ -564,7 +568,7 @@ def agents_page(request: Request, session: dict = Depends(require_auth)):
     </div></div>
     <div class="card">
       <h3>Agent Access</h3>
-      <p class="text-muted access-summary">An agent always has its private scope and read access to its active principal's user scope. To share memory with other agents and people, add a workspace. To give an agent more to do, change its role or access with <strong>Edit</strong> on its row. Create a new agent only for a separate tool or identity that needs its own key and its own history.</p>
+      <p class="text-muted access-summary">Each agent has its own private memory and can read its owner's. Add a workspace to share memory. Use <strong>Edit</strong> to give an agent more; create a new one only for a separate tool.</p>
     </div>
 
     <div class="card">

@@ -149,13 +149,13 @@ def memory_page(request: Request, session: dict = Depends(require_auth)):
 
     def active_row(r):
         modify_buttons = (
-            f"<button type='button' class='btn btn-sm btn-warning' data-memory-retract='{escape_html(r['id'])}'>Retract</button>"
+            f"<button type='button' class='btn btn-sm btn-secondary' data-memory-retract='{escape_html(r['id'])}'>Retract</button>"
             f"<button type='button' class='btn btn-sm btn-danger icon-delete-btn' data-memory-delete='{escape_html(r['id'])}' title='Permanently delete' aria-label='Permanently delete'>{get_icon('delete')}</button>"
             if can_modify_record(r)
             else "<span class='text-muted'>Read only</span>"
         )
         return (
-            f"<tr><td><span class='badge badge-{r.get('memory_class', '')}'>{r.get('memory_class', '')}</span></td>"
+            f"<tr data-scope='{escape_html(r.get('scope') or '')}'><td><span class='badge badge-{r.get('memory_class', '')}'>{r.get('memory_class', '')}</span></td>"
             f"<td>{escape_html(r.get('content', '')[:80])}</td>"
             f"<td><code>{(r.get('scope') or '').replace('workspace:', '')}</code></td>"
             f"<td>{_state_cell(r)}</td>"
@@ -268,7 +268,7 @@ def memory_page(request: Request, session: dict = Depends(require_auth)):
                     "world, so the ranking penalty stays until a follow-up "
                     "<strong>Confirm with evidence</strong> clears it. "
                     "Either <strong>Retract</strong> hides it from agents — it moves to "
-                    "Retracted Records below, where you can restore it. Pick <strong>out of "
+                    "Retracted memories below, where you can restore it. Pick <strong>out of "
                     "date</strong> if the world moved on, or <strong>not worth keeping</strong> "
                     "if it is still accurate but too vague to act on. "
                     "<strong>Leave it</strong> keeps it and stops flagging it."
@@ -279,7 +279,7 @@ def memory_page(request: Request, session: dict = Depends(require_auth)):
             <button class="btn btn-sm btn-secondary" data-proposal-id="{pid}" data-proposal-verdict="rejected">No, keep it</button>"""
                 consequences = (
                     "<strong>Yes, retract it</strong> hides it from agents — it moves to "
-                    "Retracted Records below, where you can restore it. "
+                    "Retracted memories below, where you can restore it. "
                     "<strong>No, keep it</strong> leaves it alone and stops flagging it."
                 )
 
@@ -340,7 +340,7 @@ def memory_page(request: Request, session: dict = Depends(require_auth)):
         <h3 style="margin:0">Suggestions waiting for you <span id="proposal-count" class="text-muted" style="font-weight:normal;font-size:0.8rem">({len(pending)} to look at)</span></h3>
         <button class="btn btn-secondary" onclick="generateProposals()">Check for more</button>
       </div>
-      <p class="text-muted" style="font-size:0.85rem;margin:8px 0 12px">Memory Clean-up looks for memories that may no longer be worth keeping — one-off job logs, ticket notes, repeats, or details that go out of date. Each one asks you a question. Nothing changes until you answer, and anything hidden can be restored from Retracted Records below.</p>
+      <p class="text-muted" style="font-size:0.85rem;margin:8px 0 12px">Memory Clean-up looks for memories that may no longer be worth keeping — one-off job logs, ticket notes, repeats, or details that go out of date. Each one asks you a question. Nothing changes until you answer, and anything hidden can be restored from Retracted memories below.</p>
       <div id="proposal-list">{proposals_html}</div>
       <details style="margin-top:12px">
         <summary class="text-muted" style="cursor:pointer">How good these suggestions have been</summary>
@@ -354,24 +354,34 @@ def memory_page(request: Request, session: dict = Depends(require_auth)):
             review_top, review_html = review_html, ""
 
 
+    ws_scopes = sorted({r.get("scope") for r in active_records if r.get("scope")})
+    workspace_filter_html = (
+        '<div class="form-group" style="max-width:320px;margin-bottom:10px"><label for="mem-ws-filter">Workspace</label>'
+        '<select id="mem-ws-filter" onchange="applyMemoryWorkspaceFilter()"><option value="">All workspaces</option>'
+        + "".join(f'<option value="{escape_html(sc)}">{escape_html(sc.replace("workspace:", ""))}</option>' for sc in ws_scopes)
+        + "</select></div>"
+        if len(ws_scopes) > 1
+        else ""
+    )
+
     js = (
         """
     <script>
     async function refreshMemory() { setTimeout(() => location.reload(), 150); }
     async function retractRecord(id) {
-      if (!confirm('Retract this memory record? It will be hidden but can be restored.')) return;
+      if (!confirm('Retract this memory? It will be hidden but can be restored.')) return;
       const j = await apiFetch('/api/memory/retract?record_id=' + id, { method: 'POST' });
       if (j.ok) { showToast('Retracted'); refreshMemory(); }
       else { showToast(j.error.message || 'Failed', 'danger'); }
     }
     async function restoreRecord(id) {
-      if (!confirm('Restore this memory record?')) return;
+      if (!confirm('Restore this memory?')) return;
       const j = await apiFetch('/api/memory/restore?record_id=' + id, { method: 'POST' });
       if (j.ok) { showToast('Restored'); refreshMemory(); }
       else { showToast(j.error.message || 'Failed', 'danger'); }
     }
     async function deleteRecord(id) {
-      if (!confirm('PERMANENTLY DELETE this memory record? This cannot be undone.')) return;
+      if (!confirm('PERMANENTLY DELETE this memory? This cannot be undone.')) return;
       const j = await apiFetch('/api/memory/' + id, { method: 'DELETE' });
       if (j.ok) { 
         showToast('Deleted', 'success'); 
@@ -507,16 +517,23 @@ def memory_page(request: Request, session: dict = Depends(require_auth)):
         showToast('Memory write failed: ' + (err.message || err), 'danger');
       }
     }
+    function applyMemoryWorkspaceFilter() {
+      const sel = document.getElementById('mem-ws-filter');
+      const want = sel ? sel.value : '';
+      document.querySelectorAll('#mem-results-body tr[data-scope]').forEach(tr => {
+        tr.style.display = (!want || tr.dataset.scope === want) ? '' : 'none';
+      });
+    }
     function displayRecords(records) {
       const tbody = document.getElementById('mem-results-body');
-      if (!records.length) { tbody.innerHTML = '<tr><td colspan=5 class=empty>No records found.</td></tr>'; return; }
+      if (!records.length) { tbody.innerHTML = '<tr><td colspan=5 class=empty>No memories found.</td></tr>'; return; }
       tbody.innerHTML = records.map(r => `
-        <tr>
+        <tr data-scope="${escapeHtml(r.scope || '')}">
           <td><span class="badge badge-${escapeHtml(r.memory_class)}">${escapeHtml(r.memory_class)}</span></td>
           <td>${escapeHtml((r.content || '').substring(0, 80))}</td>
           <td><code>${escapeHtml((r.scope || '').replace('workspace:', ''))}</code></td>
           <td>${(r.confidence || 0.5).toFixed(1)}</td>
-          <td><button class="btn btn-sm btn-danger" data-record-id="${escapeHtml(r.id)}" onclick="retractRecord(this.dataset.recordId)">Retract</button></td>
+          <td><button class="btn btn-sm btn-secondary" data-record-id="${escapeHtml(r.id)}" onclick="retractRecord(this.dataset.recordId)">Retract</button></td>
         </tr>`).join('');
     }
     function copyGeneratedOutput(btn) {
@@ -595,7 +612,7 @@ def memory_page(request: Request, session: dict = Depends(require_auth)):
       // requires confirm_with_evidence.
       if (verdict !== 'accepted') { showToast('Left alone — it will not be flagged again'); }
       else if (outcome === 'still_current') { showToast('Marked as still current — it will not be flagged again'); }
-      else { showToast('Retracted — find it under Retracted Records to restore'); }
+      else { showToast('Retracted — find it under Retracted memories to restore'); }
       refreshMemory();
     }
     async function confirmRecordWithEvidence(recordId, proposalId) {
@@ -681,11 +698,12 @@ def memory_page(request: Request, session: dict = Depends(require_auth)):
 
     {review_top}
 
-    <!-- Active Records -->
+    <!-- Memories -->
     <div class="card">
-      <h3>Active Records <span id="mem-count" class="text-muted" style="font-weight:normal;font-size:0.8rem">({len(active_records)})</span></h3>
-      <p class="text-muted" style="font-size:0.85rem;margin-bottom:8px">These are the active records you can read right now. Use Search for a narrower view.</p>
-      <table><thead><tr><th>Class</th><th>Content</th><th>Scope</th><th>State</th><th class="actions-cell">Actions</th></tr></thead>
+      <h3>Memories <span id="mem-count" class="text-muted" style="font-weight:normal;font-size:0.8rem">({len(active_records)})</span></h3>
+      <p class="text-muted" style="font-size:0.85rem;margin-bottom:8px">The memories you can read right now. Use Search for a narrower view, or pick a workspace.</p>
+      {workspace_filter_html}
+      <table><thead><tr><th>Class</th><th>Content</th><th>Workspace</th><th>State</th><th class="actions-cell">Actions</th></tr></thead>
       <tbody id="mem-results-body">
         {records_rows}
       </tbody></table>
@@ -699,10 +717,10 @@ def memory_page(request: Request, session: dict = Depends(require_auth)):
             + (
                 f"""
     <div class="card" style="border-left:4px solid var(--text-muted)">
-      <h3 style="color:var(--text-muted)">Retracted Records <span class="text-muted" style="font-weight:normal;font-size:0.8rem">({len(retracted_records)})</span></h3>
-      <p class="text-muted" style="font-size:0.85rem;margin-bottom:8px">These records are hidden from search. Restore to make them active again, or permanently delete.</p>
-      <table><thead><tr><th>Class</th><th>Content</th><th>Scope</th><th>State</th><th class="actions-cell">Actions</th></tr></thead>
-      <tbody>{retracted_rows or "<tr><td colspan=5 class=empty>No retracted records.</td></tr>"}</tbody></table>
+      <h3 style="color:var(--text-muted)">Retracted memories <span class="text-muted" style="font-weight:normal;font-size:0.8rem">({len(retracted_records)})</span></h3>
+      <p class="text-muted" style="font-size:0.85rem;margin-bottom:8px">These memories are hidden from search. Restore to make them active again, or permanently delete.</p>
+      <table><thead><tr><th>Class</th><th>Content</th><th>Workspace</th><th>State</th><th class="actions-cell">Actions</th></tr></thead>
+      <tbody>{retracted_rows or "<tr><td colspan=5 class=empty>No retracted memories.</td></tr>"}</tbody></table>
     </div>
     """
                 if retracted_records
@@ -806,7 +824,7 @@ def memory_page(request: Request, session: dict = Depends(require_auth)):
         </div>
         <div class="form-row">
           <div class="form-group"><label>Topic</label><span id="mem-detail-topic"></span></div>
-          <div class="form-group"><label>Standing context</label><span id="mem-detail-pinned"></span><p class="form-hint">Pinned records are shown to every agent in the scope.</p></div>
+          <div class="form-group"><label>Standing context</label><span id="mem-detail-pinned"></span><p class="form-hint">Pinned memories are shown to every agent in the workspace.</p></div>
         </div>
         <h4 class="form-section-title">How sure</h4>
         <div class="form-row">
@@ -829,7 +847,7 @@ def memory_page(request: Request, session: dict = Depends(require_auth)):
         <details style="margin-top:4px">
           <summary class="text-muted" style="cursor:pointer">Advanced</summary>
           <div class="form-row" style="margin-top:10px">
-            <div class="form-group"><label>Slot key</label><code id="mem-detail-slot-key"></code><p class="form-hint">For preferences: only one record per slot stays active.</p></div>
+            <div class="form-group"><label>Slot key</label><code id="mem-detail-slot-key"></code><p class="form-hint">For preferences: only one memory per slot stays active.</p></div>
           </div>
           <div class="form-row">
             <div class="form-group"><label>Valid from</label><span id="mem-detail-valid-from" class="text-muted"></span><p class="form-hint">When it became true in the world.</p></div>
@@ -840,7 +858,7 @@ def memory_page(request: Request, session: dict = Depends(require_auth)):
         <div id="mem-detail-supersede" class="alert alert-warning" style="display:none"></div>
         <div>
           <h4 class="form-section-title" style="margin-top:12px">Version history</h4>
-          <p class="text-muted" style="margin:4px 0 10px;font-size:0.85rem">Current record and any earlier versions it replaced.</p>
+          <p class="text-muted" style="margin:4px 0 10px;font-size:0.85rem">This memory and any earlier versions it replaced.</p>
           <div id="mem-chain-content" style="font-size:0.85rem;max-height:220px;overflow:auto"></div>
         </div>
         <div class="modal-footer">

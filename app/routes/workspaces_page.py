@@ -41,6 +41,12 @@ def workspaces_page(request: Request, session: dict = Depends(require_auth)):
         for a in all_agents
     ]
 
+    from app.database import get_db
+
+    with get_db() as conn:
+        memory_counts = {r[0]: r[1] for r in conn.execute("SELECT scope, COUNT(*) FROM memory_records GROUP BY scope")}
+        task_counts = {r[0]: r[1] for r in conn.execute("SELECT memory_scope, COUNT(*) FROM agent_activity GROUP BY memory_scope")}
+
     project_agent_access = {}
     for p in workspaces:
         pscope = f"workspace:{p['id']}"
@@ -70,7 +76,7 @@ def workspaces_page(request: Request, session: dict = Depends(require_auth)):
         is_active = p.get("is_active")
         active_label = "active" if is_active else "inactive"
         if is_active:
-            toggle_btn = f"<button type='button' class='btn btn-sm btn-warning' data-workspace-action='deactivate' data-workspace-id='{escape_html(p['id'])}'>Deactivate</button>"
+            toggle_btn = f"<button type='button' class='btn btn-sm btn-secondary' data-workspace-action='deactivate' data-workspace-id='{escape_html(p['id'])}'>Deactivate</button>"
         else:
             toggle_btn = f"<button type='button' class='btn btn-sm btn-secondary' data-workspace-action='reactivate' data-workspace-id='{escape_html(p['id'])}'>Reactivate</button>"
         return (
@@ -87,7 +93,7 @@ def workspaces_page(request: Request, session: dict = Depends(require_auth)):
             f"<td><div class='actions-cell'>"
             f"<button type='button' class='btn btn-sm btn-secondary' data-workspace-action='edit' data-workspace-id='{p['id']}'>Edit</button>"
             f"{toggle_btn}"
-            f"<button type='button' class='btn btn-sm btn-danger icon-delete-btn' data-workspace-action='purge' data-workspace-id='{p['id']}' title='Permanently delete' aria-label='Permanently delete'>{get_icon('delete')}</button>"
+            f"<button type='button' class='btn btn-sm btn-danger icon-delete-btn' data-workspace-action='purge' data-workspace-id='{p['id']}' data-memories='{memory_counts.get('workspace:' + p['id'], 0)}' data-tasks='{task_counts.get('workspace:' + p['id'], 0)}' title='Permanently delete' aria-label='Permanently delete'>{get_icon('delete')}</button>"
             f"</div></td></tr>"
         )
 
@@ -113,8 +119,10 @@ def workspaces_page(request: Request, session: dict = Depends(require_auth)):
       if (j.ok) { showToast('Workspace reactivated'); refreshProjects(); }
       else { showToast(j.error.message || 'Failed', 'danger'); }
     }
-    async function purgeProject(id) {
-      if (!confirm('PERMANENTLY DELETE this workspace? This cannot be undone.')) return;
+    async function purgeProject(id, memories, tasks) {
+      const typed = prompt('PERMANENTLY DELETE the workspace "' + id + '"? This also deletes its ' + (memories || 0) + ' memories and ' + (tasks || 0) + ' tasks. This cannot be undone.\\n\\nType the workspace ID to confirm:');
+      if (typed === null) return;
+      if (typed.trim() !== id) { showToast('That is not the workspace ID. Nothing was deleted.', 'warning'); return; }
       const j = await apiFetch('/api/workspaces/' + id + '/purge', { method: 'POST' });
       if (j.ok) { 
         showToast('Workspace deleted', 'success'); 
@@ -449,7 +457,7 @@ def workspaces_page(request: Request, session: dict = Depends(require_auth)):
       if (action === 'edit') editProject(workspaceId);
       else if (action === 'deactivate') deactivateProject(workspaceId);
       else if (action === 'reactivate') reactivateProject(workspaceId);
-      else if (action === 'purge') purgeProject(workspaceId);
+      else if (action === 'purge') purgeProject(workspaceId, button.dataset.memories, button.dataset.tasks);
     });
     </script>""".replace(
         "__WORKSPACE_AGENT_STATE__",
@@ -464,9 +472,9 @@ def workspaces_page(request: Request, session: dict = Depends(require_auth)):
     <div class="card">
       <div class="section-header">
         <h3>Workspaces</h3>
-        <div class="section-note">Shared scopes for collaboration. Assign access from Agents → Edit, or use the workspace editor here as a convenience. Scope names stay <code>workspace:&lt;id&gt;</code>. Adding an agent or person to a workspace that already exists is the normal way to share; create a new one only for a genuinely separate body of work.</div>
+        <div class="section-note">A workspace is one project's shared memory for the people and agents working on it. Create one per project or app. Give an agent access from Agents → Edit.</div>
       </div>
-      <table><thead><tr><th>Scope</th><th>Name</th><th>Status</th><th>Owner</th><th>Agents (Read/Write)</th><th>Created</th><th class="actions-cell">Actions</th></tr></thead>
+      <table><thead><tr><th>ID</th><th>Name</th><th>Status</th><th>Owner</th><th>Agents (Read/Write)</th><th>Created</th><th class="actions-cell">Actions</th></tr></thead>
         <tbody>{rows or "<tr><td colspan=7 class=empty>No workspaces yet. Create one when agents and people need a shared place for memory and work.</td></tr>"}</tbody></table>
     </div>
 
@@ -474,7 +482,7 @@ def workspaces_page(request: Request, session: dict = Depends(require_auth)):
     <div class="modal-overlay" id="create-workspace-modal" style="display:none">
       <div class="modal">
         <h3>Create Workspace</h3>
-        <p class="form-hint" style="margin-bottom:12px">Does an existing workspace already fit? Then add the agent or person to it instead. A new workspace is for a separate body of work.</p>
+        <p class="form-hint" style="margin-bottom:12px">A workspace is one project's shared memory for the people and agents working on it. Create one per project or app.</p>
         <form id="create-workspace-form" onsubmit="createProject(event)">
           <div class="form-group">
             <label>Workspace ID *</label>

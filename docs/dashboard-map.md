@@ -162,3 +162,14 @@ The first-five-minutes walk-through still sends an admin through Credentials, Se
 | Extend before creating (Agents and Workspaces wording) | Built and deployed |
 | Credentials: Used by column and Access dialog | Built, in review |
 | Still to do | The summary for the owner: section map, what was removed, merged or moved (this document), and a clean-up of anything the owner finds unclear in use. The Credentials page stays as it is until the owner has used it from a phone. |
+
+## Wording rules (batch 1, 2026-11-06)
+
+One vocabulary, used in titles, tooltips and help. A page that needs a different word is a bug.
+
+- **Service** and **binding** only. No "connector", "connector type" or "adapter" in visible text. Pages: Services, Service directory, Ready-made services, Services help.
+- **Task** for a unit of work on Activity. **Memory / memories**, not "records". **Workspace** wherever a scope means a workspace; "scope" stays only in advanced areas and generated agent files. Never "principal" (say "owner").
+- **Key**, not "bearer key" or "API key" in the same sentence. **Two-step sign-in**, not "OTP". **Encryption key**, not "Fernet key". **Local credential helper** for the broker.
+- Buttons that act on one row (Deactivate, Retract) are plain; the filled blue button is the one main action on a page. The Connect output button is blue and reads "Generate One-Time Key + <output>".
+- Anything that deletes for good names what goes with it (memories and tasks for a workspace, the key and history for an agent) and asks for the ID to be typed.
+- Where Connect's checks all pass, one line says so and the list sits behind "Show the checks"; it opens by itself when something fails.

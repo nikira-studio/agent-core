@@ -95,7 +95,7 @@ def test_integrations_keeps_connection_setup_separate_from_workspace_guidance(
 
     connection_page = integrations_client.get(common + "mcp_json")
     assert connection_page.status_code == 200
-    assert "Generating a key-bearing output rotates" in connection_page.text
+    assert "Generating one creates a new key for the selected agent" in connection_page.text
     assert "id='generate-connection-btn'" in connection_page.text
 
 
@@ -551,6 +551,6 @@ def test_the_form_says_what_the_agent_choice_affects(test_client, admin_token):
         "/integrations", headers={"Authorization": f"Bearer {admin_token}"}
     )
     assert r.status_code == 200
-    assert "only re-renders the preview" in r.text
-    assert "mints a fresh API key" in r.text
-    assert "identical for every agent" in r.text
+    assert "only updates the preview" in r.text
+    assert "creates a new key for the selected agent" in r.text
+    assert "the same for every agent" in r.text

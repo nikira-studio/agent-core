@@ -264,7 +264,7 @@ def _health_items(is_admin: bool) -> list[tuple[str, str, str, bool]]:
         ("Agent Core", f"version {APP_VERSION}, running", "", True),
         ("Services", "all working" if not failing else f"{failing} failing", "/connectors", not failing),
         ("Webhooks", "no failures in 24 hours" if not dead else f"{dead} failed in 24 hours", "/webhooks", not dead),
-        ("Broker credential", "set" if broker else "not set", "/settings", broker),
+        ("Local credential helper", "ready" if broker else "not set up", "/settings", broker),
     ]
 
 
@@ -333,8 +333,8 @@ def dashboard_home(request: Request, session: dict = Depends(require_auth)):
       {users_card}
       <a class="stat-card stat-link" href="/agents"><div class="value">{agent_count}</div><div class="label">Active Agents</div></a>
       <a class="stat-card stat-link" href="/workspaces"><div class="value">{workspace_count}</div><div class="label">Active Workspaces</div></a>
-      <a class="stat-card stat-link" href="/activity" id="stat-open-activities"><div class="value">{active_task_count}</div><div class="label">Open Activities</div></a>
-      <a class="stat-card stat-link" href="/memory"><div class="value">{memory_count}</div><div class="label">Memory Records</div></a>
+      <a class="stat-card stat-link" href="/activity" id="stat-open-activities"><div class="value">{active_task_count}</div><div class="label">Open tasks</div></a>
+      <a class="stat-card stat-link" href="/memory"><div class="value">{memory_count}</div><div class="label">Memories</div></a>
     </div>"""
 
     waiting = _waiting_rows(session, is_admin, attention)

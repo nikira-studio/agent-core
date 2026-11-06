@@ -155,7 +155,7 @@ Content-Type: application/json
     </tr></thead>
     <tbody id="webhooks-table-body">{rows}</tbody>
   </table>
-  <p class="form-hint" style="margin:0.75rem 0 0">Every message carries <code>X-Agent-Core-Signature: sha256=&lt;hex&gt;</code>, made with the webhook's secret, so the receiver can check it came from here. Webhooks only notify; they do not run anything.</p>
+  <p class="form-hint" style="margin:0.75rem 0 0">Every message carries <code>X-Agent-Core-Signature: sha256=&lt;hex&gt;</code>, made with the webhook's secret, so the receiver can check it came from here. Outgoing webhooks only notify; they do not run anything.</p>
   <details class="access-details" id="webhook-retry-policy">
     <summary>Retry policy</summary>
     <form onsubmit="saveWebhookRetry(event)">

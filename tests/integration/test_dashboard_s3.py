@@ -119,7 +119,7 @@ class TestAgentsPage:
         assert "Can Write To" in r.text
         assert "Other users can use this scope" in r.text
         assert "User <code>user:admin</code> (owner context)" in r.text
-        assert "read access to its active principal's user scope" in r.text
+        assert "can read its owner's" in r.text
 
     def test_agents_edit_modal_shows_owner_and_default_user(self, admin_client):
         r = admin_client.get("/agents")
@@ -145,7 +145,7 @@ class TestAgentsPage:
         assert 'data-scope="user:admin" checked data-required-scope="true" disabled' in r.text
         assert "function applyLeastPrivilegedPreset" in r.text
         assert 'id="ca-authority-preview"' in r.text
-        assert "Permanent authority after creation" in r.text
+        assert "What this agent will be able to do" in r.text
 
     def test_agents_edit_hides_and_preserves_own_scope(self, admin_client):
         r = admin_client.get("/agents")
@@ -209,7 +209,7 @@ class TestUsersPage:
     def test_users_page_does_not_claim_login_registration_is_open(self, admin_client):
         r = admin_client.get("/users")
         assert "have them register at the login page" not in r.text
-        assert "admins create users here" in r.text
+        assert "Admins add people here and choose their role." in r.text
 
     def test_non_admin_users_page_has_dashboard_forbidden_state(self, user_client):
         r = user_client.get("/users")
@@ -227,7 +227,7 @@ class TestWorkspacesPage:
     def test_projects_table_has_agents_column(self, admin_client):
         r = admin_client.get("/workspaces")
         assert "<th>Agents (Read/Write)</th>" in r.text
-        assert "Assign access from Agents → Edit, or use the workspace editor here as a convenience." in r.text
+        assert "Give an agent access from Agents → Edit." in r.text
         assert "id=\"ep-agent-access\"" in r.text
         assert "toggleWorkspaceAgentScope" in r.text
 
@@ -278,7 +278,7 @@ class TestActivityPage:
         assert '<th class="activity-task-cell">Task</th>' in r.text
         assert '<th class="activity-id-cell">ID</th>' not in r.text
         assert "activity-updated-cell" in r.text
-        assert 'No activities yet.' in r.text
+        assert 'No tasks yet.' in r.text
 
     def test_activity_create_sends_assigned_agent_id(self, admin_client):
         r = admin_client.get("/activity")

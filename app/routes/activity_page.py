@@ -184,8 +184,8 @@ def activity_page(request: Request, session: dict = Depends(require_auth)):
         f"<td class='activity-updated-cell'>{local_dt(a.get('updated_at'), style='date')}<br>{local_dt(a.get('updated_at'), style='time')}</td>"
         f"<td><div class='actions-cell activity-actions-cell'>"
         f"<button type='button' class='btn btn-sm btn-secondary' data-activity-reassign='{escape_html(a['id'])}' title='Reassign'>Reassign</button>"
-        f"<button type='button' class='btn btn-sm btn-secondary' data-activity-start='{escape_html(a['id'])}' {'disabled' if a.get('status') not in ('stale', 'blocked', 'reassigned') else ''} title='Reactivate'>Start</button>"
-        f"<button type='button' class='btn btn-sm btn-secondary' data-activity-done='{escape_html(a['id'])}' {'disabled' if a.get('status') not in ('active', 'stale', 'blocked', 'reassigned') else ''} title='Complete'>Done</button>"
+        f"<button type='button' class='btn btn-sm btn-secondary' data-activity-start='{escape_html(a['id'])}' {'disabled' if a.get('status') not in ('stale', 'blocked', 'reassigned') else ''} title='Start'>Start</button>"
+        f"<button type='button' class='btn btn-sm btn-secondary' data-activity-done='{escape_html(a['id'])}' {'disabled' if a.get('status') not in ('active', 'stale', 'blocked', 'reassigned') else ''} title='Done'>Done</button>"
         f"<button type='button' class='btn btn-sm btn-danger' data-activity-cancel='{escape_html(a['id'])}' {'disabled' if a.get('status') not in ('active', 'stale', 'blocked', 'reassigned') else ''} title='Cancel'>Cancel</button>"
         f"</div></td></tr>"
         for a in activities
@@ -285,26 +285,26 @@ def activity_page(request: Request, session: dict = Depends(require_auth)):
     {waiting_card}
     <div class="card">
       <h3>Workspace synchronization</h3>
-      <p class="text-muted" style="font-size:0.85rem">Each row is one agent execution with an independent delivery cursor.</p>
+      <p class="text-muted" style="font-size:0.85rem">Which agent sessions are following each workspace's changes, and how far behind they are.</p>
       <div style="overflow-x:auto"><table><thead><tr><th>Agent</th><th>Workspace</th><th>Status</th><th>Last Seen</th><th>Acknowledged</th><th>Unacknowledged</th></tr></thead>
       <tbody>{execution_rows or "<tr><td colspan=6 class=empty>No synchronized executions yet.</td></tr>"}</tbody></table></div>
     </div>
     <div class="card">
       <h3>Tasks</h3>
-      <p class="text-muted" style="font-size:0.85rem;margin-bottom:8px">Assign work to agents and track progress. An agent session calls <code>activity_pickup</code> at startup or when idle to claim tasks assigned to it in its configured workspace. Use reassign when work needs to move between agents.</p>
+      <p class="text-muted" style="font-size:0.85rem;margin-bottom:8px">Assign a task to an agent. It picks the task up the next time it starts or is idle.</p>
       <div class="card" style="margin-bottom:12px;padding:14px">
         <div class="section-header" style="margin-bottom:8px">
           <h3>Coordination Snapshot</h3>
-          <div class="section-note">Who owns work right now and where handoffs have happened.</div>
+          <div class="section-note">Who owns each task right now and where handoffs have happened.</div>
         </div>
         <div class="stat-grid" style="margin-bottom:10px">
-          <div class="stat-card"><div class="value">{len(coordination_activities)}</div><div class="label">Open Work Items</div></div>
+          <div class="stat-card"><div class="value">{len(coordination_activities)}</div><div class="label">Open tasks</div></div>
           <div class="stat-card"><div class="value">{active_owner_count}</div><div class="label">Assigned Agents</div></div>
           <div class="stat-card"><div class="value">{handoff_count}</div><div class="label">Recent Handoffs</div></div>
           <div class="stat-card"><div class="value">{len(attention_activities)}</div><div class="label">Needs Attention</div></div>
         </div>
         <div class="stat-grid" style="margin-bottom:10px">
-          <div class="stat-card" title="Workspace-scoped activities with an associated execution_id, over the lifetime of the installation. A linked execution proves association with an execution, not that the returned changes were read or acted on.">
+          <div class="stat-card" title="Tasks in a workspace that are tied to an agent session, over the lifetime of the installation. A linked execution proves association with an execution, not that the returned changes were read or acted on.">
             <div class="value">{exec_stats["workspace_activities_pct_lifetime"]}%</div>
             <div class="label">Execution-linked workspace activities (lifetime)</div>
             <div class="text-muted" style="font-size:0.78rem;margin-top:2px">
@@ -320,14 +320,14 @@ def activity_page(request: Request, session: dict = Depends(require_auth)):
           </div>
         </div>
         <div class="text-muted" style="font-size:0.85rem;margin-bottom:8px">Current ownership:</div>
-        <div>{coordination_summary or "<span class='text-muted'>No open work items yet.</span>"}</div>
+        <div>{coordination_summary or "<span class='text-muted'>No open tasks yet.</span>"}</div>
       </div>
       <div class="filter-bar" style="margin-bottom:12px">
         {status_tabs}
       </div>
       <div style="overflow-x:auto">
-      <table class="activity-table"><thead><tr><th class="activity-task-cell">Task</th><th class="activity-scope-cell">Scope</th><th class="activity-status-cell">Status</th><th class="activity-agent-cell">Agent</th><th class="activity-handoff-cell">Handoff From</th><th class="activity-updated-cell">Updated</th><th class="activity-actions-header">Actions</th></tr></thead>
-      <tbody>{rows or "<tr><td colspan=7 class=empty>No activities yet.</td></tr>"}</tbody></table>
+      <table class="activity-table"><thead><tr><th class="activity-task-cell">Task</th><th class="activity-scope-cell">Workspace</th><th class="activity-status-cell">Status</th><th class="activity-agent-cell">Agent</th><th class="activity-handoff-cell">Handoff From</th><th class="activity-updated-cell">Updated</th><th class="activity-actions-header">Actions</th></tr></thead>
+      <tbody>{rows or "<tr><td colspan=7 class=empty>No tasks yet.</td></tr>"}</tbody></table>
       </div>
       <div style="margin-top:8px;font-size:0.85rem;color:var(--text-muted)">{activity_page_info}</div>
       {activity_pagination_html}
@@ -370,7 +370,7 @@ def activity_page(request: Request, session: dict = Depends(require_auth)):
     <!-- Reassign Activity Modal -->
     <div class="modal-overlay" id="reassign-modal" style="display:none">
       <div class="modal">
-        <h3>Reassign Activity</h3>
+        <h3>Reassign task</h3>
         <div class="form-group">
           <label>New Agent</label>
           <select id="reassign-agent-select" required>

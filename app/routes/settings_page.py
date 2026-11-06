@@ -765,7 +765,7 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
           <a href="/settings/password" class="btn btn-secondary">Change Password</a>
         </div>
         <div class="form-group">
-          <a href="/settings/otp" class="btn btn-secondary">Manage OTP</a>
+          <a href="/settings/otp" class="btn btn-secondary">Manage two-step sign-in</a>
         </div>
       </div>
     </div>"""
@@ -832,7 +832,7 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
             [
                 f"<tr><td>Credential Entries</td><td>{credential_count}</td><td class='text-muted'>Encrypted secrets stored in the vault</td></tr>",
                 f"<tr><td>Encryption Key</td><td><span class='badge badge-{'active' if key_status.get('mode') == 'keyring' else 'stale'}'>{escape_html(key_status.get('mode', 'unknown'))}</span></td><td class='text-muted'>Keyring size: {escape_html(key_status.get('keyring_size', 0))} · Primary key ID: {escape_html(key_status.get('primary_key_id', 'none'))}</td></tr>",
-                f"<tr><td>Broker Credential</td><td><span class='badge badge-{broker_badge}'>{broker_label}</span></td><td class='text-muted'>Resolves {CREDENTIAL_PREFIX}* references at runtime</td></tr>",
+                f"<tr><td>Local credential helper</td><td><span class='badge badge-{broker_badge}'>{broker_label}</span></td><td class='text-muted'>Resolves {CREDENTIAL_PREFIX}* references at runtime</td></tr>",
             ]
         )
         secrets_snapshot_html = f"""
@@ -893,11 +893,15 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
       <div class="form-group">
         <button class="btn" onclick="exportBackup()">Export Encrypted Backup</button>
         <button class="btn btn-secondary" onclick="openModal('restore-modal')">Restore from Backup</button>
+      </div>
+      <div id="backup-result" style="margin-top:12px"></div>
+      <hr class=divider>
+      <h4 class="section-title">Maintenance</h4>
+      <div class="form-group">
         <button class="btn btn-secondary" onclick="runMaintenance()">Run Maintenance</button>
       </div>
-      <p class="form-hint">Maintenance marks stale activities using <code>{ENV_PREFIX}STALE_THRESHOLD_MINUTES</code>, deletes transient scratchpad memories and permanently deletes retracted or replaced memory records past the retention limits above. This does not touch credentials or connector bindings. {schedule_line}</p>
+      <p class="form-hint">Maintenance marks tasks stale after the idle limit, deletes temporary scratchpad notes and permanently deletes retracted or replaced memories past the retention limits above. It does not touch credentials or service bindings. {schedule_line}</p>
       <p class="form-hint" id="maintenance-last-run">{last_run_line}</p>
-      <div id="backup-result" style="margin-top:12px"></div>
       <hr class=divider>
       <h4 class="section-title">Startup Checks</h4>
       <div id="startup-checks"><button class="btn btn-secondary btn-sm" onclick="runStartupChecks()">Run Checks</button></div>
@@ -919,11 +923,11 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
 
     broker_html = ""
     if is_admin:
-        broker_html = """
+        broker_html = f"""
     <div class="card">
-      <h3>Broker</h3>
-      <p class="text-muted" style="margin-bottom:12px">The broker credential resolves <code>{CREDENTIAL_PREFIX}*</code> references at runtime. Rotate it if a local consumer should stop using the current broker secret.</p>
-        <button class="btn btn-danger" onclick="rotateBroker()">Rotate Broker Credential</button>
+      <h3>Local credential helper</h3>
+      <p class="text-muted" style="margin-bottom:12px">The local credential helper swaps <code>{CREDENTIAL_PREFIX}*</code> references for the real value when a command runs. Rotate its key if a local program should stop using the current one.</p>
+        <button class="btn btn-danger" onclick="rotateBroker()">Rotate helper key</button>
       <div id="broker-result" style="margin-top:12px"></div>
     </div>"""
 
@@ -1022,7 +1026,7 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
         vector_settings_html = f"""
     <div class="card">
       <h3>Vector Search</h3>
-      <p class="text-muted" style="margin-bottom:12px">Enable semantic search using an embedding endpoint: Ollama, or any service with an OpenAI-compatible embeddings API. Save the settings to turn it on immediately when the backend is healthy. Disable to use FTS5 text search only.</p>
+      <p class="text-muted" style="margin-bottom:12px">Enable semantic search using an embedding endpoint: Ollama, or any service with an OpenAI-compatible embeddings API. Save the settings to turn it on immediately when the backend is healthy. Disable to use plain text search only.</p>
       <form id="vector-settings-form" onsubmit="saveVectorSettings(event)">
         <label class="checkbox-label" style="margin-bottom:16px">
           <input type="checkbox" id="vector-search-enabled" {vector_checked}>
@@ -1084,10 +1088,11 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
       <div id="vector-estimate-result" style="margin-top:12px"></div>
       <div style="margin-top:20px;border-top:1px solid var(--border, #ddd);padding-top:16px">
         <h4 style="margin:0 0 8px">Re-embed memory</h4>
-        <p class="form-hint">Search only uses vectors made by the current model. After changing the model, re-embed so existing records are found by meaning again; until then they are matched by text only. A run can be stopped and started again, and it skips records already done. Each record keeps one vector, so re-embedding replaces the previous model's vectors: switching back later means re-embedding again.</p>
+        <p class="form-hint">Search only uses vectors made by the current model. After changing the model, re-embed so older memories are found by meaning again.</p>
+        <details class="access-details"><summary>More</summary><p class="form-hint">Until then they are matched by text only. A run can be stopped and started again, and it skips memories already done. Each memory keeps one vector, so switching back later means re-embedding again.</p></details>
         <p id="vector-reembed-coverage" class="text-muted">Loading...</p>
         <div class="form-actions">
-          <button type="button" class="btn btn-secondary" id="vector-reembed-start" onclick="startReembed()">Re-embed missing records</button>
+          <button type="button" class="btn btn-secondary" id="vector-reembed-start" onclick="startReembed()">Re-embed missing memories</button>
           <button type="button" class="btn btn-secondary" id="vector-reembed-cancel" onclick="cancelReembed()" style="display:none">Stop</button>
         </div>
         <div id="vector-reembed-result" style="margin-top:12px"></div>
@@ -1139,7 +1144,7 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
         <h3>Restore Encryption Key</h3>
         <form id="credential-key-restore-form" onsubmit="restoreCredentialKey(event)">
           <div class="form-group">
-            <label>Fernet Key *</label>
+            <label>Encryption key *</label>
             <input type="text" id="credential-key-restore-key" required>
             <p class="form-hint">The key must decrypt all current credential entries before it is accepted.</p>
           </div>
@@ -1357,7 +1362,7 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
         const changed = savedVectorModel !== null && model !== savedVectorModel;
         loadReembedStatus();
         if (changed && body.vector_search_enabled === 'true') {{
-          document.getElementById('vector-settings-result').innerHTML = '<div class="alert alert-success">Vector settings saved. The model changed: existing records are matched by text only until they are re-embedded.</div>';
+          document.getElementById('vector-settings-result').innerHTML = '<div class="alert alert-success">Vector settings saved. The model changed: existing memories are matched by text only until they are re-embedded.</div>';
           measureVectorCost(null, null);
         }}
       }} else {{
@@ -1399,7 +1404,7 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
       const cls = {{ danger: 'alert-danger', warning: 'alert-warning', notice: '', ok: 'alert-success' }}[d.level] || '';
       out.innerHTML = '<div class="alert ' + cls + '"><strong>' + escapeHtml(d.model) + '</strong> (' + escapeHtml(String(d.dimension)) + ' dimensions): '
         + escapeHtml(String(d.seconds_per_record)) + ' s per record (sample of ' + escapeHtml(String(d.sample_chars)) + ' characters). '
-        + 'Re-embedding the ' + escapeHtml(String(d.records_to_embed)) + ' records without a vector for it would take about ' + escapeHtml(fmtDuration(d.backfill_seconds)) + '. '
+        + 'Re-embedding the ' + escapeHtml(String(d.records_to_embed)) + ' memories without a vector for it would take about ' + escapeHtml(fmtDuration(d.backfill_seconds)) + '. '
         + 'Each memory write would wait about ' + escapeHtml(String(d.write_delay_seconds)) + ' s for embeddings (it embeds twice; the limit per call is ' + escapeHtml(String(d.embed_timeout_seconds)) + ' s). '
         + escapeHtml(d.message) + '</div>';
       return d;
@@ -1414,7 +1419,7 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
       const cov = document.getElementById('vector-reembed-coverage');
       if (!cov) return;
       cov.textContent = 'Model ' + (c.model || '') + ': ' + (c.active_embedded || 0) + ' of ' + (c.active_total || 0)
-        + ' active records embedded' + (c.missing ? ' (' + c.missing + ' records missing, including superseded and retracted).' : '.');
+        + ' active memories embedded' + (c.missing ? ' (' + c.missing + ' memories missing, including superseded and retracted).' : '.');
       const running = !!job && (job.status === 'running' || job.status === 'cancelling');
       document.getElementById('vector-reembed-start').disabled = running || !data.vector_search_enabled || !c.missing;
       document.getElementById('vector-reembed-cancel').style.display = running ? '' : 'none';
@@ -1440,7 +1445,7 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
       const est = await measureVectorCost(null, null);
       if (!est) return;
       const warn = (est.level === 'danger' || est.level === 'warning') ? '\\n\\nWarning: ' + est.message : '';
-      if (!confirm('Re-embed ' + est.records_to_embed + ' records with ' + est.model + '? At ' + est.seconds_per_record + ' s per record this takes about ' + fmtDuration(est.backfill_seconds) + ' and runs in the background. Each record keeps one vector, so vectors from the previous model are replaced.' + warn)) return;
+      if (!confirm('Re-embed ' + est.records_to_embed + ' memories with ' + est.model + '? At ' + est.seconds_per_record + ' s per record this takes about ' + fmtDuration(est.backfill_seconds) + ' and runs in the background. Each record keeps one vector, so vectors from the previous model are replaced.' + warn)) return;
       const j = await apiFetch('/api/dashboard/vector-reembed', {{ method: 'POST' }});
       if (!j.ok) showToast(j.error?.message || 'Could not start the re-embed', 'danger');
       loadReembedStatus();
@@ -1650,18 +1655,18 @@ def settings_otp_page(request: Request, session: dict = Depends(require_auth)):
 
     if enrolled:
         body_html = """
-        <div class="alert alert-success">OTP is currently enrolled on your account.</div>
-        <p class="text-muted">Resetting OTP requires your current password and an existing authenticator code. Disable OTP to turn it off completely and re-enroll later if you want.</p>
+        <div class="alert alert-success">Two-step sign-in is on for your account.</div>
+        <p class="text-muted">To reset it you need your current password and a code from your authenticator app. Turn it off to remove it completely; you can set it up again later.</p>
         <form id="otp-reset-form" onsubmit="submitOtpReset(event)">
           <div class="form-group">
             <label for="otp-current-password">Current Password</label>
             <input type="password" id="otp-current-password" autocomplete="current-password" required>
           </div>
           <div class="form-group">
-            <label for="otp-current-code">Current OTP Code</label>
+            <label for="otp-current-code">Current code</label>
             <input type="text" id="otp-current-code" maxlength="6" pattern="[0-9]*" inputmode="numeric" required style="width:160px">
           </div>
-          <button type="submit" class="btn btn-danger">Reset OTP</button>
+          <button type="submit" class="btn btn-danger">Reset two-step sign-in</button>
         </form>
         <form id="otp-disable-form" onsubmit="submitOtpDisable(event)" style="margin-top:16px">
           <div class="form-group">
@@ -1669,32 +1674,32 @@ def settings_otp_page(request: Request, session: dict = Depends(require_auth)):
             <input type="password" id="otp-disable-password" autocomplete="current-password" required>
           </div>
           <div class="form-group">
-            <label for="otp-disable-code">Current OTP Code</label>
+            <label for="otp-disable-code">Current code</label>
             <input type="text" id="otp-disable-code" maxlength="6" pattern="[0-9]*" inputmode="numeric" required style="width:160px">
           </div>
-          <button type="submit" class="btn btn-secondary">Disable OTP</button>
+          <button type="submit" class="btn btn-secondary">Turn off two-step sign-in</button>
         </form>
         <div id="otp-reset-result" style="margin-top:16px"></div>"""
         js = """
         <script>
         async function submitOtpReset(e) {
           e.preventDefault();
-          if (!confirm('Reset OTP? Your existing authenticator setup will be replaced.')) return;
+          if (!confirm('Reset two-step sign-in? Your existing authenticator setup will be replaced.')) return;
           await startOtpEnrollment('otp-reset-result');
         }
         async function submitOtpDisable(e) {
           e.preventDefault();
-          if (!confirm('Disable OTP on this account?')) return;
+          if (!confirm('Turn off two-step sign-in on this account?')) return;
           const password = document.getElementById('otp-disable-password')?.value || '';
           const otp = document.getElementById('otp-disable-code')?.value || '';
-          if (!password || !otp) { showToast('Enter your current password and OTP code', 'warning'); return; }
+          if (!password || !otp) { showToast('Enter your current password and the code from your authenticator app', 'warning'); return; }
           const j = await apiFetch('/api/auth/otp/disable', {
             method: 'POST',
             body: JSON.stringify({ current_password: password, otp_code: otp })
           });
           if (j.ok) {
             document.getElementById('otp-disable-form').reset();
-            document.getElementById('otp-reset-result').innerHTML = '<div class="alert alert-success"><strong>OTP is disabled.</strong></div>';
+            document.getElementById('otp-reset-result').innerHTML = '<div class="alert alert-success"><strong>Two-step sign-in is off.</strong></div>';
           } else {
             showToast(j.error?.message || 'Failed', 'danger');
           }
@@ -1702,13 +1707,13 @@ def settings_otp_page(request: Request, session: dict = Depends(require_auth)):
         </script>"""
     else:
         body_html = """
-        <div class="alert alert-warning">OTP is not currently enrolled.</div>
-        <p class="text-muted">Enrolling OTP adds a second layer of authentication. Enter your current password, then scan the QR code with an authenticator app.</p>
+        <div class="alert alert-warning">Two-step sign-in is not set up.</div>
+        <p class="text-muted">Two-step sign-in adds a second check when you sign in. Enter your current password, then scan the QR code with an authenticator app.</p>
         <div class="form-group">
           <label for="otp-current-password">Current Password</label>
           <input type="password" id="otp-current-password" autocomplete="current-password" required>
         </div>
-        <button class="btn" onclick="enrollOtp()">Start OTP Setup</button>
+        <button class="btn" onclick="enrollOtp()">Set up two-step sign-in</button>
         <div id="otp-enroll-result" style="margin-top:16px"></div>"""
         js = """
         <script>
@@ -1724,7 +1729,7 @@ def settings_otp_page(request: Request, session: dict = Depends(require_auth)):
           const password = document.getElementById('otp-current-password')?.value || '';
           const currentOtp = document.getElementById('otp-current-code')?.value || '';
           if (!password) { showToast('Enter your current password', 'warning'); return; }
-        target.innerHTML = '<div class="alert alert-warning">Preparing OTP setup...</div>';
+        target.innerHTML = '<div class="alert alert-warning">Preparing two-step sign-in...</div>';
           const body = { current_password: password };
           if (currentOtp) body.otp_code = currentOtp;
           const j = await apiFetch('/api/auth/otp/enroll', {
@@ -1733,7 +1738,7 @@ def settings_otp_page(request: Request, session: dict = Depends(require_auth)):
           });
           if (j.ok) {
             const qrHtml = j.data.qr_svg
-              ? '<img class="otp-qr" src="' + j.data.qr_svg + '" alt="OTP enrollment QR code">'
+              ? '<img class="otp-qr" src="' + j.data.qr_svg + '" alt="Two-step sign-in QR code">'
               : '<div class="alert alert-warning">QR code could not be generated. Use the manual secret instead.</div>';
             target.innerHTML =
               '<div class="alert alert-success"><strong>Scan this QR code in your authenticator app.</strong></div>' +
@@ -1744,11 +1749,11 @@ def settings_otp_page(request: Request, session: dict = Depends(require_auth)):
                   '<div class="mono" style="word-break:break-all;margin:12px 0">' + escapeHtml(j.data.secret) + '</div>' +
                   '<label for="otp-confirm-code">Enter the 6-digit code from your app</label>' +
                   '<input type="text" id="otp-confirm-code" maxlength="6" pattern="[0-9]*" inputmode="numeric" style="width:160px">' +
-                  '<div style="margin-top:10px"><button class="btn" data-otp-confirm="' + escapeHtml(targetId) + '">Verify and Enable OTP</button></div>' +
+                  '<div style="margin-top:10px"><button class="btn" data-otp-confirm="' + escapeHtml(targetId) + '">Verify and turn on</button></div>' +
                 '</div>' +
               '</div>';
           } else {
-            target.innerHTML = '<div class="alert alert-danger">' + escapeHtml(j.error?.message || 'Failed to prepare OTP setup') + '</div>';
+            target.innerHTML = '<div class="alert alert-danger">' + escapeHtml(j.error?.message || 'Failed to prepare two-step sign-in') + '</div>';
             showToast(j.error?.message || 'Failed', 'danger');
           }
         }
@@ -1771,7 +1776,7 @@ def settings_otp_page(request: Request, session: dict = Depends(require_auth)):
           });
           if (j.ok) {
             document.getElementById(targetId).innerHTML =
-              '<div class="alert alert-success"><strong>OTP is enabled.</strong></div>';
+              '<div class="alert alert-success"><strong>Two-step sign-in is on.</strong></div>';
           } else {
             showToast(j.error?.message || 'Invalid code', 'danger');
           }
@@ -1781,7 +1786,7 @@ def settings_otp_page(request: Request, session: dict = Depends(require_auth)):
     js = setup_js + js
 
     return render_page(
-        "Manage OTP",
+        "Manage two-step sign-in",
         f"""
     <div class="page-header"><h1>Two-Factor Authentication</h1></div>
     <div class="card" style="max-width:600px">

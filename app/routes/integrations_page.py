@@ -328,7 +328,7 @@ def _agent_setup_access_model(
     elif can_read_user:
         checks.append({"label": "User preference read access", "status": "ok"})
     else:
-        checks.append({"label": "Selected user is not the agent's active principal", "status": "warning"})
+        checks.append({"label": "Selected user is not this agent's owner", "status": "warning"})
 
     if enforcer.can_read(agent_scope) and enforcer.can_write(agent_scope):
         checks.append({"label": "Agent private scope", "status": "ok"})
@@ -351,7 +351,7 @@ def _agent_setup_access_model(
 
     checks.append(
         {
-            "label": "Scope model: workspace membership gates agent scopes",
+            "label": "Access comes from the workspaces this agent belongs to.",
             "status": "info",
         }
     )
@@ -722,8 +722,15 @@ def integrations_page(
             }[check["status"]]
             checks_html += f"<div class='{cls}'><span class='check-icon'>{icon}</span>{escape_html(check['label'])}</div>"
         checks_html += "</div>"
-        if any(c["status"] == "warning" for c in access_checks):
-            checks_html += "<p class='text-muted' style='font-size:0.8rem;margin-top:8px'>Warnings indicate missing access. Review access on the Agents page or generate the prompt anyway.</p>"
+        if any(c["status"] in ("warning", "blocked") for c in access_checks):
+            checks_html += "<p class='text-muted' style='font-size:0.8rem;margin-top:8px'>Warnings mean something is missing. Review access on the Agents page, or generate the output anyway.</p>"
+        else:
+            checks_html = (
+                "<div class='check-ok'><span class='check-icon'>&#10003;</span>Everything this agent needs is in place</div>"
+                "<details class='access-details' style='margin-top:8px'><summary>Show the checks</summary>"
+                + checks_html
+                + "</details>"
+            )
 
     current_params = {
         "user_id": user_id,
@@ -770,7 +777,7 @@ def integrations_page(
             else "Generate One-Time Key + Assistants Prompt"
         )
         connection_btn = (
-            f"<button type='button' class='btn btn-sm btn-warning' id='generate-connection-btn' data-label='{escape_html(connection_label)}' onclick='generateConnectionConfig()'>{escape_html(connection_label)}</button>"
+            f"<button type='button' class='btn btn-sm' id='generate-connection-btn' data-label='{escape_html(connection_label)}' onclick='generateConnectionConfig()'>{escape_html(connection_label)}</button>"
             if output_type in ("env", "mcp_json", "assistants_md")
             else ""
         )
@@ -834,8 +841,8 @@ def integrations_page(
             </select>
             <p class="form-hint">The agent identity the tool signs in as. It decides what the tool may read and write.</p>
             <details class="access-details">
-              <summary>What does Generate connection do?</summary>
-              <p class="form-hint">Changing this selection only re-renders the preview below — nothing is issued until you press the amber <strong>Generate connection</strong> button, which mints a fresh API key for the selected agent and invalidates the previous one. That button appears only for the outputs that embed a key (MCP Config, Environment Variables, Assistants). CLAUDE.md, AGENTS.md, Instructions and the prompts are repository-level guidance — identical for every agent, and safe to regenerate at any time.</p>
+              <summary>What does Generate One-Time Key do?</summary>
+              <p class="form-hint">Choosing a user, workspace or agent only updates the preview below. Nothing is issued until you press the blue <strong>Generate One-Time Key</strong> button under the output, which creates a new key for the selected agent and replaces its old one. That button appears only for outputs that include a key (MCP Config, Environment Variables, Assistants). CLAUDE.md, AGENTS.md, Instructions and the prompts are the same for every agent and safe to regenerate at any time.</p>
             </details>
           </div>
         </div>
@@ -849,19 +856,19 @@ def integrations_page(
         <h2>Generated Output</h2>
         <div class="setup-output-group" data-setup-path="connection">
           <h3>1. Connect a client</h3>
-          <p>Use these outputs the first time you connect a client, or when you deliberately replace its MCP settings or bearer key. Generating a key-bearing output rotates the selected agent's key.</p>
+          <p>Use these the first time you connect a tool, or when you deliberately replace its connection settings or key. Generating one creates a new key for the selected agent and replaces its old one.</p>
           <div class="setup-tabs">{connection_tabs}</div>
         </div>
         <div class="setup-output-group" data-setup-path="workspace-instructions">
           <h3>2. Add or refresh workspace instructions</h3>
-          <p>Use these outputs for a repository or a single session. They contain no bearer key. You can refresh them after an Agent Core update or reuse them in another workspace without changing an MCP connection.</p>
+          <p>Use these outputs for a repository or a single session. They contain no key. You can refresh them after an Agent Core update or reuse them in another workspace without changing an MCP connection.</p>
           <div class="setup-tabs">{instruction_tabs}</div>
         </div>
         <div class="alert alert-warning" id="connection-warning" style="display:none"></div>
         <div class="connection-doctor" id="connection-doctor">
           <div>
             <h3>Connection doctor</h3>
-            <p>Use the exact MCP URL below, not the site root. This check never stores a bearer key.</p>
+            <p>Use the exact MCP URL below, not the site root. This check never stores the key.</p>
             <code>{escape_html(base_url)}/mcp</code>
           </div>
           <button type="button" class="btn btn-sm btn-secondary" id="test-connection-details-btn" onclick="testConnectionDetails()">Test connection details</button>
@@ -1723,17 +1730,17 @@ export {ENV_PREFIX}USER_SCOPE="{user_scope}"
 
 def _get_destination_guidance(target, output_type):
     if output_type == "claude_md":
-        return f"Save this as <code>CLAUDE.md</code> in the workspace repository root. It is workspace-centric; the configured MCP/API key determines the active {APP_NAME} agent."
+        return f"Save this as <code>CLAUDE.md</code> in the workspace repository root. The key you connect with decides which {APP_NAME} agent is active."
     elif output_type == "agents_md":
-        return f"Save this as <code>AGENTS.md</code> in the workspace repository root. It is workspace-centric and can be shared by multiple agents; the configured MCP/API key determines the active {APP_NAME} agent."
+        return f"Save this as <code>AGENTS.md</code> in the workspace repository root. It can be shared by several agents; the key each one connects with decides which {APP_NAME} agent is active."
     elif output_type == "assistants_md":
-        return "Paste this into the assistant's own onboarding or instruction field. It is meant for assistant-style agents that manage their own MCP configuration. Use the one-time key button here when you want the prompt to include a fresh bearer token."
+        return "Paste this into the assistant's own onboarding or instruction field. It is meant for assistant-style agents that manage their own MCP configuration. Use the one-time key button here when you want the prompt to include a fresh key."
     elif output_type == "mcp_json":
-        return f"Use the section that matches your tool. For Claude Code, run the <code>claude mcp add</code> command or save the JSON as <code>.mcp.json</code> in your repo root. Antigravity uses the same MCP shape but expects <code>serverUrl</code> instead of <code>url</code>. The bearer key determines the active {APP_NAME} agent."
+        return f"Use the section that matches your tool. For Claude Code, run the <code>claude mcp add</code> command or save the JSON as <code>.mcp.json</code> in your repo root. Antigravity uses the same MCP shape but expects <code>serverUrl</code> instead of <code>url</code>. The key decides which {APP_NAME} agent is active."
     elif output_type == "env":
         return "Optional. Paste these into your shell profile (<code>~/.bashrc</code>, <code>~/.zshrc</code>) or tool environment only if you want the tool to read values from environment variables. This does not configure MCP by itself."
     elif output_type == "instructions":
-        return "Read this yourself. It explains which generated output to use, where to put it, and when to generate a one-time key."
+        return "Start here: which output to use, where to put it, and when to generate a one-time key."
     elif output_type == "session":
         return "Paste this into the first message or workspace instructions field for a single agent session."
     elif output_type == "claude_code_hook":
