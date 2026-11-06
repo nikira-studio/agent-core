@@ -1,4 +1,6 @@
+import fcntl
 import threading
+import time
 import os
 import json
 import tempfile
@@ -16,7 +18,80 @@ from app.config import settings
 # and whose payload holds another, or a database re-encrypted half under each.
 # It lives here because it is a property of the key material, not of any one
 # caller, and because both sides of the problem already import this module.
-KEY_OPERATION_LOCK = threading.RLock()
+#
+# With more than one worker process a thread lock is not enough: two workers rotating at the
+# same moment would each prepend a new key to the same old list, the second write would drop the
+# first worker's key, and anything encrypted with it could never be read again. So the same lock
+# also holds a file lock in the data directory, for as long as the outermost holder keeps it.
+# The kernel drops a file lock when its process dies, so a crashed worker cannot leave it held.
+KEY_OPERATION_LOCK_FILE = ".key-operation.lock"
+KEY_OPERATION_WAIT_SECONDS = 300
+
+
+class _KeyOperationLock:
+    """Reentrant in a thread, exclusive across threads, and exclusive across processes."""
+
+    def __init__(self) -> None:
+        self._thread_lock = threading.RLock()
+        self._depth = 0
+        self._fd = -1
+
+    def acquire(self) -> bool:
+        self._thread_lock.acquire()
+        if self._depth == 0:
+            try:
+                self._fd = self._lock_file()
+            except BaseException:
+                self._thread_lock.release()
+                raise
+        self._depth += 1
+        return True
+
+    def release(self) -> None:
+        if not self._thread_lock._is_owned():
+            raise RuntimeError("Cannot release a key operation lock this thread does not hold")
+        self._depth -= 1
+        if self._depth == 0:
+            fd, self._fd = self._fd, -1
+            try:
+                fcntl.flock(fd, fcntl.LOCK_UN)
+            finally:
+                os.close(fd)
+        self._thread_lock.release()
+
+    @staticmethod
+    def _lock_file() -> int:
+        # The lock file must not be removed or replaced while a key operation holds it (a restore
+        # that swaps the data directory holds this lock for its whole run, so it never does).
+        os.makedirs(settings.data_dir, exist_ok=True)
+        fd = os.open(os.path.join(settings.data_dir, KEY_OPERATION_LOCK_FILE), os.O_CREAT | os.O_RDWR, 0o600)
+        deadline = time.monotonic() + KEY_OPERATION_WAIT_SECONDS
+        while True:
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                return fd
+            except BlockingIOError:
+                if time.monotonic() >= deadline:
+                    os.close(fd)
+                    raise TimeoutError("Another key operation is still running; try again shortly")
+                time.sleep(0.05)
+            except BaseException:
+                os.close(fd)
+                raise
+
+    def _is_owned(self) -> bool:
+        """True when the calling thread holds it (the same check a threading.RLock offers)."""
+        return self._thread_lock._is_owned() and self._depth > 0
+
+    def __enter__(self):
+        self.acquire()
+        return self
+
+    def __exit__(self, *exc_info) -> None:
+        self.release()
+
+
+KEY_OPERATION_LOCK = _KeyOperationLock()
 
 _fernet: Optional[MultiFernet] = None
 _keyring: Optional[list[bytes]] = None
@@ -176,6 +251,11 @@ def decrypt_value(ciphertext: str) -> str:
 
 
 def rotate_key() -> tuple[bytes, list[bytes]]:
+    with KEY_OPERATION_LOCK:
+        return _rotate_key_locked()
+
+
+def _rotate_key_locked() -> tuple[bytes, list[bytes]]:
     global _fernet, _keyring, _keyring_stamp
     current = _loaded()
     new_key = Fernet.generate_key()
