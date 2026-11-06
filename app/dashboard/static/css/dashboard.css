@@ -1992,3 +1992,15 @@ details.card[open] > summary::before { content: "\25BE\00a0"; }
   .stack-phone td:empty { display: none; }
   .stack-phone .activity-actions-cell { padding-top: 8px; flex-wrap: wrap; }
 }
+
+/* Connect: three steps, each tool's pieces in the order a person does them. */
+.setup-steps { list-style: none; counter-reset: setup-step; margin: 14px 0 0; padding: 0; }
+.setup-steps > li { counter-increment: setup-step; position: relative; padding: 0 0 16px 34px; }
+.setup-steps > li::before { content: counter(setup-step, lower-alpha); position: absolute; left: 0; top: 0; width: 24px; height: 24px; border-radius: 50%; background: var(--accent); color: #fff; font-size: 0.8rem; text-align: center; line-height: 24px; }
+.setup-steps > li > h3 { margin: 0 0 4px; font-size: 0.95rem; border: 0; padding: 0; }
+.setup-steps > li > p { margin: 0 0 8px; color: var(--muted); font-size: 0.85rem; }
+.output-section + .output-section { margin-top: 12px; }
+#other-outputs { margin-top: 16px; }
+@media (max-width: 720px) {
+  #step-2 .setup-tabs { flex-wrap: wrap; overflow-x: visible; }
+}

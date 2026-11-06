@@ -10,8 +10,13 @@ function downloadGeneratedOutput(filename, content) {
   URL.revokeObjectURL(url);
 }
 
-function getGeneratedOutputText() {
-  return document.querySelector('.output-block')?.innerText || '';
+// Each output sits in its own .output-section; a button reads and updates its own section.
+function sectionOf(el) {
+  return (el && el.closest && el.closest('.output-section')) || document;
+}
+
+function getGeneratedOutputText(el) {
+  return sectionOf(el).querySelector('.output-block')?.innerText || '';
 }
 
 function getSetupScrollStorageKey() {
@@ -60,29 +65,29 @@ function setStoredIntegrationConnectionKey(key) {
 function applyStoredIntegrationConnectionKey() {
   const key = getStoredIntegrationConnectionKey();
   if (!key) return;
-  const block = document.querySelector('.output-block');
-  if (!block) return;
-  const current = block.innerText || '';
-  if (!current.includes(_AC_API_KEY_ANGLE) && !current.includes(_AC_API_KEY_BRACKET)) return;
-  const updated = current
-    .replaceAll(_AC_API_KEY_ANGLE, key)
-    .replaceAll(_AC_API_KEY_BRACKET, key);
-  if (updated !== current) {
-    block.innerText = updated;
-    const warning = document.getElementById('connection-warning');
-    if (warning) {
-      warning.textContent = 'This page is using the last generated one-time key for the current context.';
-      warning.style.display = 'block';
+  document.querySelectorAll('.output-block').forEach(function(block) {
+    const current = block.innerText || '';
+    if (!current.includes(_AC_API_KEY_ANGLE) && !current.includes(_AC_API_KEY_BRACKET)) return;
+    const updated = current
+      .replaceAll(_AC_API_KEY_ANGLE, key)
+      .replaceAll(_AC_API_KEY_BRACKET, key);
+    if (updated !== current) {
+      block.innerText = updated;
+      const warning = document.getElementById('connection-warning');
+      if (warning) {
+        warning.textContent = 'This page is using the last generated one-time key for the current context.';
+        warning.style.display = 'block';
+      }
     }
-  }
+  });
 }
 
 function copyGeneratedOutput(btn) {
-  copyToClipboard(getGeneratedOutputText(), btn);
+  copyToClipboard(getGeneratedOutputText(btn), btn);
 }
 
-function downloadCurrentOutput(filename) {
-  downloadGeneratedOutput(filename, getGeneratedOutputText());
+function downloadCurrentOutput(filename, btn) {
+  downloadGeneratedOutput(filename, getGeneratedOutputText(btn));
 }
 
 async function applyRecommendedAccess() {
@@ -132,15 +137,15 @@ async function applyRecommendedAccess() {
   }
 }
 
-async function generateConnectionConfig() {
-  const btn = document.getElementById('generate-connection-btn');
+async function generateConnectionConfig(btn) {
+  btn = btn || document.getElementById('generate-connection-btn');
   const warning = document.getElementById('connection-warning');
   const params = new URLSearchParams(window.location.search);
   const userId = params.get('user_id') || document.getElementById('user_id')?.value;
   const projectId = params.get('workspace_id') || document.getElementById('workspace_id')?.value || '';
   const agentId = params.get('agent_id') || document.getElementById('agent_id')?.value;
-  const target = params.get('target') || 'generic_mcp';
-  const outputType = params.get('output_type') || 'env';
+  const target = btn.dataset.target || params.get('target') || 'generic_mcp';
+  const outputType = btn.dataset.outputType || params.get('output_type') || 'env';
 
   if (!userId || !agentId) {
     showToast('Select user and agent first', 'warning');
@@ -165,9 +170,10 @@ async function generateConnectionConfig() {
     const j = await r.json();
     if (j.ok) {
       setStoredIntegrationConnectionKey(j.data.api_key || '');
-      const block = document.querySelector('.output-block');
+      const section = sectionOf(btn);
+      const block = section.querySelector('.output-block');
       if (block) block.innerText = j.data.output || '';
-      const label = document.querySelector('.output-label');
+      const label = section.querySelector('.output-label');
       if (label) label.textContent = j.data.output_label || 'Connection Config';
       if (warning) {
         warning.textContent = j.data.warning || 'This key is shown once.';
@@ -262,5 +268,5 @@ document.addEventListener('click', function(ev) {
   const btn = ev.target.closest('[data-download-filename]');
   if (!btn) return;
   ev.preventDefault();
-  downloadCurrentOutput(btn.dataset.downloadFilename);
+  downloadCurrentOutput(btn.dataset.downloadFilename, btn);
 });

@@ -62,7 +62,6 @@ def test_integrations_page_loads(integrations_client):
     html = r.text
     assert "<h1>Connect</h1>" in html
     assert "Generate setup instructions" in html
-    assert "Current tool preset" in html
     assert 'href="/integrations?' in html
     assert 'id="user_id"' in html
     assert 'id="workspace_id"' in html
@@ -158,7 +157,8 @@ def test_integrations_generates_claude_md(integrations_client):
     )
     assert r.status_code == 200
     html = r.text
-    output_match = re.search(r"<pre class='output-block'>(.*?)</pre>", html, re.S)
+    # The page leads with the chosen tool's steps; the requested raw output is under "Other outputs".
+    output_match = re.search(r"<pre class='output-block'>(.*?)</pre>", html.split('id="other-outputs"', 1)[1], re.S)
     assert output_match is not None
     output = output_match.group(1)
     assert "CLAUDE.md" in html
@@ -554,3 +554,56 @@ def test_the_form_says_what_the_agent_choice_affects(test_client, admin_token):
     assert "only updates the preview" in r.text
     assert "creates a new key for the selected agent" in r.text
     assert "the same for every agent" in r.text
+
+
+def test_connect_is_three_steps_and_a_chosen_tool_gets_only_its_own_pieces(integrations_client):
+    from app.routes.integrations_page import _build_mcp_json, SETUP_TOOLS
+
+    # The full MCP config is byte-for-byte what it was; per-tool pieces are cut from it.
+    full = _build_mcp_json("https://core.test", "K")
+    assert full.startswith("# Claude Code") and "# Codex CLI" in full and "# OpenCode" in full
+    codex_only = _build_mcp_json("https://core.test", "K", tool="codex")
+    assert codex_only in full and "# Claude Code" not in codex_only and "mcpServers" not in codex_only
+    assert "# Codex CLI" not in _build_mcp_json("https://core.test", "K", tool="claude_code")
+    assert '"serverUrl"' in _build_mcp_json("https://core.test", "K", tool="antigravity")
+    assert [t[0] for t in SETUP_TOOLS] == ["claude_code", "codex", "cursor", "windsurf", "antigravity", "generic_mcp"]
+
+
+def test_connect_page_lists_the_steps_and_keeps_every_other_output(test_client, admin_token):
+    r = test_client.get("/integrations", headers={"Authorization": f"Bearer {admin_token}"})
+    assert r.status_code == 200
+    html = r.text
+    assert html.index("1. Who is connecting?") < html.index("2. Which tool?") < html.index("3. Check it works")
+    assert "Choose your tool to see exactly what to copy" in html
+    assert 'id="other-outputs"' in html and "Next Steps" not in html
+    for label in ("Claude Code", "Codex", "Cursor", "Windsurf", "Antigravity", "Other MCP tool"):
+        assert f">{label}</a>" in html
+
+
+def test_a_chosen_tool_shows_its_connect_block_its_file_and_the_key_button(integrations_client):
+    base = "/integrations?user_id=alex&workspace_id=agent-core&agent_id=claude-code"
+    claude = integrations_client.get(base + "&target=claude_code").text
+    steps = claude.split('id="step-2"', 1)[1].split('id="step-3"', 1)[0]
+    assert "Connect it" in steps and "Give it instructions" in steps and "Optional: add context" in steps
+    assert "# Claude Code" in steps and "# Codex CLI" not in steps
+    assert "id='generate-tool-connection-btn'" in steps and "data-output-type='mcp_tool'" in steps
+    assert "CLAUDE.md" in steps
+
+    codex = integrations_client.get(base + "&target=codex").text.split('id="step-2"', 1)[1].split('id="step-3"', 1)[0]
+    assert "# Codex CLI" in codex and "# Claude Code" not in codex and "AGENTS.md" in codex
+    assert "Optional: add context" not in codex
+
+    other = integrations_client.get(base).text.split('id="step-2"', 1)[1].split('id="step-3"', 1)[0]
+    assert "Choose your tool to see exactly what to copy" in other and "Connect it" not in other
+    # Step 3 carries the verification prompt once an agent is chosen.
+    assert "Verification Prompt" in integrations_client.get(base + "&target=codex").text.split('id="step-3"', 1)[1]
+
+
+def test_generating_a_key_for_the_chosen_tool_returns_only_that_tools_config(integrations_client):
+    r = integrations_client.post("/api/integrations/generate-connection", json={
+        "user_id": "alex", "workspace_id": "agent-core", "agent_id": "claude-code",
+        "target": "codex", "output_type": "mcp_tool"}, headers=csrf_headers(integrations_client))
+    assert r.status_code == 200, r.text
+    data = r.json()["data"]
+    assert "# Codex CLI" in data["output"] and "# Claude Code" not in data["output"]
+    assert data["api_key"] and data["api_key"] in data["output"]

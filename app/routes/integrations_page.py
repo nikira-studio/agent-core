@@ -249,8 +249,38 @@ def _agent_setup_target_label(target):
         "cursor": "Cursor",
         "windsurf": "Windsurf",
         "antigravity": "Antigravity",
-        "generic_mcp": "Generic MCP",
-    }.get(target, "Generic MCP")
+        "generic_mcp": "Other MCP tool",
+    }.get(target, "Other MCP tool")
+
+
+# What each tool needs, in the order a person does it. The text is the same generated
+# output as the "Other outputs" tabs; this only chooses which pieces to show.
+SETUP_TOOLS = (
+    ("claude_code", "Claude Code",
+     "Run the <code>claude mcp add</code> command, or save the JSON as <code>.mcp.json</code> in your repo root.",
+     "claude_md", "CLAUDE.md", "CLAUDE.md",
+     "Save this as <code>CLAUDE.md</code> in the workspace repository root. Claude Code reads it automatically."),
+    ("codex", "Codex",
+     "Add this to <code>~/.codex/config.toml</code>.",
+     "agents_md", "AGENTS.md", "AGENTS.md",
+     "Save this as <code>AGENTS.md</code> in the workspace repository root. Codex reads it automatically."),
+    ("cursor", "Cursor",
+     "Save this as <code>.cursor/mcp.json</code> in your workspace, or <code>~/.cursor/mcp.json</code> for every project, then run Reload MCP Servers.",
+     "instructions", "Setup guide", f"{APP_SLUG}-instructions.md",
+     "Read this yourself: which output to use, where to put it, and when to generate a one-time key."),
+    ("windsurf", "Windsurf",
+     "Add this to Windsurf's MCP settings for your workspace. Restart Windsurf if it does not appear.",
+     "instructions", "Setup guide", f"{APP_SLUG}-instructions.md",
+     "Read this yourself: which output to use, where to put it, and when to generate a one-time key."),
+    ("antigravity", "Antigravity",
+     "Add this to your MCP settings. It uses <code>serverUrl</code> instead of <code>url</code>. Restart Antigravity if it does not appear.",
+     "instructions", "Setup guide", f"{APP_SLUG}-instructions.md",
+     "Read this yourself: which output to use, where to put it, and when to generate a one-time key."),
+    ("generic_mcp", "Other MCP tool",
+     "This has a block for each common tool. Use the one that matches yours; file locations vary (see docs/integrations.md).",
+     "instructions", "Setup guide", f"{APP_SLUG}-instructions.md",
+     "Read this yourself: which output to use, where to put it, and when to generate a one-time key."),
+)
 
 
 def _agent_setup_access_model(
@@ -603,7 +633,6 @@ def integrations_page(
     agent_id = request.query_params.get("agent_id", "")
     target = request.query_params.get("target", "generic_mcp")
     output_type = request.query_params.get("output_type", "instructions")
-    tool_label = _agent_setup_target_label(target)
 
     users = []
     with get_db() as conn:
@@ -653,6 +682,7 @@ def integrations_page(
     )
 
     access_checks = []
+    tool_ctx = None
     generated_output = ""
     output_label = ""
     base_url = public_base_url(request)
@@ -695,6 +725,7 @@ def integrations_page(
             )
 
         if agent and user:
+            tool_ctx = (user, workspace, agent)
             output_label, generated_output = _build_agent_setup_output(
                 user=user,
                 workspace=workspace,
@@ -737,6 +768,9 @@ def integrations_page(
         "workspace_id": workspace_id,
         "agent_id": agent_id,
     }
+    tool_selected = "target" in request.query_params
+    if tool_selected:
+        current_params["target"] = target
     from urllib.parse import urlencode
 
     def output_tabs(options):
@@ -777,7 +811,7 @@ def integrations_page(
             else "Generate One-Time Key + Assistants Prompt"
         )
         connection_btn = (
-            f"<button type='button' class='btn btn-sm' id='generate-connection-btn' data-label='{escape_html(connection_label)}' onclick='generateConnectionConfig()'>{escape_html(connection_label)}</button>"
+            f"<button type='button' class='btn btn-sm' id='generate-connection-btn' data-label='{escape_html(connection_label)}' data-target='{escape_html(target)}' data-output-type='{escape_html(output_type)}' onclick='generateConnectionConfig(this)'>{escape_html(connection_label)}</button>"
             if output_type in ("env", "mcp_json", "assistants_md")
             else ""
         )
@@ -803,18 +837,79 @@ def integrations_page(
     output_label_html = (
         f"<div class='output-label'>{output_label}</div>" if output_label else ""
     )
+
+    def _section(label, text, file_name, key_button=""):
+        return (
+            "<div class='output-section'>"
+            f"<div class='output-label'>{escape_html(label)}</div>"
+            f"<pre class='output-block'>{escape_html(text)}</pre>"
+            "<div class='output-actions'>"
+            f"{key_button}"
+            "<button type='button' class='btn btn-sm btn-secondary' onclick=\"copyGeneratedOutput(this)\">Copy</button>"
+            f"<button type='button' class='btn btn-sm btn-secondary' data-download-filename='{escape_html(file_name)}'>Download</button>"
+            "</div></div>"
+        )
+
+    tool_links = "".join(
+        f'<a class="setup-tab {"active" if tool_selected and t[0] == target else ""}" '
+        f'href="{page_path}?{urlencode({**{k: v for k, v in current_params.items() if k != "target"}, "target": t[0]})}#step-2">{escape_html(t[1])}</a>\n'
+        for t in SETUP_TOOLS
+    )
+    selected_tool = next((t for t in SETUP_TOOLS if t[0] == target), None) if tool_selected else None
+    tool_steps_html = ""
+    verification_html = ""
+    if tool_ctx:
+        u_, w_, a_ = tool_ctx
+        _vl, _vt = _build_agent_setup_output(
+            user=u_, workspace=w_, agent=a_, target=target, output_type="verification", base_url=base_url
+        )
+        verification_html = _section(
+            "Verification Prompt — run it in the connected tool", _vt, f"{APP_SLUG}-verification.md"
+        )
+    if selected_tool and tool_ctx:
+        _key, _name, connect_where, file_type, file_label, file_name, file_where = selected_tool
+        c_label, c_text = _build_agent_setup_output(
+            user=u_, workspace=w_, agent=a_, target=target, output_type="mcp_tool", base_url=base_url
+        )
+        f_label, f_text = _build_agent_setup_output(
+            user=u_, workspace=w_, agent=a_, target=target, output_type=file_type, base_url=base_url
+        )
+        connect_btn = (
+            "<button type='button' class='btn btn-sm' id='generate-tool-connection-btn' "
+            f"data-label='Generate One-Time Key + {escape_html(_name)} MCP Config' data-target='{escape_html(target)}' "
+            "data-output-type='mcp_tool' onclick='generateConnectionConfig(this)'>"
+            f"Generate One-Time Key + {escape_html(_name)} MCP Config</button>"
+        )
+        hook_item = (
+            "<li><h3>Optional: add context at the start of each session</h3>"
+            "<p>A hook runs when a Claude Code session starts. The steps are under "
+            f"<a href=\"{page_path}?{urlencode({**current_params, 'output_type': 'claude_code_hook'})}#other-outputs\">Other outputs → Claude Code Hook</a>.</p></li>"
+            if target == "claude_code"
+            else ""
+        )
+        tool_steps_html = (
+            '<ol class="setup-steps">'
+            f"<li><h3>Connect it</h3><p>{connect_where}</p>{_section(c_label, c_text, f'{APP_SLUG}-mcp-config.txt', connect_btn)}</li>"
+            f"<li><h3>Give it instructions</h3><p>{file_where}</p>{_section(f_label, f_text, file_name)}</li>"
+            f"{hook_item}"
+            "</ol>"
+        )
+    elif selected_tool:
+        tool_steps_html = "<div class='empty'>Choose an agent in step 1 to see what to copy.</div>"
+    else:
+        tool_steps_html = "<p class='form-hint'>Choose your tool to see exactly what to copy, in order.</p>"
+    other_open = "open" if "output_type" in request.query_params else ""
+    target_hidden = f'<input type="hidden" name="target" value="{escape_html(target)}">' if tool_selected else ""
     body = f"""
     <div class="page-header setup-page-header">
       <h1>Connect</h1>
       <p class="subtitle">Generate setup instructions for connecting an AI tool such as Claude Code, Cursor or Codex to {APP_NAME} as one of your agents. Choose who is connecting, then copy the result into the tool.</p>
-      <div class="text-muted" style="font-size:0.86rem;margin-top:8px">
-        Current tool preset: <strong>{escape_html(tool_label)}</strong>.
-      </div>
     </div>
 
     <form method="get" action="{page_path}" class="setup-form" onsubmit="saveSetupScrollPosition()">
+      {target_hidden}
       <div class="form-section">
-        <h2>Who is connecting?</h2>
+        <h2>1. Who is connecting?</h2>
         <div class="form-row">
           <div class="form-group">
             <label for="user_id">User</label>
@@ -850,10 +945,32 @@ def integrations_page(
 
       {access_check_section}
 
-      {destination_section}
+      <div class="form-section" id="step-2">
+        <h2>2. Which tool?</h2>
+        <div class="setup-tabs">{tool_links}</div>
+        {tool_steps_html}
+        <div class="alert alert-warning" id="connection-warning" style="display:none"></div>
+      </div>
 
-      <div class="form-section" id="generated-output">
-        <h2>Generated Output</h2>
+      <div class="form-section" id="step-3">
+        <h2>3. Check it works</h2>
+        <div class="connection-doctor" id="connection-doctor">
+          <div>
+            <h3>Connection doctor</h3>
+            <p>Use the exact MCP URL below, not the site root. This check never stores the key.</p>
+            <code>{escape_html(base_url)}/mcp</code>
+          </div>
+          <button type="button" class="btn btn-sm btn-secondary" id="test-connection-details-btn" onclick="testConnectionDetails()">Test connection details</button>
+        </div>
+        <div class="connection-doctor-result" id="connection-doctor-result" aria-live="polite"></div>
+        {verification_html}
+      </div>
+
+      <details class="card" id="other-outputs" {other_open}>
+        <summary><h3>Other outputs</h3></summary>
+        <p class="form-hint">Everything this page can generate, as tabs: environment variables, the session prompt, the Claude Code hook, and the full MCP config for every tool.</p>
+        {destination_section}
+        <div class="form-section" id="generated-output">
         <div class="setup-output-group" data-setup-path="connection">
           <h3>1. Connect a client</h3>
           <p>Use these the first time you connect a tool, or when you deliberately replace its connection settings or key. Generating one creates a new key for the selected agent and replaces its old one.</p>
@@ -864,31 +981,15 @@ def integrations_page(
           <p>Use these outputs for a repository or a single session. They contain no key. You can refresh them after an Agent Core update or reuse them in another workspace without changing an MCP connection.</p>
           <div class="setup-tabs">{instruction_tabs}</div>
         </div>
-        <div class="alert alert-warning" id="connection-warning" style="display:none"></div>
-        <div class="connection-doctor" id="connection-doctor">
-          <div>
-            <h3>Connection doctor</h3>
-            <p>Use the exact MCP URL below, not the site root. This check never stores the key.</p>
-            <code>{escape_html(base_url)}/mcp</code>
-          </div>
-          <button type="button" class="btn btn-sm btn-secondary" id="test-connection-details-btn" onclick="testConnectionDetails()">Test connection details</button>
-        </div>
-        <div class="connection-doctor-result" id="connection-doctor-result" aria-live="polite"></div>
+        <div class="output-section">
         {output_label_html}
         {output_display}
         <div class="output-actions">{connection_btn}{copy_btn}{download_btn}{regenerate_btn}</div>
-      </div>
+        </div>
+        </div>
+      </details>
     </form>
 
-    <div class="setup-next-steps">
-      <h3>Next Steps</h3>
-      <ol>
-        <li>Start with Instructions if you are not sure which output to use.</li>
-        <li>For most tools, MCP Config is the required connection step. Environment is optional and only stores values for shell or launcher use.</li>
-        <li>Add CLAUDE.md, AGENTS.md, or Session Prompt only where the connected tool reads them.</li>
-        <li>Run the Verification Prompt in the connected agent to confirm end-to-end memory, credential, and connector access.</li>
-      </ol>
-    </div>
     """
 
     return render_page(
@@ -909,14 +1010,14 @@ def _agent_setup_extra_js(base_url):
         f"window._AC_MCP_URL = {json.dumps(f'{base_url}/mcp')};"
         "</script>"
     )
-    return constants + '<script src="/static/js/integrations.js?v=20260828"></script>'
+    return constants + '<script src="/static/js/integrations.js?v=20261106"></script>'
 
 
 # Outputs that embed the agent's API key, and therefore require rotating it.
 # Everything else — the repo instruction files and the prompts — is guidance
 # that carries no credential.
 KEY_BEARING_OUTPUTS = frozenset(
-    {"env", "mcp_json", "cursor_mcp_json", "windsurf_mcp_json", "assistants_md"}
+    {"env", "mcp_json", "mcp_tool", "cursor_mcp_json", "windsurf_mcp_json", "assistants_md"}
 )
 
 
@@ -987,6 +1088,10 @@ def _build_agent_setup_output(
     elif output_type == "mcp_json":
         label = "MCP Config"
         content = _build_mcp_json(base_url, api_key)
+    elif output_type == "mcp_tool":
+        # The MCP config for the chosen tool only; the "Other outputs" tab keeps the whole text.
+        label = f"MCP Config ({_agent_setup_target_label(target)})"
+        content = _build_mcp_json(base_url, api_key, tool=target)
     elif output_type == "cursor_mcp_json":
         label = "MCP Config (Cursor)"
         content = _build_cursor_mcp_json(base_url, api_key)
@@ -1611,7 +1716,8 @@ The hook sends the session's working directory. {APP_NAME} matches it against ea
 """
 
 
-def _build_mcp_json(base_url, api_key=None):
+def _mcp_config_sections(base_url, api_key=None):
+    """The MCP config as separate per-tool blocks, in the order the full text prints them."""
     key = _connection_key_value(api_key)
     _shell_api_key = "${" + ENV_PREFIX + "API_KEY}"
     codex_auth = f'http_headers = {{ Authorization = "Bearer {key}" }}'
@@ -1658,27 +1764,43 @@ def _build_mcp_json(base_url, api_key=None):
         },
         indent=2,
     )
-    return f"""# Claude Code
+    sections = {
+        "claude_code": f"""# Claude Code
 # Option 1 — CLI (recommended, adds to user-level config so it works in every project):
 claude mcp add --transport http --scope user {APP_SLUG} {base_url}/mcp \\
   --header "Authorization: Bearer {key}"
 
 # Option 2 — create .mcp.json in your repo root (workspace-level, committable):
 # If committing, replace the key with an env var: "Bearer {_shell_api_key}"
-{generic_json}
-
-# Codex CLI: add this to ~/.codex/config.toml
+{generic_json}""",
+        "codex": f"""# Codex CLI: add this to ~/.codex/config.toml
 [mcp_servers.{APP_SLUG}]
 url = "{base_url}/mcp"
-{codex_auth}
-
-# OpenCode: add this under ~/.config/opencode/opencode.json
-{opencode_json}
-
-# Antigravity/Other MCP clients:
+{codex_auth}""",
+        "opencode": f"""# OpenCode: add this under ~/.config/opencode/opencode.json
+{opencode_json}""",
+        "antigravity": f"""# Antigravity/Other MCP clients:
 # Use this JSON block. File location varies by tool — see docs/integrations.md.
-{antigravity_json}
-"""
+{antigravity_json}""",
+    }
+    return sections
+
+
+# Which blocks of the MCP config each tool needs. Cursor and Windsurf use their own JSON
+# (see _build_cursor_mcp_json); a tool not listed here gets the whole config.
+_MCP_TOOL_SECTIONS = {
+    "claude_code": ("claude_code",),
+    "codex": ("codex",),
+    "antigravity": ("antigravity",),
+}
+
+
+def _build_mcp_json(base_url, api_key=None, tool=None):
+    if tool in ("cursor", "windsurf"):
+        return _build_cursor_mcp_json(base_url, api_key)
+    sections = _mcp_config_sections(base_url, api_key)
+    wanted = _MCP_TOOL_SECTIONS.get(tool, tuple(sections))
+    return "\n\n".join(sections[name] for name in wanted) + "\n"
 
 
 def _build_cursor_mcp_json(base_url, api_key=None):
