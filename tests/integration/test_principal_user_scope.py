@@ -266,14 +266,15 @@ def test_only_an_admin_or_the_person_themselves_can_let_an_agent_run_that_person
 
 
 def test_testing_a_binding_needs_the_same_capability_as_running_one(test_client, monkeypatch):
-    agent_service.create_agent("looker", "Looker", "admin", capabilities=["connectors_read"], read_scopes=["workspace:ops"], write_scopes=[])
-    agent_service.create_agent("doer", "Doer", "admin", capabilities=["connectors_read", "connectors_execute"], read_scopes=["workspace:ops"], write_scopes=[])
+    auth_service.create_user("boss2", "boss2@test.local", "testpassword123", "Boss Two", "user")
+    agent_service.create_agent("looker", "Looker", "boss2", capabilities=["connectors_read"], read_scopes=["workspace:ops"], write_scopes=[])
+    agent_service.create_agent("doer", "Doer", "boss2", capabilities=["connectors_read", "connectors_execute"], read_scopes=["workspace:ops"], write_scopes=[])
     from app.services import workspace_service
 
-    workspace_service.create_workspace("ops", "Ops", "admin")
+    workspace_service.create_workspace("ops", "Ops", "boss2")
     connector_service.create_connector_type(connector_type_id="tsvc", display_name="T", auth_type="none",
                                             supported_actions=[{"name": "GET /x", "method": "GET"}], backend_type="generic_http")
-    binding = connector_service.create_binding("tsvc", "T", "workspace:ops", created_by="admin")
+    binding = connector_service.create_binding("tsvc", "T", "workspace:ops", created_by="boss2")
     monkeypatch.setattr(connector_service, "test_binding", lambda binding_id: {"success": True})
     keys = {}
     for agent_id in ("looker", "doer"):
