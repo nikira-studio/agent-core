@@ -273,70 +273,24 @@ def _health_items(is_admin: bool) -> list[tuple[str, str, str, bool]]:
 def dashboard_home(request: Request, session: dict = Depends(require_auth)):
     from app.services import activity_service
     from app.services.agent_service import list_agents
-    from app.services.workspace_service import list_workspaces
-    from app.database import get_db
 
     activity_service.mark_stale_activities()
     is_admin = session.get("role") == "admin"
-    user_scope = f"user:{session['user_id']}"
 
     if is_admin:
         agents = list_agents()
-        workspaces = list_workspaces()
         agent_count = len([a for a in agents if a.get("is_active")])
-        workspace_count = len([p for p in workspaces if p.get("is_active")])
-        with get_db() as conn:
-            counts = conn.execute(
-                """
-                SELECT
-                    (SELECT COUNT(*) FROM memory_records WHERE record_status = 'active') AS memory_count,
-                    (SELECT COUNT(*) FROM connector_bindings WHERE enabled = 1) AS binding_count,
-                    (SELECT COUNT(*) FROM connector_executions) AS execution_count,
-                    (SELECT COUNT(*) FROM agent_activity WHERE status IN ('active', 'reassigned')) AS task_count,
-                    (SELECT COUNT(*) FROM users) AS user_count
-                """
-            ).fetchone()
         recent_activity = activity_service.list_activities(limit=8)
         attention = activity_service.list_attention_activities(limit=8)
     else:
         agents = list_agents(owner_user_id=session["user_id"])
-        workspaces = list_workspaces(owner_user_id=session["user_id"])
         agent_count = len([a for a in agents if a.get("is_active")])
-        workspace_count = len([p for p in workspaces if p.get("is_active")])
-        with get_db() as conn:
-            counts = conn.execute(
-                """
-                SELECT
-                    (SELECT COUNT(*) FROM memory_records WHERE scope = ? AND record_status = 'active') AS memory_count,
-                    (SELECT COUNT(*) FROM connector_bindings WHERE scope = ? AND enabled = 1) AS binding_count,
-                    (SELECT COUNT(*) FROM connector_executions ce JOIN connector_bindings cb ON ce.binding_id = cb.id WHERE cb.scope = ?) AS execution_count,
-                    (SELECT COUNT(*) FROM agent_activity WHERE user_id = ? AND status IN ('active', 'reassigned')) AS task_count,
-                    0 AS user_count
-                """,
-                (user_scope, user_scope, user_scope, session["user_id"]),
-            ).fetchone()
         recent_activity = activity_service.list_activities(
             user_id=session["user_id"], limit=8
         )
         attention = activity_service.list_attention_activities(
             user_id=session["user_id"], limit=8
         )
-
-    memory_count = int(counts["memory_count"])
-    active_task_count = int(counts["task_count"])
-    users_card = ""
-    if is_admin:
-        user_count = int(counts["user_count"])
-        users_card = f'<a class="stat-card stat-link" href="/users"><div class="value">{user_count}</div><div class="label">Users</div></a>'
-
-    stat_cards = f"""
-    <div class="stat-grid">
-      {users_card}
-      <a class="stat-card stat-link" href="/agents"><div class="value">{agent_count}</div><div class="label">Active Agents</div></a>
-      <a class="stat-card stat-link" href="/workspaces"><div class="value">{workspace_count}</div><div class="label">Active Workspaces</div></a>
-      <a class="stat-card stat-link" href="/activity" id="stat-open-activities"><div class="value">{active_task_count}</div><div class="label">Open tasks</div></a>
-      <a class="stat-card stat-link" href="/memory"><div class="value">{memory_count}</div><div class="label">Memories</div></a>
-    </div>"""
 
     waiting = _waiting_rows(session, is_admin, attention)
     if waiting:
@@ -349,7 +303,7 @@ def dashboard_home(request: Request, session: dict = Depends(require_auth)):
         waiting_body = '<p class="text-muted" style="margin:0">Nothing is waiting on you.</p>'
     attention_html = f"""
     <div class="card attention-card" id="overview-waiting">
-      <h3>Waiting on you</h3>
+      <h2>Waiting on you</h2>
       <p class="text-muted" style="margin-top:-6px">Decisions and requests that need a person. Each row links to where you deal with it.</p>
       {waiting_body}
     </div>"""
@@ -357,7 +311,7 @@ def dashboard_home(request: Request, session: dict = Depends(require_auth)):
     health_html = ""
     if is_admin:
         health_html = (
-            '<div class="card" id="overview-health"><h3>Health</h3><div class="stat-grid">'
+            '<div class="card" id="overview-health"><h2>Health</h2><div class="stat-grid">'
             + "".join(
                 (f"<a class='stat-card stat-link' href='{escape_html(href)}'>" if href else "<div class='stat-card'>")
                 + f"<div class='label'>{escape_html(label)}</div>"
@@ -381,14 +335,14 @@ def dashboard_home(request: Request, session: dict = Depends(require_auth)):
             style = " style='opacity:.6'" if done else ""
             step_items.append(f"<li{style}><a href='{href}'>{label}</a> <span class='text-muted'>{note}</span></li>")
         started_html = (
-            '<div class="card" id="overview-getting-started"><h3>Getting started</h3><ol>'
+            '<div class="card" id="overview-getting-started"><h2>Getting started</h2><ol>'
             + "".join(step_items) + "</ol></div>"
         )
 
     search_html = """
     <div class="card">
       <div class="section-header">
-        <h3>Search</h3>
+        <h2>Search</h2>
         <div class="section-note">Find a memory, a task or a service.</div>
       </div>
       <form onsubmit="runDashboardSearch(event)" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
@@ -431,11 +385,10 @@ def dashboard_home(request: Request, session: dict = Depends(require_auth)):
     {started_html}
     {attention_html}
     {health_html}
-    {stat_cards}
     {search_html}
     <div class="card">
       <div class="section-header">
-        <h3>Recent Activity</h3>
+        <h2>Recent Activity</h2>
         <div class="section-actions">
           <a href="/activity" class="btn btn-sm btn-secondary">View Activity</a>
           {audit_link}
@@ -449,8 +402,6 @@ def dashboard_home(request: Request, session: dict = Depends(require_auth)):
       var j = await apiFetch('/api/dashboard/activity/summary');
       if (!j.ok) return;
       var data = j.data || {{}};
-      var openEl = document.getElementById('stat-open-activities');
-      if (openEl) openEl.querySelector('.value').textContent = data.active_count || 0;
       var tbody = document.getElementById('overview-activity-tbody');
       if (!tbody) return;
       var recent = (data.recent || []).slice(0, 6);
@@ -505,7 +456,7 @@ def dashboard_home(request: Request, session: dict = Depends(require_auth)):
         if (!items || !items.length) return '';
         return '<div class="card" style="margin-top:12px;padding:12px">' +
           '<div class="section-header" style="margin-bottom:6px">' +
-            '<h4 style="margin:0">' + escapeHtml(title) + '</h4>' +
+            '<h3 style="margin:0" class="sub-heading">' + escapeHtml(title) + '</h3>' +
             '<div class="section-note">' + items.length + ' match(es)</div>' +
           '</div>' +
           items.map(renderItem).join('') +

@@ -141,14 +141,14 @@ def users_page(request: Request, session: dict = Depends(require_auth)):
       <button class="btn" onclick="openModal('create-user-modal')">+ Add User</button>
     </div></div>
     <div class="card">
-      <h3>All Users</h3>
+      <h2>All Users</h2>
       <p class="text-muted" style="margin-bottom:12px">Only admins see this page. Admins add people here and choose their role.</p>
       <table><thead><tr><th>Name</th><th>ID</th><th>Email</th><th>Role</th><th>Status</th><th>Two-step sign-in</th><th>Created</th><th class="actions-cell">Actions</th></tr></thead>
       <tbody>{rows}</tbody></table>
     </div>
     <div class="modal-overlay" id="create-user-modal" style="display:none">
       <div class="modal">
-        <h3>Add User</h3>
+        <h2>Add User</h2>
         <form id="create-user-form" onsubmit="createUser(event)">
           <div class="form-group"><label>Display Name</label><input type="text" name="display_name" autocomplete="name" required><p class="form-hint">How they appear in the dashboard.</p></div>
           <div class="form-group"><label>Email</label><input type="email" name="email" autocomplete="email" required><p class="form-hint">They sign in with this address.</p></div>
@@ -165,7 +165,7 @@ def users_page(request: Request, session: dict = Depends(require_auth)):
     </div>
     <div class="modal-overlay" id="edit-user-modal" style="display:none">
       <div class="modal">
-        <h3>Edit User</h3>
+        <h2>Edit User</h2>
         <form id="edit-user-form" onsubmit="submitEditUser(event)">
           <input type="hidden" id="eu-id">
           <div class="form-group"><label>Display Name</label><input type="text" id="eu-display-name" autocomplete="name" required><p class="form-hint">How they appear in the dashboard.</p></div>

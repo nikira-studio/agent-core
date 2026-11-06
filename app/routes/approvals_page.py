@@ -151,7 +151,7 @@ def _operation_card(index: int, operation: dict, can_decide: bool) -> str:
     summary_html = "<p class='text-muted' style='font-size:0.85rem'>" + escape_html(summary) + "</p>"
     return (
         "<div class='card'>"
-        "<h3>" + heading + "</h3>"
+        "<h2>" + heading + "</h2>"
         + summary_html
         + "<table><thead><tr><th>Parameter</th><th>Value</th></tr></thead>"
         "<tbody>" + param_rows + "</tbody></table>"
@@ -185,7 +185,7 @@ def _decision_card(view: dict) -> str:
         )
     return (
         "<div class='card'>"
-        "<h3>Decision</h3>"
+        "<h2>Decision</h2>"
         "<table><tbody>"
         "<tr><td>Decided by</td><td>" + decided_by + "</td></tr>"
         "<tr><td>Decided at</td><td>" + decided_at + "</td></tr>"
@@ -202,7 +202,7 @@ def _decide_card(approval_id: str) -> str:
     safe_id = escape_html(approval_id)
     return (
         "<div class='card'>"
-        "<h3>Your decision</h3>"
+        "<h2>Your decision</h2>"
         "<p class='text-muted' style='font-size:0.85rem'>"
         "Approving runs every operation above, together, as you. Rejecting leaves "
         "nothing changed."
@@ -262,7 +262,7 @@ def _connector_request_cards(row: dict, view: dict) -> str:
         "<p class='text-muted' style='margin:0'>" + wait + "</p>"
         "</div>"
         "<div class='card'>"
-        "<h3>What it will send</h3>"
+        "<h2>What it will send</h2>"
         "<p class='text-muted' style='font-size:0.85rem'>Exactly this, once, if you approve. Anything that looks like a key or password is hidden.</p>"
         "<div class='table-scroll' style='overflow-x:auto'><table><tbody>"
         "<tr><td style='width:9rem'>Service</td><td>" + escape_html((connector_type or {}).get("display_name") or "") + "</td></tr>"
@@ -278,7 +278,7 @@ def _connector_decide_card(approval_id: str) -> str:
     safe_id = escape_html(approval_id)
     return (
         "<div class='card'>"
-        "<h3>Your decision</h3>"
+        "<h2>Your decision</h2>"
         "<p class='text-muted' style='font-size:0.85rem'>Approving runs this one request now, exactly as shown. "
         "Rejecting runs nothing, and the agent is told so.</p>"
         "<div class='form-group'>"
@@ -327,7 +327,7 @@ def approvals_page(request: Request, session: dict = Depends(require_auth)):
     body = """
 <div class="page-header"><h1>Approvals</h1></div>
 <div class="card">
-  <h3>Waiting for a decision</h3>
+  <h2>Waiting for a decision</h2>
   <p class="text-muted" style="font-size:0.85rem">
     An agent proposed an admin change. Nothing runs until a person decides it.
   </p>
@@ -337,7 +337,7 @@ def approvals_page(request: Request, session: dict = Depends(require_auth)):
   </table></div>
 </div>
 <div class="card">
-  <h3>Recently decided</h3>
+  <h2>Recently decided</h2>
   <div style="overflow-x:auto"><table>
     <thead><tr><th>Title</th><th>Workspace</th><th>Proposed by</th><th>Outcome</th><th>Created</th><th>Decided</th></tr></thead>
     <tbody>""" + (decided_rows or "<tr><td colspan='6' class='empty'>Nothing has been decided yet.</td></tr>") + """</tbody>

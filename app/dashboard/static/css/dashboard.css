@@ -296,7 +296,14 @@ a:focus-visible {
   margin-bottom: 20px;
 }
 
-.card h3 {
+/* A heading inside a card (a section of the card, not its title) is an h3 with this class. */
+:where(h3.sub-heading) {
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.card h2,
+.card h3:not(.sub-heading) {
   color: var(--text);
   margin-bottom: 16px;
   font-size: 1rem;
@@ -462,7 +469,8 @@ a:focus-visible {
   padding-bottom: 8px;
 }
 
-.section-header h3 {
+.section-header h2,
+.section-header h3:not(.sub-heading) {
   margin-bottom: 0;
   border-bottom: 0;
   padding-bottom: 0;
@@ -909,7 +917,8 @@ tr:hover td {
   box-shadow: var(--shadow);
 }
 
-.modal h3 {
+.modal h2,
+.modal h3:not(.sub-heading) {
   margin-bottom: 16px;
   font-size: 1.1rem;
   font-weight: 600;
@@ -1289,7 +1298,7 @@ th.activity-actions-header {
   opacity: 0.5;
 }
 
-.empty-state h4 {
+.empty-state h3 {
   font-size: 1rem;
   margin-bottom: 8px;
   color: var(--text);
@@ -1360,7 +1369,7 @@ th.activity-actions-header {
   overflow-y: auto;
   margin-top: 4px;
 }
-.scope-selectors h4 {
+.scope-selectors h3 {
   font-size: 0.75rem;
   text-transform: uppercase;
   color: var(--muted);
@@ -1368,7 +1377,7 @@ th.activity-actions-header {
   border-bottom: 1px solid var(--border);
   padding-bottom: 2px;
 }
-.scope-selectors h4:first-child {
+.scope-selectors h3:first-child {
   margin-top: 0;
 }
 .checkbox-label {
@@ -2003,6 +2012,7 @@ th.activity-actions-header {
 .row-more-list { display: flex; gap: 6px; margin-top: 6px; }
 details.card-fold > summary { list-style: none; }
 details.card-fold > summary::-webkit-details-marker { display: none; }
+details.card-fold > summary h2,
 details.card-fold > summary h3 { margin: 0; border-bottom: 0; padding-bottom: 0; display: inline; }
 details.card-fold > summary::before { content: "\25B8\00a0"; color: var(--muted); }
 details.card-fold[open] > summary::before { content: "\25BE\00a0"; }

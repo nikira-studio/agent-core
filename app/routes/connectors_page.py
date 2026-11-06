@@ -511,7 +511,7 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
 
     quick_start_html = "" if visible_binding_count else """<div class="card">
       <div class="section-header">
-        <h3>Getting a service working</h3>
+        <h2>Getting a service working</h2>
         <div class="section-note">Four steps, shown until the first binding exists.</div>
       </div>
       <ol style="margin:0;padding-left:20px;line-height:1.6">
@@ -550,7 +550,7 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
      <div class="card" id="service-catalog">
       <div class="section-header" style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px">
         <div>
-          <h3>Service Catalog</h3>
+          <h2>Service Catalog</h2>
           <div class="section-note">Built-in and added services, shared across this install. Ready-made ones are in the <a href="/connectors/directory">service directory</a> and <a href="/connectors/adapters">ready-made services</a>.</div>
         </div>
         <button type="button" class="btn btn-sm btn-secondary" onclick="checkHealth(this)" title="Test every enabled binding now">Check Health</button>
@@ -560,7 +560,7 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
 
     <div class="card" id="bindings">
       <div class="section-header">
-        <h3>Bindings</h3>
+        <h2>Bindings</h2>
         <div class="section-note">A binding says which workspace may use a service, and with which credential.</div>
       </div>
       <div id="bindings-list">{bindings_html}</div>
@@ -568,7 +568,7 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
 
     <details class="card" id="executions">
       <summary class="section-header" style="cursor:pointer">
-        <h3 style="display:inline">Recent runs ({len(visible_executions)})</h3>
+        <h2 style="display:inline">Recent runs ({len(visible_executions)})</h2>
         <span class="section-note" style="margin-left:8px">What agents and tests have run through bindings. Click to open.</span>
       </summary>
       <div id="executions-list" style="margin-top:12px">{executions_html}</div>
@@ -577,7 +577,7 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
     <!-- Create Binding Modal -->
     <div class="modal-overlay" id="create-binding-modal" style="display:none">
       <div class="modal">
-        <h3>New Binding</h3>
+        <h2>New Binding</h2>
         <p class="form-hint" style="margin-bottom:12px">A binding lets agents in one workspace use a service with one credential.</p>
         <form id="create-binding-form" onsubmit="createBinding(event)">
           <div class="form-group">
@@ -659,7 +659,7 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
     <!-- Edit Binding Modal -->
     <div class="modal-overlay" id="edit-binding-modal" style="display:none">
       <div class="modal">
-        <h3>Edit Binding</h3>
+        <h2>Edit Binding</h2>
         <form id="edit-binding-form" onsubmit="submitEditBinding(event)">
           <input type="hidden" id="edit-binding-id">
           <div class="form-group">
@@ -709,7 +709,7 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
     <!-- Import API Spec Modal -->
     <div class="modal-overlay" id="import-spec-modal" style="display:none">
       <div class="modal">
-        <h3>Import API Spec</h3>
+        <h2>Import API Spec</h2>
         <form id="import-spec-form" onsubmit="importSpec(event)">
           <div class="form-group">
             <label>Spec URL</label>
@@ -745,7 +745,7 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
     <!-- Import MCP Server Modal -->
     <div class="modal-overlay" id="import-mcp-modal" style="display:none">
       <div class="modal">
-        <h3>Import MCP Server</h3>
+        <h2>Import MCP Server</h2>
         <div style="background:var(--bg-secondary);border-left:3px solid var(--warning-color);padding:0.6rem 0.85rem;border-radius:4px;margin-bottom:1rem;font-size:0.875em">
           <strong>HTTP transport only.</strong> {APP_NAME} connects to MCP servers over HTTP — it cannot launch local processes.
           Servers configured with <code>command</code>/<code>args</code> (stdio) are not supported here.
@@ -799,7 +799,7 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
     <!-- Add HTTP Connector Modal -->
     <div class="modal-overlay" id="add-http-modal" style="display:none">
       <div class="modal">
-        <h3>Add a plain web service</h3>
+        <h2>Add a plain web service</h2>
         <form id="add-http-form" onsubmit="addHttpConnector(event)">
           <div class="form-group">
             <label>Display Name</label>
@@ -845,7 +845,7 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
     <!-- View Actions Modal -->
     <div class="modal-overlay" id="view-actions-modal" style="display:none" data-admin="{'1' if ctx.is_admin else '0'}" data-agents="{escape_html(json.dumps([{'id': a['id'], 'name': a.get('display_name') or a['id']} for a in agents if a.get('is_active')]) if ctx.is_admin else '[]')}">
       <div class="modal" style="max-width:700px">
-        <h3 id="view-actions-title">Actions</h3>
+        <h2 id="view-actions-title">Actions</h2>
         <div style="display:flex;gap:8px;margin-bottom:12px">
           <input type="text" id="view-actions-filter" placeholder="Filter actions..." oninput="filterActions()" style="flex:1" autocomplete="off">
           <button type="button" class="btn btn-sm btn-secondary" onclick="bulkSetActions(true)">Select All</button>
@@ -862,7 +862,7 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
     <!-- Test Result Modal -->
     <div class="modal-overlay" id="test-result-modal" style="display:none">
       <div class="modal">
-        <h3>Connection Test Result</h3>
+        <h2>Connection Test Result</h2>
         <div id="test-result-content"></div>
         <button type="button" class="btn" onclick="closeModal('test-result-modal')">Close</button>
       </div>
@@ -871,7 +871,7 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
     <!-- OAuth Redirect Modal -->
     <div class="modal-overlay" id="oauth-redirect-modal" style="display:none">
       <div class="modal" style="max-width:760px">
-        <h3>Google OAuth Redirect URI</h3>
+        <h2>Google OAuth Redirect URI</h2>
         <div class="form-hint" style="margin-bottom:8px">
           Add this exact URL to the Google OAuth client’s Authorized redirect URIs.
         </div>
@@ -889,7 +889,7 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
     <!-- Binding Executions Modal -->
     <div class="modal-overlay" id="executions-modal" style="display:none">
       <div class="modal" style="max-width:700px">
-        <h3>Execution History</h3>
+        <h2>Execution History</h2>
         <div id="executions-content"></div>
         <button type="button" class="btn" onclick="closeModal('executions-modal')">Close</button>
       </div>
@@ -929,7 +929,7 @@ async def connectors_adapters_page(
     <div class="card">
       <div class="section-header" style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px">
         <div>
-          <h3>Ready-made services</h3>
+          <h2>Ready-made services</h2>
           <div class="section-note">Install one into the service catalog, then add a binding for it like any other service.</div>
         </div>
         <div class="section-note">{len(adapter_entries)} available</div>
@@ -954,7 +954,7 @@ def connectors_help_page(request: Request, session: dict = Depends(require_auth)
     <div class="page-header"><h1>Services help</h1></div>
 
     <div class="card">
-      <h3>What is an OpenAPI Spec?</h3>
+      <h2>What is an OpenAPI Spec?</h2>
       <p>
         An OpenAPI (formerly Swagger) spec is a machine-readable JSON or YAML file that describes every
         endpoint, parameter, authentication method, and response format for a REST API. When you import
@@ -964,7 +964,7 @@ def connectors_help_page(request: Request, session: dict = Depends(require_auth)
     </div>
 
     <div class="card">
-      <h3>How to Find a Spec</h3>
+      <h2>How to Find a Spec</h2>
       <p>Many APIs publish their OpenAPI spec at a standard URL. Try these approaches:</p>
       <table>
         <thead><tr><th>Method</th><th>What to Try</th></tr></thead>
@@ -978,7 +978,7 @@ def connectors_help_page(request: Request, session: dict = Depends(require_auth)
     </div>
 
     <div class="card">
-      <h3>After Importing</h3>
+      <h2>After Importing</h2>
       <p>Once you import a spec, the workflow is:</p>
       <ol>
         <li><strong>Create a credential</strong> — store your API key or token (a personal access token, for example)</li>
@@ -989,7 +989,7 @@ def connectors_help_page(request: Request, session: dict = Depends(require_auth)
     </div>
 
     <div class="card">
-      <h3>Supported Spec Formats</h3>
+      <h2>Supported Spec Formats</h2>
       <ul>
         <li><strong>OpenAPI 3.0+</strong> (JSON or YAML)</li>
         <li><strong>Swagger 2.0</strong> (JSON or YAML)</li>
@@ -999,7 +999,7 @@ def connectors_help_page(request: Request, session: dict = Depends(require_auth)
     </div>
 
     <div class="card">
-      <h3>Troubleshooting</h3>
+      <h2>Troubleshooting</h2>
       <table>
         <thead><tr><th>Problem</th><th>Solution</th></tr></thead>
         <tbody>
@@ -1041,7 +1041,7 @@ def connectors_directory_page(
     </div>
     <div class="card">
       <div class="section-header">
-        <h3>Browse 2,500+ OpenAPI Specs</h3>
+        <h2>Browse 2,500+ OpenAPI Specs</h2>
         <div class="section-note">Powered by <a href="https://apis.guru" target="_blank">apis.guru</a>. Search by name or provider, filter by category, and import with one click.</div>
       </div>
       <div class="directory-controls">
@@ -1054,7 +1054,7 @@ def connectors_directory_page(
 
     <div class="modal-overlay" id="import-spec-modal" style="display:none">
       <div class="modal">
-        <h3>Import API Spec</h3>
+        <h2>Import API Spec</h2>
         <div class="form-group">
           <label>Spec URL</label>
           <input type="url" id="import-spec-url" placeholder="https://example.com/openapi.json" />
@@ -1079,7 +1079,7 @@ def connectors_directory_page(
 
     <div class="modal-overlay" id="directory-import-mcp-modal" style="display:none">
       <div class="modal">
-        <h3>Import MCP Server</h3>
+        <h2>Import MCP Server</h2>
         <form id="directory-import-mcp-form" onsubmit="importMcpServer(event)">
           <div class="form-group">
             <label>Server URL</label>

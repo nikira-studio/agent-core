@@ -723,13 +723,13 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
     account_html = f"""
     <div class="two-col">
       <div class="card">
-        <h3>Account</h3>
+        <h2>Account</h2>
         <p><strong>Display Name:</strong> {escape_html(user.get("display_name") or "")}</p>
         <p><strong>Email:</strong> {escape_html(user.get("email") or "")}</p>
         <p><strong>Role:</strong> {escape_html(session.get("role") or "user")}</p>
       </div>
       <div class="card">
-        <h3>Sign-in</h3>
+        <h2>Sign-in</h2>
         <div class="form-group">
           <a href="/settings/password" class="btn btn-secondary">Change Password</a>
         </div>
@@ -751,7 +751,7 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
     preferences_html = f"""
     <div class="card">
       <div class="section-header">
-        <h3>Preferences</h3>
+        <h2>Preferences</h2>
         <div class="section-note">Personal display options for your account.</div>
       </div>
       <form id="user-settings-form" onsubmit="saveUserSettings(event)">
@@ -766,7 +766,7 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
     </div>
     <div class="card">
       <div class="section-header">
-        <h3>Operator Tokens</h3>
+        <h2>Operator Tokens</h2>
         <div class="section-note">Short-lived keys for scripts that act as you, such as an attended install script. Requests made with one are recorded as yours. Agents use their own agent keys, not these.</div>
       </div>
       <div class="form-group">
@@ -806,7 +806,7 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
         secrets_snapshot_html = f"""
     <div class="card">
       <div class="section-header">
-        <h3>Secrets Snapshot</h3>
+        <h2>Secrets Snapshot</h2>
         <div class="section-note">Current status for key and secret operations.</div>
       </div>
       <table>
@@ -856,7 +856,7 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
         backup_html = f"""
     <div class="card">
       <div class="section-header">
-        <h3>Backup & Restore</h3>
+        <h2>Backup & Restore</h2>
       </div>
       <div class="form-group">
         <button class="btn" onclick="exportBackup()">Export Encrypted Backup</button>
@@ -864,14 +864,14 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
       </div>
       <div id="backup-result" style="margin-top:12px"></div>
       <hr class=divider>
-      <h4 class="section-title">Maintenance</h4>
+      <h3 class="sub-heading section-title">Maintenance</h3>
       <div class="form-group">
         <button class="btn btn-secondary" onclick="runMaintenance()">Run Maintenance</button>
       </div>
       <p class="form-hint">Maintenance marks tasks stale after the idle limit, deletes temporary scratchpad notes and permanently deletes retracted or replaced memories past the retention limits above. It does not touch credentials or service bindings. {schedule_line}</p>
       <p class="form-hint" id="maintenance-last-run">{last_run_line}</p>
       <hr class=divider>
-      <h4 class="section-title">Startup Checks</h4>
+      <h3 class="sub-heading section-title">Startup Checks</h3>
       <p class="form-hint">Checks that the data folder is writable, text search is available, and the encryption key and local credential helper are in place. Run it after an upgrade or a restore.</p>
       <div id="startup-checks"><button class="btn btn-secondary btn-sm" onclick="runStartupChecks()">Run Checks</button></div>
     </div>"""
@@ -880,7 +880,7 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
     if is_admin:
         encryption_key_html = """
     <div class="card">
-      <h3>Encryption Key</h3>
+      <h2>Encryption Key</h2>
       <p class="text-muted" style="margin-bottom:12px">This key protects stored credential values. Rotate it if you want to re-encrypt all saved secrets with a new primary key, or restore a known-good key if you need to recover from a bad rotation.</p>
       <div class="form-group">
         <button class="btn btn-secondary" onclick="loadCredentialKeyStatus()">Check Status</button>
@@ -899,9 +899,9 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
     if is_admin:
         network_limits_html = """
     <div class="card" id="network-limits">
-      <h3>Network limits</h3>
+      <h2>Network limits</h2>
       <p class="text-muted" style="margin-bottom:12px">Two limits you can turn up in steps. Start with <strong>report only</strong>: it lists what would be refused and refuses nothing, so you can allow what you expect before you enforce.</p>
-      <h4 class="section-title">Private addresses</h4>
+      <h3 class="sub-heading section-title">Private addresses</h3>
       <div class="form-group">
         <label for="nl-internal-mode">Services, webhooks and imports reaching private addresses (like 192.168.x.x)</label>
         <select id="nl-internal-mode">
@@ -921,7 +921,7 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
       <div class="actions-cell"><button type="button" class="btn" id="nl-save-internal">Save</button></div>
       <div id="nl-internal-note" class="alert" style="display:none;margin-top:8px"></div>
       <hr class="divider">
-      <h4 class="section-title">Credential broker callers</h4>
+      <h3 class="sub-heading section-title">Credential broker callers</h3>
       <p class="text-muted" id="nl-broker-status"></p>
       <div class="form-group">
         <label for="nl-broker-allowed">Allowed callers</label>
@@ -945,7 +945,7 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
     if is_admin:
         broker_html = f"""
     <div class="card">
-      <h3>Local credential helper</h3>
+      <h2>Local credential helper</h2>
       <p class="text-muted" style="margin-bottom:12px">The local credential helper swaps <code>{CREDENTIAL_PREFIX}*</code> references for the real value when a command runs. Rotate its key if a local program should stop using the current one.</p>
         <button class="btn btn-warning" onclick="openModal('broker-rotate-modal')">Rotate helper key</button>
       <div id="broker-result" style="margin-top:12px"></div>
@@ -960,7 +960,7 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
     if is_admin:
         memory_behavior_html = f"""
     <div class="card">
-      <h3>Memory behavior</h3>
+      <h2>Memory behavior</h2>
       <form onsubmit="saveSystemSettings(event)">
         <div class="form-group">
           <label>Expire work-log memories after (days)</label>
@@ -972,7 +972,7 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
           {_number("memory-dedupe-similarity", memory_dedupe_similarity, 0.5, 1, 0.01)}
           <p class="form-hint">A new memory this similar to an existing one in the same scope is flagged as a possible duplicate, never blocked. Needs vector search. Lower catches more and raises more false alarms.</p>
         </div>
-        <h4 class="section-title">Memory review</h4>
+        <h3 class="sub-heading section-title">Memory review</h3>
         <p class="form-hint">Agent Core asks you to check agent-written facts nobody has confirmed. These settings decide which ones it asks about. The questions appear under Memory Clean-up on the Memory page.</p>
         <div class="form-group">
           <label>Ask about unconfirmed facts older than (days)</label>
@@ -996,7 +996,7 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
 
         retention_html = f"""
     <div class="card">
-      <h3>How long things are kept</h3>
+      <h2>How long things are kept</h2>
       <p class="form-hint" style="margin-top:0;margin-bottom:14px">Run Maintenance (below) deletes anything older than these limits. Nothing here touches credentials or service bindings.</p>
       <form onsubmit="saveSystemSettings(event)">
         <div class="form-group">
@@ -1045,7 +1045,7 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
         )
         vector_settings_html = f"""
     <div class="card">
-      <h3>Search by meaning (vector search)</h3>
+      <h2>Search by meaning (vector search)</h2>
       <p class="text-muted" style="margin-bottom:12px">Enable semantic search using an embedding endpoint: Ollama, or any service with an OpenAI-compatible embeddings API. Save the settings to turn it on immediately when the backend is healthy. Disable to use plain text search only.</p>
       <form id="vector-settings-form" onsubmit="saveVectorSettings(event)">
         <label class="checkbox-label" style="margin-bottom:16px">
@@ -1107,7 +1107,7 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
       <div id="vector-settings-result" style="margin-top:12px"></div>
       <div id="vector-estimate-result" style="margin-top:12px"></div>
       <div style="margin-top:20px;border-top:1px solid var(--border, #ddd);padding-top:16px">
-        <h4 style="margin:0 0 8px">Re-embed memory</h4>
+        <h3 style="margin:0 0 8px" class="sub-heading">Re-embed memory</h3>
         <p class="form-hint">Search only uses vectors made by the current model. After changing the model, re-embed so older memories are found by meaning again.</p>
         <details class="access-details"><summary>More</summary><p class="form-hint">Until then they are matched by text only. A run can be stopped and started again, and it skips memories already done. Each memory keeps one vector, so switching back later means re-embedding again.</p></details>
         <p id="vector-reembed-coverage" class="text-muted">Loading...</p>
@@ -1125,7 +1125,7 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
     <!-- Restore Modal -->
     <div class="modal-overlay" id="restore-modal" style="display:none">
       <div class="modal">
-        <h3>Restore from Backup</h3>
+        <h2>Restore from Backup</h2>
         <div class="alert alert-danger">This replaces your current database and encryption key with the contents of the backup.</div>
         <form id="restore-form" onsubmit="doRestore(event)">
           <div class="form-group">
@@ -1148,7 +1148,7 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
 
     <div class="modal-overlay" id="credential-key-rotate-modal" style="display:none">
       <div class="modal">
-        <h3>Rotate Encryption Key</h3>
+        <h2>Rotate Encryption Key</h2>
         <div class="alert alert-warning"><strong>Keeps working:</strong> every stored credential, every agent and every service. The old key stays in the key list, so nothing becomes unreadable.<br>
         <strong>Changes now:</strong> all stored credential values are re-encrypted with a new key. A backup made before this still restores, but take a new backup afterwards so it holds the new key.</div>
         <form id="credential-key-rotate-form" onsubmit="rotateCredentialKey(event)">
@@ -1162,7 +1162,7 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
 
     <div class="modal-overlay" id="broker-rotate-modal" style="display:none">
       <div class="modal">
-        <h3>Rotate the local credential helper key</h3>
+        <h2>Rotate the local credential helper key</h2>
         <div class="alert alert-warning"><strong>Keeps working:</strong> agents, services, stored credentials, and any local program that reads the helper key from its file, which picks up the new key the next time it reads the file (the helper wrapper does, each time it starts).<br>
         <strong>Stops working:</strong> any program or script that was given the old helper key by hand, until you give it the new one. The new key is shown once, here, right after you rotate.</div>
         <div class="modal-footer">
@@ -1174,7 +1174,7 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
 
     <div class="modal-overlay" id="credential-key-restore-modal" style="display:none">
       <div class="modal">
-        <h3>Restore Encryption Key</h3>
+        <h2>Restore Encryption Key</h2>
         <form id="credential-key-restore-form" onsubmit="restoreCredentialKey(event)">
           <div class="form-group">
             <label>Encryption key *</label>
@@ -1559,7 +1559,7 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
     if is_admin:
         prune_html = """
     <div class="card">
-      <h3>Clear old activity</h3>
+      <h2>Clear old activity</h2>
       <p class="form-hint" style="margin-top:0;margin-bottom:14px">Permanently deletes finished, cancelled and blocked tasks older than a date you choose. Tasks still in progress are left alone. This is separate from the limits above, which run on their own.</p>
       <div class="form-group">
         <label for="prune-activity-before">Delete tasks older than</label>
@@ -1643,7 +1643,7 @@ def settings_password_page(request: Request, session: dict = Depends(require_aut
         """
     <div class="page-header"><h1>Change Password</h1></div>
     <div class="card" style="max-width:500px">
-      <h3>Update Your Password</h3>
+      <h2>Update Your Password</h2>
       <div id="password-status" class="alert alert-success" style="display:none"></div>
       <form id="password-form" onsubmit="submitPassword(event)">
         <div class="form-group">

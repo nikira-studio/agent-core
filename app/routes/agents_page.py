@@ -52,7 +52,7 @@ def agents_page(request: Request, session: dict = Depends(require_auth)):
     def build_scope_list(prefix):
         h = f'<div class="scope-selectors" id="{prefix}-scopes">'
         h += '<label class="checkbox-label" data-scope-row="shared"><input type="checkbox" data-scope="shared"> <span>Other users can use this scope</span></label>'
-        h += "<h4>Personal User Scopes</h4>"
+        h += "<h3 class='sub-heading'>Personal User Scopes</h3>"
         for user in selectable_users:
             user_id = user["id"]
             checked = " checked" if prefix == "ca-read" and user_id == session["user_id"] else ""
@@ -70,11 +70,11 @@ def agents_page(request: Request, session: dict = Depends(require_auth)):
                 f'<code>user:{escape_html(user_id)}</code>{owner_label}</span></label>'
             )
         if all_workspaces:
-            h += "<h4>Workspaces</h4>"
+            h += "<h3 class='sub-heading'>Workspaces</h3>"
             for p in all_workspaces:
                 h += f'<label class="checkbox-label" data-scope-row="workspace:{escape_html(p["id"])}"><input type="checkbox" data-scope="workspace:{escape_html(p["id"])}"> <span>{escape_html(p["name"])} <code>workspace:{escape_html(p["id"])}</code></span></label>'
         if agents:
-            h += "<h4>Other Agent Private Scopes</h4>"
+            h += "<h3 class='sub-heading'>Other Agent Private Scopes</h3>"
             for a in agents:
                 h += f'<label class="checkbox-label" data-scope-row="agent:{escape_html(a["id"])}"><input type="checkbox" data-scope="agent:{escape_html(a["id"])}"> <span>{escape_html(a["display_name"])} ({escape_html(a["id"])})</span></label>'
         h += "</div>"
@@ -124,7 +124,7 @@ def agents_page(request: Request, session: dict = Depends(require_auth)):
         ]
         controls = ""
         for heading, items in groups:
-            controls += f'<h4 class="capability-group">{heading}</h4>'
+            controls += f'<h3 class="sub-heading capability-group">{heading}</h3>'
             for key, name, description, default in items:
                 controls += (
                     f'<label class="checkbox-label"><input type="checkbox" data-capability="{key}" '
@@ -132,7 +132,7 @@ def agents_page(request: Request, session: dict = Depends(require_auth)):
                     f'<span><strong>{name}</strong><br><small class="form-hint">{description}</small></span></label>'
                 )
         return (
-            '<div class="form-section"><h4 class="form-section-title">What will this agent do?</h4>'
+            '<div class="form-section"><h3 class="sub-heading form-section-title">What will this agent do?</h3>'
             f'<div class="role-cards">{cards}</div>'
             f'<div class="role-custom" id="{prefix}-role-custom" hidden>{controls}</div>'
             f'<label class="checkbox-label" style="margin-top:12px"><input type="checkbox" id="{prefix}-inherit-user-bindings"> '
@@ -155,7 +155,7 @@ def agents_page(request: Request, session: dict = Depends(require_auth)):
             "Its private scope and its owner's personal scope are automatic. Tick extra places it may read from."
         )
         return (
-            '<div class="form-section"><h4 class="form-section-title">What can it reach?</h4>'
+            '<div class="form-section"><h3 class="sub-heading form-section-title">What can it reach?</h3>'
             f'<details class="access-details"><summary>Memory access <span class="text-muted" id="{prefix}-access-summary"></span></summary>'
             '<p class="form-hint">An agent always has its own private scope. Add workspaces to share memory with other agents and people.</p>'
             f'<div class="form-group"><label>Can Read From</label>{read_html}<p class="form-hint">{read_hint}</p></div>'
@@ -595,12 +595,12 @@ def agents_page(request: Request, session: dict = Depends(require_auth)):
         <button class="btn" onclick="openModal('create-agent-modal')">+ Create Agent</button>
     </div></div>
     <div class="card">
-      <h3>Agent Access</h3>
+      <h2>Agent Access</h2>
       <p class="text-muted access-summary">Each agent has its own private memory and can read its owner's. Add a workspace to share memory. Use <strong>Edit</strong> to give an agent more; create a new one only for a separate tool.</p>
     </div>
 
     <div class="card">
-      <h3>All Agents</h3>
+      <h2>All Agents</h2>
 <table class="stack-phone"><thead><tr><th>Agent</th><th>Status</th><th>Access</th><th>Created</th><th class="actions-cell">Actions</th></tr></thead>
         <tbody>{rows or "<tr><td colspan=5 class=empty>No agents yet. Create one for each tool or script that should have its own key and history.</td></tr>"}</tbody></table>
     </div>
@@ -608,7 +608,7 @@ def agents_page(request: Request, session: dict = Depends(require_auth)):
     <!-- Create Agent Modal -->
     <div class="modal-overlay" id="create-agent-modal" style="display:none">
       <div class="modal modal-wide">
-        <h3>Create Agent</h3>
+        <h2>Create Agent</h2>
         <p class="form-hint" style="margin-bottom:12px">Does an existing agent already do this job? Then use <strong>Edit</strong> on its row to give it what it needs. A new agent is for a separate tool or identity.</p>
         <form id="create-agent-form" onsubmit="createAgent(event)">
           <div class="form-section">
@@ -649,7 +649,7 @@ def agents_page(request: Request, session: dict = Depends(require_auth)):
     <!-- Edit Agent Modal -->
     <div class="modal-overlay" id="edit-agent-modal" style="display:none">
       <div class="modal modal-wide">
-        <h3><span id="edit-agent-modal-title">Edit Agent</span>: <span id="edit-agent-id"></span></h3>
+        <h2><span id="edit-agent-modal-title">Edit Agent</span>: <span id="edit-agent-id"></span></h2>
         <div id="edit-no-effect" class="alert alert-warning" style="display:none"></div>
         <form id="edit-agent-form" onsubmit="submitEditAgent(event)">
           <div class="form-section">
@@ -680,7 +680,7 @@ def agents_page(request: Request, session: dict = Depends(require_auth)):
     <!-- Rotate Key Modal -->
     <div class="modal-overlay" id="rotate-modal" style="display:none">
       <div class="modal">
-        <h3>New API Key</h3>
+        <h2>New API Key</h2>
         <div id="rotate-modal-body"></div>
         <div class="modal-footer">
           <button class="btn btn-secondary" onclick="closeModal('rotate-modal'); refreshAgents();">Done</button>

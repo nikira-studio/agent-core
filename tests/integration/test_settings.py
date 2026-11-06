@@ -855,4 +855,4 @@ def test_a_partial_save_still_rejects_a_bad_value(admin_client):
 def test_the_account_tab_names_its_password_card_sign_in_so_security_means_one_tab(admin_client):
     html = admin_client.get("/settings").text
     account = html.split('id="tab-account"', 1)[1].split('id="tab-memory"', 1)[0]
-    assert "<h3>Sign-in</h3>" in account and "<h3>Security</h3>" not in account
+    assert "<h2>Sign-in</h2>" in account and "<h2>Security</h2>" not in account

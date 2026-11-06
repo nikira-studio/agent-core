@@ -308,7 +308,7 @@ def memory_page(request: Request, session: dict = Depends(require_auth)):
 
             return f"""
       <div class="card" style="border-left:4px solid var(--text-muted);margin-bottom:12px" id="proposal-{pid}">
-        <h4 style="margin:0 0 4px">{escape_html(p.get("prompt") or "Review this memory")}</h4>
+        <h3 style="margin:0 0 4px" class="sub-heading">{escape_html(p.get("prompt") or "Review this memory")}</h3>
         <p class="text-muted" style="font-size:0.85rem;margin:0">{escape_html(p.get("rule_description") or "")}</p>
         {memory_blocks}
         <p style="margin:8px 0 4px">{escape_html(p["rationale"])}</p>
@@ -360,7 +360,7 @@ def memory_page(request: Request, session: dict = Depends(require_auth)):
         review_html = f"""
     <div class="card">
       <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
-        <h3 style="margin:0">Suggestions waiting for you <span id="proposal-count" class="text-muted" style="font-weight:normal;font-size:0.8rem">({len(pending)} to look at)</span></h3>
+        <h2 style="margin:0">Suggestions waiting for you <span id="proposal-count" class="text-muted" style="font-weight:normal;font-size:0.8rem">({len(pending)} to look at)</span></h2>
         <button class="btn btn-secondary" onclick="generateProposals()">Check for more</button>
       </div>
       <p class="text-muted" style="font-size:0.85rem;margin:8px 0 12px">Memory Clean-up looks for memories that may no longer be worth keeping — one-off job logs, ticket notes, repeats, or details that go out of date. Each one asks you a question. Nothing changes until you answer, and anything hidden can be restored from Retracted memories below.</p>
@@ -690,7 +690,7 @@ def memory_page(request: Request, session: dict = Depends(require_auth)):
 
     <!-- Search Filters -->
     <div class="card" id="filter-panel" style="display:none">
-      <h3>Search Memory</h3>
+      <h2>Search Memory</h2>
       <div class="filter-bar">
         <input type="text" id="mem-query" class="search-input" placeholder="Search query...">
         <select id="mem-scope" title="Access scope filter">
@@ -723,7 +723,7 @@ def memory_page(request: Request, session: dict = Depends(require_auth)):
 
     <!-- Memories -->
     <div class="card">
-      <h3>Memories <span id="mem-count" class="text-muted" style="font-weight:normal;font-size:0.8rem">({len(active_records)})</span></h3>
+      <h2>Memories <span id="mem-count" class="text-muted" style="font-weight:normal;font-size:0.8rem">({len(active_records)})</span></h2>
       <p class="text-muted" style="font-size:0.85rem;margin-bottom:8px">The memories you can read right now. Use Search for a narrower view, or pick a workspace.</p>
       {workspace_filter_html}
       <table class="stack-cards"><thead><tr><th>Class</th><th>Content</th><th>Workspace</th><th>State</th><th class="actions-cell">Actions</th></tr></thead>
@@ -742,7 +742,7 @@ def memory_page(request: Request, session: dict = Depends(require_auth)):
             + (
                 f"""
     <div class="card" style="border-left:4px solid var(--text-muted)">
-      <h3 style="color:var(--text-muted)">Retracted memories <span class="text-muted" style="font-weight:normal;font-size:0.8rem">({len(retracted_records)})</span></h3>
+      <h2 style="color:var(--text-muted)">Retracted memories <span class="text-muted" style="font-weight:normal;font-size:0.8rem">({len(retracted_records)})</span></h2>
       <p class="text-muted" style="font-size:0.85rem;margin-bottom:8px">These memories are hidden from search. Restore to make them active again, or permanently delete.</p>
       <table><thead><tr><th>Class</th><th>Content</th><th>Workspace</th><th>State</th><th class="actions-cell">Actions</th></tr></thead>
       <tbody>{retracted_rows or "<tr><td colspan=5 class=empty>No retracted memories.</td></tr>"}</tbody></table>
@@ -756,7 +756,7 @@ def memory_page(request: Request, session: dict = Depends(require_auth)):
     <!-- Write Memory Modal -->
     <div class="modal-overlay" id="write-memory-modal" style="display:none">
       <div class="modal">
-        <h3>Save Memory</h3>
+        <h2>Save Memory</h2>
         <form id="write-memory-form" onsubmit="doWrite(event)">
           <div class="form-group">
             <label>What should be remembered? *</label>
@@ -840,8 +840,8 @@ def memory_page(request: Request, session: dict = Depends(require_auth)):
     <!-- Memory Detail Modal -->
     <div class="modal-overlay" id="memory-detail-modal" style="display:none">
       <div class="modal" style="max-width:600px">
-        <h3>Memory Detail</h3>
-        <h4 class="form-section-title">What it says</h4>
+        <h2>Memory Detail</h2>
+        <h3 class="sub-heading form-section-title">What it says</h3>
         <div class="form-group"><label>Content</label><div id="mem-detail-content" style="background:var(--bg);padding:8px;border-radius:6px;white-space:pre-wrap;max-height:200px;overflow-y:auto"></div></div>
         <div class="form-row">
           <div class="form-group"><label>Class</label><span id="mem-detail-class" class="badge"></span><p class="form-hint">Fact, decision, preference or scratchpad.</p></div>
@@ -851,7 +851,7 @@ def memory_page(request: Request, session: dict = Depends(require_auth)):
           <div class="form-group"><label>Topic</label><span id="mem-detail-topic"></span></div>
           <div class="form-group"><label>Standing context</label><span id="mem-detail-pinned"></span><p class="form-hint">Pinned memories are shown to every agent in the workspace.</p></div>
         </div>
-        <h4 class="form-section-title">How sure</h4>
+        <h3 class="sub-heading form-section-title">How sure</h3>
         <div class="form-row">
           <div class="form-group"><label>Confidence</label><span id="mem-detail-confidence"></span><p class="form-hint">How sure it is that this is right (1 is certain).</p></div>
           <div class="form-group"><label>Importance</label><span id="mem-detail-importance"></span><p class="form-hint">Higher ranks earlier in search results.</p></div>
@@ -860,7 +860,7 @@ def memory_page(request: Request, session: dict = Depends(require_auth)):
           <div class="form-group"><label>Last confirmed</label><span id="mem-detail-last-confirmed" class="text-muted"></span><p class="form-hint">When someone last checked it is still true.</p></div>
           <div class="form-group"><label>Status</label><span id="mem-detail-status" class="badge"></span><p class="form-hint">Whether agents still use it.</p></div>
         </div>
-        <h4 class="form-section-title">Where it came from</h4>
+        <h3 class="sub-heading form-section-title">Where it came from</h3>
         <div class="form-row">
           <div class="form-group"><label>Created</label><span id="mem-detail-created" class="text-muted"></span></div>
           <div class="form-group"><label>Anchor</label><span id="mem-detail-anchor" class="text-muted"></span><p class="form-hint">The file, host or service a later check compares it with.</p></div>
@@ -882,7 +882,7 @@ def memory_page(request: Request, session: dict = Depends(require_auth)):
         <input type="hidden" id="mem-detail-id" value="">
         <div id="mem-detail-supersede" class="alert alert-warning" style="display:none"></div>
         <div>
-          <h4 class="form-section-title" style="margin-top:12px">Version history</h4>
+          <h3 class="sub-heading form-section-title" style="margin-top:12px">Version history</h3>
           <p class="text-muted" style="margin:4px 0 10px;font-size:0.85rem">This memory and any earlier versions it replaced.</p>
           <div id="mem-chain-content" style="font-size:0.85rem;max-height:220px;overflow:auto"></div>
         </div>

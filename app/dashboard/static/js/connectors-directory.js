@@ -114,7 +114,7 @@
       el.innerHTML =
         '<div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">' +
           logo +
-          '<h3 style="margin:0">' + escapeHtml(entry.display_name) + '</h3>' +
+          '<h2 style="margin:0">' + escapeHtml(entry.display_name) + '</h2>' +
         '</div>' +
         '<div style="margin-bottom:10px">' + cats + ' ' + provider + ' ' + variants + '</div>' +
         '<div style="margin-bottom:10px;color:var(--muted);font-size:0.9em;white-space:pre-wrap;word-break:break-word;max-height:200px;overflow-y:auto">' + escapeHtml(desc) + '</div>' +
@@ -127,7 +127,7 @@
         '</table>';
       if (entry.variant_count > 1) {
         el.innerHTML +=
-          '<h4 style="margin:16px 0 8px">Variants</h4>' +
+          '<h3 style="margin:16px 0 8px" class="sub-heading">Variants</h3>' +
           '<table style="width:100%;font-size:0.9em">' +
             '<thead><tr><th>Variant</th><th>Version</th><th>Spec URL</th><th>Status</th><th class="actions-cell">Actions</th></tr></thead>' +
             '<tbody>' + variantRows + '</tbody>' +
@@ -243,7 +243,7 @@
           return '<span class="badge" style="margin:0 6px 6px 0;display:inline-block">' + escapeHtml(a) + '</span>';
         }).join('');
         previewEl.innerHTML =
-          '<h4 style="margin-top:0">Preview</h4>' +
+          '<h3 style="margin-top:0" class="sub-heading">Preview</h3>' +
           '<table style="width:100%">' +
             '<tr><td style="padding:4px 8px 4px 0;color:var(--muted)">Name</td><td>' + escapeHtml(preview.display_name || preview.connector_type_id || 'API') + '</td></tr>' +
             '<tr><td style="padding:4px 8px 4px 0;color:var(--muted)">Connector ID</td><td><code>' + escapeHtml(preview.connector_type_id || '-') + '</code></td></tr>' +

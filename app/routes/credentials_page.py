@@ -192,7 +192,7 @@ def credentials_page(request: Request, session: dict = Depends(require_auth)):
         )
         requests_html = f"""
     <div class="card" id="credential-requests">
-      <h3>Requested by agents</h3>
+      <h2>Requested by agents</h2>
       <p class="text-muted">An agent needs these to continue. The value is stored encrypted; the agent only ever receives the reference.</p>
       <table><thead><tr><th>Name</th><th>Workspace</th><th>What it's for</th><th class='actions-cell'>Actions</th></tr></thead>
       <tbody>{request_rows}</tbody></table>
@@ -227,9 +227,9 @@ def credentials_page(request: Request, session: dict = Depends(require_auth)):
     <!-- Who can use a credential -->
     <div class="modal-overlay" id="access-modal" style="display:none">
       <div class="modal modal-wide">
-        <h3>Who can use <span id="access-name"></span></h3>
+        <h2>Who can use <span id="access-name"></span></h2>
         <p class="form-hint" style="margin-bottom:12px">One credential per service: give it to each agent that needs it instead of storing it again. Use a separate credential only for a different account or an outside service.</p>
-        <h4 class="form-section-title">Agents with access</h4>
+        <h3 class="sub-heading form-section-title">Agents with access</h3>
         <div id="access-grants"></div>
         <div class="form-group">
           <label for="access-agent">Give access to</label>
@@ -240,7 +240,7 @@ def credentials_page(request: Request, session: dict = Depends(require_auth)):
           <p class="form-hint">An agent can be given a credential when its role includes reading credential values (the Service agent role).</p>
           <details id="access-cannot" style="display:none"><summary class="text-muted">Can't receive it yet (<span id="access-cannot-count"></span>)</summary><div id="access-cannot-list"></div></details>
         </div>
-        <h4 class="form-section-title">Services using it</h4>
+        <h3 class="sub-heading form-section-title">Services using it</h3>
         <div id="access-services"></div>
         <p class="form-hint" id="access-scope-readers"></p>
         <details class="access-details">
@@ -262,7 +262,7 @@ def credentials_page(request: Request, session: dict = Depends(require_auth)):
     <!-- One agent's credentials, opened from the Agents page -->
     <div class="modal-overlay" id="agent-access-modal" style="display:none">
       <div class="modal modal-wide">
-        <h3>What <span id="agent-access-name"></span> can use</h3>
+        <h2>What <span id="agent-access-name"></span> can use</h2>
         <p class="form-hint">Give an agent a credential that is already stored here instead of storing it again.</p>
         <div id="agent-access-list"></div>
         <div class="form-group">
@@ -279,7 +279,7 @@ def credentials_page(request: Request, session: dict = Depends(require_auth)):
     <!-- Fill Credential Request Modal -->
     <div class="modal-overlay" id="fill-request-modal" style="display:none">
       <div class="modal">
-        <h3>Provide <span id="fill-request-name"></span></h3>
+        <h2>Provide <span id="fill-request-name"></span></h2>
         <form id="fill-request-form" onsubmit="fillCredentialRequest(event)">
           <input type="hidden" id="fill-request-id">
           <div class="form-group">
@@ -299,7 +299,7 @@ def credentials_page(request: Request, session: dict = Depends(require_auth)):
     <!-- Create Credential Modal -->
     <div class="modal-overlay" id="create-credential-modal" style="display:none">
       <div class="modal">
-        <h3>New Credential</h3>
+        <h2>New Credential</h2>
         <form id="create-credential-form" onsubmit="createCredential(event)">
           <div class="form-group">
             <label>Name *</label>
@@ -334,7 +334,7 @@ def credentials_page(request: Request, session: dict = Depends(require_auth)):
     <!-- Edit Credential Modal -->
     <div class="modal-overlay" id="edit-credential-modal" style="display:none">
       <div class="modal">
-        <h3>Edit Credential</h3>
+        <h2>Edit Credential</h2>
         <form id="edit-credential-form" onsubmit="submitEditCredential(event)">
           <input type="hidden" id="edit-credential-id">
           <div class="form-group">

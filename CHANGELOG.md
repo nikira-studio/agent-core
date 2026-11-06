@@ -12,6 +12,9 @@ Notable changes to Agent Core are documented here. The format follows [Keep a Ch
 - **Readability.** Filled buttons, the active page and write tags use a darker blue, and the red delete button a darker red, so their white text reads at 4.5:1 or better; muted text, links, error and warning text were adjusted so they meet the same level in the dark and light themes (a test now checks the colour pairs). The Secondary button no longer turns its text white on a light background when hovered. Small text is at least 12 px.
 - The built-in web service is described as "A web service reached over HTTP with an API key" (an existing install's old default text is updated; text someone wrote is left alone, schema revision 23), and the remaining "connector type" wording in the Services page and its not-found message reads "service".
 
+- Every dashboard page now has its headings in order: the page title is an h1, each card's title an h2, and a section inside a card an h3, so a screen reader or an outline no longer jumps from h1 to h3. The look is unchanged (the levels are styled by class, not chosen for size).
+- **Overview** no longer shows the row of count tiles (users, agents, workspaces, open tasks, memories). They repeated what each page already shows; the page now reads Waiting on you, Health, Search and Recent Activity.
+
 ### Added
 
 - `scripts/ui_sweep.py` also saves each page as rendered and runs the design detector on it when it is installed, so the HTML built in Python is checked too.

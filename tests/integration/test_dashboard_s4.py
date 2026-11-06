@@ -54,7 +54,7 @@ def test_overview_page_has_operational_search(admin_client):
     r = admin_client.get("/")
     assert r.status_code == 200
     html = r.text
-    assert "<h3>Search</h3>" in html
+    assert "<h2>Search</h2>" in html
     assert 'id="dashboard-search-query"' in html
     assert "Find a memory, a task or a service." in html
 

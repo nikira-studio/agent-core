@@ -201,3 +201,7 @@ Everything else (environment variables, session prompt, hook, assistants prompt,
 ## Phones and rows (1.2.1)
 
 Where it lives: the sidebar on a phone, and the row lists on Agents, Services (bindings and recent runs) and Overview (Recent Activity). What a person sees first: the group headings with their pages; then one block per row with the name and its few labelled values. One line of help per control is unchanged; the new **More** button on an Agents or bindings row says what is under it ("Credentials, deactivate, delete" / "History, delete"). Vocabulary: row buttons are Edit, Connect, Test and More; Delete always sits under More. A decided approval says "Approved:" or "Rejected:" and links back to **Waiting on you**. The two key rotations say what keeps working and what stops before they run.
+
+## Headings and the Overview (1.2.1)
+
+The page title is the one h1; each card's title is an h2; a section inside a card is an h3 (class `sub-heading`). Pages that group cards under their own h2 (Webhooks, Connect) keep their cards at h3. Overview answers "what needs me, and is it healthy": **Waiting on you**, **Health**, **Search**, **Recent Activity**. The count tiles were removed because each count lives on its own page and none answered something Health does not.

@@ -663,7 +663,7 @@ async function previewSpec(e) {
       return '<span class="badge" style="margin:0 6px 6px 0;display:inline-block">' + escapeHtml(a) + '</span>';
     }).join('');
     previewEl.innerHTML =
-      '<h4 style="margin-top:0">Preview</h4>' +
+      '<h3 style="margin-top:0" class="sub-heading">Preview</h3>' +
       '<table style="width:100%">' +
         '<tr><td style="padding:4px 8px 4px 0;color:var(--muted)">Name</td><td>' + escapeHtml(preview.display_name || preview.connector_type_id || 'API') + '</td></tr>' +
         '<tr><td style="padding:4px 8px 4px 0;color:var(--muted)">Connector ID</td><td><code>' + escapeHtml(preview.connector_type_id || '-') + '</code></td></tr>' +
@@ -1001,7 +1001,7 @@ async function saveActionSettings() {
 
 window[window.AGENT_CORE_WINDOW_EVENT || "onAgentCoreEvent"] = function(event) {
   if (event.type !== 'connector_executed') return;
-  var header = document.querySelector('#executions .section-header h3');
+  var header = document.querySelector('#executions .section-header h2');
   if (!header || document.getElementById('executions-live-dot')) return;
   var dot = document.createElement('span');
   dot.id = 'executions-live-dot';

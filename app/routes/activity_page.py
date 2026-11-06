@@ -165,7 +165,7 @@ def activity_page(request: Request, session: dict = Depends(require_auth)):
         else ""
     )
     waiting_card = (
-        "<div class='card'><h3>Waiting on you</h3>"
+        "<div class='card'><h2>Waiting on you</h2>"
         "<p class='text-muted' style='font-size:0.85rem'>Agents flagged these in a handoff as needing a person. "
         "Each one appears at the top of every agent session in its workspace until you mark it resolved, "
         "the agent that asked resolves it, or a request that agent makes in a later session in the same workspace replaces it.</p>"
@@ -287,11 +287,11 @@ def activity_page(request: Request, session: dict = Depends(require_auth)):
     </div></div>
     {waiting_card}
     <div class="card">
-      <h3>Tasks</h3>
+      <h2>Tasks</h2>
       <p class="text-muted" style="font-size:0.85rem;margin-bottom:8px">Assign a task to an agent. It picks the task up the next time it starts or is idle.</p>
       <div class="card" style="margin-bottom:12px;padding:14px">
         <div class="section-header" style="margin-bottom:8px">
-          <h3>Coordination Snapshot</h3>
+          <h2>Coordination Snapshot</h2>
           <div class="section-note">Who owns each task right now and where handoffs have happened.</div>
         </div>
         <div class="stat-grid" style="margin-bottom:10px">
@@ -333,7 +333,7 @@ def activity_page(request: Request, session: dict = Depends(require_auth)):
     </div>
 
     <details class="card card-fold" id="workspace-sync" {"open" if execution_rows else ""}>
-      <summary style="cursor:pointer"><h3>Workspace synchronization</h3></summary>
+      <summary style="cursor:pointer"><h2>Workspace synchronization</h2></summary>
       <p class="text-muted" style="font-size:0.85rem">Which agent sessions are following each workspace's changes, and how far behind they are.</p>
       <div style="overflow-x:auto"><table><thead><tr><th>Agent</th><th>Workspace</th><th>Status</th><th>Last Seen</th><th>Acknowledged</th><th>Unacknowledged</th></tr></thead>
       <tbody>{execution_rows or "<tr><td colspan=6 class=empty>No agent sessions are following a workspace yet.</td></tr>"}</tbody></table></div>
@@ -342,7 +342,7 @@ def activity_page(request: Request, session: dict = Depends(require_auth)):
     <!-- Create Activity Modal -->
     <div class="modal-overlay" id="create-activity-modal" style="display:none">
       <div class="modal">
-        <h3>Assign a task</h3>
+        <h2>Assign a task</h2>
         <form id="create-activity-form" onsubmit="doCreateActivity(event)">
           <div class="form-group">
             <label>Assign To *</label>
@@ -376,7 +376,7 @@ def activity_page(request: Request, session: dict = Depends(require_auth)):
     <!-- Reassign Activity Modal -->
     <div class="modal-overlay" id="reassign-modal" style="display:none">
       <div class="modal">
-        <h3>Reassign task</h3>
+        <h2>Reassign task</h2>
         <div class="form-group">
           <label>New Agent</label>
           <select id="reassign-agent-select" required>

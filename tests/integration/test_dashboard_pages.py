@@ -108,11 +108,11 @@ def test_overview_surfaces_operational_sections(authenticated_client):
     r = authenticated_client.get("/")
     assert r.status_code == 200
     html = r.text
-    assert "Users" in html
-    assert "Active Agents" in html
-    assert "Open tasks" in html
+    # The count tiles are gone: each count lives on its own page, and Health says how things are.
+    assert 'class="stat-card' not in html.split("overview-health", 1)[0].split("overview-waiting", 1)[0]
+    for label in ("Active Agents", "Active Workspaces", "Open tasks"):
+        assert f'<div class="label">{label}</div>' not in html
     assert "Waiting on you" in html
-    assert "Memories" in html
     assert "Capability Snapshot" not in html
     assert "Health" in html
     assert "Recent Activity" in html
@@ -453,7 +453,7 @@ def test_wording_batch_one_fixes_the_text_that_did_not_match_the_screen(authenti
     settings = authenticated_client.get("/settings").text
     assert "{CREDENTIAL_PREFIX}" not in settings and "AC_SECRET_*" in settings
     # The maintenance help sits with its own button, not beside Export Encrypted Backup.
-    backup = settings.split("<h3>Backup & Restore</h3>", 1)[1]
+    backup = settings.split("<h2>Backup & Restore</h2>", 1)[1]
     export_part, maintenance_part = backup.split("<h4 class=\"section-title\">Maintenance</h4>", 1)
     assert "Maintenance marks tasks stale" not in export_part
     assert "Run Maintenance" in maintenance_part and "Maintenance marks tasks stale" in maintenance_part
@@ -486,10 +486,10 @@ def test_delete_asks_for_the_name_and_says_what_goes_with_it(authenticated_clien
 
 def test_activity_page_puts_tasks_first_and_synchronization_last(authenticated_client):
     html = authenticated_client.get("/activity").text
-    assert html.index("<h3>Tasks</h3>") < html.index("Workspace synchronization")
+    assert html.index("<h2>Tasks</h2>") < html.index("Workspace synchronization")
     # The two coverage percentages stay on the page, behind an Advanced toggle.
     assert "Advanced: how many tasks are tied to an agent session" in html
-    assert html.index("<h3>Tasks</h3>") < html.index("Advanced: how many tasks")
+    assert html.index("<h2>Tasks</h2>") < html.index("Advanced: how many tasks")
     # Empty synchronization is closed; assigning a task is still on this page.
     assert '<details class="card card-fold" id="workspace-sync" >' in html
     assert "+ Assign a task" in html
@@ -578,3 +578,21 @@ def test_phone_navigation_keeps_its_group_headings():
     css = (Path(__file__).resolve().parents[2] / "app/dashboard/static/css/dashboard.css").read_text()
     assert ".sidebar nav .nav-heading { display: none; }" not in css
     assert "flex: 0 0 100%" in css.split("The group headings stay on a phone", 1)[1][:400]
+
+
+def test_every_dashboard_page_has_headings_in_order(authenticated_client):
+    """Page title h1, card titles h2, anything inside a card h3: no page jumps a level."""
+    import re
+
+    pages = ["/", "/activity", "/approvals", "/memory", "/users", "/agents", "/workspaces", "/integrations",
+             "/connectors", "/connectors/directory", "/connectors/adapters", "/connectors/help", "/credentials",
+             "/audit", "/webhooks", "/settings"]
+    for path in pages:
+        html = authenticated_client.get(path).text
+        body = re.sub(r"<script.*?</script>", "", html, flags=re.S)
+        levels = [int(m) for m in re.findall(r"<h([1-4])[\s>]", body)]
+        assert levels and levels[0] == 1, (path, levels[:5])
+        previous = 0
+        for level in levels:
+            assert level <= previous + 1, (path, "jumps from h%d to h%d" % (previous, level))
+            previous = level

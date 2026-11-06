@@ -18,7 +18,7 @@ def login_page(request: Request):
             "Setup",
             """
     <div class="card">
-      <h3>Welcome to {APP_NAME}</h3>
+      <h2>Welcome to {APP_NAME}</h2>
       <p class="text-muted" style="margin-bottom:20px">Create your admin account to get started.</p>
       <form id="setup-form" onsubmit="submitSetup(event)">
         <div class="form-group">
@@ -54,7 +54,7 @@ def login_page(request: Request):
         "Login",
         """
     <div class="card" style="max-width:400px;margin:60px auto">
-      <h3>Sign In</h3>
+      <h2>Sign In</h2>
       <form id="login-form" onsubmit="submitLogin(event)">
         <div class="form-group">
           <label>Email</label>
@@ -95,7 +95,7 @@ def otp_page(request: Request):
         "OTP Verification",
         """
     <div class="card" style="max-width:400px;margin:60px auto">
-      <h3>Two-Factor Authentication</h3>
+      <h2>Two-Factor Authentication</h2>
       <p class="text-muted" style="margin-bottom:16px">Enter the 6-digit code from your authenticator app.</p>
       <form id="otp-form" onsubmit="submitOtp(event)">
         <div class="form-group">

@@ -216,7 +216,7 @@ def workspaces_page(request: Request, session: dict = Depends(require_auth)):
         }).join('');
         container.innerHTML =
           '<div class="section-header" style="margin-bottom:8px">' +
-            '<h3>Collaborators</h3>' +
+            '<h2>Collaborators</h2>' +
             '<div class="section-note">Share this workspace with specific users. Their agents can use workspace scopes while access remains granted.</div>' +
           '</div>' +
           '<div class="card" style="padding:12px;margin-bottom:12px">' +
@@ -305,7 +305,7 @@ def workspaces_page(request: Request, session: dict = Depends(require_auth)):
       header.className = 'section-header';
       header.style.marginBottom = '8px';
 
-      const title = document.createElement('h3');
+      const title = document.createElement('h2');
       title.textContent = 'Agent Access';
       header.appendChild(title);
 
@@ -475,7 +475,7 @@ def workspaces_page(request: Request, session: dict = Depends(require_auth)):
     </div></div>
     <div class="card">
       <div class="section-header">
-        <h3>Workspaces</h3>
+        <h2>Workspaces</h2>
         <div class="section-note">A workspace is one project's shared memory for the people and agents working on it. Create one per project or app. Give an agent access from Agents → Edit.</div>
       </div>
       <table><thead><tr><th>ID</th><th>Name</th><th>Status</th><th>Owner</th><th>Memories</th><th>Agents (Read/Write)</th><th>Created</th><th class="actions-cell">Actions</th></tr></thead>
@@ -485,7 +485,7 @@ def workspaces_page(request: Request, session: dict = Depends(require_auth)):
     <!-- Create Workspace Modal -->
     <div class="modal-overlay" id="create-workspace-modal" style="display:none">
       <div class="modal">
-        <h3>Create Workspace</h3>
+        <h2>Create Workspace</h2>
         <p class="form-hint" style="margin-bottom:12px">A workspace is one project's shared memory for the people and agents working on it. Create one per project or app.</p>
         <form id="create-workspace-form" onsubmit="createProject(event)">
           <div class="form-group">
@@ -514,7 +514,7 @@ def workspaces_page(request: Request, session: dict = Depends(require_auth)):
     <!-- Edit Workspace Modal -->
     <div class="modal-overlay" id="edit-workspace-modal" style="display:none">
       <div class="modal">
-        <h3>Edit Workspace: <span id="ep-id"></span></h3>
+        <h2>Edit Workspace: <span id="ep-id"></span></h2>
         <form id="edit-workspace-form" onsubmit="submitEditProject(event)">
           <div class="form-group">
             <label>Name</label>

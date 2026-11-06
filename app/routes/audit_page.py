@@ -249,10 +249,10 @@ def audit_page(request: Request, session: dict = Depends(require_auth)):
         <button class="btn btn-danger" onclick="openPruneModal('audit','Prune Audit Log')">Prune Log</button>
     </div></div>
     <div class="card">
-      <h3>Events</h3>
+      <h2>Events</h2>
       <div class="card" style="margin-bottom:12px;padding:14px">
         <div class="section-header" style="margin-bottom:8px">
-          <h3>Audit Snapshot</h3>
+          <h2>Audit Snapshot</h2>
           <div class="section-note">A quick read on how much is happening and what kinds of events are being written.</div>
         </div>
         <div class="stat-grid" style="margin-bottom:10px">
@@ -302,7 +302,7 @@ def audit_page(request: Request, session: dict = Depends(require_auth)):
 
     <div class="modal-overlay" id="prune-modal" style="display:none">
       <div class="modal">
-        <h3 id="prune-modal-title">Prune Data</h3>
+        <h2 id="prune-modal-title">Prune Data</h2>
         <form id="prune-form" onsubmit="submitPrune(event)">
           <input type="hidden" id="prune-resource-type" value="">
           <div class="form-group">
