@@ -21,6 +21,7 @@ def test_backup_export_no_longer_requires_otp(test_client, admin_token):
     assert r.status_code == 200, r.text
     # The key is in the response body, never in a header; the file is a second request.
     assert BACKUP_KEY_HEADER.lower() not in r.headers
+    assert r.headers["cache-control"] == "no-store"
     data = r.json()["data"]
     assert data["backup_key"] == backup_key.decode() and data["download_path"].startswith("/api/backup/download/")
     first = test_client.get(data["download_path"], headers={"Authorization": f"Bearer {admin_token}"})
@@ -129,3 +130,20 @@ def test_backup_startup_checks(test_client, admin_token):
     assert r.status_code == 200
     data = r.json()["data"]
     assert "checks" in data
+
+
+def test_an_abandoned_download_is_swept_even_without_its_sidecar(test_client, admin_token):
+    import os
+    import time
+
+    from app.routes import backup as backup_routes
+
+    directory = backup_routes._downloads_dir()
+    stray = directory / "abandoned.sending"
+    stray.write_bytes(b"x")
+    old = time.time() - backup_routes.DOWNLOAD_TTL_SECONDS - 3600
+    os.utime(stray, (old, old))
+    fresh = directory / "fresh.sending"
+    fresh.write_bytes(b"y")
+    backup_routes._sweep_downloads(directory)
+    assert not stray.exists() and fresh.exists()

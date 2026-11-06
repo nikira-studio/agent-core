@@ -41,6 +41,15 @@ def _sweep_downloads(directory: Path) -> None:
         if expired:
             for leftover in (meta, meta.with_suffix(".enc"), meta.with_suffix(".sending")):
                 leftover.unlink(missing_ok=True)
+    # A download that was claimed and never finished (the client went away) leaves a file with
+    # no sidecar; any archive file older than the window plus a margin goes, whatever it pairs with.
+    cutoff = now - DOWNLOAD_TTL_SECONDS - 300
+    for stray in list(directory.glob("*.enc")) + list(directory.glob("*.sending")):
+        try:
+            if stray.stat().st_mtime < cutoff:
+                stray.unlink(missing_ok=True)
+        except OSError:
+            pass
 
 
 @router.post("/export")
@@ -78,13 +87,15 @@ async def backup_export(
     meta_path = directory / f"{download_id}.json"
     meta_path.write_text(json.dumps({"user_id": session["user_id"], "filename": filename, "expires_at": expires_at}))
     os.chmod(meta_path, 0o600)
-    return success_response({
+    response = success_response({
         "download_path": f"/api/backup/download/{download_id}",
         "filename": filename,
         "backup_key": backup_key.decode(),
         "expires_in_seconds": DOWNLOAD_TTL_SECONDS,
         "note": "Keep the backup key. It is shown here once and the file cannot be restored without it.",
     })
+    response.headers["Cache-Control"] = "no-store"  # the response carries the key
+    return response
 
 
 @router.get("/download/{download_id}")
