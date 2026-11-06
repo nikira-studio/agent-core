@@ -141,17 +141,21 @@ def _loaded() -> list[bytes]:
     global _keyring, _keyring_stamp
     _drop_cache_if_file_changed()
     if _keyring is None:
+        # Stamp first, then read: a change made while reading leaves the stamp behind the
+        # file, so the next call reloads once more instead of trusting stale keys.
+        stamp = _keyring_file_stamp()
         _keyring = _load_keyring()
-        _keyring_stamp = _keyring_file_stamp()
+        _keyring_stamp = stamp
     return _keyring
 
 
 def get_fernet() -> MultiFernet:
     global _fernet
     keys = _loaded()
-    if _fernet is None:
-        _fernet = _build_fernet(keys)
-    return _fernet
+    fernet = _fernet  # a local, so another thread dropping the cache cannot turn this into None
+    if fernet is None:
+        fernet = _fernet = _build_fernet(keys)
+    return fernet
 
 
 def get_primary_key() -> bytes:
