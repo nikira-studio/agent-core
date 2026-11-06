@@ -235,6 +235,7 @@ def agents_page(request: Request, session: dict = Depends(require_auth)):
     js = """
     <script>
     const IS_ADMIN = __IS_ADMIN__;
+    const CAPABILITY_NAMES = {memory: 'Memory', coordination: 'Coordination', credentials: 'Credential references', credentials_resolve: 'Read credential values', connectors_read: 'See services', connectors_execute: 'Run service actions', admin_propose: 'Propose admin changes'};
     let agentModalReadOnly = false;
     async function refreshAgents() { location.reload(); }
     function createAuthorityPreview() {
@@ -252,7 +253,7 @@ def agents_page(request: Request, session: dict = Depends(require_auth)):
         '<li>Read: <code>' + escapeHtml(read.join(', ')) + '</code></li>' +
         '<li>Write: <code>' + escapeHtml(write.join(', ')) + '</code></li>' +
         '<li>Searches by default: <code>' + escapeHtml(recall.join(', ')) + '</code></li>' +
-        '<li>Can use: <code>' + escapeHtml(capabilities.join(', ')) + '</code></li>' +
+        '<li>Can use: ' + (capabilities.length ? escapeHtml(capabilities.map(function(c) { return CAPABILITY_NAMES[c] || c; }).join(', ')) : 'nothing yet') + '</li>' +
         '</ul>';
     }
     function applyLeastPrivilegedPreset() {

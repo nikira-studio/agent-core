@@ -140,4 +140,4 @@ def test_memory_detail_groups_its_fields_and_tucks_the_expert_ones(test_client, 
 
 def test_the_active_records_table_is_closed_before_the_next_card(test_client, admin_token):
     html = _page(test_client, admin_token)
-    assert '</tbody></table>\n      <input type="hidden" id="current-scope"' in html
+    assert '</tbody></table>\n      <div id="mem-page-info"' in html

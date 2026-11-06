@@ -1868,7 +1868,7 @@ def _get_destination_guidance(target, output_type):
     elif output_type == "claude_code_hook":
         return "Follow these steps on each machine that runs Claude Code. The hook contains no key; it reuses the MCP configuration."
     elif output_type == "verification":
-        return "Paste this into your connected agent after setup. It runs the end-to-end verification flow and reports memory, credential, and connector access."
+        return "Paste this into your connected agent after setup. It runs the end-to-end verification flow and reports memory, credential, and service access."
     return ""
 
 

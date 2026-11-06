@@ -268,18 +268,18 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
 
     user_scope = f"user:{session['user_id']}"
     workspace_scope_opts = "".join(
-        f'<option value="workspace:{p["id"]}">workspace:{p["id"]}</option>'
+        f'<option value="workspace:{p["id"]}">{escape_html(p.get("name") or p["id"])}</option>'
         for p in workspaces
     )
     agent_scope_opts = "".join(
-        f'<option value="agent:{a["id"]}">agent:{a["id"]}</option>'
+        f'<option value="agent:{a["id"]}">{escape_html(a.get("display_name") or a["id"])}</option>'
         for a in agents
         if a.get("is_active")
     )
     scope_options = (
-        f'<option value="{user_scope}">{user_scope}</option>\n'
-        f"{workspace_scope_opts}\n"
-        f"{agent_scope_opts}"
+        f'<optgroup label="You"><option value="{user_scope}">Just me (personal)</option></optgroup>\n'
+        f'<optgroup label="Workspaces">{workspace_scope_opts}</optgroup>\n'
+        f'<optgroup label="Agents (private to one agent)">{agent_scope_opts}</optgroup>'
     )
 
     connector_type_opts = "".join(
@@ -576,7 +576,7 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
     <div class="modal-overlay" id="create-binding-modal" style="display:none">
       <div class="modal">
         <h3>New Binding</h3>
-        <p class="form-hint" style="margin-bottom:12px">A binding lets agents in one scope use a service with one credential.</p>
+        <p class="form-hint" style="margin-bottom:12px">A binding lets agents in one workspace use a service with one credential.</p>
         <form id="create-binding-form" onsubmit="createBinding(event)">
           <div class="form-group">
             <label>Service *</label>
@@ -598,12 +598,12 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
             <div class="form-hint">A label for this binding, such as the account or environment it covers.</div>
           </div>
           <div class="form-group">
-            <label>Scope *</label>
+            <label>Who may use it *</label>
             <select id="binding-scope" required>
-              <option value="">Select scope...</option>
+              <option value="">Select a workspace...</option>
               {scope_options}
             </select>
-            <div class="form-hint">Only agents that can reach this scope may use the binding.</div>
+            <div class="form-hint">Only agents that can reach this workspace may use the binding.</div>
           </div>
           <div class="form-group">
             <label>Credential</label>
@@ -614,7 +614,7 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
               <option value="new">Create new credential</option>
             </select>
           </div>
-          <div id="binding-existing-credential-fields" class="form-group">
+          <div id="binding-existing-credential-fields" class="form-group" style="display:none">
             <label for="binding-credential">Stored Credential</label>
             <select id="binding-credential">
               <option value="">-- Select stored credential --</option>
@@ -666,11 +666,11 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
             <div class="form-hint">A label for this binding, such as the account or environment it covers.</div>
           </div>
           <div class="form-group">
-            <label>Scope</label>
+            <label>Who may use it</label>
             <select id="edit-binding-scope">
               {scope_options}
             </select>
-            <div class="form-hint">Only agents that can reach this scope may use the binding.</div>
+            <div class="form-hint">Only agents that can reach this workspace may use the binding.</div>
           </div>
           <div class="form-group">
             <label>Credential</label>

@@ -2012,3 +2012,17 @@ details.card[open] > summary::before { content: "\25BE\00a0"; }
 .stat-card.stat-quiet .value { color: var(--muted); }
 .stat-card.stat-alert .value { color: var(--danger); }
 .form-hint + .form-group, p.form-hint + .form-group { margin-top: 12px; }
+
+/* Memory on a phone: one card per memory, the text first and the class, workspace and state as small tags. */
+@media (max-width: 768px) {
+  .stack-cards, .stack-cards tbody { display: block; width: 100%; }
+  .stack-cards thead { display: none; }
+  .stack-cards tr { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; padding: 12px 0; border-bottom: 1px solid var(--border); }
+  .stack-cards td { display: block; border: 0; padding: 0; white-space: normal; max-width: none; width: auto; }
+  .stack-cards td.mem-content { order: 1; width: 100%; font-size: 0.95rem; }
+  .stack-cards td.mem-class { order: 2; }
+  .stack-cards td.mem-ws { order: 3; }
+  .stack-cards td.mem-state { order: 4; font-size: 0.8rem; }
+  .stack-cards td.mem-actions { order: 5; width: 100%; }
+  .stack-cards td.empty { width: 100%; text-align: center; }
+}

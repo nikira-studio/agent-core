@@ -522,3 +522,30 @@ def test_wording_batch_two(authenticated_client):
     assert "With Details" not in audit
     approvals = authenticated_client.get("/approvals").text
     assert "<th>Decided</th>" in approvals and "<th>Scope</th>" not in approvals
+
+
+def test_memory_list_is_paged_and_can_be_filtered_by_workspace(authenticated_client):
+    from app.services import memory_service
+
+    for i in range(30):
+        memory_service.write_memory(content=f"alpha memory number {i}", memory_class="fact", scope="workspace:alpha", topic=f"alpha-{i}")
+    for i in range(3):
+        memory_service.write_memory(content=f"beta memory number {i}", memory_class="fact", scope="workspace:beta", topic=f"beta-{i}")
+    first = authenticated_client.get("/memory").text
+    table = first.split('id="mem-results-body"', 1)[1].split("</tbody>", 1)[0]
+    assert table.count("<tr data-scope=") == 25
+    assert "Page 1 of 2" in first and "Showing 1–25 of 33" in first and "?page=2" in first
+    second = authenticated_client.get("/memory?page=2").text
+    assert second.split('id="mem-results-body"', 1)[1].split("</tbody>", 1)[0].count("<tr data-scope=") == 8
+    beta = authenticated_client.get("/memory?workspace=workspace:beta").text
+    rows = beta.split('id="mem-results-body"', 1)[1].split("</tbody>", 1)[0]
+    assert rows.count("<tr data-scope=") == 3 and "alpha memory" not in rows
+    assert 'class="stack-cards"' in first and "mem-content" in first
+    assert authenticated_client.get("/memory?page=999").status_code == 200  # clamps instead of failing
+
+
+def test_new_binding_dialog_shows_one_credential_choice_at_a_time(authenticated_client):
+    html = authenticated_client.get("/connectors").text
+    assert 'id="binding-existing-credential-fields" class="form-group" style="display:none"' in html
+    assert "Who may use it" in html and "A binding lets agents in one workspace" in html
+    assert "<label>Scope *</label>" not in html and "Just me (personal)" in html

@@ -336,7 +336,7 @@ def activity_page(request: Request, session: dict = Depends(require_auth)):
       <summary style="cursor:pointer"><h3>Workspace synchronization</h3></summary>
       <p class="text-muted" style="font-size:0.85rem">Which agent sessions are following each workspace's changes, and how far behind they are.</p>
       <div style="overflow-x:auto"><table><thead><tr><th>Agent</th><th>Workspace</th><th>Status</th><th>Last Seen</th><th>Acknowledged</th><th>Unacknowledged</th></tr></thead>
-      <tbody>{execution_rows or "<tr><td colspan=6 class=empty>No synchronized executions yet.</td></tr>"}</tbody></table></div>
+      <tbody>{execution_rows or "<tr><td colspan=6 class=empty>No agent sessions are following a workspace yet.</td></tr>"}</tbody></table></div>
     </details>
 
     <!-- Create Activity Modal -->

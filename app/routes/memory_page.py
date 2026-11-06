@@ -155,11 +155,11 @@ def memory_page(request: Request, session: dict = Depends(require_auth)):
             else "<span class='text-muted'>Read only</span>"
         )
         return (
-            f"<tr data-scope='{escape_html(r.get('scope') or '')}'><td><span class='badge badge-{r.get('memory_class', '')}'>{r.get('memory_class', '')}</span></td>"
-            f"<td>{escape_html(r.get('content', '')[:80])}</td>"
-            f"<td><code>{(r.get('scope') or '').replace('workspace:', '')}</code></td>"
-            f"<td>{_state_cell(r)}</td>"
-            f"<td><div class='actions-cell'>"
+            f"<tr data-scope='{escape_html(r.get('scope') or '')}'><td class='mem-class'><span class='badge badge-{r.get('memory_class', '')}'>{r.get('memory_class', '')}</span></td>"
+            f"<td class='mem-content'>{escape_html(r.get('content', '')[:160])}</td>"
+            f"<td class='mem-ws'><code>{(r.get('scope') or '').replace('workspace:', '')}</code></td>"
+            f"<td class='mem-state'>{_state_cell(r)}</td>"
+            f"<td class='mem-actions'><div class='actions-cell'>"
             f"<button type='button' class='btn btn-sm btn-secondary' data-memory-detail='{escape_html(r['id'])}'>Detail</button>"
             f"{modify_buttons}"
             f"</div></td></tr>"
@@ -182,8 +182,31 @@ def memory_page(request: Request, session: dict = Depends(require_auth)):
             f"</div></td></tr>"
         )
 
+    from app.routes.dashboard_shared import _build_pagination
+
+    ws_scopes = sorted({r.get("scope") for r in active_records if r.get("scope")})
+    ws_filter = request.query_params.get("workspace", "")
+    shown_records = [r for r in active_records if not ws_filter or r.get("scope") == ws_filter]
+    PAGE_SIZE = 25
+    total_pages = max(1, (len(shown_records) + PAGE_SIZE - 1) // PAGE_SIZE)
+    try:
+        page = min(max(1, int(request.query_params.get("page", "1"))), total_pages)
+    except ValueError:
+        page = 1
+    page_records = shown_records[(page - 1) * PAGE_SIZE : page * PAGE_SIZE]
+    from urllib.parse import quote as _quote
+
+    memory_pagination_html = (
+        _build_pagination(page, total_pages, f"workspace={_quote(ws_filter, safe='')}" if ws_filter else "")
+        if total_pages > 1
+        else ""
+    )
+    memory_page_info = (
+        f"Page {page} of {total_pages} &nbsp;·&nbsp; Showing "
+        f"{(page - 1) * PAGE_SIZE + 1 if shown_records else 0}–{(page - 1) * PAGE_SIZE + len(page_records)} of {len(shown_records)}"
+    )
     records_rows = (
-        "".join(active_row(r) for r in active_records)
+        "".join(active_row(r) for r in page_records)
         or "<tr><td colspan=5 class=empty>No memories yet. Agents save them as they work, or use <strong>Save Memory</strong> above.</td></tr>"
     )
     retracted_rows = "".join(retracted_row(r) for r in retracted_records)
@@ -354,11 +377,13 @@ def memory_page(request: Request, session: dict = Depends(require_auth)):
             review_top, review_html = review_html, ""
 
 
-    ws_scopes = sorted({r.get("scope") for r in active_records if r.get("scope")})
     workspace_filter_html = (
         '<div class="form-group" style="max-width:320px;margin-bottom:10px"><label for="mem-ws-filter">Workspace</label>'
         '<select id="mem-ws-filter" onchange="applyMemoryWorkspaceFilter()"><option value="">All workspaces</option>'
-        + "".join(f'<option value="{escape_html(sc)}">{escape_html(sc.replace("workspace:", ""))}</option>' for sc in ws_scopes)
+        + "".join(
+            f'<option value="{escape_html(sc)}"{" selected" if sc == ws_filter else ""}>{escape_html(sc.replace("workspace:", ""))}</option>'
+            for sc in ws_scopes
+        )
         + "</select></div>"
         if len(ws_scopes) > 1
         else ""
@@ -520,20 +545,18 @@ def memory_page(request: Request, session: dict = Depends(require_auth)):
     function applyMemoryWorkspaceFilter() {
       const sel = document.getElementById('mem-ws-filter');
       const want = sel ? sel.value : '';
-      document.querySelectorAll('#mem-results-body tr[data-scope]').forEach(tr => {
-        tr.style.display = (!want || tr.dataset.scope === want) ? '' : 'none';
-      });
+      window.location.href = '/memory' + (want ? '?workspace=' + encodeURIComponent(want) : '');
     }
     function displayRecords(records) {
       const tbody = document.getElementById('mem-results-body');
       if (!records.length) { tbody.innerHTML = '<tr><td colspan=5 class=empty>No memories found.</td></tr>'; return; }
       tbody.innerHTML = records.map(r => `
         <tr data-scope="${escapeHtml(r.scope || '')}">
-          <td><span class="badge badge-${escapeHtml(r.memory_class)}">${escapeHtml(r.memory_class)}</span></td>
-          <td>${escapeHtml((r.content || '').substring(0, 80))}</td>
-          <td><code>${escapeHtml((r.scope || '').replace('workspace:', ''))}</code></td>
-          <td>${(r.confidence || 0.5).toFixed(1)}</td>
-          <td><button class="btn btn-sm btn-secondary" data-record-id="${escapeHtml(r.id)}" onclick="retractRecord(this.dataset.recordId)">Retract</button></td>
+          <td class="mem-class"><span class="badge badge-${escapeHtml(r.memory_class)}">${escapeHtml(r.memory_class)}</span></td>
+          <td class="mem-content">${escapeHtml((r.content || '').substring(0, 160))}</td>
+          <td class="mem-ws"><code>${escapeHtml((r.scope || '').replace('workspace:', ''))}</code></td>
+          <td class="mem-state">${(r.confidence || 0.5).toFixed(1)}</td>
+          <td class="mem-actions"><button class="btn btn-sm btn-secondary" data-record-id="${escapeHtml(r.id)}" onclick="retractRecord(this.dataset.recordId)">Retract</button></td>
         </tr>`).join('');
     }
     function copyGeneratedOutput(btn) {
@@ -703,10 +726,12 @@ def memory_page(request: Request, session: dict = Depends(require_auth)):
       <h3>Memories <span id="mem-count" class="text-muted" style="font-weight:normal;font-size:0.8rem">({len(active_records)})</span></h3>
       <p class="text-muted" style="font-size:0.85rem;margin-bottom:8px">The memories you can read right now. Use Search for a narrower view, or pick a workspace.</p>
       {workspace_filter_html}
-      <table><thead><tr><th>Class</th><th>Content</th><th>Workspace</th><th>State</th><th class="actions-cell">Actions</th></tr></thead>
+      <table class="stack-cards"><thead><tr><th>Class</th><th>Content</th><th>Workspace</th><th>State</th><th class="actions-cell">Actions</th></tr></thead>
       <tbody id="mem-results-body">
         {records_rows}
       </tbody></table>
+      <div id="mem-page-info" style="margin-top:8px;font-size:0.85rem;color:var(--text-muted)">{memory_page_info}</div>
+      {memory_pagination_html}
       <input type="hidden" id="current-scope" value="{user_scope}">
     </div>
 
