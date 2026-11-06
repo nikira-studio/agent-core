@@ -39,3 +39,16 @@ def test_other_schemes_are_refused():
     for url in ("file:///etc/passwd", "ftp://host/", "core.example.com"):
         ok, message = check_transport(url, "warn")
         assert not ok and "http:// or https://" in message
+
+
+def test_the_documented_double_dash_form_runs_the_command(tmp_path, monkeypatch, capsys):
+    import sys
+
+    from runner import agent_core_broker as broker
+
+    seen = {}
+    monkeypatch.setattr(broker, "run_env_mode", lambda agent, cmd, token, url: seen.update(cmd=cmd) or 0)
+    for argv in (["x", "--agent-id", "a", "--token", "t", "--", "echo", "hi"], ["x", "--agent-id", "a", "--token", "t", "echo", "hi"]):
+        monkeypatch.setattr(sys, "argv", argv)
+        seen.clear()
+        assert broker.main() == 0 and seen["cmd"] == ["echo", "hi"]

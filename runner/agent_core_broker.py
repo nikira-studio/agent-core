@@ -202,6 +202,8 @@ def main() -> int:
             file=sys.stderr,
         )
         return 1
+    if args.cmd and args.cmd[0] == "--":
+        args.cmd = args.cmd[1:]  # argparse keeps the separator the usage line tells people to type
     if not args.cmd:
         print("ERROR: -- cmd [...] required", file=sys.stderr)
         return 1
