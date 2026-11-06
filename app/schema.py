@@ -568,6 +568,7 @@ def _apply_schema_migrations(conn) -> None:
         (18, "approvals", _migrate_018_approvals),
         (19, "trusted-device-sessions", _migrate_019_trusted_device_sessions),
         (20, "connector-run-approvals", _migrate_020_connector_run_approvals),
+        (21, "agent-inherit-user-bindings", _migrate_021_inherit_user_bindings),
     )
     applied = {
         row["revision"]
@@ -1627,6 +1628,43 @@ def _migrate_019_trusted_device_sessions(conn) -> None:
     )
     conn.execute("DROP TABLE sessions")
     conn.execute("ALTER TABLE sessions_rebuilt RENAME TO sessions")
+
+
+def _migrate_021_inherit_user_bindings(conn) -> None:
+    """Running the services in a person's own scope becomes a per-agent setting.
+
+    Before, every agent acting for a person could run every service bound in that
+    person's scope. New agents now start with this off. Existing agents that
+    could run services and act for an active person keep what they had (on), and
+    each one is written to the audit log so an admin can see and turn it off.
+    """
+    import json
+
+    columns = {row["name"] for row in conn.execute("PRAGMA table_info(agents)").fetchall()}
+    if "inherit_user_bindings" in columns:
+        return
+    conn.execute("ALTER TABLE agents ADD COLUMN inherit_user_bindings INTEGER NOT NULL DEFAULT 0")
+    rows = conn.execute(
+        "SELECT a.id, a.capabilities_json, COALESCE(a.default_user_id, a.owner_user_id) AS person "
+        "FROM agents a JOIN users u ON u.id = COALESCE(a.default_user_id, a.owner_user_id) AND u.is_active = 1"
+    ).fetchall()
+    for row in rows:
+        try:
+            capabilities = json.loads(row["capabilities_json"] or "[]")
+        except ValueError:
+            capabilities = []
+        if "connectors_execute" not in capabilities:
+            continue
+        conn.execute("UPDATE agents SET inherit_user_bindings = 1 WHERE id = ?", (row["id"],))
+        conn.execute(
+            "INSERT INTO audit_log (actor_type, actor_id, action, resource_type, resource_id, result, details_json) "
+            "VALUES ('system', 'upgrade', 'agent_updated', 'agent', ?, 'success', ?)",
+            (
+                row["id"],
+                json.dumps({"setting": "inherit_user_bindings", "value": True, "person": row["person"],
+                            "reason": "kept what this agent could already do on upgrade"}),
+            ),
+        )
 
 
 def _migrate_020_connector_run_approvals(conn) -> None:

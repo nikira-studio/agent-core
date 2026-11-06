@@ -135,6 +135,10 @@ def agents_page(request: Request, session: dict = Depends(require_auth)):
             '<div class="form-section"><h4 class="form-section-title">What will this agent do?</h4>'
             f'<div class="role-cards">{cards}</div>'
             f'<div class="role-custom" id="{prefix}-role-custom" hidden>{controls}</div>'
+            f'<label class="checkbox-label" style="margin-top:12px"><input type="checkbox" id="{prefix}-inherit-user-bindings"> '
+            '<span><strong>Run its person\'s own services</strong><br><small class="form-hint">Lets this agent also run the services '
+            'bound in its person\'s personal scope, not only those in workspaces it is given. Off by default; turn it on for an agent '
+            'that acts as that person.</small></span></label>'
             '<p class="form-hint">Scopes decide which data an agent can reach; this decides which kinds of action it may attempt. '
             'Changes apply to the next request; reconnect an MCP client to refresh its tool list.</p></div>'
         )
@@ -182,10 +186,16 @@ def agents_page(request: Request, session: dict = Depends(require_auth)):
             if a.get("is_shared") or agent_service.is_agent_shared(a)
             else ""
         )
+        personal_badge = (
+            "<span class='badge badge-info' title='May run the services bound in its person&#39;s own scope'>runs personal services</span>"
+            if a.get("inherit_user_bindings")
+            else ""
+        )
         access_summary = (
             f"<span class='scope-tag' title='Implicit private scope'>{escape_html(own_scope)}</span>"
             f"<span class='scope-tag' title='Inherited from its owner'>{escape_html(principal_scope)}</span>"
             f"{shared_badge}"
+            f"{personal_badge}"
             f"<span class='text-muted'> + {len(read_extra)} read / {len(write_extra)} write grants</span>"
         )
         can_manage = is_admin or a.get("owner_user_id") == session["user_id"]
@@ -364,6 +374,7 @@ def agents_page(request: Request, session: dict = Depends(require_auth)):
       document.getElementById('edit-owner').textContent = a.owner_user_id || '-';
       document.getElementById('edit-default-user').textContent = a.default_user_id || a.owner_user_id || '-';
       setSelectedCapabilities('edit', a.capabilities || []);
+      document.getElementById('edit-inherit-user-bindings').checked = !!a.inherit_user_bindings;
       syncRole('edit');
       const readScopes = JSON.parse(a.read_scopes_json || '[]');
       const writeScopes = JSON.parse(a.write_scopes_json || '[]');
@@ -491,6 +502,7 @@ def agents_page(request: Request, session: dict = Depends(require_auth)):
           read_scopes: getSelectedScopes('edit-read-scopes'),
           write_scopes: getSelectedScopes('edit-write-scopes'),
           capabilities: getSelectedCapabilities('edit'),
+          inherit_user_bindings: document.getElementById('edit-inherit-user-bindings').checked,
         };
         body.read_scopes.push(ownScope);
         body.write_scopes.push(ownScope);
@@ -522,6 +534,7 @@ def agents_page(request: Request, session: dict = Depends(require_auth)):
           read_scopes: getSelectedScopes('ca-read-scopes'),
           write_scopes: getSelectedScopes('ca-write-scopes'),
           capabilities: getSelectedCapabilities('ca'),
+          inherit_user_bindings: document.getElementById('ca-inherit-user-bindings').checked,
         };
         // Ensure private scope is added if not present (it's implicit in backend but good to show)
         const privateScope = 'agent:' + agentId;

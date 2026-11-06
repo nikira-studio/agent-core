@@ -119,7 +119,7 @@ OTP verify (during login):
 
 ## Agents
 
-Session required. Admins can manage all agents. Non-admin users can create and manage agents they own. At request time, every active agent inherits read access to `user:<principal_user_id>`; this does not grant user-scope write access. Personal `user:<id>` scopes are limited to that principal; use `workspace:<id>` for multi-user collaboration. Agents marked `shared` are visible read-only to other authenticated users, but editing, key rotation, and delete controls stay with the owner or an admin.
+Session required. Admins can manage all agents. Non-admin users can create and manage agents they own. At request time, every active agent inherits read access to `user:<principal_user_id>`; this does not grant user-scope write access. Personal `user:<id>` scopes are limited to that principal; use `workspace:<id>` for multi-user collaboration. Agents marked `shared` are visible read-only to other authenticated users, but editing, key rotation, and delete controls stay with the owner or an admin. Running the services bound in that personal scope is separate: the agent's `inherit_user_bindings` setting (create, update and read; `false` by default) decides whether it sees, resolves and runs them.
 
 | Method | Path | Description |
 | --- | --- | --- |

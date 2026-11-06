@@ -110,6 +110,10 @@ The model's context window never contains your actual secret. It's injected at e
 
 ---
 
+## Personal services and agents
+
+An agent acts for a person (its default user) and can read that person's own memory scope. Running the services bound in that personal scope is a separate per-agent setting, `inherit_user_bindings`, off for new agents: without it the agent does not see, resolve or run those services, over MCP or REST. Turn it on only for an agent that really acts as that person, and give service agents their own person instead of a shared one. Upgrading switches it on for agents that could already run services, and writes each to the audit log.
+
 ## Service execution flow
 
 Services are the server-side path for external actions:

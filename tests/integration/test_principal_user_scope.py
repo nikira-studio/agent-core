@@ -10,7 +10,7 @@ def _mcp(client, token, tool, params):
     )
 
 
-def _create_principal_agent(user_id: str, agent_id: str):
+def _create_principal_agent(user_id: str, agent_id: str, inherit_user_bindings: bool = True):
     auth_service.create_user(
         user_id,
         f"{user_id}@test.local",
@@ -25,6 +25,7 @@ def _create_principal_agent(user_id: str, agent_id: str):
         default_user_id=user_id,
         read_scopes=[],
         write_scopes=[],
+        inherit_user_bindings=inherit_user_bindings,
     )
 
 
@@ -168,3 +169,80 @@ def test_inherited_user_scope_allows_all_binding_actions_but_not_secret_reveal(
     )
     assert reveal.status_code == 403, reveal.json()
     assert reveal.json()["error"]["code"] == "FORBIDDEN"
+
+
+def test_a_new_agent_does_not_run_its_persons_own_services_until_told_to(test_client, monkeypatch):
+    agent, token = _create_principal_agent("owner", "assistant", inherit_user_bindings=False)
+    _, binding = _create_user_binding("owner")
+    ran = []
+    monkeypatch.setattr(connector_service, "execute_binding_action",
+                        lambda binding_id, action, params=None: ran.append(action) or {"success": True})
+
+    # It still reads the person's memory scope...
+    context = build_agent_context(agent)
+    assert "user:owner" in context.read_scopes
+    assert "user:owner" not in context.connector_read_scopes()
+    # ...but sees none of the services bound there, cannot resolve them, and cannot run them.
+    assert _mcp(test_client, token, "connectors_bindings_list", {"scope": "user:owner"}).status_code == 403
+    listed = _mcp(test_client, token, "connectors_bindings_list", {})
+    assert listed.json()["data"]["bindings"] == []
+    resolved = _mcp(test_client, token, "connectors_resolve", {"connector_type_id": "lifequery", "logical_alias": "primary"})
+    assert resolved.json().get("data", {}).get("binding") is None
+    run = _mcp(test_client, token, "connectors_run", {"binding_id": binding["id"], "action": "GET /spaces", "params": {}})
+    assert run.json()["ok"] is False and ran == []
+    tested = _mcp(test_client, token, "connectors_bindings_test", {"binding_id": binding["id"]})
+    assert tested.status_code == 403
+    summary = _mcp(test_client, token, "connectors_summary", {}).json()["data"]
+    assert all(not c["bindings"] for c in summary["connectors"])
+
+    # Switching it on is the one thing that gives it back.
+    agent_service.update_agent("assistant", inherit_user_bindings=True)
+    again = _mcp(test_client, token, "connectors_run", {"binding_id": binding["id"], "action": "GET /spaces", "params": {}})
+    assert again.json()["ok"] is True and ran == ["GET /spaces"]
+
+
+def test_services_in_a_workspace_the_agent_is_given_are_not_affected(test_client):
+    from app.services import workspace_service
+
+    _create_principal_agent("owner", "assistant", inherit_user_bindings=False)
+    workspace_service.create_workspace("shop", "Shop", "owner")
+    connector_service.create_connector_type(
+        connector_type_id="shopsvc", display_name="Shop", auth_type="none",
+        supported_actions=[{"name": "GET /x", "method": "GET"}], backend_type="generic_http")
+    binding = connector_service.create_binding("shopsvc", "Shop", "workspace:shop", created_by="owner")
+    agent_service.update_agent("assistant", read_scopes=["workspace:shop"], write_scopes=["workspace:shop"])
+    agent = agent_service.get_agent_by_id("assistant")
+    from app.security.effective_authority import permanent_authority
+
+    authority = permanent_authority(build_agent_context(agent))
+    assert authority.can("connector", "read", scope="workspace:shop")
+    assert not authority.can("connector", "read", scope="user:owner")
+    assert binding["scope"] == "workspace:shop"
+
+
+def test_upgrade_keeps_what_agents_could_do_and_says_which_ones(test_client):
+    import json
+
+    from app.database import get_db
+    from app.schema import _migrate_021_inherit_user_bindings
+
+    auth_service.create_user("person", "person@test.local", "testpassword123", "Person", "user")
+    auth_service.create_user("gone", "gone@test.local", "testpassword123", "Gone", "user")
+    for agent_id, user, caps in (("runner", "person", ["memory", "connectors_execute"]),
+                                 ("reader", "person", ["memory", "connectors_read"]),
+                                 ("orphan", "gone", ["connectors_execute"])):
+        agent_service.create_agent(agent_id, agent_id, user, default_user_id=user, capabilities=caps)
+    with get_db() as conn:
+        conn.execute("UPDATE users SET is_active = 0 WHERE id = 'gone'")
+        conn.execute("ALTER TABLE agents DROP COLUMN inherit_user_bindings")
+        conn.commit()
+        _migrate_021_inherit_user_bindings(conn)
+        conn.commit()
+        flags = {r["id"]: r["inherit_user_bindings"] for r in conn.execute("SELECT id, inherit_user_bindings FROM agents")}
+        audited = [r["resource_id"] for r in conn.execute(
+            "SELECT resource_id, details_json FROM audit_log WHERE actor_id = 'upgrade' AND action = 'agent_updated'")]
+    assert flags["runner"] == 1 and flags["reader"] == 0 and flags["orphan"] == 0
+    assert audited == ["runner"]
+    # New agents start with it off.
+    agent_service.create_agent("fresh", "Fresh", "person", capabilities=["connectors_execute"])
+    assert agent_service.get_agent_by_id("fresh")["inherit_user_bindings"] == 0

@@ -2430,6 +2430,7 @@ async def _run_custom_mcp_tool(body: dict, ctx: EffectiveAuthority):
     elif tool == "connectors_bindings_list":
         from app.services import connector_service
 
+        enforcer = ctx.connector_enforcer()
         scope = params.get("scope")
         if scope:
             if not enforcer.can_read(scope):
@@ -2446,7 +2447,7 @@ async def _run_custom_mcp_tool(body: dict, ctx: EffectiveAuthority):
                 enabled=enabled_filter,
             )
         else:
-            allowed = enforcer.filter_readable_scopes(ctx.read_scopes)
+            allowed = enforcer.filter_readable_scopes(ctx.connector_read_scopes)
             effective_scope = scope if (scope and enforcer.can_read(scope)) else None
             if effective_scope:
                 bindings = connector_service.list_bindings(
@@ -2476,6 +2477,7 @@ async def _run_custom_mcp_tool(body: dict, ctx: EffectiveAuthority):
     elif tool == "connectors_bindings_test":
         from app.services import connector_service
 
+        enforcer = ctx.connector_enforcer()
         binding = connector_service.get_binding(params["binding_id"])
         if not binding:
             return _mcp_error("NOT_FOUND", "Binding not found", 404)
@@ -2546,7 +2548,7 @@ async def _run_custom_mcp_tool(body: dict, ctx: EffectiveAuthority):
 
         summary = await asyncio.to_thread(
             connector_service.build_capability_summary,
-            enforcer,
+            ctx.connector_enforcer(),
             connector_type_id=params.get("connector_type_id"),
             scope=params.get("scope"),
             enabled_only=bool(params.get("enabled_only", True)),

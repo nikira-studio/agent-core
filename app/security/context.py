@@ -23,6 +23,17 @@ class RequestContext:
     # session). A service action that waits for approval does not hold them;
     # it holds every key, token and script.
     browser_session: bool = False
+    # An agent acts for a person and reads that person's own scope for memory. Running
+    # the services bound in that scope is a separate, per-agent setting, off unless an
+    # admin turned it on; principal_user_scope names the scope it covers.
+    principal_user_scope: Optional[str] = None
+    inherit_user_bindings: bool = True
+
+    def connector_read_scopes(self) -> list[str]:
+        """The scopes whose bindings this caller may see and run."""
+        if self.actor_type == "agent" and not self.inherit_user_bindings and self.principal_user_scope:
+            return [s for s in self.read_scopes if s != self.principal_user_scope]
+        return list(self.read_scopes)
 
 
 def build_user_context(session: dict) -> RequestContext:

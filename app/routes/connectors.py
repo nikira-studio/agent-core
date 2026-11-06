@@ -19,7 +19,6 @@ from app.services import (
 )
 from app.branding import APP_USER_AGENT
 from app.security.dependencies import get_request_context, require_capability
-from app.security.scope_enforcer import ScopeEnforcer
 from app.security.effective_authority import EffectiveAuthority
 from app.security.exceptions import APIError
 from app.security.public_url import public_base_url
@@ -129,13 +128,7 @@ def list_bindings(
     enabled: Optional[bool] = None,
     ctx: EffectiveAuthority = Depends(get_request_context),
 ):
-    enforcer = ScopeEnforcer(
-        ctx.read_scopes,
-        ctx.write_scopes,
-        ctx.agent_id,
-        is_admin=ctx.is_admin,
-        active_workspace_ids=ctx.active_workspace_ids,
-    )
+    enforcer = ctx.connector_enforcer()
     if scope and not enforcer.can_read(scope):
         return error_response("SCOPE_DENIED", "Access denied to this scope", 403)
     bindings = connector_service.list_bindings(
@@ -164,13 +157,7 @@ def create_binding(
     body: CreateBindingRequest,
     ctx: EffectiveAuthority = Depends(get_request_context),
 ):
-    enforcer = ScopeEnforcer(
-        ctx.read_scopes,
-        ctx.write_scopes,
-        ctx.agent_id,
-        is_admin=ctx.is_admin,
-        active_workspace_ids=ctx.active_workspace_ids,
-    )
+    enforcer = ctx.connector_enforcer()
     if not enforcer.can_write(body.scope):
         return error_response("SCOPE_DENIED", "Access denied to this scope", 403)
     ct = connector_service.get_connector_type(body.connector_type_id)
@@ -222,13 +209,7 @@ async def start_binding_oauth(
     binding = connector_service.get_binding(binding_id)
     if not binding:
         return error_response("NOT_FOUND", "Binding not found", 404)
-    enforcer = ScopeEnforcer(
-        ctx.read_scopes,
-        ctx.write_scopes,
-        ctx.agent_id,
-        is_admin=ctx.is_admin,
-        active_workspace_ids=ctx.active_workspace_ids,
-    )
+    enforcer = ctx.connector_enforcer()
     if not enforcer.can_write(binding["scope"]):
         return error_response("SCOPE_DENIED", "Access denied to this binding", 403)
     redirect_uri = f"{public_base_url(request)}/api/connector-bindings/oauth/callback"
@@ -275,13 +256,7 @@ def get_binding(
     binding = connector_service.get_binding(binding_id)
     if not binding:
         return error_response("NOT_FOUND", "Binding not found", 404)
-    enforcer = ScopeEnforcer(
-        ctx.read_scopes,
-        ctx.write_scopes,
-        ctx.agent_id,
-        is_admin=ctx.is_admin,
-        active_workspace_ids=ctx.active_workspace_ids,
-    )
+    enforcer = ctx.connector_enforcer()
     if not enforcer.can_read(binding["scope"]):
         return error_response("SCOPE_DENIED", "Access denied to this binding", 403)
     return success_response({"binding": binding})
@@ -296,13 +271,7 @@ def update_binding(
     binding = connector_service.get_binding(binding_id)
     if not binding:
         return error_response("NOT_FOUND", "Binding not found", 404)
-    enforcer = ScopeEnforcer(
-        ctx.read_scopes,
-        ctx.write_scopes,
-        ctx.agent_id,
-        is_admin=ctx.is_admin,
-        active_workspace_ids=ctx.active_workspace_ids,
-    )
+    enforcer = ctx.connector_enforcer()
     if not enforcer.can_write(binding["scope"]):
         return error_response("SCOPE_DENIED", "Access denied to this binding", 403)
     if body.scope and not enforcer.can_write(body.scope):
@@ -348,13 +317,7 @@ def delete_binding(
     binding = connector_service.get_binding(binding_id)
     if not binding:
         return error_response("NOT_FOUND", "Binding not found", 404)
-    enforcer = ScopeEnforcer(
-        ctx.read_scopes,
-        ctx.write_scopes,
-        ctx.agent_id,
-        is_admin=ctx.is_admin,
-        active_workspace_ids=ctx.active_workspace_ids,
-    )
+    enforcer = ctx.connector_enforcer()
     if not enforcer.can_write(binding["scope"]):
         return error_response("SCOPE_DENIED", "Access denied to this binding", 403)
     connector_service.delete_binding(binding_id)
@@ -377,13 +340,7 @@ async def test_binding(
     binding = connector_service.get_binding(binding_id)
     if not binding:
         return error_response("NOT_FOUND", "Binding not found", 404)
-    enforcer = ScopeEnforcer(
-        ctx.read_scopes,
-        ctx.write_scopes,
-        ctx.agent_id,
-        is_admin=ctx.is_admin,
-        active_workspace_ids=ctx.active_workspace_ids,
-    )
+    enforcer = ctx.connector_enforcer()
     if not enforcer.can_read(binding["scope"]):
         return error_response("SCOPE_DENIED", "Access denied to this binding", 403)
     result = await asyncio.to_thread(connector_service.test_binding, binding_id)
@@ -445,13 +402,7 @@ def list_binding_executions(
     binding = connector_service.get_binding(binding_id)
     if not binding:
         return error_response("NOT_FOUND", "Binding not found", 404)
-    enforcer = ScopeEnforcer(
-        ctx.read_scopes,
-        ctx.write_scopes,
-        ctx.agent_id,
-        is_admin=ctx.is_admin,
-        active_workspace_ids=ctx.active_workspace_ids,
-    )
+    enforcer = ctx.connector_enforcer()
     if not enforcer.can_read(binding["scope"]):
         return error_response("SCOPE_DENIED", "Access denied to this binding", 403)
     limit = max(1, min(limit, 200))
@@ -475,13 +426,7 @@ async def get_binding_tools(
     binding = connector_service.get_binding(binding_id)
     if not binding:
         return error_response("NOT_FOUND", "Binding not found", 404)
-    enforcer = ScopeEnforcer(
-        ctx.read_scopes,
-        ctx.write_scopes,
-        ctx.agent_id,
-        is_admin=ctx.is_admin,
-        active_workspace_ids=ctx.active_workspace_ids,
-    )
+    enforcer = ctx.connector_enforcer()
     if not enforcer.can_read(binding["scope"]):
         return error_response("SCOPE_DENIED", "Access denied to this binding", 403)
 
@@ -520,13 +465,7 @@ def connector_summary(
     enabled_only: bool = True,
     ctx: EffectiveAuthority = Depends(get_request_context),
 ):
-    enforcer = ScopeEnforcer(
-        ctx.read_scopes,
-        ctx.write_scopes,
-        ctx.agent_id,
-        is_admin=ctx.is_admin,
-        active_workspace_ids=ctx.active_workspace_ids,
-    )
+    enforcer = ctx.connector_enforcer()
     if scope and not enforcer.can_read(scope):
         return error_response("SCOPE_DENIED", "Access denied to this scope", 403)
     summary = connector_service.build_capability_summary(
@@ -543,13 +482,7 @@ async def connector_health_check(
     body: ConnectorHealthCheckRequest,
     ctx: EffectiveAuthority = Depends(get_request_context),
 ):
-    enforcer = ScopeEnforcer(
-        ctx.read_scopes,
-        ctx.write_scopes,
-        ctx.agent_id,
-        is_admin=ctx.is_admin,
-        active_workspace_ids=ctx.active_workspace_ids,
-    )
+    enforcer = ctx.connector_enforcer()
     if body.scope and not enforcer.can_read(body.scope):
         return error_response("SCOPE_DENIED", "Access denied to this scope", 403)
 

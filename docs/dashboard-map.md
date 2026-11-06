@@ -174,6 +174,10 @@ One vocabulary, used in titles, tooltips and help. A page that needs a different
 - Anything that deletes for good names what goes with it (memories and tasks for a workspace, the key and history for an agent) and asks for the ID to be typed.
 - Where Connect's checks all pass, one line says so and the list sits behind "Show the checks"; it opens by itself when something fails.
 
+## Running a person's own services (2026-11-06)
+
+**Agents** (Create and Edit): the checkbox **Run its person's own services** (off by default; help: it lets the agent also run the services bound in its person's personal scope, not only those in workspaces it is given). Agents that have it on show a **runs personal services** tag in the list. The agent's person's memory scope is still readable either way.
+
 ## Access that has no effect yet (2026-11-06)
 
 An agent acts for its default user and can use only the workspaces that person can reach. A workspace added to the agent but not reachable by that person has no effect, so **Agents** (a line under the agent's access), **Edit Agent** (a banner) and **Connect** (the access check) say so in plain words and say what to do: "No effect yet: Pat is not a member of Beta. Add them on Workspaces."

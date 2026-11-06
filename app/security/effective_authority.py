@@ -91,6 +91,20 @@ class EffectiveAuthority:
     def required_capability(self, resource_type: str, operation: str) -> Optional[str]:
         return RESOURCE_CAPABILITIES.get((resource_type, operation))
 
+    @property
+    def connector_read_scopes(self) -> list[str]:
+        return self.context.connector_read_scopes()
+
+    def connector_enforcer(self) -> ScopeEnforcer:
+        """Scope rules for services: like the memory rules, minus an agent's person's own scope unless allowed."""
+        return ScopeEnforcer(
+            self.connector_read_scopes,
+            self.context.write_scopes,
+            agent_id=self.context.agent_id,
+            is_admin=self.context.is_admin,
+            active_workspace_ids=self.context.active_workspace_ids,
+        )
+
     def can(self, resource_type: str, operation: str, *, scope: Optional[str] = None) -> bool:
         """Test a closed resource operation against the effective authority."""
         if operation not in RESOURCE_OPERATIONS.get(resource_type, frozenset()):
@@ -100,7 +114,7 @@ class EffectiveAuthority:
             return False
         if scope is None:
             return self.context.is_admin
-        enforcer = ScopeEnforcer(
+        enforcer = self.connector_enforcer() if resource_type == "connector" else ScopeEnforcer(
             self.context.read_scopes,
             self.context.write_scopes,
             agent_id=self.context.agent_id,

@@ -24,6 +24,8 @@ class CreateAgentRequest(BaseModel):
     # default (fan all read_scopes).
     default_recall_scopes: Optional[list[str]] = None
     capabilities: Optional[list[str]] = None
+    # Whether it may also run the services bound in its person's own scope.
+    inherit_user_bindings: bool = False
 
 
 class UpdateAgentRequest(BaseModel):
@@ -36,6 +38,7 @@ class UpdateAgentRequest(BaseModel):
     default_recall_scopes: Optional[list[str]] = None
     reset_default_recall_scopes: bool = False
     capabilities: Optional[list[str]] = None
+    inherit_user_bindings: Optional[bool] = None
 
 
 def _is_admin(session: dict) -> bool:
@@ -111,6 +114,7 @@ def _authority_audit_details(agent: dict) -> dict:
             else None
         ),
         "capabilities": agent_service.parse_capabilities(agent.get("capabilities_json")),
+        "inherit_user_bindings": bool(agent.get("inherit_user_bindings")),
     }
 
 
@@ -178,6 +182,7 @@ def create_agent(
             write_scopes=body.write_scopes,
             default_recall_scopes=body.default_recall_scopes,
             capabilities=body.capabilities,
+            inherit_user_bindings=body.inherit_user_bindings,
         )
     except ValueError as exc:
         return error_response("INVALID_CAPABILITIES", str(exc), 400)
@@ -232,6 +237,7 @@ def get_agent(agent_id: str, session: dict = Depends(get_current_session)):
             "is_active": agent["is_active"],
             "created_at": agent["created_at"],
             "is_shared": agent_service.is_agent_shared(agent),
+            "inherit_user_bindings": bool(agent.get("inherit_user_bindings")),
             # Workspaces in its lists that its person cannot reach, so they have no effect yet.
             "no_effect": agent_access_service.no_effect(agent),
         }
@@ -268,6 +274,7 @@ def update_agent(
         read_scopes=body.read_scopes,
         write_scopes=body.write_scopes,
         capabilities=body.capabilities,
+        inherit_user_bindings=body.inherit_user_bindings,
     )
     # reset flag clears back to default (fan all read_scopes); otherwise a
     # provided list narrows, and absence leaves it unchanged.

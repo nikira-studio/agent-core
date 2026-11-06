@@ -148,4 +148,6 @@ def build_agent_context(agent: dict) -> "RequestContext":
         active_workspace_ids=active_workspace_ids,
         is_admin=False,
         capabilities=frozenset(agent_service.parse_capabilities(agent.get("capabilities_json"))),
+        principal_user_scope=principal_scope,
+        inherit_user_bindings=bool(agent.get("inherit_user_bindings")),
     )
