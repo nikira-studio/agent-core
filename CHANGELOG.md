@@ -16,6 +16,7 @@ Notable changes to Agent Core are documented here. The format follows [Keep a Ch
 
 ### Fixed
 
+- An agent given a workspace its person (its default user) cannot reach used to look fine in the lists and do nothing. The Agents page and the Edit Agent form now say so in words ("No effect yet: Pat is not a member of Beta. Add them on Workspaces.", or that the person can read but not write there, or that the workspace is deactivated), and the Connect access check names the same reason instead of suggesting a scope the agent already has.
 - Editing a user's active state used the checkbox in the Add User dialog (the same element id appeared in both dialogs); it now lives in the Edit dialog only.
 - Settings → Security showed a literal `{CREDENTIAL_PREFIX}*` in the helper's description; it now shows `AC_SECRET_*`.
 - The Agents page now offers the `admin_propose` and `credentials_resolve` capabilities, unchecked on the create form so a new agent never gets either by default, and each capability is grouped and described in plain words. Before, saving an edit to an agent that held one of those two silently removed it, because the form only sent the boxes it showed.

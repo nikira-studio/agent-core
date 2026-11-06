@@ -174,6 +174,10 @@ One vocabulary, used in titles, tooltips and help. A page that needs a different
 - Anything that deletes for good names what goes with it (memories and tasks for a workspace, the key and history for an agent) and asks for the ID to be typed.
 - Where Connect's checks all pass, one line says so and the list sits behind "Show the checks"; it opens by itself when something fails.
 
+## Access that has no effect yet (2026-11-06)
+
+An agent acts for its default user and can use only the workspaces that person can reach. A workspace added to the agent but not reachable by that person has no effect, so **Agents** (a line under the agent's access), **Edit Agent** (a banner) and **Connect** (the access check) say so in plain words and say what to do: "No effect yet: Pat is not a member of Beta. Add them on Workspaces."
+
 ## Asking a person first (2026-11-06)
 
 Where it lives: **Services** to set it up (View Actions → **Ask a person first** per action, for every caller or named agents), **Approvals** to decide, **Overview** (Waiting on you) to notice. What a person sees first on the approval page is one plain sentence, then what will be sent, then the two buttons. One line of help per control: the checkbox says "A run waits on the Approvals page until you approve it. The agent is told to wait."; the decision card says "Approving runs this one request now, exactly as shown. Rejecting runs nothing, and the agent is told so."; the note field is "Note for the agent (optional)". Vocabulary: service, binding, workspace. Design: [design/approval-gate.md](design/approval-gate.md).

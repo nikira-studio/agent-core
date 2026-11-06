@@ -3,7 +3,7 @@ from pydantic import BaseModel
 from typing import Optional
 
 from app.services import audit_service, workspace_service
-from app.services import agent_service
+from app.services import agent_access_service, agent_service
 from app.security.dependencies import get_current_session
 from app.security.response_helpers import success_response, error_response
 from app.security.scope_utils import validate_scope_string, normalize_scope_string
@@ -232,6 +232,8 @@ def get_agent(agent_id: str, session: dict = Depends(get_current_session)):
             "is_active": agent["is_active"],
             "created_at": agent["created_at"],
             "is_shared": agent_service.is_agent_shared(agent),
+            # Workspaces in its lists that its person cannot reach, so they have no effect yet.
+            "no_effect": agent_access_service.no_effect(agent),
         }
     })
 

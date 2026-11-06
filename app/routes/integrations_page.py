@@ -334,15 +334,30 @@ def _agent_setup_access_model(
         if can_read_workspace and can_write_workspace:
             checks.append({"label": "Workspace read/write access", "status": "ok"})
         elif can_read_workspace:
-            checks.append({"label": "Workspace read-only access", "status": "warning"})
-        else:
-            checks.append({"label": "No workspace access", "status": "blocked"})
-            checks.append(
-                {
-                    "label": "Recommended: add workspace scope to agent",
-                    "status": "warning",
-                }
+            from app.services import agent_access_service
+
+            read_only = next(
+                (n for n in agent_access_service.no_effect(agent)
+                 if n["workspace"] == workspace["id"] and n["reason"] == "read_only_member"), None
             )
+            checks.append({"label": read_only["message"] if read_only else "Workspace read-only access", "status": "warning"})
+        else:
+            from app.services import agent_access_service
+
+            no_effect = next(
+                (n for n in agent_access_service.no_effect(agent) if n["workspace"] == workspace["id"]), None
+            )
+            if no_effect:
+                # The workspace is in the agent's lists but does nothing: say why, not "add it".
+                checks.append({"label": no_effect["message"], "status": "blocked"})
+            else:
+                checks.append({"label": "No workspace access", "status": "blocked"})
+                checks.append(
+                    {
+                        "label": "Recommended: add workspace scope to agent",
+                        "status": "warning",
+                    }
+                )
     else:
         checks.append({"label": "No workspace selected", "status": "info"})
 

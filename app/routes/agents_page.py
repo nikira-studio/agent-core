@@ -32,7 +32,7 @@ def role_of(capabilities) -> str:
 
 @router.get("/agents")
 def agents_page(request: Request, session: dict = Depends(require_auth)):
-    from app.services import agent_service, auth_service, workspace_service
+    from app.services import agent_access_service, agent_service, auth_service, workspace_service
 
     is_admin = session.get("role") == "admin"
     agents = (
@@ -189,6 +189,10 @@ def agents_page(request: Request, session: dict = Depends(require_auth)):
             f"<span class='text-muted'> + {len(read_extra)} read / {len(write_extra)} write grants</span>"
         )
         can_manage = is_admin or a.get("owner_user_id") == session["user_id"]
+        no_effect_html = "".join(
+            f"<div class='agent-no-effect' style='color:var(--warning,#b7791f);font-size:0.8rem;margin-top:4px'>{escape_html(n['message'])}</div>"
+            for n in agent_access_service.no_effect(a)
+        )
         if can_manage:
             if active:
                 toggle_btn = f"<button type='button' class='btn btn-sm btn-secondary' data-agent-deactivate='{escape_html(a['id'])}'>Deactivate</button>"
@@ -223,7 +227,7 @@ def agents_page(request: Request, session: dict = Depends(require_auth)):
             f"<td><strong>{escape_html(a.get('display_name', ''))}</strong> {role_badge}<br><code>{escape_html(a['id'])}</code>"
             f"<div class='text-muted'>Owner: {escape_html(owner_id)} · Default user: {escape_html(default_user_id)}</div></td>"
             f"<td>{status_badge}</td>"
-            f"<td>{access_summary}</td>"
+            f"<td>{access_summary}{no_effect_html}</td>"
             f"<td>{local_dt(a.get('created_at'), style='date')}</td>"
             f"<td><div class='actions-cell'>"
             f"{action_buttons}"
@@ -363,6 +367,11 @@ def agents_page(request: Request, session: dict = Depends(require_auth)):
       syncRole('edit');
       const readScopes = JSON.parse(a.read_scopes_json || '[]');
       const writeScopes = JSON.parse(a.write_scopes_json || '[]');
+      const noEffect = document.getElementById('edit-no-effect');
+      if (noEffect) {
+        noEffect.innerHTML = (a.no_effect || []).map(function(n) { return '<div>' + escapeHtml(n.message) + '</div>'; }).join('');
+        noEffect.style.display = (a.no_effect || []).length ? '' : 'none';
+      }
       setSelectedScopes('edit-read-scopes', readScopes);
       setSelectedScopes('edit-write-scopes', writeScopes);
       // Default recall: null column => "all readable" (Option A); else the stored subset.
@@ -623,6 +632,7 @@ def agents_page(request: Request, session: dict = Depends(require_auth)):
     <div class="modal-overlay" id="edit-agent-modal" style="display:none">
       <div class="modal modal-wide">
         <h3><span id="edit-agent-modal-title">Edit Agent</span>: <span id="edit-agent-id"></span></h3>
+        <div id="edit-no-effect" class="alert alert-warning" style="display:none"></div>
         <form id="edit-agent-form" onsubmit="submitEditAgent(event)">
           <div class="form-section">
             <div class="form-row">
