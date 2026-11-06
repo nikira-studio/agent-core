@@ -59,7 +59,7 @@ The broker sends its credential to Agent Core and receives raw secret values bac
 - `http://` to this machine (`localhost`, `127.0.0.1`, `::1`) is fine and says nothing.
 - `https://` is fine anywhere.
 - `http://` to any other host prints a warning to stderr and carries on. Set `AGENT_CORE_BROKER_PLAIN_HTTP=refuse` to make it stop instead.
-- If you trust the link (for example a tunnel you set up yourself), pass `--allow-plain-http` or set `AGENT_CORE_BROKER_ALLOW_PLAIN_HTTP=1`; the warning and the refusal both go away.
+- If you trust the link (for example a tunnel you set up yourself), pass `--allow-plain-http` or set `AGENT_CORE_BROKER_ALLOW_PLAIN_HTTP=1`; the warning and the refusal both go away. A link you have marked as trusted wins over `refuse`.
 - Anything other than `http://` or `https://` (such as `file://`) is always refused.
 
 To rotate the broker credential (e.g., after a suspected exposure):
