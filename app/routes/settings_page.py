@@ -1259,15 +1259,18 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
     loadOperatorTokens();
 
     async function exportBackup() {{
-      const r = await fetch('/api/backup/export', {{
-        method: 'POST',
-      }});
+      const made = await apiFetch('/api/backup/export', {{ method: 'POST' }});
+      if (!made.ok) {{
+        showToast(made.error?.message || 'Export failed', 'danger');
+        return;
+      }}
+      const backupKey = made.data.backup_key;
+      const r = await fetch(made.data.download_path);
       if (r.ok) {{
         const blob = await r.blob();
-        const backupKey = r.headers.get('{BACKUP_KEY_HEADER}');
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
-        a.href = url; a.download = '{APP_SLUG}-backup.zip.enc'; a.click();
+        a.href = url; a.download = made.data.filename || '{APP_SLUG}-backup.zip.enc'; a.click();
         URL.revokeObjectURL(url);
         const keyHtml = backupKey
           ? '<div class="alert alert-warning"><strong>Save this backup key now.</strong> It will not be shown again.<div class="api-key-display" style="margin-top:8px"><code>' + escapeHtml(backupKey) + '</code></div><button class="copy-btn" data-copy-value="' + escapeHtml(backupKey) + '">Copy</button></div>'

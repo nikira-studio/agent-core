@@ -19,8 +19,44 @@ def test_backup_export_no_longer_requires_otp(test_client, admin_token):
         )
 
     assert r.status_code == 200, r.text
-    assert r.headers["content-type"].startswith("application/octet-stream")
-    assert r.headers[BACKUP_KEY_HEADER.lower()] == backup_key.decode()
+    # The key is in the response body, never in a header; the file is a second request.
+    assert BACKUP_KEY_HEADER.lower() not in r.headers
+    data = r.json()["data"]
+    assert data["backup_key"] == backup_key.decode() and data["download_path"].startswith("/api/backup/download/")
+    first = test_client.get(data["download_path"], headers={"Authorization": f"Bearer {admin_token}"})
+    assert first.status_code == 200 and first.content == b"encrypted-zip"
+    assert first.headers["content-type"].startswith("application/octet-stream")
+    assert BACKUP_KEY_HEADER.lower() not in first.headers
+    # It can be taken once.
+    again = test_client.get(data["download_path"], headers={"Authorization": f"Bearer {admin_token}"})
+    assert again.status_code == 404
+
+
+def test_a_backup_download_is_for_the_admin_who_made_it_and_expires(test_client, admin_token):
+    import json
+    import time
+    from io import BytesIO
+
+    from app.routes import backup as backup_routes
+    from app.services import auth_service
+
+    with patch(
+        "app.services.backup_service.build_encrypted_backup_package",
+        return_value=(BytesIO(b"encrypted-zip"), b"k" * 44),
+    ):
+        made = test_client.post("/api/backup/export", headers={"Authorization": f"Bearer {admin_token}"}).json()["data"]
+    other = auth_service.create_user("admin2", "admin2@test.local", "testpassword123", "Admin Two", role="admin")
+    stolen = test_client.get(made["download_path"], headers={"Authorization": f"Bearer {operator_token_for(other['id'])}"})
+    assert stolen.status_code == 404  # someone else's download is not even acknowledged
+    assert test_client.get("/api/backup/download/not-a-real-id", headers={"Authorization": f"Bearer {admin_token}"}).status_code == 404
+    download_id = made["download_path"].rsplit("/", 1)[1]
+    meta_path = backup_routes._downloads_dir() / f"{download_id}.json"
+    meta = json.loads(meta_path.read_text())
+    meta["expires_at"] = time.time() - 1
+    meta_path.write_text(json.dumps(meta))
+    expired = test_client.get(made["download_path"], headers={"Authorization": f"Bearer {admin_token}"})
+    assert expired.status_code == 404
+    assert not (backup_routes._downloads_dir() / f"{download_id}.enc").exists()  # swept
 
 
 def test_backup_export_requires_admin(test_client):

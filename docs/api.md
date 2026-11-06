@@ -894,7 +894,8 @@ Session authentication required. These routes power the setup page that generate
 
 | Method | Path | Auth | Description |
 | --- | --- | --- | --- |
-| `POST` | `/api/backup/export` | Admin | Download encrypted full backup archive and one-time backup key header |
+| `POST` | `/api/backup/export` | Admin | Make an encrypted full backup. Returns `{download_path, filename, backup_key, expires_in_seconds}`; the one-time backup key is in the body, not a header |
+| `GET` | `/api/backup/download/{id}` | Admin (same person) | Download that encrypted backup, once, within 10 minutes |
 | `POST` | `/api/backup/restore` | Admin | Restore an encrypted backup ZIP, replacing all current data (`mode=replace_all`) |
 | `GET` | `/api/backup/export/memory?fmt=jsonl` | Session | Export authorized memory as JSONL or CSV |
 | `GET` | `/api/backup/export/credentials` | Session | Export credential metadata only (no raw values) |

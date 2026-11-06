@@ -1,7 +1,14 @@
 import asyncio
+import json
+import os
+import secrets
+import time
+from pathlib import Path
+
 from fastapi import APIRouter, Depends, Request
-from fastapi.responses import StreamingResponse, JSONResponse
-from app.branding import APP_SLUG, APP_VERSION, BACKUP_KEY_HEADER, MANIFEST_VERSION_KEY
+from fastapi.responses import FileResponse, StreamingResponse, JSONResponse
+from starlette.background import BackgroundTask
+from app.branding import APP_SLUG, APP_VERSION, MANIFEST_VERSION_KEY
 from app.services import backup_service
 from app.security.dependencies import require_admin, get_current_session
 from app.security.response_helpers import success_response, error_response
@@ -10,6 +17,30 @@ from app.time_utils import utc_now
 
 
 router = APIRouter(prefix="/api/backup", tags=["backup"])
+
+# An export is made now and downloaded in a second request, so the one-time backup key
+# travels in a response body (not a header, which proxies and logs keep) and the file
+# is handed over once, to the admin who asked, within a few minutes.
+DOWNLOAD_TTL_SECONDS = 600
+
+
+def _downloads_dir() -> Path:
+    path = settings.data_dir / "backup-downloads"
+    path.mkdir(parents=True, exist_ok=True)
+    os.chmod(path, 0o700)
+    return path
+
+
+def _sweep_downloads(directory: Path) -> None:
+    now = time.time()
+    for meta in directory.glob("*.json"):
+        try:
+            expired = json.loads(meta.read_text())["expires_at"] < now
+        except Exception:
+            expired = True
+        if expired:
+            for leftover in (meta, meta.with_suffix(".enc"), meta.with_suffix(".sending")):
+                leftover.unlink(missing_ok=True)
 
 
 @router.post("/export")
@@ -37,15 +68,51 @@ async def backup_export(
     )
 
     filename = f"{APP_SLUG}-backup-{utc_now().strftime('%Y%m%d-%H%M%S')}.zip.enc"
+    directory = _downloads_dir()
+    await asyncio.to_thread(_sweep_downloads, directory)
+    download_id = secrets.token_urlsafe(32)
+    data_path = directory / f"{download_id}.enc"
+    data_path.write_bytes(zip_buf.getvalue())
+    os.chmod(data_path, 0o600)
+    expires_at = time.time() + DOWNLOAD_TTL_SECONDS
+    meta_path = directory / f"{download_id}.json"
+    meta_path.write_text(json.dumps({"user_id": session["user_id"], "filename": filename, "expires_at": expires_at}))
+    os.chmod(meta_path, 0o600)
+    return success_response({
+        "download_path": f"/api/backup/download/{download_id}",
+        "filename": filename,
+        "backup_key": backup_key.decode(),
+        "expires_in_seconds": DOWNLOAD_TTL_SECONDS,
+        "note": "Keep the backup key. It is shown here once and the file cannot be restored without it.",
+    })
 
-    return StreamingResponse(
-        zip_buf,
+
+@router.get("/download/{download_id}")
+async def backup_download(download_id: str, session: dict = Depends(require_admin)):
+    """The encrypted backup made by a recent export: once, for the admin who made it."""
+    if not download_id or not all(c.isalnum() or c in "-_" for c in download_id):
+        return error_response("NOT_FOUND", "No such download", 404)
+    directory = _downloads_dir()
+    await asyncio.to_thread(_sweep_downloads, directory)
+    meta_path = directory / f"{download_id}.json"
+    data_path = directory / f"{download_id}.enc"
+    try:
+        meta = json.loads(meta_path.read_text())
+    except Exception:
+        return error_response("NOT_FOUND", "No such download, or it has expired. Export again.", 404)
+    if meta.get("user_id") != session["user_id"]:
+        return error_response("NOT_FOUND", "No such download, or it has expired. Export again.", 404)
+    sending = data_path.with_suffix(".sending")
+    try:
+        os.rename(data_path, sending)  # claims it: a second request finds nothing
+    except FileNotFoundError:
+        return error_response("NOT_FOUND", "That download was already taken. Export again.", 404)
+    meta_path.unlink(missing_ok=True)
+    return FileResponse(
+        sending,
         media_type="application/octet-stream",
-        headers={
-            "Content-Disposition": f"attachment; filename={filename}",
-            BACKUP_KEY_HEADER: backup_key.decode(),
-            f"{BACKUP_KEY_HEADER}-Encrypted": "true",
-        },
+        filename=meta["filename"],
+        background=BackgroundTask(lambda: sending.unlink(missing_ok=True)),
     )
 
 

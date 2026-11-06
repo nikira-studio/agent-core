@@ -9,13 +9,16 @@ Agent Core's state lives in three files: the database (`data/agent-core.db`), th
 A full backup requires an admin session. This is intentional: the encrypted archive and backup key together contain enough to restore all your credentials, so both are treated as sensitive.
 
 ```bash
-curl -X POST http://localhost:3500/api/backup/export \
-  -H "Authorization: Bearer <admin-session>" \
-  -H "Content-Type: application/json" \
+# 1. Make the backup. The response carries the one-time backup key and where to download the file.
+curl -sS -X POST http://localhost:3500/api/backup/export \
+  -H "Authorization: Bearer <operator-token>" > export.json
+# 2. Download it (once, within 10 minutes, as the same admin).
+curl -sS -H "Authorization: Bearer <operator-token>" \
+  "http://localhost:3500$(python3 -c 'import json;print(json.load(open("export.json"))["data"]["download_path"])')" \
   -o agent-core-backup.zip.enc
 ```
 
-The exported archive contains the same backup contents as before, but encrypted with a separate one-time backup key. The dashboard shows that key once after export, and the REST response also includes it in the `X-Agent-Core-Backup-Key` header.
+The exported archive contains the same backup contents as before, but encrypted with a separate one-time backup key. The dashboard shows that key once after export. Over REST the key is in the body of the export response (`data.backup_key`); it is not sent as a header any more, because proxies and logs keep headers. A script that read the `X-Agent-Core-Backup-Key` header must read the body instead.
 
 The underlying backup archive contains:
 
