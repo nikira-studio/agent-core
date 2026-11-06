@@ -18,6 +18,8 @@ Notable changes to Agent Core are documented here. The format follows [Keep a Ch
 
 ### Fixed
 
+- Semantic search no longer depends on SQLite's limit on variables per statement. The candidate list was passed in one statement, which fails on SQLite builds limited to 999 variables (and on any build past its limit for a very large workspace) and then silently drops back to text matching. Candidates are now looked up in pages of 500, and only the best results are kept while scoring, so memory use no longer grows with the workspace. Results and tie order are unchanged. Not done: an indexed vector store (the sqlite-vec approach was removed earlier); scoring is still computed in Python.
+
 - An agent given a workspace its person (its default user) cannot reach used to look fine in the lists and do nothing. The Agents page and the Edit Agent form now say so in words ("No effect yet: Pat is not a member of Beta. Add them on Workspaces.", or that the person can read but not write there, or that the workspace is deactivated), and the Connect access check names the same reason instead of suggesting a scope the agent already has.
 - Editing a user's active state used the checkbox in the Add User dialog (the same element id appeared in both dialogs); it now lives in the Edit dialog only.
 - Settings → Security showed a literal `{CREDENTIAL_PREFIX}*` in the helper's description; it now shows `AC_SECRET_*`.
