@@ -1,5 +1,5 @@
 // Settings → Security → Network limits. Reads and saves through /api/network-limits.
-(function() {
+function initNetworkLimits() {
   const root = document.getElementById('network-limits');
   if (!root) return;
 
@@ -77,4 +77,6 @@
     save({ allowed_internal: current }, 'nl-internal-note');
   });
   load();
-})();
+}
+// The page's own scripts (apiFetch, escapeHtml) load after this one, so wait for them.
+document.addEventListener('DOMContentLoaded', initNetworkLimits);

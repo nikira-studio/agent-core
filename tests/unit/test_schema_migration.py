@@ -235,6 +235,7 @@ def test_create_schema_records_and_skips_applied_revision(monkeypatch):
         {"revision": 19, "name": "trusted-device-sessions"},
         {"revision": 20, "name": "connector-run-approvals"},
         {"revision": 21, "name": "agent-inherit-user-bindings"},
+        {"revision": 22, "name": "private-address-policy"},
     ]
     assert conn.execute(
         "SELECT 1 FROM sqlite_master WHERE type='table' AND name='credential_resolution_daily'"
