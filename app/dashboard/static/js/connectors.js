@@ -506,6 +506,7 @@ function renderHealthResult(data) {
   const total = data.total || 0;
   const passed = data.passed || 0;
   const failed = data.failed || 0;
+  const skipped = data.skipped || 0;
   const content = document.getElementById('test-result-content');
   if (!content) return;
   const rows = (data.results || []).map(function(r) {
@@ -516,6 +517,7 @@ function renderHealthResult(data) {
   }).join('');
   content.innerHTML =
     '<div class="' + (failed ? 'alert alert-warning' : 'alert alert-success') + '">Checked ' + total + ' binding(s): ' + passed + ' passed, ' + failed + ' failed.</div>' +
+    (skipped ? '<p class="form-hint">' + skipped + ' more were not checked (at most ' + (data.limit || 25) + ' at a time). Use Test on a binding to check one.</p>' : '') +
     (rows ? '<table><thead><tr><th>Binding</th><th>Scope</th><th>Status</th><th>Error</th></tr></thead><tbody>' + rows + '</tbody></table>' : '<div class="empty">No enabled bindings to check.</div>');
   openModal('test-result-modal');
 }

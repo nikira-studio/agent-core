@@ -503,11 +503,19 @@ def connector_summary(
     return success_response(summary)
 
 
+# One request tests this many bindings at most; narrow with scope or connector_type_id for the rest.
+HEALTH_CHECK_LIMIT = 25
+
+
 @connector_types_router.post("/health-check")
 async def connector_health_check(
     body: ConnectorHealthCheckRequest,
     ctx: EffectiveAuthority = Depends(get_request_context),
 ):
+    # Every check calls a real service with its stored credential, so this is held to the same
+    # capability as one test, and one request tests at most HEALTH_CHECK_LIMIT bindings.
+    if not ctx.has_capability("connectors_execute"):
+        return error_response("CAPABILITY_DENIED", "This operation requires the connectors_execute capability", 403)
     enforcer = ctx.connector_enforcer()
     if body.scope and not enforcer.can_read(body.scope):
         return error_response("SCOPE_DENIED", "Access denied to this scope", 403)
@@ -517,7 +525,8 @@ async def connector_health_check(
         connector_type_id=body.connector_type_id,
         enabled=True,
     )
-    visible = [binding for binding in bindings if enforcer.can_read(binding["scope"])]
+    all_visible = [binding for binding in bindings if enforcer.can_read(binding["scope"])]
+    visible = all_visible[:HEALTH_CHECK_LIMIT]
     results = []
     for binding in visible:
         result = await asyncio.to_thread(connector_service.test_binding, binding["id"])
@@ -551,6 +560,8 @@ async def connector_health_check(
             "total": len(results),
             "passed": len([r for r in results if r["success"]]),
             "failed": len([r for r in results if not r["success"]]),
+            "skipped": len(all_visible) - len(visible),
+            "limit": HEALTH_CHECK_LIMIT,
         }
     )
 

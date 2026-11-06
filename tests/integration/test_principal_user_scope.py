@@ -286,3 +286,28 @@ def test_testing_a_binding_needs_the_same_capability_as_running_one(test_client,
     assert _mcp(test_client, keys["doer"], "connectors_bindings_test", {"binding_id": binding["id"]}).json()["ok"] is True
     # Looking is still allowed with read alone.
     assert _mcp(test_client, keys["looker"], "connectors_bindings_list", {}).status_code == 200
+
+
+def test_the_batch_health_check_needs_execute_and_tests_at_most_a_page_of_bindings(test_client, monkeypatch):
+    from app.routes.connectors import HEALTH_CHECK_LIMIT
+    from app.services import workspace_service
+
+    auth_service.create_user("boss3", "boss3@test.local", "testpassword123", "Boss Three", "user")
+    workspace_service.create_workspace("fleet", "Fleet", "boss3")
+    connector_service.create_connector_type(connector_type_id="fleetsvc", display_name="Fleet", auth_type="none",
+                                            supported_actions=[{"name": "GET /x", "method": "GET"}], backend_type="generic_http")
+    for i in range(HEALTH_CHECK_LIMIT + 5):
+        connector_service.create_binding("fleetsvc", f"b{i}", "workspace:fleet", created_by="boss3")
+    calls = []
+    monkeypatch.setattr(connector_service, "test_binding", lambda binding_id: calls.append(binding_id) or {"success": True})
+    caps = {"looker3": ["connectors_read"], "doer3": ["connectors_read", "connectors_execute"]}
+    keys = {}
+    for agent_id, capabilities in caps.items():
+        agent_service.create_agent(agent_id, agent_id, "boss3", capabilities=capabilities,
+                                   read_scopes=["workspace:fleet"], write_scopes=[])
+        keys[agent_id] = agent_service.rotate_agent_key(agent_id)
+    headers = lambda agent_id: {"Authorization": f"Bearer {keys[agent_id]}"}  # noqa: E731
+    denied = test_client.post("/api/connector-types/health-check", headers=headers("looker3"), json={})
+    assert denied.status_code == 403 and calls == []
+    ok = test_client.post("/api/connector-types/health-check", headers=headers("doer3"), json={}).json()["data"]
+    assert ok["total"] == HEALTH_CHECK_LIMIT == len(calls) and ok["skipped"] == 5 and ok["limit"] == HEALTH_CHECK_LIMIT
