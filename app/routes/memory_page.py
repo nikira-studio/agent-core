@@ -155,9 +155,9 @@ def memory_page(request: Request, session: dict = Depends(require_auth)):
             else "<span class='text-muted'>Read only</span>"
         )
         return (
-            f"<tr data-scope='{escape_html(r.get('scope') or '')}'><td class='mem-class'><span class='badge badge-{r.get('memory_class', '')}'>{r.get('memory_class', '')}</span></td>"
+            f"<tr data-scope='{escape_html(r.get('scope') or '')}'><td class='mem-class'><span class='badge badge-{escape_html(r.get('memory_class', ''))}'>{escape_html(r.get('memory_class', ''))}</span></td>"
             f"<td class='mem-content'>{escape_html(r.get('content', '')[:160])}</td>"
-            f"<td class='mem-ws'><code>{(r.get('scope') or '').replace('workspace:', '')}</code></td>"
+            f"<td class='mem-ws'><code>{escape_html((r.get('scope') or '').replace('workspace:', ''))}</code></td>"
             f"<td class='mem-state'>{_state_cell(r)}</td>"
             f"<td class='mem-actions'><div class='actions-cell'>"
             f"<button type='button' class='btn btn-sm btn-secondary' data-memory-detail='{escape_html(r['id'])}'>Detail</button>"
@@ -175,7 +175,7 @@ def memory_page(request: Request, session: dict = Depends(require_auth)):
         return (
             f"<tr style='opacity:0.65'><td><span class='badge badge-inactive'>{r.get('memory_class', '')}</span></td>"
             f"<td>{escape_html(r.get('content', '')[:80])}</td>"
-            f"<td><code>{(r.get('scope') or '').replace('workspace:', '')}</code></td>"
+            f"<td><code>{escape_html((r.get('scope') or '').replace('workspace:', ''))}</code></td>"
             f"<td>{_state_cell(r)}</td>"
             f"<td><div class='actions-cell'>"
             f"{modify_buttons}"
