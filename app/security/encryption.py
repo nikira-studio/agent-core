@@ -145,7 +145,8 @@ def _loaded() -> list[bytes]:
         # file, so the next call reloads once more instead of trusting stale keys.
         stamp = _keyring_file_stamp()
         _keyring = _load_keyring()
-        _keyring_stamp = stamp
+        # A first start creates the file while loading; then the file we wrote is the one we hold.
+        _keyring_stamp = stamp if stamp is not None else _keyring_file_stamp()
     return _keyring
 
 
