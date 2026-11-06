@@ -173,3 +173,11 @@ One vocabulary, used in titles, tooltips and help. A page that needs a different
 - Buttons that act on one row (Deactivate, Retract) are plain; the filled blue button is the one main action on a page. The Connect output button is blue and reads "Generate One-Time Key + <output>".
 - Anything that deletes for good names what goes with it (memories and tasks for a workspace, the key and history for an agent) and asks for the ID to be typed.
 - Where Connect's checks all pass, one line says so and the list sits behind "Show the checks"; it opens by itself when something fails.
+
+## Connect in three steps (2026-11-06)
+
+1. **Who is connecting?** User, workspace, agent, with the Access Check under it (one line when everything is in place).
+2. **Which tool?** Claude Code, Codex, Cursor, Windsurf, Antigravity or Other MCP tool. Choosing one shows only what that tool needs, in order, each with Copy and Download: (a) its MCP config, with the **Generate One-Time Key + … MCP Config** button; (b) the file it reads (CLAUDE.md for Claude Code, AGENTS.md for Codex, the setup guide for the rest); for Claude Code, a pointer to the optional session hook. Other MCP tool shows the whole MCP config.
+3. **Check it works.** The connection doctor and the Verification Prompt.
+
+Everything else (environment variables, session prompt, hook, assistants prompt, the full MCP config, and the old tab links such as `?output_type=env`) is under **Other outputs**, which opens by itself when a link asks for one. The generated text is unchanged; the per-tool config is the same MCP config cut into its blocks. `?target=` picks the tool and is kept when the form is resubmitted.

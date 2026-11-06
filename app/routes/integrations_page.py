@@ -852,7 +852,7 @@ def integrations_page(
 
     tool_links = "".join(
         f'<a class="setup-tab {"active" if tool_selected and t[0] == target else ""}" '
-        f'href="{page_path}?{urlencode({**{k: v for k, v in current_params.items() if k != "target"}, "target": t[0]})}#step-2">{escape_html(t[1])}</a>\n'
+        f'href="{page_path}?{urlencode({**{k: v for k, v in current_params.items() if k != "target"}, "target": t[0]})}#tool-step">{escape_html(t[1])}</a>\n'
         for t in SETUP_TOOLS
     )
     selected_tool = next((t for t in SETUP_TOOLS if t[0] == target), None) if tool_selected else None
@@ -945,14 +945,14 @@ def integrations_page(
 
       {access_check_section}
 
-      <div class="form-section" id="step-2">
+      <div class="form-section" id="tool-step">
         <h2>2. Which tool?</h2>
         <div class="setup-tabs">{tool_links}</div>
         {tool_steps_html}
         <div class="alert alert-warning" id="connection-warning" style="display:none"></div>
       </div>
 
-      <div class="form-section" id="step-3">
+      <div class="form-section" id="check-step">
         <h2>3. Check it works</h2>
         <div class="connection-doctor" id="connection-doctor">
           <div>

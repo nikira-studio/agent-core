@@ -583,20 +583,20 @@ def test_connect_page_lists_the_steps_and_keeps_every_other_output(test_client, 
 def test_a_chosen_tool_shows_its_connect_block_its_file_and_the_key_button(integrations_client):
     base = "/integrations?user_id=alex&workspace_id=agent-core&agent_id=claude-code"
     claude = integrations_client.get(base + "&target=claude_code").text
-    steps = claude.split('id="step-2"', 1)[1].split('id="step-3"', 1)[0]
+    steps = claude.split('id="tool-step"', 1)[1].split('id="check-step"', 1)[0]
     assert "Connect it" in steps and "Give it instructions" in steps and "Optional: add context" in steps
     assert "# Claude Code" in steps and "# Codex CLI" not in steps
     assert "id='generate-tool-connection-btn'" in steps and "data-output-type='mcp_tool'" in steps
     assert "CLAUDE.md" in steps
 
-    codex = integrations_client.get(base + "&target=codex").text.split('id="step-2"', 1)[1].split('id="step-3"', 1)[0]
+    codex = integrations_client.get(base + "&target=codex").text.split('id="tool-step"', 1)[1].split('id="check-step"', 1)[0]
     assert "# Codex CLI" in codex and "# Claude Code" not in codex and "AGENTS.md" in codex
     assert "Optional: add context" not in codex
 
-    other = integrations_client.get(base).text.split('id="step-2"', 1)[1].split('id="step-3"', 1)[0]
+    other = integrations_client.get(base).text.split('id="tool-step"', 1)[1].split('id="check-step"', 1)[0]
     assert "Choose your tool to see exactly what to copy" in other and "Connect it" not in other
     # Step 3 carries the verification prompt once an agent is chosen.
-    assert "Verification Prompt" in integrations_client.get(base + "&target=codex").text.split('id="step-3"', 1)[1]
+    assert "Verification Prompt" in integrations_client.get(base + "&target=codex").text.split('id="check-step"', 1)[1]
 
 
 def test_generating_a_key_for_the_chosen_tool_returns_only_that_tools_config(integrations_client):

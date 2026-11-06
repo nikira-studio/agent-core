@@ -2002,5 +2002,5 @@ details.card[open] > summary::before { content: "\25BE\00a0"; }
 .output-section + .output-section { margin-top: 12px; }
 #other-outputs { margin-top: 16px; }
 @media (max-width: 720px) {
-  #step-2 .setup-tabs { flex-wrap: wrap; overflow-x: visible; }
+  #tool-step .setup-tabs { flex-wrap: wrap; overflow-x: visible; }
 }

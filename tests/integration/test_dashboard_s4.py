@@ -45,7 +45,7 @@ def test_integrations_page_is_current_workflow(admin_client):
     assert 'id="agent_id"' in html
     assert 'id="target"' not in html
     assert "setup-tabs" in html
-    assert "Current tool preset:" in html
+    assert "2. Which tool?" in html
     assert "CLAUDE.md" in html
     assert "AGENTS.md" in html
 
