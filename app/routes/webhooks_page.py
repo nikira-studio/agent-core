@@ -116,14 +116,14 @@ def webhooks_page(request: Request, session: dict = Depends(require_auth)):
     <strong>New key (shown once):</strong>
     <code id="inbound-key-value" style="display:block;word-break:break-all;margin:0.35rem 0"></code>
     <button class="btn btn-sm btn-secondary" onclick="copyInboundKey()">Copy Key</button>
-    <p style="margin:0.5rem 0 0;color:var(--text-muted);font-size:0.85em">Store this key now. It will not be shown again.</p>
+    <p style="margin:0.5rem 0 0;color:var(--text-muted);font-size:0.875em">Store this key now. It will not be shown again.</p>
   </div>
-  <p style="margin-top:1rem;margin-bottom:0.5rem;color:var(--text-muted);font-size:0.85em">
+  <p style="margin-top:1rem;margin-bottom:0.5rem;color:var(--text-muted);font-size:0.875em">
     Supported commands: <code>activity.create</code>, <code>activity.assign</code>, <code>activity.update</code>, <code>activity.cancel</code>, <code>activity.note</code>
   </p>
   <details style="margin-top:0.75rem">
     <summary style="cursor:pointer;font-size:0.9em;color:var(--text-muted)">How to send a command</summary>
-    <div style="margin-top:0.75rem;font-size:0.85em">
+    <div style="margin-top:0.75rem;font-size:0.875em">
       <p style="margin:0 0 0.5rem">POST to the inbound URL with your key in the header and a JSON body:</p>
       <pre style="background:var(--bg-secondary);padding:0.75rem;border-radius:4px;overflow-x:auto;margin:0 0 0.75rem"><code>POST {escape_html(inbound_url)}
 X-Agent-Core-Inbound-Key: &lt;your-key&gt;
@@ -178,13 +178,13 @@ Content-Type: application/json
   <div class="modal">
     <h3>New Webhook</h3>
     <div id="create-webhook-error" class="error-box" style="display:none"></div>
-    <label>Name <span style="color:var(--text-muted);font-size:0.85em">(for your own reference)</span>
+    <label>Name <span style="color:var(--text-muted);font-size:0.875em">(for your own reference)</span>
       <input type="text" id="wh-name" placeholder="e.g. n8n Activity Alerts">
     </label>
-    <label>URL <span style="color:var(--text-muted);font-size:0.85em">(where messages are sent)</span>
+    <label>URL <span style="color:var(--text-muted);font-size:0.875em">(where messages are sent)</span>
       <input type="text" id="wh-url" placeholder="https://your-endpoint.example.com/hook">
     </label>
-    <label>Secret <span style="color:var(--text-muted);font-size:0.85em">(signs each message so the receiver can verify it)</span>
+    <label>Secret <span style="color:var(--text-muted);font-size:0.875em">(signs each message so the receiver can verify it)</span>
       <input type="password" id="wh-secret" placeholder="Enter a strong secret">
     </label>
     <label>Send a message when these happen</label>
@@ -204,13 +204,13 @@ Content-Type: application/json
     <h3>Edit Webhook</h3>
     <div id="edit-webhook-error" class="error-box" style="display:none"></div>
     <input type="hidden" id="edit-webhook-id">
-    <label>Name <span style="color:var(--text-muted);font-size:0.85em">(for your own reference)</span>
+    <label>Name <span style="color:var(--text-muted);font-size:0.875em">(for your own reference)</span>
       <input type="text" id="edit-wh-name">
     </label>
-    <label>URL <span style="color:var(--text-muted);font-size:0.85em">(where messages are sent)</span>
+    <label>URL <span style="color:var(--text-muted);font-size:0.875em">(where messages are sent)</span>
       <input type="text" id="edit-wh-url">
     </label>
-    <label>New Secret <span style="color:var(--text-muted);font-size:0.85em">(leave blank to keep existing)</span>
+    <label>New Secret <span style="color:var(--text-muted);font-size:0.875em">(leave blank to keep existing)</span>
       <input type="password" id="edit-wh-secret" placeholder="Leave blank to keep current secret">
     </label>
     <label>Subscribe to events</label>

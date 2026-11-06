@@ -236,6 +236,7 @@ def test_create_schema_records_and_skips_applied_revision(monkeypatch):
         {"revision": 20, "name": "connector-run-approvals"},
         {"revision": 21, "name": "agent-inherit-user-bindings"},
         {"revision": 22, "name": "private-address-policy"},
+        {"revision": 23, "name": "builtin-service-description"},
     ]
     assert conn.execute(
         "SELECT 1 FROM sqlite_master WHERE type='table' AND name='credential_resolution_daily'"
@@ -477,3 +478,21 @@ def test_migration_14_drops_only_removed_feature_settings():
     keys = {row["key"] for row in conn.execute("SELECT key FROM system_settings")}
     assert "vector_url" in keys
     assert not keys & {"review_model_url", "usefulness_review_enabled"}
+
+
+def test_the_builtin_service_description_is_reworded_only_when_it_is_the_old_seed_text():
+    import sqlite3
+
+    from app.schema import _migrate_023_builtin_service_description
+
+    conn = sqlite3.connect(":memory:")
+    conn.execute("create table connector_types (id text, description text)")
+    conn.execute("insert into connector_types values ('generic_http', 'Generic authenticated HTTP API connector')")
+    conn.execute("insert into connector_types values ('other', 'Generic authenticated HTTP API connector')")
+    _migrate_023_builtin_service_description(conn)
+    rows = dict(conn.execute("select id, description from connector_types").fetchall())
+    assert rows["generic_http"] == "A web service reached over HTTP with an API key"
+    assert rows["other"] == "Generic authenticated HTTP API connector"  # only the built-in is touched
+    conn.execute("update connector_types set description = 'My own words' where id = 'generic_http'")
+    _migrate_023_builtin_service_description(conn)
+    assert conn.execute("select description from connector_types where id = 'generic_http'").fetchone()[0] == "My own words"

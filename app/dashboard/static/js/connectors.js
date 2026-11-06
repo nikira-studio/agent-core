@@ -78,7 +78,7 @@ function resetCreateBindingForm() {
   const setupEl = document.getElementById('binding-setup');
   if (setupEl) setupEl.innerHTML = '';
   const recipe = document.getElementById('binding-recipe');
-  if (recipe) recipe.textContent = 'Choose a connector type to see the required credential and config fields.';
+  if (recipe) recipe.textContent = 'Choose a service to see the credential and settings it needs.';
   const credentialMode = document.getElementById('binding-credential-mode');
   if (credentialMode) credentialMode.value = 'none';
   toggleBindingCredentialMode(false);
@@ -429,7 +429,7 @@ async function deleteBinding(id) {
 }
 
 async function deleteConnectorType(id) {
-  if (!confirm('Delete this connector type and all its bindings? This cannot be undone.')) return;
+  if (!confirm('Delete this service and all its bindings? This cannot be undone.')) return;
   const j = await apiFetch('/api/connector-types/' + id, { method: 'DELETE' });
   if (j.ok) { showToast('Deleted', 'success'); location.reload(); }
   else { showToast(j.error?.message || 'Failed', 'danger'); }
@@ -879,12 +879,12 @@ function renderActions() {
           'onchange="toggleActionEnabled(decodeURIComponent(this.dataset.action), this.checked)"></label></td>' +
           '<td><strong style="font-size:0.9em">' + escapeHtml(t.name) + '</strong></td>' +
           '<td>' +
-            (t.method ? '<span class="badge" style="font-size:0.75em;margin-right:6px">' + escapeHtml(t.method) + '</span>' : '') +
-            (t.path ? '<code style="font-size:0.8em">' + escapeHtml(t.path) + '</code>' : '') +
-            (t.auth_summary ? '<div style="font-size:0.8em;color:var(--muted);margin-top:4px">Auth: ' + escapeHtml(t.auth_summary) + '</div>' : '') +
-            (t.description ? '<div style="font-size:0.85em;color:var(--muted);margin-top:4px">' + escapeHtml(t.description) + '</div>' : '') +
-            (policyBits.length ? '<div style="font-size:0.8em;color:var(--muted);margin-top:4px">' + escapeHtml(policyBits.join(' · ')) + '</div>' : '') +
-            (!t.enabled ? '<div class="text-muted" style="font-size:0.8em;margin-top:4px">Disabled</div>' : '') +
+            (t.method ? '<span class="badge" style="font-size:0.875em;margin-right:6px">' + escapeHtml(t.method) + '</span>' : '') +
+            (t.path ? '<code style="font-size:0.875em">' + escapeHtml(t.path) + '</code>' : '') +
+            (t.auth_summary ? '<div style="font-size:0.875em;color:var(--muted);margin-top:4px">Auth: ' + escapeHtml(t.auth_summary) + '</div>' : '') +
+            (t.description ? '<div style="font-size:0.875em;color:var(--muted);margin-top:4px">' + escapeHtml(t.description) + '</div>' : '') +
+            (policyBits.length ? '<div style="font-size:0.875em;color:var(--muted);margin-top:4px">' + escapeHtml(policyBits.join(' · ')) + '</div>' : '') +
+            (!t.enabled ? '<div class="text-muted" style="font-size:0.875em;margin-top:4px">Disabled</div>' : '') +
             gateCell(t) +
           '</td>' +
         '</tr>';

@@ -318,7 +318,7 @@ def _build_pagination(page: int, total_pages: int, extra_qs: str = "") -> str:
     for p in sorted(show):
         if prev_shown and p - prev_shown > 1:
             nums_html += "<span style='padding:0 4px;color:var(--text-muted)'>…</span>"
-        active_style = "background:var(--accent);color:#fff;" if p == page else ""
+        active_style = "background:var(--accent-fill);color:#fff;" if p == page else ""
         nums_html += f"<a href='{page_url(p)}' class='btn btn-sm btn-secondary' style='min-width:32px;{active_style}'>{p}</a>"
         prev_shown = p
 

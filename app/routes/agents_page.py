@@ -200,7 +200,7 @@ def agents_page(request: Request, session: dict = Depends(require_auth)):
         )
         can_manage = is_admin or a.get("owner_user_id") == session["user_id"]
         no_effect_html = "".join(
-            f"<div class='agent-no-effect' style='color:var(--warning,#b7791f);font-size:0.8rem;margin-top:4px'>{escape_html(n['message'])}</div>"
+            f"<div class='agent-no-effect' style='color:var(--warning-text,#8a5a0a);font-size:0.8rem;margin-top:4px'>{escape_html(n['message'])}</div>"
             for n in agent_access_service.no_effect(a)
         )
         if can_manage:
@@ -221,12 +221,17 @@ def agents_page(request: Request, session: dict = Depends(require_auth)):
                     f"<a class='btn btn-sm btn-secondary' href='/credentials?agent={quote(a['id'])}'"
                     " title='Choose which stored credentials this agent can use'>Credentials</a>"
                 )
+            # Edit and Connect are what people come for; the rest sit under More, so Delete is never
+            # a neighbour of Deactivate.
             action_buttons = (
                 f"<button type='button' class='btn btn-sm btn-secondary' data-agent-edit='{escape_html(a['id'])}'>Edit</button>"
                 f"<a class='btn btn-sm btn-secondary' href='/integrations?agent_id={quote(a['id'])}'>Connect</a>"
+                "<details class='row-more'><summary class='btn btn-sm btn-secondary' title='Credentials, deactivate, delete'>More</summary>"
+                "<div class='row-more-list'>"
                 f"{credentials_link}"
                 f"{toggle_btn}"
                 f"<button type='button' class='btn btn-sm btn-danger icon-delete-btn' data-agent-purge='{escape_html(a['id'])}' title='Permanently delete' aria-label='Permanently delete'>{get_icon('delete')}</button>"
+                "</div></details>"
             )
         else:
             action_buttons = (
@@ -236,9 +241,9 @@ def agents_page(request: Request, session: dict = Depends(require_auth)):
             f"<tr>"
             f"<td><strong>{escape_html(a.get('display_name', ''))}</strong> {role_badge}<br><code>{escape_html(a['id'])}</code>"
             f"<div class='text-muted'>Owner: {escape_html(owner_id)} · Default user: {escape_html(default_user_id)}</div></td>"
-            f"<td>{status_badge}</td>"
-            f"<td>{access_summary}{no_effect_html}</td>"
-            f"<td>{local_dt(a.get('created_at'), style='date')}</td>"
+            f"<td data-label='Status'>{status_badge}</td>"
+            f"<td data-label='Access'>{access_summary}{no_effect_html}</td>"
+            f"<td class='hide-phone'>{local_dt(a.get('created_at'), style='date')}</td>"
             f"<td><div class='actions-cell'>"
             f"{action_buttons}"
             f"</div></td></tr>"
@@ -596,7 +601,7 @@ def agents_page(request: Request, session: dict = Depends(require_auth)):
 
     <div class="card">
       <h3>All Agents</h3>
-<table><thead><tr><th>Agent</th><th>Status</th><th>Access</th><th>Created</th><th class="actions-cell">Actions</th></tr></thead>
+<table class="stack-phone"><thead><tr><th>Agent</th><th>Status</th><th>Access</th><th>Created</th><th class="actions-cell">Actions</th></tr></thead>
         <tbody>{rows or "<tr><td colspan=5 class=empty>No agents yet. Create one for each tool or script that should have its own key and history.</td></tr>"}</tbody></table>
     </div>
 

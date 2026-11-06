@@ -118,7 +118,7 @@
         '</div>' +
         '<div style="margin-bottom:10px">' + cats + ' ' + provider + ' ' + variants + '</div>' +
         '<div style="margin-bottom:10px;color:var(--muted);font-size:0.9em;white-space:pre-wrap;word-break:break-word;max-height:200px;overflow-y:auto">' + escapeHtml(desc) + '</div>' +
-        '<table style="width:100%;font-size:0.85em">' +
+        '<table style="width:100%;font-size:0.875em">' +
           '<tr><td style="color:var(--muted);padding:4px 8px 4px 0;white-space:nowrap">Provider</td><td>' + escapeHtml(entry.provider || '-') + '</td></tr>' +
           '<tr><td style="color:var(--muted);padding:4px 8px 4px 0;white-space:nowrap">Version</td><td>' + escapeHtml(entry.version || '-') + '</td></tr>' +
           (safeUrl(entry.website) ? '<tr><td style="color:var(--muted);padding:4px 8px 4px 0;white-space:nowrap">Website</td><td><a href="' + escapeHtml(safeUrl(entry.website)) + '" target="_blank" rel="noopener">' + escapeHtml(entry.website) + '</a></td></tr>' : '') +

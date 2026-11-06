@@ -106,7 +106,7 @@ async function applyRecommendedAccess() {
 
   if (!userId || !projectId || !agentId) {
     status.textContent = 'Select user, workspace, and agent first.';
-    status.style.color = 'var(--warning)';
+    status.style.color = 'var(--warning-text)';
     btn.disabled = false;
     btn.textContent = 'Apply Recommended Access';
     return;

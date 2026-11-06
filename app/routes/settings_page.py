@@ -884,7 +884,7 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
       <p class="text-muted" style="margin-bottom:12px">This key protects stored credential values. Rotate it if you want to re-encrypt all saved secrets with a new primary key, or restore a known-good key if you need to recover from a bad rotation.</p>
       <div class="form-group">
         <button class="btn btn-secondary" onclick="loadCredentialKeyStatus()">Check Status</button>
-        <button class="btn btn-danger" onclick="openModal('credential-key-rotate-modal')">Rotate Key</button>
+        <button class="btn btn-warning" onclick="openModal('credential-key-rotate-modal')">Rotate Key</button>
         <button class="btn btn-secondary" onclick="openModal('credential-key-restore-modal')">Restore Key</button>
       </div>
       <ul class="form-hint" style="margin:0 0 0 18px">
@@ -947,7 +947,7 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
     <div class="card">
       <h3>Local credential helper</h3>
       <p class="text-muted" style="margin-bottom:12px">The local credential helper swaps <code>{CREDENTIAL_PREFIX}*</code> references for the real value when a command runs. Rotate its key if a local program should stop using the current one.</p>
-        <button class="btn btn-danger" onclick="rotateBroker()">Rotate helper key</button>
+        <button class="btn btn-warning" onclick="openModal('broker-rotate-modal')">Rotate helper key</button>
       <div id="broker-result" style="margin-top:12px"></div>
     </div>"""
 
@@ -1149,13 +1149,26 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
     <div class="modal-overlay" id="credential-key-rotate-modal" style="display:none">
       <div class="modal">
         <h3>Rotate Encryption Key</h3>
-        <div class="alert alert-danger">This re-encrypts all credential entries with a new primary key. Keep backups of your database and your encryption key files.</div>
+        <div class="alert alert-warning"><strong>Keeps working:</strong> every stored credential, every agent and every service. The old key stays in the key list, so nothing becomes unreadable.<br>
+        <strong>Changes now:</strong> all stored credential values are re-encrypted with a new key. A backup made before this still restores, but take a new backup afterwards so it holds the new key.</div>
         <form id="credential-key-rotate-form" onsubmit="rotateCredentialKey(event)">
           <div class="modal-footer">
             <button type="button" class="btn btn-secondary" onclick="closeModal('credential-key-rotate-modal')">Cancel</button>
-            <button type="submit" class="btn btn-danger">Rotate Key</button>
+            <button type="submit" class="btn btn-warning">Rotate Key</button>
           </div>
         </form>
+      </div>
+    </div>
+
+    <div class="modal-overlay" id="broker-rotate-modal" style="display:none">
+      <div class="modal">
+        <h3>Rotate the local credential helper key</h3>
+        <div class="alert alert-warning"><strong>Keeps working:</strong> agents, services, stored credentials, and any local program that reads the helper key from its file, which picks up the new key by itself.<br>
+        <strong>Stops working:</strong> any program or script that was given the old helper key by hand, until you give it the new one. The new key is shown once, here, right after you rotate.</div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" onclick="closeModal('broker-rotate-modal')">Cancel</button>
+          <button type="button" class="btn btn-warning" onclick="rotateBroker()">Rotate helper key</button>
+        </div>
       </div>
     </div>
 
@@ -1280,7 +1293,7 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
       }} else {{ showToast('Failed', 'danger'); }}
     }}
     async function rotateBroker() {{
-      if (!confirm('Rotate broker credential? The new credential will be shown once.')) return;
+      closeModal('broker-rotate-modal');
       const j = await apiFetch('/api/dashboard/broker/rotate', {{ method: 'POST' }});
       if (j.ok) {{
         document.getElementById('broker-result').innerHTML =

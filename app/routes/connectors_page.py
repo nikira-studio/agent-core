@@ -143,7 +143,7 @@ def _render_adapter_cards(adapter_entries: list[dict], ctx) -> str:
         requirement_line = ""
         if req_text:
             requirement_line = (
-                "<div style='font-size:0.82em;"
+                "<div style='font-size:0.875em;"
                 + ("color:var(--danger);" if not adapter.get("requirements_met", True) else "color:var(--text-muted);")
                 + "margin-top:0.35rem'"
                 + (f" title=\"{escape_html(req_hover)}\"" if req_hover else "")
@@ -154,7 +154,7 @@ def _render_adapter_cards(adapter_entries: list[dict], ctx) -> str:
         binding_recipe_line = ""
         if recipe_line:
             binding_recipe_line = (
-                "<div style='font-size:0.8em;color:var(--text-muted);margin-top:0.25rem'>"
+                "<div style='font-size:0.875em;color:var(--text-muted);margin-top:0.25rem'>"
                 + escape_html(recipe_line)
                 + "</div>"
             )
@@ -166,7 +166,7 @@ def _render_adapter_cards(adapter_entries: list[dict], ctx) -> str:
         installed_version_line = ""
         if installed and installed_version and installed_version != source_version:
             installed_version_line = (
-                "<div style='font-size:0.75em;color:var(--text-muted);margin-top:0.1rem'>"
+                "<div style='font-size:0.875em;color:var(--text-muted);margin-top:0.1rem'>"
                 + f"Installed {escape_html(str(installed_version))}"
                 + "</div>"
             )
@@ -175,7 +175,7 @@ def _render_adapter_cards(adapter_entries: list[dict], ctx) -> str:
         <div class='connector-type-card' data-adapter-card data-search-text="{escape_html((adapter.get("display_name", "") or "") + " " + (adapter.get("description", "") or "") + " " + (source_version or "") + " " + (installed_version or "") + " " + adapter.get("source_kind", "") + " " + req_text)}">
           <div style="padding:0 0 0.5rem">
             <div class='connector-type-name' style="margin:0">{escape_html(adapter["display_name"])}</div>
-            <div style="font-size:0.8em;color:var(--text-muted);margin-top:0.1rem">
+            <div style="font-size:0.875em;color:var(--text-muted);margin-top:0.1rem">
               {version_line}
             </div>
             {installed_version_line}
@@ -374,21 +374,23 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
         bindings_rows += f"""
         <tr data-binding-id="{b["id"]}" data-connector-type-id="{escape_html(b.get("connector_type_id", ""))}" data-provider-type="{escape_html(ct.get("provider_type", "") if ct else "")}">
           <td style="{text_style}">{escape_html(b.get("name", ""))}</td>
-          <td style="{text_style}">{escape_html(ct.get("display_name", "") if ct else b.get("connector_type_id", ""))}</td>
-          <td style="{text_style}"><code>{escape_html(b.get("scope", ""))}</code></td>
-          <td class="{status_cls}" style="{text_style}">{escape_html(status_text)}</td>
+          <td data-label="Service" style="{text_style}">{escape_html(ct.get("display_name", "") if ct else b.get("connector_type_id", ""))}</td>
+          <td data-label="Workspace" style="{text_style}"><code>{escape_html(b.get("scope", ""))}</code></td>
+          <td data-label="Status" class="{status_cls}" style="{text_style}">{escape_html(status_text)}</td>
           <td class='actions-cell'>
             {oauth_button}
             <button type='button' class='btn btn-sm btn-secondary' data-binding-edit="{escape_html(b["id"])}">Edit</button>
-            <button type='button' class='btn btn-sm btn-secondary' data-binding-history="{escape_html(b["id"])}">History</button>
             <button type='button' class='btn btn-sm btn-secondary' data-binding-test="{escape_html(b["id"])}">Test</button>
-            <button type='button' class='btn btn-sm btn-danger icon-delete-btn' data-binding-delete="{escape_html(b["id"])}" title='Delete binding' aria-label='Delete binding'>{get_icon("delete")}</button>
+            <details class='row-more'><summary class='btn btn-sm btn-secondary' title='History, delete'>More</summary><div class='row-more-list'>
+              <button type='button' class='btn btn-sm btn-secondary' data-binding-history="{escape_html(b["id"])}">History</button>
+              <button type='button' class='btn btn-sm btn-danger icon-delete-btn' data-binding-delete="{escape_html(b["id"])}" title='Delete binding' aria-label='Delete binding'>{get_icon("delete")}</button>
+            </div></details>
           </td>
         </tr>"""
 
     if visible_bindings:
         bindings_html = f"""
-        <table><thead><tr><th>Name</th><th>Type</th><th>Workspace</th><th>Status</th><th class='actions-cell'>Actions</th></tr></thead>
+        <table class="stack-phone"><thead><tr><th>Name</th><th>Service</th><th>Workspace</th><th>Status</th><th class='actions-cell'>Actions</th></tr></thead>
         <tbody>{bindings_rows}</tbody></table>"""
     else:
         bindings_html = (
@@ -410,15 +412,15 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
         execution_rows_html += f"""
         <tr>
           <td><button type="button" class="btn btn-sm btn-secondary" data-binding-history="{escape_html(execution.get("binding_id", ""))}">{escape_html(execution.get("binding_name", ""))}</button></td>
-          <td><code>{escape_html(execution.get("action", ""))}</code></td>
-          <td><span class="badge" style="{badge_style}">{escape_html(status)}</span></td>
-          <td>{local_dt(execution.get("executed_at"))}</td>
-          <td>{escape_html(execution_note)}</td>
+          <td data-label="Action"><code>{escape_html(execution.get("action", ""))}</code></td>
+          <td data-label="Result"><span class="badge" style="{badge_style}">{escape_html(status)}</span></td>
+          <td data-label="When">{local_dt(execution.get("executed_at"))}</td>
+          <td data-label="Notes">{escape_html(execution_note)}</td>
         </tr>"""
     if execution_rows_html:
         executions_html = f"""
-        <table>
-          <thead><tr><th>Binding</th><th>Action</th><th>Status</th><th>When</th><th>Notes</th></tr></thead>
+        <table class="stack-phone">
+          <thead><tr><th>Binding</th><th>Action</th><th>Result</th><th>When</th><th>Notes</th></tr></thead>
           <tbody>{execution_rows_html}</tbody>
         </table>"""
     else:
@@ -433,13 +435,13 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
         disabled_actions = ct.get("disabled_actions") or []
         provider_type = ct.get("provider_type") or "openapi"
         if provider_type == "mcp":
-            type_chip = '<span style="display:inline-block;font-size:0.72em;font-weight:600;line-height:1;padding:3px 8px;border-radius:10px;background:#7c3aed;color:#fff;letter-spacing:0.03em;white-space:nowrap">MCP</span>'
+            type_chip = '<span style="display:inline-block;font-size:0.875em;font-weight:600;line-height:1;padding:3px 8px;border-radius:10px;background:#7c3aed;color:#fff;letter-spacing:0.03em;white-space:nowrap">MCP</span>'
         elif provider_type == "generic_http" or ct.get("backend_type") == "generic_http":
-            type_chip = '<span style="display:inline-block;font-size:0.72em;font-weight:600;line-height:1;padding:3px 8px;border-radius:10px;background:rgba(80,200,120,0.15);color:var(--success);letter-spacing:0.03em;white-space:nowrap">HTTP</span>'
+            type_chip = '<span style="display:inline-block;font-size:0.875em;font-weight:600;line-height:1;padding:3px 8px;border-radius:10px;background:rgba(80,200,120,0.15);color:var(--success);letter-spacing:0.03em;white-space:nowrap">HTTP</span>'
         elif provider_type == "builtin":
-            type_chip = '<span style="display:inline-block;font-size:0.72em;font-weight:600;line-height:1;padding:3px 8px;border-radius:10px;background:#6b7280;color:#fff;letter-spacing:0.03em;white-space:nowrap">Built-in</span>'
+            type_chip = '<span style="display:inline-block;font-size:0.875em;font-weight:600;line-height:1;padding:3px 8px;border-radius:10px;background:#6b7280;color:#fff;letter-spacing:0.03em;white-space:nowrap">Built-in</span>'
         else:
-            type_chip = '<span style="display:inline-block;font-size:0.72em;font-weight:600;line-height:1;padding:3px 8px;border-radius:10px;background:#2563eb;color:#fff;letter-spacing:0.03em;white-space:nowrap">API</span>'
+            type_chip = '<span style="display:inline-block;font-size:0.875em;font-weight:600;line-height:1;padding:3px 8px;border-radius:10px;background:#2563eb;color:#fff;letter-spacing:0.03em;white-space:nowrap">API</span>'
         action_count = len(supported_action_names)
         enabled_action_count = max(
             action_count
@@ -493,7 +495,7 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
         <div class='connector-type-card'>
           <div style="padding:0 0 0.5rem">
             <div class='connector-type-name' style="margin:0">{escape_html(ct["display_name"])}</div>
-            <div style="font-size:0.8em;color:var(--text-muted);margin-top:0.1rem">{binding_action_line}</div>
+            <div style="font-size:0.875em;color:var(--text-muted);margin-top:0.1rem">{binding_action_line}</div>
             <div class='connector-type-desc' style="margin-top:0.35rem">{escape_html(ct.get("description", "") or "")}</div>
           </div>
           <div class='connector-type-footer' style="margin-top:auto; display:flex; flex-direction:column; gap:8px; align-items:stretch;">
@@ -531,7 +533,7 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
       </div>
       <div class="page-actions">
         <div class="dropdown" style="display:inline-block;position:relative">
-          <button class="btn btn-primary" onclick="toggleDropdown(this)" type="button">Add a service <span style="font-size:0.8em">&#9662;</span></button>
+          <button class="btn btn-primary" onclick="toggleDropdown(this)" type="button">Add a service <span style="font-size:0.875em">&#9662;</span></button>
           <div class="dropdown-menu" style="display:none;position:absolute;right:0;top:100%;background:#fff;border:1px solid #ddd;border-radius:4px;box-shadow:0 2px 8px rgba(0,0,0,0.15);z-index:1000;min-width:280px;text-align:left">
             <button class="dropdown-item" style="display:block;width:100%;padding:10px 16px;border:none;background:none;text-align:left;cursor:pointer;font-size:14px" onclick="resetImportPreview();openModal('import-spec-modal');closeAllDropdowns()">From an API spec<br><small class="text-muted">Most web services publish one (an OpenAPI file).</small></button>
             <button class="dropdown-item" style="display:block;width:100%;padding:10px 16px;border:none;background:none;text-align:left;cursor:pointer;font-size:14px" onclick="openModal('import-mcp-modal');closeAllDropdowns()">From an MCP server<br><small class="text-muted">A tool server that already speaks MCP.</small></button>
@@ -1029,7 +1031,7 @@ def connectors_directory_page(
         <div class="page-actions">
         <a class="btn btn-secondary" href="/connectors">&larr; Back to Services</a>
         <div class="dropdown" style="display:inline-block;position:relative">
-          <button class="btn btn-secondary" onclick="toggleDropdown(this)" type="button">Add a service <span style="font-size:0.8em">&#9662;</span></button>
+          <button class="btn btn-secondary" onclick="toggleDropdown(this)" type="button">Add a service <span style="font-size:0.875em">&#9662;</span></button>
           <div class="dropdown-menu" style="display:none;position:absolute;right:0;top:100%;background:#fff;border:1px solid #ddd;border-radius:4px;box-shadow:0 2px 8px rgba(0,0,0,0.15);z-index:1000;min-width:200px;text-align:left">
             <button class="dropdown-item" style="display:block;width:100%;padding:10px 16px;border:none;background:none;text-align:left;cursor:pointer;font-size:14px" onclick="resetImportPreview();openModal('import-spec-modal');closeAllDropdowns()">From an API spec</button>
             <button class="dropdown-item" style="display:block;width:100%;padding:10px 16px;border:none;background:none;text-align:left;cursor:pointer;font-size:14px" onclick="openModal('directory-import-mcp-modal');closeAllDropdowns()">From an MCP server</button>

@@ -570,6 +570,7 @@ def _apply_schema_migrations(conn) -> None:
         (20, "connector-run-approvals", _migrate_020_connector_run_approvals),
         (21, "agent-inherit-user-bindings", _migrate_021_inherit_user_bindings),
         (22, "private-address-policy", _migrate_022_private_address_policy),
+        (23, "builtin-service-description", _migrate_023_builtin_service_description),
     )
     applied = {
         row["revision"]
@@ -1565,7 +1566,7 @@ def _seed_connector_types(conn) -> None:
         {
             "id": "generic_http",
             "display_name": "Generic HTTP API",
-            "description": "Generic authenticated HTTP API connector",
+            "description": "A web service reached over HTTP with an API key",
             "provider_type": "builtin",
             "auth_type": "api_key",
             "supported_actions": ["call_endpoint"],
@@ -1632,6 +1633,17 @@ def _migrate_019_trusted_device_sessions(conn) -> None:
     )
     conn.execute("DROP TABLE sessions")
     conn.execute("ALTER TABLE sessions_rebuilt RENAME TO sessions")
+
+
+def _migrate_023_builtin_service_description(conn) -> None:
+    """The built-in web service read "connector" in its description; the dashboard says service.
+
+    Only the exact old seed text is replaced, so a description someone wrote is left alone.
+    """
+    conn.execute(
+        "UPDATE connector_types SET description = ? WHERE id = 'generic_http' AND description = ?",
+        ("A web service reached over HTTP with an API key", "Generic authenticated HTTP API connector"),
+    )
 
 
 def _migrate_022_private_address_policy(conn) -> None:

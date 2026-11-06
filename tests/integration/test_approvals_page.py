@@ -214,3 +214,11 @@ def test_the_overview_lists_a_pending_approval_under_waiting_on_you(test_client,
     waiting = html.split('id="overview-waiting"', 1)[1].split("</table>", 1)[0]
     assert "Widen target-agent" in waiting and "ops-agent" in waiting
     assert f"/approvals/{approval_id}" in waiting
+
+
+def test_a_decided_request_links_back_and_says_so_with_a_message(test_client, admin_token):
+    approval_id = _proposal(test_client, admin_token)
+    _browser_admin(test_client)
+    html = test_client.get(f"/approvals/{approval_id}").text
+    assert 'href="/#overview-waiting"' in html and "Back to Waiting on you" in html
+    assert "approvalFlash" in html and "'Approved: '" in html and "'Rejected: '" in html

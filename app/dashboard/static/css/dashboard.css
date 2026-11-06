@@ -8,14 +8,20 @@
   --panel2: #21253a;
   --border: #2a2d3a;
   --text: #e0e0e0;
-  --muted: #888;
+  --muted: #a0a0ac;
   --accent: #4f8eff;
   --accent-hover: #6ba0ff;
+  /* Filled controls (buttons, the active page, write tags) use these so white text reads at 4.5:1 or better; --accent stays the lighter link colour. */
+  --accent-fill: #2f6fe0;
+  --accent-fill-hover: #2a62cc;
+  --danger-fill: #c93c3c;
+  --danger-fill-hover: #b03030;
   --primary: var(--accent);
-  --danger: #e05050;
+  --danger: #e86060;
   --danger-hover: #ff6060;
   --success: #50c878;
   --warning: #f0a030;
+  --warning-text: var(--warning);
   --surface-0: #0d0c0f;
   --surface: var(--surface-0);
   --radius: 6px;
@@ -29,7 +35,7 @@
   --bg-secondary: var(--panel2);
   --success-color: var(--success);
   --danger-color: var(--danger);
-  --warning-color: var(--warning);
+  --warning-color: var(--warning-text);
   --muted-color: var(--muted);
 }
 
@@ -39,13 +45,18 @@
   --panel2: #eaeaef;
   --border: #d0d0d8;
   --text: #1a1a1f;
-  --muted: #6b6b75;
-  --accent: #3b7de9;
-  --accent-hover: #2d6cd6;
-  --danger: #c94040;
-  --danger-hover: #b03030;
+  --muted: #62626c;
+  --accent: #2a63cf;
+  --accent-hover: #1f55b8;
+  --accent-fill: #2a63cf;
+  --accent-fill-hover: #1f55b8;
+  --danger-fill: #c94040;
+  --danger-fill-hover: #b03030;
+  --danger: #b03030;
+  --danger-hover: #962828;
   --success: #3da860;
   --warning: #d08820;
+  --warning-text: #8a5a0a;
   --surface-0: #e8e8ee;
 }
 
@@ -159,7 +170,7 @@ a:focus-visible {
 }
 
 .sidebar nav a.active {
-  background: var(--accent);
+  background: var(--accent-fill);
   color: #fff;
 }
 
@@ -493,7 +504,7 @@ a:focus-visible {
 /* === Buttons === */
 .btn {
   display: inline-block;
-  background: var(--accent);
+  background: var(--accent-fill);
   color: #fff;
   padding: 8px 16px;
   border-radius: var(--radius);
@@ -508,7 +519,7 @@ a:focus-visible {
 }
 
 .btn:hover {
-  opacity: 0.85;
+  background: var(--accent-fill-hover);
   color: #fff;
 }
 
@@ -526,12 +537,23 @@ a:focus-visible {
   font-size: 0.75rem;
 }
 
+.btn-warning {
+  background: var(--warning);
+  color: #1a1a1f;
+}
+
+.btn-warning:hover {
+  background: var(--warning);
+  color: #1a1a1f;
+  filter: brightness(1.1);
+}
+
 .btn-danger {
-  background: var(--danger);
+  background: var(--danger-fill);
 }
 
 .btn-danger:hover {
-  background: var(--danger-hover);
+  background: var(--danger-fill-hover);
 }
 
 .btn-secondary {
@@ -542,6 +564,7 @@ a:focus-visible {
 
 .btn-secondary:hover {
   background: var(--border);
+  color: var(--text);
 }
 
 .btn:disabled {
@@ -697,7 +720,7 @@ tr:hover td {
   display: inline-block;
   padding: 2px 8px;
   border-radius: 12px;
-  font-size: 0.7rem;
+  font-size: 0.75rem;
   font-weight: 500;
   line-height: 1.4;
 }
@@ -709,7 +732,7 @@ tr:hover td {
 
 .badge-stale {
   background: rgba(240,160,48,0.15);
-  color: var(--warning);
+  color: var(--warning-text);
 }
 
 @keyframes status-pulse {
@@ -755,7 +778,7 @@ tr:hover td {
 
 .badge-warning {
   background: rgba(240, 160, 48, 0.15);
-  color: var(--warning);
+  color: var(--warning-text);
 }
 
 .badge-info {
@@ -781,7 +804,7 @@ tr:hover td {
 
 
 .status-pill.active { background: rgba(80,200,120,0.12); color: var(--success); }
-.status-pill.stale { background: rgba(240,160,48,0.12); color: var(--warning); }
+.status-pill.stale { background: rgba(240,160,48,0.12); color: var(--warning-text); }
 .status-pill.completed { background: rgba(79,142,255,0.12); color: var(--accent); }
 .status-pill.blocked { background: rgba(224,80,80,0.12); color: var(--danger); }
 
@@ -816,7 +839,7 @@ tr:hover td {
 .text-muted { color: var(--muted); font-size: 0.8rem; }
 .text-danger { color: var(--danger); }
 .text-success { color: var(--success); }
-.text-warning { color: var(--warning); }
+.text-warning { color: var(--warning-text); }
 
 /* === Divider === */
 .divider {
@@ -849,7 +872,7 @@ tr:hover td {
 .alert-warning {
   background: rgba(240,160,48,0.1);
   border-color: rgba(240,160,48,0.3);
-  color: var(--warning);
+  color: var(--warning-text);
 }
 
 .alert-info {
@@ -997,14 +1020,14 @@ tr:hover td {
   border: 1px solid var(--border);
   border-radius: 4px;
   padding: 1px 6px;
-  font-size: 0.7rem;
+  font-size: 0.75rem;
   color: var(--muted);
   margin: 1px;
 }
 .scope-tag.scope-write {
-  background: var(--accent);
+  background: var(--accent-fill);
   color: #fff;
-  border-color: var(--accent);
+  border-color: var(--accent-fill);
 }
 .agent-read-list, .agent-write-list {
   display: flex;
@@ -1016,7 +1039,7 @@ tr:hover td {
 .access-label {
   min-width: 36px;
   color: var(--muted);
-  font-size: 0.72rem;
+  font-size: 0.75rem;
   font-weight: 600;
 }
 
@@ -1338,7 +1361,7 @@ th.activity-actions-header {
   margin-top: 4px;
 }
 .scope-selectors h4 {
-  font-size: 0.7rem;
+  font-size: 0.75rem;
   text-transform: uppercase;
   color: var(--muted);
   margin: 10px 0 6px;
@@ -1444,7 +1467,7 @@ th.activity-actions-header {
   border: 1px solid var(--border);
   border-radius: 4px;
   padding: 1px 6px;
-  font-size: 0.72rem;
+  font-size: 0.75rem;
   color: var(--accent);
 }
 
@@ -1508,9 +1531,9 @@ th.activity-actions-header {
 
 .check-warn {
   background: rgba(240,160,48,0.1);
-  color: var(--warning);
+  color: var(--warning-text);
 }
-.check-warn .check-icon { color: var(--warning); }
+.check-warn .check-icon { color: var(--warning-text); }
 
 .check-blocked {
   background: rgba(224,80,80,0.1);
@@ -1603,7 +1626,7 @@ th.activity-actions-header {
 }
 
 .connection-doctor-result.warning {
-  color: var(--warning);
+  color: var(--warning-text);
 }
 
 .connection-doctor-result.error {
@@ -1695,7 +1718,7 @@ th.activity-actions-header {
   background: var(--panel2);
   padding: 1px 5px;
   border-radius: 3px;
-  font-size: 0.82em;
+  font-size:0.875em;
   color: var(--accent);
 }
 
@@ -1832,7 +1855,7 @@ th.activity-actions-header {
   background: var(--bg);
 }
 .capability-group {
-  font-size: 0.7rem;
+  font-size: 0.75rem;
   text-transform: uppercase;
   color: var(--muted);
   margin: 10px 0 4px;
@@ -1859,7 +1882,7 @@ th.activity-actions-header {
 
 /* === Sidebar groups === */
 .sidebar nav .nav-heading {
-  font-size: 0.65rem;
+  font-size: 0.75rem;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.1em;
@@ -1914,7 +1937,9 @@ th.activity-actions-header {
 .audit-action-cell { width: 200px; }
 .audit-resource-cell { width: 130px; }
 @media (max-width: 768px) {
-  .sidebar nav .nav-heading { display: none; }
+  /* The group headings stay on a phone: each starts its own row, with its pages under it. */
+  .sidebar nav .nav-heading { flex: 0 0 100%; border-top: 0; margin: 6px 0 0; padding: 0 2px; }
+  .sidebar nav .nav-heading:first-child { margin-top: 0; }
 }
 /* The main column may shrink below its widest table; the card then scrolls instead of widening the page. */
 .main { min-width: 0; }
@@ -1966,7 +1991,7 @@ th.activity-actions-header {
   .stack-table thead { display: none; }
   .stack-table tr { padding: 10px 0; border-bottom: 1px solid var(--border); }
   .stack-table td { border: 0; padding: 3px 0; }
-  .stack-table td[data-label]::before { content: attr(data-label); display: inline-block; min-width: 4.5rem; color: var(--muted); font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.05em; }
+  .stack-table td[data-label]::before { content: attr(data-label); display: inline-block; min-width: 4.5rem; color: var(--muted); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; }
   .stack-table td.actions-cell { display: flex; gap: 6px; flex-wrap: wrap; padding-top: 8px; }
 }
 
@@ -1988,15 +2013,17 @@ details.card-fold[open] > summary::before { content: "\25BE\00a0"; }
   .stack-phone thead { display: none; }
   .stack-phone tr { padding: 10px 0; border-bottom: 1px solid var(--border); }
   .stack-phone td { border: 0; padding: 3px 0; white-space: normal; max-width: none; }
-  .stack-phone td[data-label]::before { content: attr(data-label); display: inline-block; min-width: 6rem; color: var(--muted); font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.05em; }
+  .stack-phone td[data-label]::before { content: attr(data-label); display: inline-block; min-width: 6rem; color: var(--muted); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; }
   .stack-phone td:empty { display: none; }
+  .stack-phone td.hide-phone { display: none; }
+  .stack-phone .actions-cell { display: flex; gap: 6px; flex-wrap: wrap; align-items: flex-start; }
   .stack-phone .activity-actions-cell { padding-top: 8px; flex-wrap: wrap; }
 }
 
 /* Connect: three steps, each tool's pieces in the order a person does them. */
 .setup-steps { list-style: none; counter-reset: setup-step; margin: 14px 0 0; padding: 0; }
 .setup-steps > li { counter-increment: setup-step; position: relative; padding: 0 0 16px 34px; }
-.setup-steps > li::before { content: counter(setup-step, lower-alpha); position: absolute; left: 0; top: 0; width: 24px; height: 24px; border-radius: 50%; background: var(--accent); color: #fff; font-size: 0.8rem; text-align: center; line-height: 24px; }
+.setup-steps > li::before { content: counter(setup-step, lower-alpha); position: absolute; left: 0; top: 0; width: 24px; height: 24px; border-radius: 50%; background: var(--accent-fill); color: #fff; font-size: 0.8rem; text-align: center; line-height: 24px; }
 .setup-steps > li > h3 { margin: 0 0 4px; font-size: 0.95rem; border: 0; padding: 0; }
 .setup-steps > li > p { margin: 0 0 8px; color: var(--muted); font-size: 0.85rem; }
 .output-section + .output-section { margin-top: 12px; }
@@ -2006,7 +2033,7 @@ details.card-fold[open] > summary::before { content: "\25BE\00a0"; }
 }
 
 /* Scope and actor tags: a small label beside a name. */
-.scope-kind { display: inline-block; font-size: 0.65rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); border: 1px solid var(--border); border-radius: 4px; padding: 0 5px; margin-left: 2px; vertical-align: middle; }
+.scope-kind { display: inline-block; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); border: 1px solid var(--border); border-radius: 4px; padding: 0 5px; margin-left: 2px; vertical-align: middle; }
 .scope-name { white-space: nowrap; }
 /* Counters that matter only when above zero. */
 .stat-card.stat-quiet .value { color: var(--muted); }

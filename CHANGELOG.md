@@ -4,6 +4,18 @@ Notable changes to Agent Core are documented here. The format follows [Keep a Ch
 
 ## [Unreleased]
 
+### Changed
+
+- **On a phone**, the sidebar keeps its group headings (Work, Access, Capabilities, System) with the pages under each, instead of one wrapped cloud of buttons. The Agents list, the Services bindings and recent runs, and Overview's Recent Activity become one block per row, with the labels beside the values and the **Created** column left out, so row buttons are never off-screen. Agents and bindings show **Edit** and **Connect** (or **Edit** and **Test**) and put the rest, including Delete, under **More**, so Delete no longer sits next to Deactivate.
+- Deciding an approval now says what happened ("Approved: <title>" or "Rejected: <title>") and the request page links back to **Waiting on you**.
+- **Rotate Key** and **Rotate helper key** are amber, not red, and each opens a dialog that says what keeps working and what stops, in place of a browser confirm box.
+- **Readability.** Filled buttons, the active page and write tags use a darker blue, and the red delete button a darker red, so their white text reads at 4.5:1 or better; muted text, links, error and warning text were adjusted so they meet the same level in the dark and light themes (a test now checks the colour pairs). The Secondary button no longer turns its text white on a light background when hovered. Small text is at least 12 px.
+- The built-in web service is described as "A web service reached over HTTP with an API key" (an existing install's old default text is updated; text someone wrote is left alone, schema revision 23), and the remaining "connector type" wording in the Services page and its not-found message reads "service".
+
+### Added
+
+- `scripts/ui_sweep.py` also saves each page as rendered and runs the design detector on it when it is installed, so the HTML built in Python is checked too.
+
 ## [1.2.0] - 2026-11-06
 
 **Upgrading from 1.1.0.** Take a backup first. Everyone is signed out once (sessions are now signed with their own key), and a script that sends a person's session token to an admin route must switch to an operator token (Settings → Account); both are described under Security below. The dashboard pages are renamed and regrouped, but every address (`/connectors`, `/integrations` and the rest) still works, so bookmarks and links keep working. Nothing in your data needs migrating for the dashboard changes. A workspace purge keeps its tasks, with their workspace link cleared, and deletes its memories, stored credentials and service bindings; the delete dialogs now say so.

@@ -180,7 +180,7 @@ def create_binding(
         return error_response("SCOPE_DENIED", "Access denied to this scope", 403)
     ct = connector_service.get_connector_type(body.connector_type_id)
     if not ct:
-        return error_response("NOT_FOUND", "Connector type not found", 404)
+        return error_response("NOT_FOUND", "Service not found", 404)
     if body.credential_id:
         credential = credential_service.get_credential(body.credential_id)
         if not credential:
@@ -579,7 +579,7 @@ async def get_connector_type_tools(
 ):
     ct = connector_service.get_connector_type(connector_type_id)
     if not ct:
-        return error_response("NOT_FOUND", "Connector type not found", 404)
+        return error_response("NOT_FOUND", "Service not found", 404)
     result = await asyncio.to_thread(
         connector_service.generate_connector_type_tools,
         ct,
@@ -602,7 +602,7 @@ def update_connector_type_actions(
         return error_response("FORBIDDEN", "Admin access required", 403)
     ct = connector_service.get_connector_type(connector_type_id)
     if not ct:
-        return error_response("NOT_FOUND", "Connector type not found", 404)
+        return error_response("NOT_FOUND", "Service not found", 404)
 
     valid_actions = set(
         connector_service.normalize_action_names(ct.get("supported_actions"))
@@ -1287,7 +1287,7 @@ async def refresh_mcp_connector_type(
         return error_response("FORBIDDEN", "Admin access required", 403)
     ct = connector_service.get_connector_type(connector_type_id)
     if not ct:
-        return error_response("NOT_FOUND", "Connector type not found", 404)
+        return error_response("NOT_FOUND", "Service not found", 404)
     if ct.get("provider_type") != "mcp":
         return error_response("INVALID_REQUEST", "Connector type is not an MCP provider", 400)
     endpoint_url = ct.get("endpoint_url")
@@ -1384,7 +1384,7 @@ async def delete_connector_type(
         return error_response("FORBIDDEN", "Admin access required", 403)
     ct = connector_service.get_connector_type(connector_type_id)
     if not ct:
-        return error_response("NOT_FOUND", "Connector type not found", 404)
+        return error_response("NOT_FOUND", "Service not found", 404)
 
     # Adapter-backed connector types should behave like uninstall, not a raw
     # catalog delete, so the Browse Adapters page and service catalog stay in

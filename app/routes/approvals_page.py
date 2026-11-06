@@ -397,7 +397,11 @@ def approval_detail_page(
   </tbody></table>
 </div>
 """
-    header = '<div class="page-header"><h1>' + title + '</h1></div>\n'
+    header = (
+        '<div class="page-header"><h1>' + title + '</h1></div>\n'
+        '<p class="form-hint" style="margin-top:0"><a href="/#overview-waiting">&larr; Back to Waiting on you</a>'
+        ' &middot; <a href="/approvals">All approvals</a></p>\n'
+    )
     if is_run:
         # The plain sentence first, then what it sends, then the decision; the bookkeeping last.
         body = header + operation_cards + decide_card + decision_card + meta_card
@@ -428,9 +432,19 @@ async function decideApproval(id, approve) {
     method: 'POST',
     body: JSON.stringify({approve: approve, note: note || null, values: values})
   });
-  if (j.ok) { location.reload(); return; }
+  if (j.ok) {
+    const heading = document.querySelector('.page-header h1');
+    try { sessionStorage.setItem('approvalFlash', (approve ? 'Approved: ' : 'Rejected: ') + (heading ? heading.textContent : 'the request')); } catch (e) {}
+    location.reload();
+    return;
+  }
   showToast((j.error && j.error.message) || 'The decision did not go through', 'danger');
 }
+(function showDecisionFlash() {
+  let message = null;
+  try { message = sessionStorage.getItem('approvalFlash'); sessionStorage.removeItem('approvalFlash'); } catch (e) {}
+  if (message) showToast(message, 'success');
+})();
 </script>
 """
 

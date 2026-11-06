@@ -10,11 +10,22 @@ signed in as an admin, never against data you cannot afford to expose:
 It needs Playwright (`pip install playwright && playwright install chromium`).
 It only reads pages. The overflow check prints any element wider than its card
 and any page that scrolls sideways; the screenshots are for a person to open.
+
+It also saves each page as the browser rendered it, with its stylesheets, under
+<out>/rendered, and runs the design detector on that folder when it is installed
+(`impeccable detect`; pass --detector PATH, or set IMPECCABLE). The detector reads
+rendered pages, not Python source, so the HTML this app builds in f-strings is only
+checked this way. Findings are printed and written to <out>/detect.json; they do
+not change the exit status.
 """
 
 import argparse
 import asyncio
+import os
 import pathlib
+import re
+import shutil
+import subprocess
 
 from playwright.async_api import async_playwright
 
@@ -48,8 +59,47 @@ OVERFLOW_JS = """() => {
 }"""
 
 
-async def main(base: str, cookie: str, out: pathlib.Path) -> int:
+DEFAULT_DETECTOR = "~/.claude/skills/impeccable/scripts/impeccable"
+
+
+async def save_rendered(page, base: str, rendered: pathlib.Path, slug: str) -> None:
+    """Save the page as rendered (after its scripts ran) with the /static files it links, so a detector can open it."""
+    html = await page.content()
+    (rendered / f"{slug}.html").write_text(html, encoding="utf-8")
+    for ref in set(re.findall(r'(?:href|src)="(/static/[^"?#]+)', html)):
+        target = rendered / ref.lstrip("/")
+        if target.exists():
+            continue
+        response = await page.context.request.get(base + ref)
+        if response.ok:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(await response.body())
+
+
+def run_detector(detector: str, rendered: pathlib.Path, out: pathlib.Path) -> None:
+    path = os.path.expanduser(detector)
+    if not (os.path.isfile(path) or shutil.which(path)):
+        print("design detector not found; skipped (pass --detector PATH to run it on", rendered, ")")
+        return
+    result = subprocess.run([path, "detect", "--json", "--no-config", str(rendered)], capture_output=True, text=True)
+    (out / "detect.json").write_text(result.stdout, encoding="utf-8")
+    try:
+        import json
+        findings = json.loads(result.stdout or "[]")
+        findings = findings if isinstance(findings, list) else findings.get("findings", [])
+        counts: dict[str, int] = {}
+        for item in findings:
+            counts[item.get("antipattern", "?")] = counts.get(item.get("antipattern", "?"), 0) + 1
+        print("design detector:", "clean" if not findings else ", ".join(f"{k} x{v}" for k, v in sorted(counts.items())),
+              "- details in", out / "detect.json")
+    except ValueError:
+        print("design detector output was not JSON; see", out / "detect.json")
+
+
+async def main(base: str, cookie: str, out: pathlib.Path, detector: str = "") -> int:
     out.mkdir(parents=True, exist_ok=True)
+    rendered = out / "rendered"
+    rendered.mkdir(exist_ok=True)
     problems = 0
     async with async_playwright() as p:
         browser = await p.chromium.launch()
@@ -68,6 +118,8 @@ async def main(base: str, cookie: str, out: pathlib.Path) -> int:
                     await page.click(f"[data-tab={tab}]")
                 slug = (path.strip("/").replace("/", "_") or "overview") + (f"-{tab}" if tab else "")
                 await page.screenshot(path=str(out / f"{slug}-{name}.png"), full_page=True)
+                if name == "desktop":
+                    await save_rendered(page, base, rendered, slug)
                 result = await page.evaluate(OVERFLOW_JS)
                 if result["scrolls"] or result["count"]:
                     problems += 1
@@ -79,6 +131,7 @@ async def main(base: str, cookie: str, out: pathlib.Path) -> int:
             await ctx.close()
         await browser.close()
     print("overflow check:", "clean" if not problems else f"{problems} problem(s)", "- now open the screenshots in", out)
+    run_detector(detector or os.environ.get("IMPECCABLE", DEFAULT_DETECTOR), rendered, out)
     return problems
 
 
@@ -87,5 +140,6 @@ if __name__ == "__main__":
     parser.add_argument("--base", required=True, help="Dashboard address, for example http://127.0.0.1:3500")
     parser.add_argument("--cookie", required=True, help="An admin's session_token cookie value")
     parser.add_argument("--out", type=pathlib.Path, required=True, help="Folder for the screenshots")
+    parser.add_argument("--detector", default="", help="Path to the impeccable command (default: $IMPECCABLE or ~/.claude/skills/impeccable/scripts/impeccable)")
     args = parser.parse_args()
-    raise SystemExit(1 if asyncio.run(main(args.base.rstrip("/"), args.cookie, args.out)) else 0)
+    raise SystemExit(1 if asyncio.run(main(args.base.rstrip("/"), args.cookie, args.out, args.detector)) else 0)

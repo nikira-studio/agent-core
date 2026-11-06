@@ -122,7 +122,7 @@ def test_overview_surfaces_operational_sections(authenticated_client):
     assert "quick-action" not in html
     # localDt returns a span. The live event refresh must insert that markup,
     # not escape it as visible text, and then localize the new timestamp.
-    assert "'<td>' + ts + '</td>'" in html
+    assert "'<td class=\"hide-phone\">' + ts + '</td>'" in html
     assert "applyLocalTimes(tbody);" in html
 
 
@@ -549,3 +549,32 @@ def test_new_binding_dialog_shows_one_credential_choice_at_a_time(authenticated_
     assert 'id="binding-existing-credential-fields" class="form-group" style="display:none"' in html
     assert "Who may use it" in html and "A binding lets agents in one workspace" in html
     assert "<label>Scope *</label>" not in html and "Just me (personal)" in html
+
+
+def test_agent_rows_keep_edit_and_connect_and_put_the_rest_under_more(authenticated_client, test_client):
+    from app.services import agent_service
+
+    agent_service.create_agent("rowtest", "Row Test", "admin", capabilities=["memory"])
+    html = authenticated_client.get("/agents").text
+    row = html.split("data-agent-edit='rowtest'", 1)[1].split("</tr>", 1)[0]
+    assert "Connect</a>" in row and "<summary" in row and "More</summary>" in row
+    before_more, after_more = row.split("More</summary>", 1)
+    assert "data-agent-purge" not in before_more and "data-agent-deactivate" not in before_more
+    assert "data-agent-purge='rowtest'" in after_more and "data-agent-deactivate='rowtest'" in after_more
+
+
+def test_the_two_key_rotations_say_what_keeps_working_and_what_stops_before_they_run(authenticated_client):
+    html = authenticated_client.get("/settings").text
+    assert "confirm('Rotate broker" not in html
+    assert 'id="broker-rotate-modal"' in html and "Stops working:" in html and "Keeps working:" in html
+    assert "Changes now:" in html
+    assert 'class="btn btn-warning" onclick="openModal(\'broker-rotate-modal\')"' in html
+    assert 'btn btn-danger" onclick="openModal(\'credential-key-rotate-modal\')"' not in html
+
+
+def test_phone_navigation_keeps_its_group_headings():
+    from pathlib import Path
+
+    css = (Path(__file__).resolve().parents[2] / "app/dashboard/static/css/dashboard.css").read_text()
+    assert ".sidebar nav .nav-heading { display: none; }" not in css
+    assert "flex: 0 0 100%" in css.split("The group headings stay on a phone", 1)[1][:400]

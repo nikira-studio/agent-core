@@ -197,3 +197,7 @@ Where it lives: **Services** to set it up (View Actions → **Ask a person first
 3. **Check it works.** The connection doctor and the Verification Prompt.
 
 Everything else (environment variables, session prompt, hook, assistants prompt, the full MCP config, and the old tab links such as `?output_type=env`) is under **Other outputs**, which opens by itself when a link asks for one. The generated text is unchanged; the per-tool config is the same MCP config cut into its blocks. `?target=` picks the tool and is kept when the form is resubmitted.
+
+## Phones and rows (1.2.1)
+
+Where it lives: the sidebar on a phone, and the row lists on Agents, Services (bindings and recent runs) and Overview (Recent Activity). What a person sees first: the group headings with their pages; then one block per row with the name and its few labelled values. One line of help per control is unchanged; the new **More** button on an Agents or bindings row says what is under it ("Credentials, deactivate, delete" / "History, delete"). Vocabulary: row buttons are Edit, Connect, Test and More; Delete always sits under More. A decided approval says "Approved:" or "Rejected:" and links back to **Waiting on you**. The two key rotations say what keeps working and what stops before they run.

@@ -404,9 +404,9 @@ def dashboard_home(request: Request, session: dict = Depends(require_auth)):
     activity_rows = (
         "".join(
             f"<tr><td><div class='text-truncate' title='{escape_html(a.get('task_description', ''))}'>{escape_html(a.get('task_description', ''))}</div></td>"
-            f"<td><span class='badge badge-{escape_html(a.get('status', 'active'))}'>{escape_html(a.get('status', ''))}</span></td>"
-            f"<td>{escape_html(a.get('assigned_agent_id', ''))}</td>"
-            f"<td>{local_dt(a.get('updated_at') or a.get('started_at'))}</td></tr>"
+            f"<td data-label='Status'><span class='badge badge-{escape_html(a.get('status', 'active'))}'>{escape_html(a.get('status', ''))}</span></td>"
+            f"<td data-label='Agent'>{escape_html(a.get('assigned_agent_id', ''))}</td>"
+            f"<td class='hide-phone'>{local_dt(a.get('updated_at') or a.get('started_at'))}</td></tr>"
             for a in recent_activity[:6]
         )
         if recent_activity
@@ -441,7 +441,7 @@ def dashboard_home(request: Request, session: dict = Depends(require_auth)):
           {audit_link}
         </div>
       </div>
-      <table><thead><tr><th>Task</th><th>Status</th><th>Agent</th><th>Updated</th></tr></thead><tbody id="overview-activity-tbody">{activity_rows}</tbody></table>
+      <table class="stack-phone"><thead><tr><th>Task</th><th>Status</th><th>Agent</th><th>Updated</th></tr></thead><tbody id="overview-activity-tbody">{activity_rows}</tbody></table>
     </div>
     <script>
     window.{JS_WINDOW_EVENT} = async function(event) {{
@@ -462,9 +462,9 @@ def dashboard_home(request: Request, session: dict = Depends(require_auth)):
         var ts = localDt(a.updated_at || a.started_at);
         return '<tr>' +
           '<td><div class="text-truncate" title="' + escapeHtml(a.task_description || '') + '">' + escapeHtml(a.task_description || '') + '</div></td>' +
-          '<td><span class="badge badge-' + escapeHtml(a.status || '') + '">' + escapeHtml(a.status || '') + '</span></td>' +
-          '<td>' + escapeHtml(a.assigned_agent_id || '') + '</td>' +
-          '<td>' + ts + '</td>' +
+          '<td data-label="Status"><span class="badge badge-' + escapeHtml(a.status || '') + '">' + escapeHtml(a.status || '') + '</span></td>' +
+          '<td data-label="Agent">' + escapeHtml(a.assigned_agent_id || '') + '</td>' +
+          '<td class="hide-phone">' + ts + '</td>' +
         '</tr>';
       }}).join('');
       applyLocalTimes(tbody);
