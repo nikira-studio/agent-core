@@ -19,7 +19,7 @@ The exported archive contains the same backup contents as before, but encrypted 
 
 The underlying backup archive contains:
 
-- `agent-core.db`: the full database (memory, agents, credentials metadata, activity, connector types, bindings, and execution history)
+- `agent-core.db`: the full database (memory, agents, credentials metadata, activity, services, bindings, and execution history)
 - `credential.key`: the current encryption key
 - `credential.keyring`: all historical keys (needed to decrypt entries from before a key rotation)
 - `manifest.json`: version, timestamp, and SHA-256 checksums for everything in the archive

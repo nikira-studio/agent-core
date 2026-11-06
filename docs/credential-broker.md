@@ -13,7 +13,7 @@ Anything you put in a prompt or config file might end up in a log, a response, o
 
 Here's the full flow from storage to execution:
 
-1. You store a credential in Agent Core from the **Connectors** page or API.
+1. You store a credential in Agent Core from the **Credentials** page or API.
 2. An agent calls `credential_get` (MCP) or `POST /api/credentials/entries/{id}/reference` (REST).
 3. Agent Core returns an `AC_SECRET_*` reference name, not the secret.
 4. The agent passes that reference into a tool configuration or environment variable.
@@ -25,9 +25,9 @@ Here's the full flow from storage to execution:
 
 > **Important:** The `agent_id` the broker uses for permission checks comes from your integration configuration, not from the model. The model should never be able to specify which agent identity resolves a secret.
 
-This broker path is for local tools and scripts that need a secret in their own environment. If you want Agent Core itself to run the external action, use the **Connectors** page and a connector binding instead of the broker.
+This broker path is for local tools and scripts that need a secret in their own environment. If you want Agent Core itself to run the external action, use the **Services** page and a service binding instead of the broker.
 
-You can edit credentials from the Connectors page. Metadata changes do not alter the encrypted secret. The secret is replaced only when you enter a new replacement value.
+You can edit credentials from the Credentials page. Metadata changes do not alter the encrypted secret. The secret is replaced only when you enter a new replacement value.
 
 ---
 

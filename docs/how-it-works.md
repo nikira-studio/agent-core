@@ -15,7 +15,7 @@ Agent Core is a single local HTTP service backed by one SQLite database. It stor
 | **Memory** | What stays true: facts, decisions, preferences | Agents |
 | **Activity** | What happened: one record per task, with a heartbeat | Agents |
 | **Credentials** | Encrypted secrets, exposed only as references | Operator |
-| **Connectors** | How to reach external services, and with which credential | Operator |
+| **Services** | How to reach external services, and with which credential | Operator |
 
 Agents connect to it. It does not connect to agents, schedule them, or run their work. That boundary is deliberate: an agent's harness already decides what to do next, and a memory layer that also tried to would have to be replaced every time you changed agents. Agent Core is what stays constant while the agents around it change.
 
@@ -39,7 +39,7 @@ Agents connect to it. It does not connect to agents, schedule them, or run their
                                             external services
 ```
 
-Nothing leaves the machine unless you configure something that reaches out: a connector action, an embedding backend, or an outbound webhook notification. Those are the only outbound paths, and all three are off until an operator sets them up.
+Nothing leaves the machine unless you configure something that reaches out: a service action, an embedding backend, or an outbound webhook notification. Those are the only outbound paths, and all three are off until an operator sets them up.
 
 ### Two transports, one implementation
 
@@ -113,7 +113,7 @@ service:<binding_id>                     something reachable through a connector
 
 **Repo paths are relative to the workspace root, never absolute.** The same directory has a different absolute path inside every agent's container, so an absolute anchor is resolvable only by whoever wrote it. Agent Core resolves the relative path against this installation's configured root, which is exactly what lets agents with different mounts share one corpus.
 
-The vocabulary is open. `repo:`, `host:` and `service:` are what Agent Core can check by itself; an installation teaches it to check others (`url:`, `doc:`, `ticket:`) by mapping the type to a connector binding it already has (see [Configuration](configuration.md#verification-beyond-code)). Writing an anchor type nothing can check is allowed and warned about, not refused: the anchor still tells a human what would settle the record.
+The vocabulary is open. `repo:`, `host:` and `service:` are what Agent Core can check by itself; an installation teaches it to check others (`url:`, `doc:`, `ticket:`) by mapping the type to a service binding it already has (see [Configuration](configuration.md#verification-beyond-code)). Writing an anchor type nothing can check is allowed and warned about, not refused: the anchor still tells a human what would settle the record.
 
 Anchors also work as a filter. `subject_anchor: "repo:app/services"` matches everything anchored under that prefix, which answers "what have we recorded about this part of the code".
 
@@ -249,17 +249,17 @@ credential_get → AC_SECRET_GITHUB_TOKEN_1A2B3C4D
 From there, two paths:
 
 - **Broker**: a local tool needs the secret in its own config or environment. The [Credential Broker](credential-broker.md) resolves the reference at runtime, on the machine, so the raw value never passes through a prompt, a log, or a generated config file.
-- **Connector**: Agent Core makes the call itself, server-side, using the stored credential. The secret never leaves the service at all.
+- **Service**: Agent Core makes the call itself, server-side, using the stored credential. The secret never leaves the service at all.
 
-Prefer the connector path when both are available. The reference is what agents see, and a reference in a transcript is worth nothing to anyone who reads it.
+Prefer the service path when both are available. The reference is what agents see, and a reference in a transcript is worth nothing to anyone who reads it.
 
 ---
 
-## 6. Connectors: the hands
+## 6. Services: the hands
 
-Memory is what agents know. Connectors are what they can do, and the point of putting them here is that every agent does a given thing the same way, with the same credential and the same audit trail, no matter which harness it runs in.
+Memory is what agents know. Services are what they can do, and the point of putting them here is that every agent does a given thing the same way, with the same credential and the same audit trail, no matter which harness it runs in.
 
-A **connector type** describes a service and its actions. Four ways to add one:
+A **service** describes a service and its actions. Four ways to add one:
 
 | Source | Use when |
 | --- | --- |
@@ -268,7 +268,7 @@ A **connector type** describes a service and its actions. Four ways to add one:
 | **Adapter** | You want a shareable, data-only integration: OAuth, session handshakes, CLI wrappers ([docs/adapters.md](adapters.md)) |
 | **Generic HTTP** | Everything else; the escape hatch |
 
-A **binding** joins one connector type to one stored credential, inside a scope. That is what agents actually use:
+A **binding** joins one service to one stored credential, inside a scope. That is what agents actually use:
 
 ```
 connectors_summary        what can I reach from here?
@@ -279,7 +279,7 @@ connectors_run            do it, server-side
 
 Adapters declare their requirements, and a binding only exposes actions whose requirements are met, so a half-configured integration presents as unavailable rather than failing at the moment an agent depends on it. Every execution is logged, and the log is pruned on the same retention sweep as everything else.
 
-Binding visibility grants access to every action enabled on the connector type. Connector types define which actions exist and which are disabled; bindings decide which users, agents, or workspaces can use the connection.
+Binding visibility grants access to every action enabled on the service. Services define which actions exist and which are disabled; bindings decide which users, agents, or workspaces can use the connection.
 
 ---
 
@@ -304,7 +304,7 @@ One in-process sweep, hourly by default, does all of it (`AGENT_CORE_MAINTENANCE
 - sweeps records past `expires_at`
 - prunes scratchpad memory past its retention window
 - purges retracted and superseded records past theirs
-- prunes connector execution and webhook delivery logs
+- prunes service execution and webhook delivery logs
 - verifies a batch of anchored facts, least-recently-attempted first
 
 The last run's time, trigger, and results are visible in **Settings → Backup & Restore** and at `GET /api/backup/maintenance/status`.
@@ -355,6 +355,6 @@ Every design decision above comes from one of these. When something in Agent Cor
 | [API Reference](api.md) | Every REST endpoint and MCP tool |
 | [Configuration](configuration.md) | Settings, optional capabilities, data layout |
 | [Security](security.md) | Scope model, secret handling, deployment checklist |
-| [Adapters](adapters.md) | Building and sharing connector integrations |
+| [Adapters](adapters.md) | Building and sharing service integrations |
 | [Backup & Restore](backup-restore.md) | Export, restore, maintenance |
 | [Troubleshooting](troubleshooting.md) | Common issues and fixes |

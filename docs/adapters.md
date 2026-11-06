@@ -1,5 +1,7 @@
 # Adapters
 
+In the dashboard, installable adapters are listed under **Ready-made services**; "adapter" is the name of the manifest format this guide describes.
+
 One manifest file adds any external service to Agent Core. It describes what the service is, what credentials it needs, what actions it exposes, and how Agent Core should call it. The built-in engines handle the rest. No Python is added to your installation. Adapters survive upgrades, and the same file works on any other Agent Core instance when you share it.
 
 - **[Part 1: Using adapters](#part-1-using-adapters)**: installing, binding credentials, calling actions

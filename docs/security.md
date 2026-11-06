@@ -33,7 +33,7 @@ Secrets have one controlled path out (below). Memory *content* has two, both off
 
 Point any of these at a service on a machine you control and nothing leaves it. Point one at a hosted API and your memory content is sent there. That is the entire trade-off, and it is why none of them has a default and why the features that use them stay off until switched on.
 
-Connector actions are the third outbound path, but those are explicit by nature: an agent asked for a call to be made.
+Service actions are the third outbound path, but those are explicit by nature: an agent asked for a call to be made.
 
 ---
 
@@ -43,15 +43,15 @@ When you store a credential, the value is encrypted with [Fernet](https://crypto
 
 Normal API responses for credentials include metadata and the `AC_SECRET_*` reference name. The raw `value` field is never included.
 
-Credentials are managed from the **Connectors** page or the `/api/credentials` API. Editing a credential only replaces the encrypted secret when a new value is supplied; metadata edits keep the current encrypted value.
+Credentials are managed from the **Credentials** page or the `/api/credentials` API. Editing a credential only replaces the encrypted secret when a new value is supplied; metadata edits keep the current encrypted value.
 
 **The only controlled ways a raw secret leaves Agent Core:**
 
 1. A user with permission calls the reveal endpoint from an authenticated session.
 2. The Credential Broker calls the internal resolution endpoint with a valid broker credential and an authorized agent identity.
-3. A connector binding resolves the credential server-side so Agent Core can call the external service directly.
+3. A service binding resolves the credential server-side so Agent Core can call the external service directly.
 
-In the connector case, the raw secret stays inside the Agent Core process and is not returned to the agent.
+In the service case, the raw secret stays inside the Agent Core process and is not returned to the agent.
 
 Full backup exports are encrypted with a separate one-time backup key. The encrypted archive and the backup key together can restore your credentials, so treat both as sensitive data.
 
@@ -110,19 +110,19 @@ The model's context window never contains your actual secret. It's injected at e
 
 ---
 
-## Connector execution flow
+## Service execution flow
 
-Connectors are the server-side path for external actions:
+Services are the server-side path for external actions:
 
 1. You create a stored credential.
-2. You create a connector binding that points to that credential and has its own scope.
+2. You create a service binding that points to that credential and has its own scope.
 3. An agent calls `connectors_run` with a binding ID, action, and parameters.
-4. Agent Core verifies that the binding is visible to the agent. Binding visibility grants access to every action enabled on the connector type.
+4. Agent Core verifies that the binding is visible to the agent. Binding visibility grants access to every action enabled on the service.
 5. Agent Core resolves the credential internally, calls the external service, logs the execution, and returns the result.
 
-Both transports enforce binding visibility identically: `connectors_run` over MCP and `POST /api/connector-bindings/{id}/run` over REST call the same check. Connector types define the available actions; bindings decide which users, agents, or workspaces can use the connection.
+Both transports enforce binding visibility identically: `connectors_run` over MCP and `POST /api/connector-bindings/{id}/run` over REST call the same check. Services define the available actions; bindings decide which users, agents, or workspaces can use the connection.
 
-Credential scope controls access to the stored secret. Binding scope controls where the connector is available. In normal workspace use, set both to the same workspace.
+Credential scope controls access to the stored secret. Binding scope controls where the service is available. In normal workspace use, set both to the same workspace.
 
 ---
 
@@ -210,7 +210,7 @@ curl -X POST http://localhost:3500/api/credentials/restore-key \
   -d '{"key_base64": "<base64-encoded-fernet-key>"}'
 ```
 
-This replaces the current keyring with a single-key keyring containing the restored key. Before changing key files, Agent Core verifies that the key can decrypt all stored encrypted data, including credentials, OTP secrets, webhook secrets, connector sessions, vector API keys, and spilled tool results. If any encrypted entry fails validation, restoration is rejected and the existing keys remain in place. A successful restore writes a `credential_key_restored` audit event.
+This replaces the current keyring with a single-key keyring containing the restored key. Before changing key files, Agent Core verifies that the key can decrypt all stored encrypted data, including credentials, OTP secrets, webhook secrets, service sessions, vector API keys, and spilled tool results. If any encrypted entry fails validation, restoration is rejected and the existing keys remain in place. A successful restore writes a `credential_key_restored` audit event.
 
 After key rotation, stored data may use multiple keys. In that case, restore the full backup with its matching keyring rather than replacing the ring with one key.
 
@@ -258,4 +258,4 @@ Before making Agent Core accessible beyond localhost:
 - [ ] Restrict filesystem permissions on `data/credential.key` and `data/broker.credential`
 - [ ] Rotate the broker credential after any suspected exposure
 - [ ] Rotate webhook secrets if any are suspected to be exposed
-- [ ] Review the audit log after sensitive operations: credential reveals, backup/restore, key rotation, connector execution
+- [ ] Review the audit log after sensitive operations: credential reveals, backup/restore, key rotation, service execution

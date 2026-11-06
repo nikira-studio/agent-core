@@ -2,7 +2,7 @@
 
 **Shared memory and controlled capabilities for the agents you already use.**
 
-Agent Core is a self-hosted MCP and HTTP service. It gives Claude Code, Codex, Cursor, and custom agents durable context, encrypted credentials, scoped connector access, and an auditable activity trail.
+Agent Core is a self-hosted MCP and HTTP service. It gives Claude Code, Codex, Cursor, and custom agents durable context, encrypted credentials, scoped service access, and an auditable activity trail.
 
 **Agent Core sits beside agents, not above them.**
 
@@ -13,7 +13,7 @@ Most installations need only shared memory at first. Add the next layer when a r
 1. [Install Agent Core](#get-running-in-minutes), create an agent, and connect it with MCP.
 2. [Write and recall shared memory](#memory-that-persists-across-sessions). This is the default reason to use Agent Core.
 3. Add [encrypted credentials and the Credential Broker](docs/credential-broker.md) when a local tool needs a secret without putting it in a prompt.
-4. Add [connector bindings](docs/integrations.md#connectors-agent-core-runs-actions-directly) when Agent Core should call an external service itself.
+4. Add [service bindings](docs/integrations.md#services-agent-core-runs-actions-directly) when Agent Core should call an external service itself.
 5. Use activities, workspaces, webhooks, backups, and administration when your work needs them.
 
 You do not need to configure every capability before your first agent can use memory.
@@ -39,7 +39,7 @@ Agent Core provides:
 - durable memory in one place
 - access control for credentials and external services
 - short-lived, narrowed authority for a single task, with human approval
-- server-side connectors for imported OpenAPI specs, native MCP servers, and **adapters**, which are shareable data-manifest integrations for OAuth, session handshakes, and CLI wrappers (see [docs/adapters.md](docs/adapters.md))
+- server-side services for imported OpenAPI specs, native MCP servers, and **adapters**, which are shareable data-manifest integrations for OAuth, session handshakes, and CLI wrappers (see [docs/adapters.md](docs/adapters.md))
 - activity visibility and on-demand handoffs
 
 Agent Core is not:
@@ -56,7 +56,7 @@ A fresh install gives you a local control layer that agents can actually use:
 
 - a shared place to keep durable memory
 - a way to manage credentials without exposing raw secrets
-- a connector and service catalog that agents can call through MCP
+- a service and service catalog that agents can call through MCP
 - visibility into which agents are active and what they're doing
 - a clean dashboard for setup, oversight, and handoffs
 
@@ -64,11 +64,11 @@ A fresh install gives you a local control layer that agents can actually use:
 
 ## How it works
 
-Agent Core is a local HTTP server. It speaks REST and MCP (Model Context Protocol), so anything that can make an HTTP request can talk to it. Agents authenticate with an API key and use tools like `memory_search`, `memory_write`, `credential_get`, and the connector discovery/execution tools.
+Agent Core is a local HTTP server. It speaks REST and MCP (Model Context Protocol), so anything that can make an HTTP request can talk to it. Agents authenticate with an API key and use tools like `memory_search`, `memory_write`, `credential_get`, and the service discovery/execution tools.
 
-Memory, credentials, and configuration all live on your disk. Outbound traffic happens when an agent runs a connector action, when scheduled maintenance tests a connector binding to verify a memory anchored to it, when you browse the public API directory for connector imports, and when you register outbound webhooks. Nothing else leaves the host.
+Memory, credentials, and configuration all live on your disk. Outbound traffic happens when an agent runs a service action, when scheduled maintenance tests a service binding to verify a memory anchored to it, when you browse the public service directory for service imports, and when you register outbound webhooks. Nothing else leaves the host.
 
-For the full picture, read **[How it works](docs/how-it-works.md)**: how memory is modelled, what keeps the corpus honest, how connectors and credentials fit together, and the reasoning behind each.
+For the full picture, read **[How it works](docs/how-it-works.md)**: how memory is modelled, what keeps the corpus honest, how services and credentials fit together, and the reasoning behind each.
 
 ```
 ┌──────────────┐     MCP or HTTP     ┌────────────────────────────┐
@@ -91,7 +91,7 @@ For the full picture, read **[How it works](docs/how-it-works.md)**: how memory 
 
 ## What it looks like
 
-The dashboard gives you a central view of your connected agents, active memory, stored credentials, and connector bindings. After setup, it's the quickest way to confirm the service is running and your agents have what they need.
+The dashboard gives you a central view of your connected agents, active memory, stored credentials, and service bindings. After setup, it's the quickest way to confirm the service is running and your agents have what they need.
 
 ![Agent Core overview](docs/images/agent-overview.png)
 
@@ -125,11 +125,11 @@ Keyword search ranks matches by text relevance alongside confirmation and useful
 
 ![Agent Core memory](docs/images/agent-memory.png)
 
-### Credentials and connectors
+### Credentials and services
 
-The **Connectors** page is where you manage stored credentials and connector bindings. This is the capability layer: agents do not route through a scheduler or OS. They connect to a service catalog and call the capabilities they need, whether that capability came from an imported OpenAPI spec, a native MCP server, an installed adapter, or the built-in Generic HTTP fallback.
+The **Credentials** page holds stored credentials and the **Services** page holds service bindings. This is the capability layer: agents do not route through a scheduler or OS. They connect to a service catalog and call the capabilities they need, whether that capability came from an imported OpenAPI spec, a native MCP server, an installed adapter, or the built-in Generic HTTP fallback.
 
-A credential is the encrypted secret itself: a GitHub PAT, API key, URL, password, or other value. A connector binding is how Agent Core uses one stored credential with a connector type such as an imported OpenAPI API, a native MCP server registration, an installed adapter, or the built-in Generic HTTP escape hatch.
+A credential is the encrypted secret itself: a GitHub PAT, API key, URL, password, or other value. A service binding is how Agent Core uses one stored credential with a service such as an imported OpenAPI API, a native MCP server registration, an installed adapter, or the built-in Generic HTTP escape hatch.
 
 Agent Core can also connect to trusted internal services on your own network without weakening global URL checks. See [Configuration](docs/configuration.md) for details on `AGENT_CORE_ALLOWED_INTERNAL_HOSTS` and binding overrides.
 
@@ -138,7 +138,7 @@ You store a credential entry in Agent Core once. You can edit its name, label, a
 From there, there are two common paths:
 
 - If a local tool needs a secret in its own config, Agent Core returns a reference like `AC_SECRET_GITHUB_TOKEN_1A2B3C4D`, and the local Credential Broker resolves it at runtime.
-- If you run an action through a connector binding, Agent Core uses the stored credential server-side to call the external service and returns the result.
+- If you run an action through a service binding, Agent Core uses the stored credential server-side to call the external service and returns the result.
 
 In both cases, the raw secret never appears in prompts, logs, or generated configs.
 
@@ -253,9 +253,9 @@ For REST-based clients or custom integrations, every feature is also available t
 
 | Doc | What's in it |
 | --- | --- |
-| [Quickstart](docs/quickstart.md) | Install, connect an agent, write shared memory, then add credentials and connectors when needed |
-| [Integrations](docs/integrations.md) | Set up MCP, credentials, connectors, activities, collaboration, and webhooks in that order |
-| [How it works](docs/how-it-works.md) | The system model and full feature set: memory, activity, credentials, connectors, and maintenance |
+| [Quickstart](docs/quickstart.md) | Install, connect an agent, write shared memory, then add credentials and services when needed |
+| [Integrations](docs/integrations.md) | Set up MCP, credentials, services, activities, collaboration, and webhooks in that order |
+| [How it works](docs/how-it-works.md) | The system model and full feature set: memory, activity, credentials, services, and maintenance |
 | [Credential Broker](docs/credential-broker.md) | How `AC_SECRET_*` references work and how to resolve them at runtime |
 | [Credential consumers](docs/credential-consumers.md) | Give a service or container its own identity that fetches only the secrets granted to it |
 | [Configuration](docs/configuration.md) | Environment variables, ports, and data directory layout |

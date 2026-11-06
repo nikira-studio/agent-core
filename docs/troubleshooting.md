@@ -130,11 +130,11 @@ Work through this checklist:
 
 ### Reveal fails
 
-Revealing a raw credential value requires a user session. Agent API keys can't reveal credentials; this is intentional. Most workflows should not need reveal; use connector bindings for server-side actions or the Credential Broker for local process injection.
+Revealing a raw credential value requires a user session. Agent API keys can't reveal credentials; this is intentional. Most workflows should not need reveal; use service bindings for server-side actions or the Credential Broker for local process injection.
 
 ### Credential edits did not change the secret
 
-On the Connectors page, the credential edit form has an optional replacement secret field. If you leave it blank, Agent Core keeps the existing encrypted value and updates only metadata such as name, label, and type. Enter a new value only when you want to replace the stored secret.
+On the Credentials page, the credential edit form has an optional replacement secret field. If you leave it blank, Agent Core keeps the existing encrypted value and updates only metadata such as name, label, and type. Enter a new value only when you want to replace the stored secret.
 
 ---
 

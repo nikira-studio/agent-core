@@ -4,6 +4,8 @@ Notable changes to Agent Core are documented here. The format follows [Keep a Ch
 
 ## [Unreleased]
 
+**Upgrading from 1.1.0.** Take a backup first. Everyone is signed out once (sessions are now signed with their own key), and a script that sends a person's session token to an admin route must switch to an operator token (Settings → Account); both are described under Security below. The dashboard pages are renamed and regrouped, but every address (`/connectors`, `/integrations` and the rest) still works, so bookmarks and links keep working. Nothing in your data needs migrating for the dashboard changes. A workspace purge keeps its tasks, with their workspace link cleared, and deletes its memories, stored credentials and service bindings; the delete dialogs now say so.
+
 ### Added
 
 - Approvals: an agent with the new `admin_propose` capability proposes a bundle of named admin changes (create or update an agent, create or revoke a credential grant, create a credential, create or update a connector binding, change a connector type's actions, install an adapter) with the MCP tool `approval_propose` or `POST /api/approvals`. Nothing runs until a signed-in admin approves it on the new **Approvals** page. The whole bundle then runs as that person in one all-or-nothing database transaction, so a change that fails leaves nothing half applied; the audit records the person as the actor and the agent as the proposer. A target changed after it was proposed fails the approval instead of being overwritten, and a request expires after 24 hours. Agents read status with `approval_get` and can never decide. Secret values are never proposed: a credential's value is typed by the person when approving. Pending approvals also appear in `attention_list` (`approvals`). Migrations 18 and 19 add `approvals` and the `approvals` session channel.
@@ -13,6 +15,8 @@ Notable changes to Agent Core are documented here. The format follows [Keep a Ch
 
 ### Fixed
 
+- Editing a user's active state used the checkbox in the Add User dialog (the same element id appeared in both dialogs); it now lives in the Edit dialog only.
+- Settings → Security showed a literal `{CREDENTIAL_PREFIX}*` in the helper's description; it now shows `AC_SECRET_*`.
 - The Agents page now offers the `admin_propose` and `credentials_resolve` capabilities, unchecked on the create form so a new agent never gets either by default, and each capability is grouped and described in plain words. Before, saving an edit to an agent that held one of those two silently removed it, because the form only sent the boxes it showed.
 
 ### Changed
@@ -38,6 +42,15 @@ Notable changes to Agent Core are documented here. The format follows [Keep a Ch
 - Session context lists at most 10 key records, with shorter previews, down from up to 40. Listed records were rarely opened; `memory_search` finds the rest.
 - `GET /api/connector-bindings/{id}/executions` returns the real `total` and caps `limit` at 200.
 - The example `docker-compose.example.yml` uses a named volume and adds a health check; a bind-mounted data directory the container cannot `chmod` no longer stops startup.
+
+- **Connect** is three steps: **1. Who is connecting?**, **2. Which tool?** (Claude Code, Codex, Cursor, Windsurf, Antigravity or Other MCP tool, each showing only its own MCP config and the file it reads, in order) and **3. Check it works** (the connection check and the Verification Prompt). Every other output, and every old `?output_type=` link, is under **Other outputs**. The generated text is unchanged; the MCP config for one tool is cut from the full one. The key button reads **Generate One-Time Key + …** and the help describes it as blue, which it is.
+- **Activity** leads with the task list. The coordination counters stay; the two percentage tiles sit behind an Advanced toggle, Workspace synchronization moves to the bottom (closed when empty), and Start and Cancel sit behind **More** on each task. On a phone each task is a card. Assigning a task stays on this page.
+- **Memory** shows 25 memories to a page, has a workspace filter, and on a phone each memory is a card with the text first. **Workspaces** has a **Memories** column and shows write access in blue instead of red (red is for delete only).
+- **Audit** shows who did each thing (name plus a small user or agent tag); **Approvals** has a **Decided** column (who and when). **Credentials** shows the workspace a credential lives in, with a small tag.
+- Permanently deleting a workspace or an agent asks you to type its ID and says what goes with it (a workspace: its memories, stored credentials and service bindings; its tasks are kept but no longer belong to a workspace. An agent: its private memory, anything stored in its private workspace, and its tasks).
+- One vocabulary in the dashboard and the docs: service and binding (not connector or adapter; the pages are Services, Service directory, Ready-made services and Services help), task, memories, workspace, owner, two-step sign-in, encryption key, local credential helper. Plain-word help throughout; sidebar group headings are small labels with a divider, so they no longer look like menu entries. MCP tool names (`connectors_run` and the others) and API routes are unchanged.
+- Settings: Maintenance sits under its own heading with its help, its last run reads in plain words ("2 temporary notes deleted", or "nothing to clean up"), Run Checks says what it checks, and vector search is called **Search by meaning (vector search)**. The Security tab shows how many keys are in use with the key ID behind a toggle.
+- New Binding shows one credential choice at a time and asks **Who may use it** by workspace name. Row buttons such as Deactivate and Retract are plain; the filled blue button is the page's main action.
 
 ### Security
 
