@@ -321,3 +321,46 @@ def test_rotation_concurrent_requests_blocked(test_client, admin_token):
             assert r.status_code == 500
         except Exception:
             pass
+
+
+def _events(action):
+    from app.services import audit_service
+
+    return audit_service.query_events(action=action, limit=20)
+
+
+def test_rotating_the_helper_key_is_audited_without_the_value(test_client, admin_token):
+    r = test_client.post("/api/dashboard/broker/rotate", headers={"Authorization": f"Bearer {admin_token}"})
+    assert r.status_code == 200
+    secret = r.json()["data"]["credential"]
+    events = _events("broker_credential_rotated")
+    assert len(events) == 1
+    event = events[0]
+    assert event["actor_id"] == "admin" and event["result"] == "success"
+    assert "previous_credential_retired" in str(event)
+    assert secret not in str(event)
+
+
+def test_encryption_key_rotation_and_restore_are_audited_for_real(test_client, admin_token):
+    from app.security import encryption
+
+    headers = {"Authorization": f"Bearer {admin_token}"}
+    assert test_client.post("/api/credentials/rotate", headers=headers).status_code == 200
+    rotated = _events("credential_key_rotated")
+    assert rotated and rotated[0]["result"] == "success" and rotated[0]["actor_id"] == "admin"
+
+    primary = encryption.get_primary_key().decode()
+    assert test_client.post("/api/credentials/restore-key", headers=headers, json={"key_base64": primary}).status_code == 200
+    restored = _events("credential_key_restored")
+    assert restored and restored[0]["result"] == "success"
+    assert primary not in str(restored)
+
+
+def test_a_refused_key_restore_is_audited_as_a_failure_without_the_key(test_client, admin_token):
+    headers = {"Authorization": f"Bearer {admin_token}"}
+    bad = "not-a-valid-key"
+    r = test_client.post("/api/credentials/restore-key", headers=headers, json={"key_base64": bad})
+    assert r.status_code == 400
+    events = _events("credential_key_restored")
+    assert events and events[0]["result"] == "failure"
+    assert bad not in str(events)

@@ -550,6 +550,10 @@ async def rotate_key(
         ctx.user_id
     )
     if not ok:
+        audit_service.write_event(
+            actor_type="user", actor_id=ctx.user_id, action="credential_key_rotated",
+            result="failure", details={"reason": msg},
+        )
         return error_response("ROTATION_FAILED", msg, 500)
 
     return success_response(
@@ -594,6 +598,11 @@ async def restore_key(
         ctx.user_id, key_bytes
     )
     if not ok:
+        # A refused restore is worth a record too; the key itself is never written.
+        audit_service.write_event(
+            actor_type="user", actor_id=ctx.user_id, action="credential_key_restored",
+            result="failure", details={"reason": msg},
+        )
         return error_response("RESTORE_FAILED", msg, 400)
 
     return success_response({"message": msg})

@@ -155,6 +155,15 @@ def dashboard_activity_summary(session: dict = Depends(get_current_session)):
 @router.post("/broker/rotate")
 async def rotate_broker(session: dict = Depends(require_admin)):
     new_credential = await asyncio.to_thread(rotate_broker_credential)
+    # Who and when; never the credential itself.
+    audit_service.write_event(
+        actor_type="user",
+        actor_id=session["user_id"],
+        action="broker_credential_rotated",
+        resource_type="broker_credential",
+        result="success",
+        details={"previous_credential_retired": True},
+    )
     return success_response(
         {
             "credential": new_credential,

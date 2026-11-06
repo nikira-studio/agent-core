@@ -15,6 +15,8 @@ Notable changes to Agent Core are documented here. The format follows [Keep a Ch
 - Every dashboard page now has its headings in order: the page title is an h1, each card's title an h2, and a section inside a card an h3, so a screen reader or an outline no longer jumps from h1 to h3. The look is unchanged (the levels are styled by class, not chosen for size).
 - **Overview** no longer shows the row of count tiles (users, agents, workspaces, open tasks, memories). They repeated what each page already shows; the page now reads Waiting on you, Health, Search and Recent Activity.
 
+- Rotating the local credential helper key is now recorded in the audit log (`broker_credential_rotated`: who, when, and that the previous credential was retired; never the credential). A refused or failed encryption-key rotation or restore is recorded too (result `failure`, with the reason and never the key); successful ones were already recorded.
+
 ### Added
 
 - `scripts/ui_sweep.py` also saves each page as rendered and runs the design detector on it when it is installed, so the HTML built in Python is checked too.
