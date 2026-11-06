@@ -526,6 +526,8 @@ async def connector_health_check(
         enabled=True,
     )
     all_visible = [binding for binding in bindings if enforcer.can_read(binding["scope"])]
+    # Never-tested and longest-untested first, so repeating the check reaches the rest.
+    all_visible.sort(key=lambda binding: binding.get("last_tested_at") or "")
     visible = all_visible[:HEALTH_CHECK_LIMIT]
     results = []
     for binding in visible:

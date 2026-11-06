@@ -289,6 +289,7 @@ def test_testing_a_binding_needs_the_same_capability_as_running_one(test_client,
 
 
 def test_the_batch_health_check_needs_execute_and_tests_at_most_a_page_of_bindings(test_client, monkeypatch):
+    from app.database import get_db
     from app.routes.connectors import HEALTH_CHECK_LIMIT
     from app.services import workspace_service
 
@@ -311,3 +312,12 @@ def test_the_batch_health_check_needs_execute_and_tests_at_most_a_page_of_bindin
     assert denied.status_code == 403 and calls == []
     ok = test_client.post("/api/connector-types/health-check", headers=headers("doer3"), json={}).json()["data"]
     assert ok["total"] == HEALTH_CHECK_LIMIT == len(calls) and ok["skipped"] == 5 and ok["limit"] == HEALTH_CHECK_LIMIT
+    # a repeat reaches the ones the first call left out (the stub stamps what it tests)
+    first = set(calls)
+    with get_db() as conn:
+        for binding_id in first:
+            conn.execute("UPDATE connector_bindings SET last_tested_at = '2026-01-01' WHERE id = ?", (binding_id,))
+        conn.commit()
+    calls.clear()
+    test_client.post("/api/connector-types/health-check", headers=headers("doer3"), json={})
+    assert set(calls) >= {b["id"] for b in connector_service.list_bindings(scope="workspace:fleet") if b["id"] not in first}
