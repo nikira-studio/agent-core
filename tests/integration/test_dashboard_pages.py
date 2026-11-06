@@ -479,6 +479,6 @@ def test_row_actions_are_plain_buttons_and_the_generate_button_is_the_blue_main_
 
 def test_delete_asks_for_the_name_and_says_what_goes_with_it(authenticated_client):
     workspaces = authenticated_client.get("/workspaces").text
-    assert "dataset.memories" in workspaces and "Type the workspace ID to confirm" in workspaces
+    assert "counts.memories" in workspaces and "Type the workspace ID to confirm" in workspaces and "kept but no longer belong" in workspaces
     agents = authenticated_client.get("/agents").text
-    assert "Type the agent ID to confirm" in agents and "Its key stops working" in agents
+    assert "Type the agent ID to confirm" in agents and "its private memory" in agents

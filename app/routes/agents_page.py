@@ -301,7 +301,7 @@ def agents_page(request: Request, session: dict = Depends(require_auth)):
       else { showToast(j.error.message || 'Failed', 'danger'); }
     }
     async function purgeAgent(id) {
-      const typed = prompt('PERMANENTLY DELETE the agent "' + id + '"? Its key stops working and its history is removed. This cannot be undone.\\n\\nType the agent ID to confirm:');
+      const typed = prompt('PERMANENTLY DELETE the agent "' + id + '"? Its key stops working, and its private memory, anything stored in its private workspace (credentials, service bindings) and its tasks are deleted. This cannot be undone.\\n\\nType the agent ID to confirm:');
       if (typed === null) return;
       if (typed.trim() !== id) { showToast('That is not the agent ID. Nothing was deleted.', 'warning'); return; }
       const j = await apiFetch('/api/agents/' + id + '/purge', { method: 'POST' });

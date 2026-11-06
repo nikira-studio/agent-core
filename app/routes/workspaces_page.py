@@ -46,6 +46,8 @@ def workspaces_page(request: Request, session: dict = Depends(require_auth)):
     with get_db() as conn:
         memory_counts = {r[0]: r[1] for r in conn.execute("SELECT scope, COUNT(*) FROM memory_records GROUP BY scope")}
         task_counts = {r[0]: r[1] for r in conn.execute("SELECT memory_scope, COUNT(*) FROM agent_activity GROUP BY memory_scope")}
+        credential_counts = {r[0]: r[1] for r in conn.execute("SELECT scope, COUNT(*) FROM credentials GROUP BY scope")}
+        binding_counts = {r[0]: r[1] for r in conn.execute("SELECT scope, COUNT(*) FROM connector_bindings GROUP BY scope")}
 
     project_agent_access = {}
     for p in workspaces:
@@ -93,7 +95,7 @@ def workspaces_page(request: Request, session: dict = Depends(require_auth)):
             f"<td><div class='actions-cell'>"
             f"<button type='button' class='btn btn-sm btn-secondary' data-workspace-action='edit' data-workspace-id='{p['id']}'>Edit</button>"
             f"{toggle_btn}"
-            f"<button type='button' class='btn btn-sm btn-danger icon-delete-btn' data-workspace-action='purge' data-workspace-id='{p['id']}' data-memories='{memory_counts.get('workspace:' + p['id'], 0)}' data-tasks='{task_counts.get('workspace:' + p['id'], 0)}' title='Permanently delete' aria-label='Permanently delete'>{get_icon('delete')}</button>"
+            f"<button type='button' class='btn btn-sm btn-danger icon-delete-btn' data-workspace-action='purge' data-workspace-id='{p['id']}' data-memories='{memory_counts.get('workspace:' + p['id'], 0)}' data-tasks='{task_counts.get('workspace:' + p['id'], 0)}' data-credentials='{credential_counts.get('workspace:' + p['id'], 0)}' data-bindings='{binding_counts.get('workspace:' + p['id'], 0)}' title='Permanently delete' aria-label='Permanently delete'>{get_icon('delete')}</button>"
             f"</div></td></tr>"
         )
 
@@ -119,8 +121,8 @@ def workspaces_page(request: Request, session: dict = Depends(require_auth)):
       if (j.ok) { showToast('Workspace reactivated'); refreshProjects(); }
       else { showToast(j.error.message || 'Failed', 'danger'); }
     }
-    async function purgeProject(id, memories, tasks) {
-      const typed = prompt('PERMANENTLY DELETE the workspace "' + id + '"? This also deletes its ' + (memories || 0) + ' memories and ' + (tasks || 0) + ' tasks. This cannot be undone.\\n\\nType the workspace ID to confirm:');
+    async function purgeProject(id, counts) {
+      const typed = prompt('PERMANENTLY DELETE the workspace "' + id + '"? This also deletes its ' + (counts.memories || 0) + ' memories (retracted ones included), ' + (counts.credentials || 0) + ' stored credentials and ' + (counts.bindings || 0) + ' service bindings. Its ' + (counts.tasks || 0) + ' tasks are kept but no longer belong to a workspace. This cannot be undone.\\n\\nType the workspace ID to confirm:');
       if (typed === null) return;
       if (typed.trim() !== id) { showToast('That is not the workspace ID. Nothing was deleted.', 'warning'); return; }
       const j = await apiFetch('/api/workspaces/' + id + '/purge', { method: 'POST' });
@@ -457,7 +459,7 @@ def workspaces_page(request: Request, session: dict = Depends(require_auth)):
       if (action === 'edit') editProject(workspaceId);
       else if (action === 'deactivate') deactivateProject(workspaceId);
       else if (action === 'reactivate') reactivateProject(workspaceId);
-      else if (action === 'purge') purgeProject(workspaceId, button.dataset.memories, button.dataset.tasks);
+      else if (action === 'purge') purgeProject(workspaceId, button.dataset);
     });
     </script>""".replace(
         "__WORKSPACE_AGENT_STATE__",
