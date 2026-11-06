@@ -1860,10 +1860,15 @@ th.activity-actions-header {
 /* === Sidebar groups === */
 .sidebar nav .nav-heading {
   font-size: 0.65rem;
+  font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.1em;
   color: var(--muted);
-  padding: 12px 12px 4px;
+  border-top: 1px solid var(--border);
+  margin-top: 8px;
+  padding: 14px 0 2px 4px;
+  cursor: default;
+  user-select: none;
 }
 
 /* === Tabs === */
