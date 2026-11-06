@@ -84,11 +84,13 @@ _TOOL_CAPABILITIES = {
             "connectors_list",
             "connectors_resolve",
             "connectors_bindings_list",
-            "connectors_bindings_test",
             "connectors_actions_list",
             "connectors_summary",
         )
     },
+    # A test calls the real service with the stored credential, so it needs the same
+    # capability as running an action, not only the right to look.
+    "connectors_bindings_test": "connectors_execute",
     "connectors_run": "connectors_execute",
 }
 

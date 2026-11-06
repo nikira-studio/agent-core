@@ -361,6 +361,8 @@ async def test_binding(
     binding_id: str,
     ctx: EffectiveAuthority = Depends(get_request_context),
 ):
+    if not ctx.has_capability("connectors_execute"):
+        return error_response("CAPABILITY_DENIED", "This operation requires the connectors_execute capability", 403)
     binding = connector_service.get_binding(binding_id)
     if not binding:
         return error_response("NOT_FOUND", "Binding not found", 404)

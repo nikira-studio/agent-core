@@ -263,3 +263,25 @@ def test_only_an_admin_or_the_person_themselves_can_let_an_agent_run_that_person
     allowed = test_client.put("/api/agents/own-agent", headers=csrf_headers(test_client), json={"inherit_user_bindings": True})
     assert allowed.status_code == 200, allowed.text
     assert agent_service.get_agent_by_id("own-agent")["inherit_user_bindings"] == 1
+
+
+def test_testing_a_binding_needs_the_same_capability_as_running_one(test_client, monkeypatch):
+    agent_service.create_agent("looker", "Looker", "admin", capabilities=["connectors_read"], read_scopes=["workspace:ops"], write_scopes=[])
+    agent_service.create_agent("doer", "Doer", "admin", capabilities=["connectors_read", "connectors_execute"], read_scopes=["workspace:ops"], write_scopes=[])
+    from app.services import workspace_service
+
+    workspace_service.create_workspace("ops", "Ops", "admin")
+    connector_service.create_connector_type(connector_type_id="tsvc", display_name="T", auth_type="none",
+                                            supported_actions=[{"name": "GET /x", "method": "GET"}], backend_type="generic_http")
+    binding = connector_service.create_binding("tsvc", "T", "workspace:ops", created_by="admin")
+    monkeypatch.setattr(connector_service, "test_binding", lambda binding_id: {"success": True})
+    keys = {}
+    for agent_id in ("looker", "doer"):
+        keys[agent_id] = agent_service.rotate_agent_key(agent_id)
+    refused = _mcp(test_client, keys["looker"], "connectors_bindings_test", {"binding_id": binding["id"]})
+    assert refused.status_code == 403
+    rest = test_client.post(f"/api/connector-bindings/{binding['id']}/test", headers={"Authorization": f"Bearer {keys['looker']}"})
+    assert rest.status_code == 403 and rest.json()["error"]["code"] == "CAPABILITY_DENIED"
+    assert _mcp(test_client, keys["doer"], "connectors_bindings_test", {"binding_id": binding["id"]}).json()["ok"] is True
+    # Looking is still allowed with read alone.
+    assert _mcp(test_client, keys["looker"], "connectors_bindings_list", {}).status_code == 200
