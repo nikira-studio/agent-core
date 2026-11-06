@@ -48,8 +48,15 @@ def clean_db(test_db_path):
 
     if test_db_path.exists():
         test_db_path.unlink()
-    from app.database import init_db
+    from app.database import get_db, init_db
     init_db()
+    # Most tests talk to local stub servers, so they run with private addresses allowed;
+    # the fresh-install default (block) and the report-only mode have their own tests.
+    with get_db() as conn:
+        conn.execute("INSERT OR REPLACE INTO system_settings (key, value) VALUES ('internal_hosts_mode', 'allow')")
+        conn.commit()
+    from app.services import network_policy_service
+    network_policy_service.reset_cache()
 
     yield test_db_path
 

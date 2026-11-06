@@ -173,7 +173,7 @@ def test_stored_webhook_is_revalidated_at_delivery(clean_db, monkeypatch):
     result = webhook_service.test_delivery(webhook["id"])
 
     assert result["ok"] is False
-    assert "Blocked private network host" in result["error"]
+    assert "Blocked:" in result["error"] and "private address" in result["error"]
 
 
 def test_mcp_endpoint_is_revalidated_at_execution(monkeypatch):

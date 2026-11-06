@@ -174,6 +174,10 @@ One vocabulary, used in titles, tooltips and help. A page that needs a different
 - Anything that deletes for good names what goes with it (memories and tasks for a workspace, the key and history for an agent) and asks for the ID to be typed.
 - Where Connect's checks all pass, one line says so and the list sits behind "Show the checks"; it opens by itself when something fails.
 
+## Network limits (2026-11-06)
+
+**Settings → Security → Network limits** (admin). *Private addresses*: Allow, Report only or Block, with an *Allowed private addresses* list (one host, address or range per line) and, in Report only, the hosts that would have been blocked this week with an **Allow** button each. *Credential broker callers*: an allowed-callers list and Report only or Refuse. Each control has one line of help. **Overview → Health** shows both as quiet lines (the broker line says when any caller is accepted). A refusal reads "Blocked: 192.168.1.50 is a private address. Allow it under Settings → Security → Allowed private addresses." and is shown when a service or binding is added, not first at run time.
+
 ## Running a person's own services (2026-11-06)
 
 **Agents** (Create and Edit): the checkbox **Run its person's own services** (off by default; help: it lets the agent also run the services bound in its person's personal scope, not only those in workspaces it is given). Agents that have it on show a **runs personal services** tag in the list. The agent's person's memory scope is still readable either way.

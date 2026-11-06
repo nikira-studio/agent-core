@@ -39,6 +39,14 @@ class Settings(BaseSettings):
     EXECUTION_STALE_MINUTES: int = 30
     COOKIE_SECURE: bool = False
     BLOCK_INTERNAL_HOSTS: bool = False
+    # allow | report | block. Overrides BLOCK_INTERNAL_HOSTS when set; otherwise a fresh
+    # install blocks private addresses and an existing one keeps allowing them.
+    INTERNAL_HOSTS_MODE: str = ""
+    # Addresses or networks that may call the credential broker (loopback always may).
+    # Empty: any caller holding the broker credential. With a list, the mode decides.
+    BROKER_ALLOWED_HOSTS: str = ""
+    # audit: record the callers it would refuse and refuse nobody. enforce: refuse them.
+    BROKER_ALLOWLIST_MODE: str = "audit"
     ALLOWED_INTERNAL_HOSTS: str = ""
     # Tool-result offloader: MCP tool outputs whose serialized text exceeds this
     # many characters are spilled to local storage and replaced with a summary +

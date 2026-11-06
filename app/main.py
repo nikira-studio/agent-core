@@ -48,6 +48,7 @@ from app.routes import (
     events_router,
     webhooks_router,
     approvals_router,
+    network_limits_router,
 )
 from app.database import DatabaseUnavailable
 from app.security.exceptions import APIError
@@ -259,6 +260,7 @@ def create_app() -> FastAPI:
     app.include_router(spec_router, tags=["spec"])
     app.include_router(auth_router, tags=["auth"])
     app.include_router(approvals_router, tags=["approvals"])
+    app.include_router(network_limits_router, tags=["network_limits"])
     app.include_router(agents_router, tags=["agents"])
     app.include_router(workspaces_router, tags=["workspaces"])
     app.include_router(credentials_router, tags=["credentials"])
@@ -302,6 +304,10 @@ def create_app() -> FastAPI:
     settings.data_dir.mkdir(parents=True, exist_ok=True)
     init_db()
     ensure_broker_credential()
+    from app.services import network_policy_service
+
+    for warning in network_policy_service.startup_warnings():
+        logging.getLogger(__name__).warning(warning)
     from app.connectors import generic_http  # noqa: F401 - registers Generic HTTP connector
 
     try:

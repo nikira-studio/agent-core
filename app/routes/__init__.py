@@ -30,6 +30,7 @@ from app.routes.webhooks_page import router as webhooks_page_router
 from app.routes.events import router as events_router
 from app.routes.webhooks import router as webhooks_router
 from app.routes.approvals import router as approvals_router
+from app.routes.network_limits import router as network_limits_router
 from app.routes.approvals_page import router as approvals_page_router
 from app.routes.credential_consumers import router as credential_consumers_router
 from app.routes.workspace_sync import router as workspace_sync_router
@@ -70,6 +71,7 @@ __all__ = [
     "events_router",
     "webhooks_router",
     "approvals_router",
+    "network_limits_router",
     "approvals_page_router",
     "workspace_sync_router",
     "session_context_router",

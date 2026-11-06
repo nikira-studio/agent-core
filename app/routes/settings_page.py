@@ -926,6 +926,52 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
       <div id="credential-key-result" style="margin-top:12px"></div>
     </div>"""
 
+    network_limits_html = ""
+    if is_admin:
+        network_limits_html = """
+    <div class="card" id="network-limits">
+      <h3>Network limits</h3>
+      <p class="text-muted" style="margin-bottom:12px">Two limits you can turn up in steps. Start with <strong>report only</strong>: it lists what would be refused and refuses nothing, so you can allow what you expect before you enforce.</p>
+      <h4 class="section-title">Private addresses</h4>
+      <div class="form-group">
+        <label for="nl-internal-mode">Services, webhooks and imports reaching private addresses (like 192.168.x.x)</label>
+        <select id="nl-internal-mode">
+          <option value="allow">Allow</option>
+          <option value="report">Report only</option>
+          <option value="block">Block</option>
+        </select>
+        <p class="form-hint">Block stops anything that points at a private address unless it is in the allowed list below. A new install starts on Block; an install that was already running starts on Allow.</p>
+        <p class="form-hint" id="nl-internal-env" style="display:none">This is set by an environment variable on the server; change it there.</p>
+      </div>
+      <div class="form-group">
+        <label for="nl-allowed-internal">Allowed private addresses</label>
+        <textarea id="nl-allowed-internal" rows="3" placeholder="192.168.1.0/24&#10;searxng&#10;media-box.lan"></textarea>
+        <p class="form-hint">One per line: a host name, an address, or a range such as 192.168.1.0/24. These are always allowed, even when private addresses are blocked.</p>
+      </div>
+      <div id="nl-would-block"></div>
+      <div class="actions-cell"><button type="button" class="btn" id="nl-save-internal">Save</button></div>
+      <div id="nl-internal-note" class="alert" style="display:none;margin-top:8px"></div>
+      <hr class="divider">
+      <h4 class="section-title">Credential broker callers</h4>
+      <p class="text-muted" id="nl-broker-status"></p>
+      <div class="form-group">
+        <label for="nl-broker-allowed">Allowed callers</label>
+        <textarea id="nl-broker-allowed" rows="3" placeholder="192.168.1.20&#10;10.0.0.0/24"></textarea>
+        <p class="form-hint">One address or range per line. This server itself is always allowed. Leave it empty to accept any caller that holds the broker credential.</p>
+      </div>
+      <div class="form-group">
+        <label for="nl-broker-mode">When a caller is not in the list</label>
+        <select id="nl-broker-mode">
+          <option value="audit">Report only (let it through, and record it)</option>
+          <option value="enforce">Refuse it</option>
+        </select>
+        <p class="form-hint" id="nl-broker-env" style="display:none">This is set by an environment variable on the server; change it there.</p>
+      </div>
+      <div class="actions-cell"><button type="button" class="btn" id="nl-save-broker">Save</button></div>
+      <div id="nl-broker-note" class="alert" style="display:none;margin-top:8px"></div>
+      <script src="/static/js/network_limits.js?v=1"></script>
+    </div>"""
+
     broker_html = ""
     if is_admin:
         broker_html = f"""
@@ -1556,7 +1602,7 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
         tabs += [
             ("memory", "Memory", f"{vector_settings_html}{memory_behavior_html}"),
             ("data", "Data and backup", f"{retention_html}{backup_html}{prune_html}"),
-            ("security", "Security", f"{secrets_snapshot_html}{encryption_key_html}{broker_html}"),
+            ("security", "Security", f"{secrets_snapshot_html}{network_limits_html}{encryption_key_html}{broker_html}"),
         ]
     tab_bar = ""
     if len(tabs) > 1:

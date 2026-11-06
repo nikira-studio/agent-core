@@ -121,6 +121,24 @@ class AdapterInstallRequest(BaseModel):
     source_kind: Optional[str] = None
 
 
+def _private_address_problem(config_json, endpoint_override) -> str | None:
+    """The plain message when a binding's address is a private one that is not allowed, at the moment of adding."""
+    from app.services import network_policy_service
+
+    urls = [endpoint_override] if endpoint_override else []
+    try:
+        config = json.loads(config_json) if config_json else {}
+    except ValueError:
+        config = {}
+    if isinstance(config, dict) and isinstance(config.get("base_url"), str):
+        urls.append(config["base_url"])
+    for url in urls:
+        problem = network_policy_service.check_url(url)
+        if problem and problem.startswith("Blocked:"):
+            return problem
+    return None
+
+
 @router.get("")
 def list_bindings(
     scope: Optional[str] = None,
@@ -171,6 +189,9 @@ def create_binding(
             return error_response(
                 "SCOPE_DENIED", "Access denied to linked credential", 403
             )
+    problem = _private_address_problem(body.config_json, body.endpoint_url_override)
+    if problem:
+        return error_response("PRIVATE_ADDRESS", problem, 400)
     try:
         binding = connector_service.create_binding(
             connector_type_id=body.connector_type_id,
@@ -301,6 +322,9 @@ def update_binding(
             update_fields["endpoint_url_override"] = None
         elif body.endpoint_url_override is not None:
             update_fields["endpoint_url_override"] = body.endpoint_url_override
+        problem = _private_address_problem(body.config_json, update_fields.get("endpoint_url_override"))
+        if problem:
+            return error_response("PRIVATE_ADDRESS", problem, 400)
         ok = connector_service.update_binding(binding_id, **update_fields)
     except ValueError as e:
         return error_response("INVALID_CONFIG", str(e), 400)
@@ -1066,6 +1090,11 @@ def create_http_connector(
             raise ValueError("Base URL must include a host")
     except ValueError as e:
         return error_response("INVALID_URL", str(e), 400)
+    from app.services import network_policy_service
+
+    problem = network_policy_service.check_url(body.base_url)
+    if problem:
+        return error_response("PRIVATE_ADDRESS" if problem.startswith("Blocked:") else "INVALID_URL", problem, 400)
 
     extra_headers = {}
     if body.headers_json:

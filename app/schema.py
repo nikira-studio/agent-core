@@ -569,6 +569,7 @@ def _apply_schema_migrations(conn) -> None:
         (19, "trusted-device-sessions", _migrate_019_trusted_device_sessions),
         (20, "connector-run-approvals", _migrate_020_connector_run_approvals),
         (21, "agent-inherit-user-bindings", _migrate_021_inherit_user_bindings),
+        (22, "private-address-policy", _migrate_022_private_address_policy),
     )
     applied = {
         row["revision"]
@@ -1628,6 +1629,21 @@ def _migrate_019_trusted_device_sessions(conn) -> None:
     )
     conn.execute("DROP TABLE sessions")
     conn.execute("ALTER TABLE sessions_rebuilt RENAME TO sessions")
+
+
+def _migrate_022_private_address_policy(conn) -> None:
+    """A fresh install blocks private addresses; an install that already has data keeps allowing them.
+
+    Existing installs are never switched silently: they can see what would be blocked
+    (report only) and block when they choose.
+    """
+    has_data = conn.execute("SELECT 1 FROM users LIMIT 1").fetchone() or conn.execute(
+        "SELECT 1 FROM agents LIMIT 1"
+    ).fetchone()
+    conn.execute(
+        "INSERT OR IGNORE INTO system_settings (key, value) VALUES ('internal_hosts_mode', ?)",
+        ("allow" if has_data else "block",),
+    )
 
 
 def _migrate_021_inherit_user_bindings(conn) -> None:

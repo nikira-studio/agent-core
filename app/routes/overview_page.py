@@ -248,7 +248,7 @@ def _health_items(is_admin: bool) -> list[tuple[str, str, str, bool]]:
 
     from app.branding import APP_VERSION
     from app.database import get_db
-    from app.services import broker_service
+    from app.services import broker_service, network_policy_service
 
     cutoff = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
     with get_db() as conn:
@@ -265,6 +265,7 @@ def _health_items(is_admin: bool) -> list[tuple[str, str, str, bool]]:
         ("Services", "all working" if not failing else f"{failing} failing", "/connectors", not failing),
         ("Webhooks", "no failures in 24 hours" if not dead else f"{dead} failed in 24 hours", "/webhooks", not dead),
         ("Local credential helper", "ready" if broker else "not set up", "/settings", broker),
+        *[(label, value, "/settings#security", fine) for label, value, fine in network_policy_service.health_lines()],
     ]
 
 

@@ -29,8 +29,6 @@ def _is_blocked_ip(
 
 def resolve_public_url(url: str) -> ResolvedUrl:
     """Validate a URL and return the exact addresses approved for connection."""
-    from app.config import settings  # lazy to avoid circular import
-
     normalized = url.strip()
     parsed = urllib.parse.urlparse(normalized)
     if parsed.scheme not in ("http", "https"):
@@ -45,16 +43,22 @@ def resolve_public_url(url: str) -> ResolvedUrl:
     except ValueError as exc:
         raise ValueError("URL contains an invalid port") from exc
 
-    allow_internal = host.lower() in settings.allowed_internal_host_set
-    block_internal = bool(getattr(settings, "BLOCK_INTERNAL_HOSTS", False))
+    from app.services import network_policy_service
+
+    mode = network_policy_service.internal_hosts_mode()
+    block_internal = mode == "block"
+    report_internal = mode == "report"
 
     try:
         ip = ipaddress.ip_address(host)
     except ValueError:
         ip = None
     if ip is not None:
-        if block_internal and not allow_internal and _is_blocked_ip(ip):
-            raise ValueError(f"Blocked private network host: {host}")
+        private = _is_blocked_ip(ip) and not network_policy_service.host_allowed(host, ip)
+        if report_internal and private:
+            network_policy_service.note_would_block(host, str(ip))
+        if block_internal and private:
+            raise ValueError(network_policy_service.blocked_message(host, str(ip)))
         family = socket.AF_INET6 if ip.version == 6 else socket.AF_INET
         sockaddr = (
             (str(ip), port, 0, 0) if family == socket.AF_INET6 else (str(ip), port)
@@ -76,8 +80,11 @@ def resolve_public_url(url: str) -> ResolvedUrl:
             ip = ipaddress.ip_address(addr)
         except ValueError:
             continue
-        if block_internal and not allow_internal and _is_blocked_ip(ip):
-            raise ValueError(f"Blocked private network host: {host} -> {addr}")
+        private = _is_blocked_ip(ip) and not network_policy_service.host_allowed(host, ip)
+        if report_internal and private:
+            network_policy_service.note_would_block(host, addr)
+        if block_internal and private:
+            raise ValueError(network_policy_service.blocked_message(host, addr))
         if addr not in seen:
             seen.add(addr)
             resolved.append((family, sockaddr))

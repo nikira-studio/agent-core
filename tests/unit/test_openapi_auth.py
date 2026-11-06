@@ -341,4 +341,4 @@ def test_validate_public_url_blocks_dns_rebinding_when_disabled(monkeypatch):
         validate_public_url("https://example.test")
         assert False, "Expected validate_public_url to reject private resolution when blocked"
     except ValueError as e:
-        assert "Blocked private network host" in str(e)
+        assert "Blocked:" in str(e) and "private address" in str(e)

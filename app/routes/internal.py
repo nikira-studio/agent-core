@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Header
+from fastapi import APIRouter, Header, Request
 from pydantic import BaseModel
 
 from app.services import credential_service
@@ -25,8 +25,19 @@ async def _verify_broker(authorization: str | None) -> bool:
 @router.post("/credentials/resolve")
 async def resolve_variable(
     body: ResolveRequest,
+    request: Request,
     authorization: str | None = Header(None),
 ):
+    from app.routes.auth import get_client_ip
+    from app.security.rate_limiter import RL
+    from app.services import network_policy_service
+
+    client_ip = get_client_ip(request)
+    allowed, _ = RL.check("ip", client_ip, "broker_resolve")
+    if not allowed:
+        return error_response("RATE_LIMITED", "Too many requests; wait a moment", 429)
+    if not network_policy_service.broker_caller_allowed(client_ip, body.agent_id):
+        return error_response("FORBIDDEN", "This address may not call the credential broker", 403)
     if not await _verify_broker(authorization):
         return error_response("UNAUTHORIZED", "Broker authentication required", 401)
 
