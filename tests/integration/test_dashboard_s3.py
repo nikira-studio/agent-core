@@ -283,7 +283,7 @@ class TestActivityPage:
     def test_activity_create_sends_assigned_agent_id(self, admin_client):
         r = admin_client.get("/activity")
         assert "assigned_agent_id: agentId" in r.text
-        assert "Workspace / Scope" in r.text
+        assert "<label>Workspace</label>" in r.text
         assert "Agent private scope" in r.text
 
     def test_activity_coordination_snapshot_mentions_ownership(self, admin_client):

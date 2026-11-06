@@ -482,3 +482,24 @@ def test_delete_asks_for_the_name_and_says_what_goes_with_it(authenticated_clien
     assert "counts.memories" in workspaces and "Type the workspace ID to confirm" in workspaces and "kept but no longer belong" in workspaces
     agents = authenticated_client.get("/agents").text
     assert "Type the agent ID to confirm" in agents and "its private memory" in agents
+
+
+def test_activity_page_puts_tasks_first_and_synchronization_last(authenticated_client):
+    html = authenticated_client.get("/activity").text
+    assert html.index("<h3>Tasks</h3>") < html.index("Workspace synchronization")
+    # The two coverage percentages stay on the page, behind an Advanced toggle.
+    assert "Advanced: how many tasks are tied to an agent session" in html
+    assert html.index("<h3>Tasks</h3>") < html.index("Advanced: how many tasks")
+    # Empty synchronization is closed; assigning a task is still on this page.
+    assert '<details class="card" id="workspace-sync" >' in html
+    assert "+ Assign a task" in html
+
+
+def test_write_access_chips_are_not_the_danger_colour():
+    css = Path("app/dashboard/static/css/dashboard.css").read_text()
+    block = css.split(".scope-tag.scope-write {", 1)[1].split("}", 1)[0]
+    assert "danger" not in block
+
+
+def test_workspaces_table_counts_memories(authenticated_client):
+    assert "<th>Memories</th>" in authenticated_client.get("/workspaces").text

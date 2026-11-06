@@ -45,6 +45,7 @@ def workspaces_page(request: Request, session: dict = Depends(require_auth)):
 
     with get_db() as conn:
         memory_counts = {r[0]: r[1] for r in conn.execute("SELECT scope, COUNT(*) FROM memory_records GROUP BY scope")}
+        active_memory_counts = {r[0]: r[1] for r in conn.execute("SELECT scope, COUNT(*) FROM memory_records WHERE record_status = 'active' GROUP BY scope")}
         task_counts = {r[0]: r[1] for r in conn.execute("SELECT memory_scope, COUNT(*) FROM agent_activity GROUP BY memory_scope")}
         credential_counts = {r[0]: r[1] for r in conn.execute("SELECT scope, COUNT(*) FROM credentials GROUP BY scope")}
         binding_counts = {r[0]: r[1] for r in conn.execute("SELECT scope, COUNT(*) FROM connector_bindings GROUP BY scope")}
@@ -87,6 +88,7 @@ def workspaces_page(request: Request, session: dict = Depends(require_auth)):
             f"<td>{escape_html(p.get('name', ''))}</td>"
             f"<td><span class='badge badge-{active_label}'>{active_label}</span></td>"
             f"<td>{escape_html(p.get('owner_user_id', ''))}</td>"
+            f"<td>{active_memory_counts.get('workspace:' + p['id'], 0)}</td>"
             f"<td class='agent-access-cell'>"
             f"<div class='agent-read-list'><span class='access-label'>Read</span>{read_tags}</div>"
             f"<div class='agent-write-list'><span class='access-label'>Write</span>{write_tags}</div>"
@@ -476,8 +478,8 @@ def workspaces_page(request: Request, session: dict = Depends(require_auth)):
         <h3>Workspaces</h3>
         <div class="section-note">A workspace is one project's shared memory for the people and agents working on it. Create one per project or app. Give an agent access from Agents → Edit.</div>
       </div>
-      <table><thead><tr><th>ID</th><th>Name</th><th>Status</th><th>Owner</th><th>Agents (Read/Write)</th><th>Created</th><th class="actions-cell">Actions</th></tr></thead>
-        <tbody>{rows or "<tr><td colspan=7 class=empty>No workspaces yet. Create one when agents and people need a shared place for memory and work.</td></tr>"}</tbody></table>
+      <table><thead><tr><th>ID</th><th>Name</th><th>Status</th><th>Owner</th><th>Memories</th><th>Agents (Read/Write)</th><th>Created</th><th class="actions-cell">Actions</th></tr></thead>
+        <tbody>{rows or "<tr><td colspan=8 class=empty>No workspaces yet. Create one when agents and people need a shared place for memory and work.</td></tr>"}</tbody></table>
     </div>
 
     <!-- Create Workspace Modal -->

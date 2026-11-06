@@ -1002,9 +1002,9 @@ tr:hover td {
   margin: 1px;
 }
 .scope-tag.scope-write {
-  background: var(--danger);
-  color: var(--surface);
-  border-color: var(--danger);
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
 }
 .agent-read-list, .agent-write-list {
   display: flex;
@@ -1058,7 +1058,7 @@ tr:hover td {
 }
 
 .activity-scope-cell {
-  width: 110px;
+  width: 130px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1968,4 +1968,27 @@ th.activity-actions-header {
   .stack-table td { border: 0; padding: 3px 0; }
   .stack-table td[data-label]::before { content: attr(data-label); display: inline-block; min-width: 4.5rem; color: var(--muted); font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.05em; }
   .stack-table td.actions-cell { display: flex; gap: 6px; flex-wrap: wrap; padding-top: 8px; }
+}
+
+/* Activity: Start and Cancel sit behind "More"; opens inline so the table never clips it. */
+.row-more { display: inline-block; vertical-align: middle; }
+.row-more > summary { list-style: none; cursor: pointer; }
+.row-more > summary::-webkit-details-marker { display: none; }
+.row-more[open] > summary { background: var(--border); }
+.row-more-list { display: flex; gap: 6px; margin-top: 6px; }
+details.card > summary { list-style: none; }
+details.card > summary::-webkit-details-marker { display: none; }
+details.card > summary h3 { margin: 0; border-bottom: 0; padding-bottom: 0; display: inline; }
+details.card > summary::before { content: "\25B8\00a0"; color: var(--muted); }
+details.card[open] > summary::before { content: "\25BE\00a0"; }
+
+/* On a phone the task list becomes one block per task instead of a sideways-scrolling table. */
+@media (max-width: 768px) {
+  .stack-phone, .stack-phone tbody, .stack-phone tr, .stack-phone td { display: block; width: 100%; }
+  .stack-phone thead { display: none; }
+  .stack-phone tr { padding: 10px 0; border-bottom: 1px solid var(--border); }
+  .stack-phone td { border: 0; padding: 3px 0; white-space: normal; max-width: none; }
+  .stack-phone td[data-label]::before { content: attr(data-label); display: inline-block; min-width: 6rem; color: var(--muted); font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.05em; }
+  .stack-phone td:empty { display: none; }
+  .stack-phone .activity-actions-cell { padding-top: 8px; flex-wrap: wrap; }
 }

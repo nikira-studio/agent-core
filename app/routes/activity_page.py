@@ -177,16 +177,19 @@ def activity_page(request: Request, session: dict = Depends(require_auth)):
     rows = "".join(
         f"<tr class='activity-row' data-status='{escape_html(a.get('status', ''))}'>"
         f"<td class='activity-task-cell'>{escape_html(a.get('task_description', '')[:120])}</td>"
-        f"<td class='activity-scope-cell'><code>{escape_html((a.get('memory_scope') or '').replace('workspace:', '')) or '—'}</code></td>"
-        f"<td class='activity-status-cell'><span class='badge badge-{escape_html(a.get('status', 'active'))}'>{escape_html(a.get('status', ''))}</span></td>"
-        f"<td class='activity-agent-cell'>{escape_html(agent_labels.get(a.get('assigned_agent_id', ''), a.get('assigned_agent_id', '')))}</td>"
-        f"<td class='activity-handoff-cell'>{escape_html(agent_labels.get(a.get('reassigned_from_agent_id', ''), a.get('reassigned_from_agent_id', '')))}</td>"
-        f"<td class='activity-updated-cell'>{local_dt(a.get('updated_at'), style='date')}<br>{local_dt(a.get('updated_at'), style='time')}</td>"
+        f"<td class='activity-scope-cell' data-label='Workspace'><code>{escape_html((a.get('memory_scope') or '').replace('workspace:', '')) or '—'}</code></td>"
+        f"<td class='activity-status-cell' data-label='Status'><span class='badge badge-{escape_html(a.get('status', 'active'))}'>{escape_html(a.get('status', ''))}</span></td>"
+        f"<td class='activity-agent-cell' data-label='Agent'>{escape_html(agent_labels.get(a.get('assigned_agent_id', ''), a.get('assigned_agent_id', '')))}</td>"
+        f"<td class='activity-handoff-cell' data-label='Handoff from'>{escape_html(agent_labels.get(a.get('reassigned_from_agent_id', ''), a.get('reassigned_from_agent_id', '')))}</td>"
+        f"<td class='activity-updated-cell' data-label='Updated'>{local_dt(a.get('updated_at'), style='date')}<br>{local_dt(a.get('updated_at'), style='time')}</td>"
         f"<td><div class='actions-cell activity-actions-cell'>"
         f"<button type='button' class='btn btn-sm btn-secondary' data-activity-reassign='{escape_html(a['id'])}' title='Reassign'>Reassign</button>"
-        f"<button type='button' class='btn btn-sm btn-secondary' data-activity-start='{escape_html(a['id'])}' {'disabled' if a.get('status') not in ('stale', 'blocked', 'reassigned') else ''} title='Start'>Start</button>"
         f"<button type='button' class='btn btn-sm btn-secondary' data-activity-done='{escape_html(a['id'])}' {'disabled' if a.get('status') not in ('active', 'stale', 'blocked', 'reassigned') else ''} title='Done'>Done</button>"
-        f"<button type='button' class='btn btn-sm btn-danger' data-activity-cancel='{escape_html(a['id'])}' {'disabled' if a.get('status') not in ('active', 'stale', 'blocked', 'reassigned') else ''} title='Cancel'>Cancel</button>"
+        f"<details class='row-more'><summary class='btn btn-sm btn-secondary' title='Start or cancel this task'>More</summary>"
+        f"<div class='row-more-list'>"
+        f"<button type='button' class='btn btn-sm btn-secondary' data-activity-start='{escape_html(a['id'])}' {'disabled' if a.get('status') not in ('stale', 'blocked', 'reassigned') else ''} title='Start'>Start</button>"
+        f"<button type='button' class='btn btn-sm btn-secondary' data-activity-cancel='{escape_html(a['id'])}' {'disabled' if a.get('status') not in ('active', 'stale', 'blocked', 'reassigned') else ''} title='Cancel'>Cancel</button>"
+        f"</div></details>"
         f"</div></td></tr>"
         for a in activities
     )
@@ -280,15 +283,9 @@ def activity_page(request: Request, session: dict = Depends(require_auth)):
         "Activity",
         f"""
     <div class="page-header"><h1>Activity</h1><div class="page-actions">
-        <button class="btn" onclick="openModal('create-activity-modal')">+ Assign Work</button>
+        <button class="btn" onclick="openModal('create-activity-modal')">+ Assign a task</button>
     </div></div>
     {waiting_card}
-    <div class="card">
-      <h3>Workspace synchronization</h3>
-      <p class="text-muted" style="font-size:0.85rem">Which agent sessions are following each workspace's changes, and how far behind they are.</p>
-      <div style="overflow-x:auto"><table><thead><tr><th>Agent</th><th>Workspace</th><th>Status</th><th>Last Seen</th><th>Acknowledged</th><th>Unacknowledged</th></tr></thead>
-      <tbody>{execution_rows or "<tr><td colspan=6 class=empty>No synchronized executions yet.</td></tr>"}</tbody></table></div>
-    </div>
     <div class="card">
       <h3>Tasks</h3>
       <p class="text-muted" style="font-size:0.85rem;margin-bottom:8px">Assign a task to an agent. It picks the task up the next time it starts or is idle.</p>
@@ -303,6 +300,7 @@ def activity_page(request: Request, session: dict = Depends(require_auth)):
           <div class="stat-card"><div class="value">{handoff_count}</div><div class="label">Recent Handoffs</div></div>
           <div class="stat-card"><div class="value">{len(attention_activities)}</div><div class="label">Needs Attention</div></div>
         </div>
+        <details class="access-details" style="margin-bottom:10px"><summary>Advanced: how many tasks are tied to an agent session</summary>
         <div class="stat-grid" style="margin-bottom:10px">
           <div class="stat-card" title="Tasks in a workspace that are tied to an agent session, over the lifetime of the installation. A linked execution proves association with an execution, not that the returned changes were read or acted on.">
             <div class="value">{exec_stats["workspace_activities_pct_lifetime"]}%</div>
@@ -319,6 +317,7 @@ def activity_page(request: Request, session: dict = Depends(require_auth)):
             </div>
           </div>
         </div>
+        </details>
         <div class="text-muted" style="font-size:0.85rem;margin-bottom:8px">Current ownership:</div>
         <div>{coordination_summary or "<span class='text-muted'>No open tasks yet.</span>"}</div>
       </div>
@@ -326,17 +325,24 @@ def activity_page(request: Request, session: dict = Depends(require_auth)):
         {status_tabs}
       </div>
       <div style="overflow-x:auto">
-      <table class="activity-table"><thead><tr><th class="activity-task-cell">Task</th><th class="activity-scope-cell">Workspace</th><th class="activity-status-cell">Status</th><th class="activity-agent-cell">Agent</th><th class="activity-handoff-cell">Handoff From</th><th class="activity-updated-cell">Updated</th><th class="activity-actions-header">Actions</th></tr></thead>
+      <table class="activity-table stack-phone"><thead><tr><th class="activity-task-cell">Task</th><th class="activity-scope-cell">Workspace</th><th class="activity-status-cell">Status</th><th class="activity-agent-cell">Agent</th><th class="activity-handoff-cell">Handoff From</th><th class="activity-updated-cell">Updated</th><th class="activity-actions-header">Actions</th></tr></thead>
       <tbody>{rows or "<tr><td colspan=7 class=empty>No tasks yet.</td></tr>"}</tbody></table>
       </div>
       <div style="margin-top:8px;font-size:0.85rem;color:var(--text-muted)">{activity_page_info}</div>
       {activity_pagination_html}
     </div>
 
+    <details class="card" id="workspace-sync" {"open" if execution_rows else ""}>
+      <summary style="cursor:pointer"><h3>Workspace synchronization</h3></summary>
+      <p class="text-muted" style="font-size:0.85rem">Which agent sessions are following each workspace's changes, and how far behind they are.</p>
+      <div style="overflow-x:auto"><table><thead><tr><th>Agent</th><th>Workspace</th><th>Status</th><th>Last Seen</th><th>Acknowledged</th><th>Unacknowledged</th></tr></thead>
+      <tbody>{execution_rows or "<tr><td colspan=6 class=empty>No synchronized executions yet.</td></tr>"}</tbody></table></div>
+    </details>
+
     <!-- Create Activity Modal -->
     <div class="modal-overlay" id="create-activity-modal" style="display:none">
       <div class="modal">
-        <h3>Assign Work to Agent</h3>
+        <h3>Assign a task</h3>
         <form id="create-activity-form" onsubmit="doCreateActivity(event)">
           <div class="form-group">
             <label>Assign To *</label>
@@ -352,7 +358,7 @@ def activity_page(request: Request, session: dict = Depends(require_auth)):
             <p class="form-hint">Write the task the same way you would hand it to a person.</p>
           </div>
           <div class="form-group">
-            <label>Workspace / Scope</label>
+            <label>Workspace</label>
             <select id="act-memory-scope">
               <option value="">Agent private scope (agent only, no workspace)</option>
               {activity_scope_options}
