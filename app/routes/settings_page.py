@@ -826,13 +826,12 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
 
         key_status = get_key_status()
         broker_active = bool(get_broker_credential_hash())
-        broker_label = "present" if broker_active else "missing"
         broker_badge = "active" if broker_active else "stale"
         snapshot_rows = "".join(
             [
-                f"<tr><td>Credential Entries</td><td>{credential_count}</td><td class='text-muted'>Encrypted secrets stored in the vault</td></tr>",
-                f"<tr><td>Encryption Key</td><td><span class='badge badge-{'active' if key_status.get('mode') == 'keyring' else 'stale'}'>{escape_html(key_status.get('mode', 'unknown'))}</span></td><td class='text-muted'>Keyring size: {escape_html(key_status.get('keyring_size', 0))} · Primary key ID: {escape_html(key_status.get('primary_key_id', 'none'))}</td></tr>",
-                f"<tr><td>Local credential helper</td><td><span class='badge badge-{broker_badge}'>{broker_label}</span></td><td class='text-muted'>Resolves {CREDENTIAL_PREFIX}* references at runtime</td></tr>",
+                f"<tr><td>Credential Entries</td><td>{credential_count}</td><td class='text-muted'>Secrets stored encrypted</td></tr>",
+                f"<tr><td>Encryption Key</td><td><span class='badge badge-{'active' if key_status.get('mode') == 'keyring' else 'stale'}'>{'in use' if key_status.get('mode') == 'keyring' else escape_html(key_status.get('mode', 'unknown'))}</span></td><td class='text-muted'>{escape_html(key_status.get('keyring_size', 0))} {'key' if key_status.get('keyring_size', 0) == 1 else 'keys'} in use <details class='access-details' style='display:inline-block;margin-left:6px'><summary>Key ID</summary>Primary key ID: {escape_html(key_status.get('primary_key_id', 'none'))}</details></td></tr>",
+                f"<tr><td>Local credential helper</td><td><span class='badge badge-{broker_badge}'>{'ready' if broker_active else 'missing'}</span></td><td class='text-muted'>Resolves {CREDENTIAL_PREFIX}* references at runtime</td></tr>",
             ]
         )
         secrets_snapshot_html = f"""
@@ -864,31 +863,31 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
         if maint_status["last_run_at"]:
             summary = maint_status["last_run_summary"] or {}
             by = maint_status["last_run_by"] or "unknown"
-            proposals_generated = summary.get("proposals_generated", 0)
-            proposals_skipped = summary.get("proposals_skipped_at_cap", 0)
-            proposals_line = (
-                f", consolidation proposals generated: <code>{proposals_generated}</code>"
-                + (
-                    f" (skipped at cap: <code>{proposals_skipped}</code>)"
-                    if proposals_skipped
-                    else ""
-                )
-            )
+            def _count(n, one, many):
+                return f"{n} {one if n == 1 else many}"
+
+            parts = []
+            for key, one, many in (
+                ("stale_activities_marked", "idle task marked", "idle tasks marked"),
+                ("scratchpad_pruned", "temporary note deleted", "temporary notes deleted"),
+                ("ttl_swept", "expired memory removed", "expired memories removed"),
+                ("retracted_purged", "old retracted memory deleted", "old retracted memories deleted"),
+                ("proposals_generated", "suggestion made", "suggestions made"),
+            ):
+                n = summary.get(key, 0) or 0
+                if n:
+                    parts.append(_count(n, one, many))
             last_run_line = (
-                f"Last run: {local_dt(maint_status['last_run_at'])} ({escape_html(by)}) — "
-                f"stale activities marked: <code>{summary.get('stale_activities_marked', 0)}</code>, "
-                f"scratchpad pruned: <code>{summary.get('scratchpad_pruned', 0)}</code>, "
-                f"TTL swept: <code>{summary.get('ttl_swept', 0)}</code>, "
-                f"retracted/superseded purged: <code>{summary.get('retracted_purged', 0)}</code>"
-                f"{proposals_line}."
+                f"Last run {local_dt(maint_status['last_run_at'])} ({escape_html(by)}): "
+                + (", ".join(parts) if parts else "nothing to clean up")
+                + "."
             )
         else:
-            last_run_line = "Last run: never — check back after the next scheduled run, or run it manually now."
+            last_run_line = "Last run: never. It runs by itself on the schedule above, or you can run it now."
         backup_html = f"""
     <div class="card">
       <div class="section-header">
         <h3>Backup & Restore</h3>
-        <div class="section-actions"><a href="/audit" class="btn btn-sm btn-secondary">Audit Log</a></div>
       </div>
       <div class="form-group">
         <button class="btn" onclick="exportBackup()">Export Encrypted Backup</button>
@@ -904,6 +903,7 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
       <p class="form-hint" id="maintenance-last-run">{last_run_line}</p>
       <hr class=divider>
       <h4 class="section-title">Startup Checks</h4>
+      <p class="form-hint">Checks that the data folder is writable, text search is available, and the encryption key and local credential helper are in place. Run it after an upgrade or a restore.</p>
       <div id="startup-checks"><button class="btn btn-secondary btn-sm" onclick="runStartupChecks()">Run Checks</button></div>
     </div>"""
 
@@ -918,6 +918,11 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
         <button class="btn btn-danger" onclick="openModal('credential-key-rotate-modal')">Rotate Key</button>
         <button class="btn btn-secondary" onclick="openModal('credential-key-restore-modal')">Restore Key</button>
       </div>
+      <ul class="form-hint" style="margin:0 0 0 18px">
+        <li><strong>Check Status</strong>: shows how many encryption keys are in use.</li>
+        <li><strong>Rotate Key</strong>: makes a new key and re-encrypts every stored secret with it. Use it after a suspected leak.</li>
+        <li><strong>Restore Key</strong>: puts back an earlier key, for example after a failed rotation. It must be able to decrypt every stored secret.</li>
+      </ul>
       <div id="credential-key-result" style="margin-top:12px"></div>
     </div>"""
 
@@ -1025,12 +1030,12 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
         )
         vector_settings_html = f"""
     <div class="card">
-      <h3>Vector Search</h3>
+      <h3>Search by meaning (vector search)</h3>
       <p class="text-muted" style="margin-bottom:12px">Enable semantic search using an embedding endpoint: Ollama, or any service with an OpenAI-compatible embeddings API. Save the settings to turn it on immediately when the backend is healthy. Disable to use plain text search only.</p>
       <form id="vector-settings-form" onsubmit="saveVectorSettings(event)">
         <label class="checkbox-label" style="margin-bottom:16px">
           <input type="checkbox" id="vector-search-enabled" {vector_checked}>
-          Enable vector semantic search
+          Enable search by meaning
         </label>
         <div class="form-group">
           <label>Provider</label>
@@ -1129,7 +1134,7 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
     <div class="modal-overlay" id="credential-key-rotate-modal" style="display:none">
       <div class="modal">
         <h3>Rotate Encryption Key</h3>
-        <div class="alert alert-danger">This re-encrypts all credential entries with a new primary key. Keep backups of your database and keyring.</div>
+        <div class="alert alert-danger">This re-encrypts all credential entries with a new primary key. Keep backups of your database and your encryption key files.</div>
         <form id="credential-key-rotate-form" onsubmit="rotateCredentialKey(event)">
           <div class="modal-footer">
             <button type="button" class="btn btn-secondary" onclick="closeModal('credential-key-rotate-modal')">Cancel</button>
@@ -1232,17 +1237,19 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
       const r = await fetch('/api/backup/maintenance', {{ method: 'POST' }});
       const j = await r.json();
       if (j.ok) {{
-        const proposalsGen = j.data.proposals_generated || 0;
-        const proposalsSkip = j.data.proposals_skipped_at_cap || 0;
+        const plural = (n, one, many) => n + ' ' + (n === 1 ? one : many);
+        const parts = [];
+        const add = (n, one, many) => {{ if (n) parts.push(plural(n, one, many)); }};
+        add(j.data.stale_activities_marked || 0, 'idle task marked', 'idle tasks marked');
+        add(j.data.scratchpad_pruned || 0, 'temporary note deleted', 'temporary notes deleted');
+        add(j.data.ttl_swept || 0, 'expired memory removed', 'expired memories removed');
+        add(j.data.retracted_purged || 0, 'old retracted memory deleted', 'old retracted memories deleted');
+        add(j.data.proposals_generated || 0, 'suggestion made', 'suggestions made');
+        const outcome = parts.length ? parts.join(', ') : 'nothing to clean up';
         document.getElementById('backup-result').innerHTML =
-          '<div class="alert alert-success">Maintenance complete. Stale activities marked: <code>' + j.data.stale_activities_marked + '</code>. Scratchpad memories pruned: <code>' + j.data.scratchpad_pruned + '</code>. Retracted/superseded purged: <code>' + j.data.retracted_purged + '</code>. Consolidation proposals generated: <code>' + proposalsGen + '</code>.</div>';
+          '<div class="alert alert-success">Maintenance complete: ' + escapeHtml(outcome) + '.</div>';
         const lastRunEl = document.getElementById('maintenance-last-run');
-        if (lastRunEl) {{
-          const skippedPart = proposalsSkip > 0
-            ? ' (skipped at cap: <code>' + proposalsSkip + '</code>)'
-            : '';
-          lastRunEl.innerHTML = 'Last run: just now (manual) — stale activities marked: <code>' + j.data.stale_activities_marked + '</code>, scratchpad pruned: <code>' + j.data.scratchpad_pruned + '</code>, TTL swept: <code>' + j.data.ttl_swept + '</code>, retracted/superseded purged: <code>' + j.data.retracted_purged + '</code>, consolidation proposals generated: <code>' + proposalsGen + '</code>' + skippedPart + '.';
-        }}
+        if (lastRunEl) lastRunEl.textContent = 'Last run just now (manual): ' + outcome + '.';
         showToast('Maintenance complete');
       }} else {{ showToast(j.error?.message || 'Failed', 'danger'); }}
     }}
@@ -1269,7 +1276,8 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
       if (j.ok) {{
         const s = j.data.key_status;
         document.getElementById('credential-key-result').innerHTML =
-          '<div class="alert alert-success">Mode: <code>' + s.mode + '</code> · Keyring size: <code>' + s.keyring_size + '</code> · Primary key ID: <code>' + s.primary_key_id + '</code></div>';
+          '<div class="alert alert-success">' + s.keyring_size + (s.keyring_size === 1 ? ' key' : ' keys') + ' in use' +
+          '<details class="access-details" style="margin-top:6px"><summary>Details</summary>Mode: <code>' + s.mode + '</code> · Primary key ID: <code>' + s.primary_key_id + '</code></details></div>';
       }} else {{ showToast(j.error?.message || 'Status failed', 'danger'); }}
     }}
     async function rotateCredentialKey(e) {{
@@ -1281,7 +1289,7 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
         closeModal('credential-key-rotate-modal');
         document.getElementById('credential-key-rotate-form').reset();
         document.getElementById('credential-key-result').innerHTML =
-          '<div class="alert alert-success">' + j.data.message + ' Re-encrypted: <code>' + j.data.re_encrypted_count + '</code>. Keyring size: <code>' + j.data.keyring_size + '</code>.</div>';
+          '<div class="alert alert-success">' + j.data.message + ' Re-encrypted: <code>' + j.data.re_encrypted_count + '</code>. Keys in use: <code>' + j.data.keyring_size + '</code>.</div>';
       }} else {{ showToast(j.error?.message || 'Rotation failed', 'danger'); }}
     }}
     async function restoreCredentialKey(e) {{
@@ -1425,7 +1433,7 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
       document.getElementById('vector-reembed-cancel').style.display = running ? '' : 'none';
       const out = document.getElementById('vector-reembed-result');
       if (!job) {{
-        out.innerHTML = data.vector_search_enabled ? '' : '<div class="alert">Enable vector search to re-embed.</div>';
+        out.innerHTML = data.vector_search_enabled ? '' : '<p class="form-hint" style="margin:0">Turn on search by meaning above to re-embed.</p>';
       }} else {{
         const counts = escapeHtml(String(job.embedded || 0)) + ' embedded, ' + escapeHtml(String(job.failed || 0)) + ' failed';
         const labels = {{ running: 'Running', cancelling: 'Stopping', completed: 'Last run finished', cancelled: 'Last run stopped', failed: 'Last run failed', interrupted: 'Last run was interrupted (server restart); start it again to finish' }};

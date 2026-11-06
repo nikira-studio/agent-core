@@ -73,7 +73,7 @@ def test_admin_settings_exposes_real_system_behavior_controls(admin_client):
     assert "solo-mode-enabled" not in html
     assert "/api/dashboard/system-settings" in html
     assert "Run Maintenance" in html
-    assert "Scratchpad memories pruned" in html
+    assert "temporary notes deleted" in html
     assert "Retracted and replaced memories (days)" in html
     assert 'id="retracted-retention-days"' in html
     assert 'value="30"' in html
@@ -94,9 +94,7 @@ def test_admin_settings_shows_maintenance_last_run_after_manual_trigger(admin_cl
     html = admin_client.get("/settings").text
     assert "Last run: never" not in html
     assert "(manual)" in html
-    assert "stale activities marked: <code>0</code>" in html
-    assert "scratchpad pruned: <code>0</code>" in html
-    assert "TTL swept: <code>0</code>" in html
+    assert "nothing to clean up" in html
 
 
 def test_admin_settings_shows_scheduler_disabled_message(admin_client, monkeypatch):

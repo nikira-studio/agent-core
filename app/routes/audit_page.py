@@ -78,7 +78,6 @@ def audit_page(request: Request, session: dict = Depends(require_auth)):
     success_count = sum(1 for e in all_events if e.get("result") == "success")
     failure_count = sum(1 for e in all_events if e.get("result") == "failure")
     blocked_count = sum(1 for e in all_events if e.get("result") == "blocked")
-    events_with_details = sum(1 for e in all_events if e.get("details_json"))
     page_start = offset + 1 if total_events else 0
     page_end = offset + page_event_count
     actor_counts = Counter(e.get("actor_type") or "unknown" for e in all_events)
@@ -121,6 +120,25 @@ def audit_page(request: Request, session: dict = Depends(require_auth)):
         for resource, count in resource_counts.most_common(4)
     )
 
+    from app.database import get_db
+
+    with get_db() as conn:
+        actor_names = {
+            ("user", r[0]): r[1] or r[0] for r in conn.execute("SELECT id, display_name FROM users")
+        }
+        actor_names.update(
+            {("agent", r[0]): r[1] or r[0] for r in conn.execute("SELECT id, display_name FROM agents")}
+        )
+
+    def actor_cell(event: dict) -> str:
+        kind = event.get("actor_type") or ""
+        actor_id = event.get("actor_id") or ""
+        name = actor_names.get((kind, actor_id)) or actor_id or "—"
+        return (
+            f"<span class='audit-actor-name' title='{escape_html(actor_id)}'>{escape_html(name)}</span> "
+            f"<span class='scope-kind'>{escape_html(kind)}</span>"
+        )
+
     def audit_row(event: dict) -> str:
         result_class = "active" if event.get("result", "") == "success" else "cancelled"
         details_html = details_preview(event) or no_details_html
@@ -132,7 +150,7 @@ def audit_page(request: Request, session: dict = Depends(require_auth)):
         )
         return (
             f"<tr><td class='audit-time-cell'>{time_cell}</td>"
-            f"<td class='audit-actor-cell'><span class='badge badge-secondary'>{escape_html(event.get('actor_type') or '')}</span></td>"
+            f"<td class='audit-actor-cell'>{actor_cell(event)}</td>"
             f"<td class='audit-action-cell'><code>{_breakable(event.get('action') or '')}</code></td>"
             f"<td class='audit-resource-cell'>{_breakable(event.get('resource_type') or '-')}</td>"
             f"<td class='audit-result-cell'><span class='badge badge-{result_class}'>{escape_html(event.get('result') or '')}</span></td>"
@@ -240,9 +258,8 @@ def audit_page(request: Request, session: dict = Depends(require_auth)):
         <div class="stat-grid" style="margin-bottom:10px">
           <div class="stat-card"><div class="value">{total_events}</div><div class="label">Total Events</div></div>
           <div class="stat-card"><div class="value">{success_count}</div><div class="label">Success</div></div>
-          <div class="stat-card"><div class="value">{failure_count}</div><div class="label">Failure</div></div>
-          <div class="stat-card"><div class="value">{blocked_count}</div><div class="label">Blocked</div></div>
-          <div class="stat-card"><div class="value">{events_with_details}</div><div class="label">With Details</div></div>
+          <div class="stat-card {'stat-alert' if failure_count else 'stat-quiet'}"><div class="value">{failure_count}</div><div class="label">Failure</div></div>
+          <div class="stat-card {'stat-alert' if blocked_count else 'stat-quiet'}"><div class="value">{blocked_count}</div><div class="label">Blocked</div></div>
         </div>
         <div class="text-muted" style="font-size:0.85rem;margin-bottom:8px">Top actors:</div>
         <div>{top_actor_summary or "<span class='text-muted'>No events yet.</span>"}</div>
@@ -276,7 +293,7 @@ def audit_page(request: Request, session: dict = Depends(require_auth)):
         <button class="btn btn-sm btn-secondary" onclick="clearAuditFilters()">Clear</button>
       </div>
       <div style="overflow-x:auto">
-      <table class="audit-table"><thead><tr><th class="audit-time-cell">Time</th><th class="audit-actor-cell">Actor Type</th><th class="audit-action-cell">Action</th><th class="audit-resource-cell">Resource</th><th class="audit-result-cell">Result</th><th class="audit-details-cell">Details</th><th class="audit-ip-cell">IP</th></tr></thead>
+      <table class="audit-table"><thead><tr><th class="audit-time-cell">Time</th><th class="audit-actor-cell">Who</th><th class="audit-action-cell">Action</th><th class="audit-resource-cell">Resource</th><th class="audit-result-cell">Result</th><th class="audit-details-cell">Details</th><th class="audit-ip-cell">IP</th></tr></thead>
       <tbody>{rows or "<tr><td colspan=7 class=empty>No events yet.</td></tr>"}</tbody></table>
       </div>
       <div style="margin-top:8px;font-size:0.85rem;color:var(--text-muted)">{page_info}</div>

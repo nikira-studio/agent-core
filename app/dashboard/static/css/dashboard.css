@@ -1118,7 +1118,7 @@ tr:hover td {
 }
 
 .audit-actor-cell {
-  width: 90px;
+  width: 150px;
 }
 
 .audit-action-cell {
@@ -2004,3 +2004,11 @@ details.card[open] > summary::before { content: "\25BE\00a0"; }
 @media (max-width: 720px) {
   #tool-step .setup-tabs { flex-wrap: wrap; overflow-x: visible; }
 }
+
+/* Scope and actor tags: a small label beside a name. */
+.scope-kind { display: inline-block; font-size: 0.65rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); border: 1px solid var(--border); border-radius: 4px; padding: 0 5px; margin-left: 2px; vertical-align: middle; }
+.scope-name { white-space: nowrap; }
+/* Counters that matter only when above zero. */
+.stat-card.stat-quiet .value { color: var(--muted); }
+.stat-card.stat-alert .value { color: var(--danger); }
+.form-hint + .form-group, p.form-hint + .form-group { margin-top: 12px; }

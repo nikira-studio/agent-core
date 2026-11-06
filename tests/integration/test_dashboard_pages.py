@@ -443,7 +443,7 @@ def test_credential_row_buttons_share_a_line_and_scopes_break_only_at_the_colon(
 
     credential_service.create_credential("workspace:home-network", "a_long_credential_name", "not-shown")
     html = authenticated_client.get("/credentials").text
-    assert "<span>workspace:</span><wbr><span>home-network</span>" in html  # never splits home-network
+    assert "<span class='scope-name'>home-network</span> <span class='scope-kind' title='workspace:home-network'>workspace</span>" in html
     assert "a_<wbr>long_<wbr>credential_<wbr>name" in html
     css = open("app/dashboard/static/css/dashboard.css").read()
     assert ".actions-cell .btn { vertical-align: middle; }" in css  # text and icon buttons on one baseline
@@ -503,3 +503,22 @@ def test_write_access_chips_are_not_the_danger_colour():
 
 def test_workspaces_table_counts_memories(authenticated_client):
     assert "<th>Memories</th>" in authenticated_client.get("/workspaces").text
+
+
+def test_wording_batch_two(authenticated_client):
+    settings = authenticated_client.get("/settings").text
+    assert "vault" not in settings.lower()
+    assert "Search by meaning (vector search)" in settings and "Enable search by meaning" in settings
+    assert "Keyring size" not in settings
+    assert "Rotate Key</strong>: makes a new key" in settings
+    # The Audit Log shortcut no longer sits in the Backup & Restore header.
+    assert '<a href="/audit" class="btn btn-sm btn-secondary">Audit Log</a>' not in settings
+    assert "Checks that the data folder is writable" in settings
+
+    credentials = authenticated_client.get("/credentials").text
+    assert "vault" not in credentials.lower()
+
+    audit = authenticated_client.get("/audit").text
+    assert "With Details" not in audit
+    approvals = authenticated_client.get("/approvals").text
+    assert "<th>Decided</th>" in approvals and "<th>Scope</th>" not in approvals

@@ -23,12 +23,22 @@ router = APIRouter()
 EXPIRY_WARNING_DAYS = 14
 
 
+_SCOPE_KIND_TAG = {"workspace": "workspace", "user": "personal", "agent": "agent"}
+
+
 def scope_html(scope: str) -> str:
-    """A scope that may wrap only after its colon, never inside a name such as home-network."""
+    """The workspace (or person, or agent) a credential lives in, with a small tag for which it is.
+
+    The name never splits inside itself (home-network stays whole); the tag sits beside or under it.
+    """
     kind, sep, name = scope.partition(":")
     if not sep:
         return f"<span>{escape_html(scope)}</span>"
-    return f"<span>{escape_html(kind)}:</span><wbr><span>{escape_html(name)}</span>"
+    tag = _SCOPE_KIND_TAG.get(kind, kind)
+    return (
+        f"<span class='scope-name'>{escape_html(name)}</span> "
+        f"<span class='scope-kind' title='{escape_html(scope)}'>{escape_html(tag)}</span>"
+    )
 
 
 def _expiry_cell(expires_at) -> str:
@@ -171,7 +181,7 @@ def credentials_page(request: Request, session: dict = Depends(require_auth)):
         <tr>
           <td>{escape_html(r["name"])}
             <div class='text-muted' style='font-size:0.8rem'>asked by {escape_html(r["requested_by_agent_id"])} · {local_dt(r["created_at"], style="date")}</div></td>
-          <td><code>{escape_html(r["scope"])}</code></td>
+          <td><code class='scope-code'>{scope_html(r["scope"])}</code></td>
           <td>{escape_html(r["purpose"])}</td>
           <td class='actions-cell'>
             <button type='button' class='btn btn-sm' data-request-fill="{escape_html(r["id"])}" data-request-name="{escape_html(r["name"])}">Provide secret</button>
@@ -183,15 +193,15 @@ def credentials_page(request: Request, session: dict = Depends(require_auth)):
         requests_html = f"""
     <div class="card" id="credential-requests">
       <h3>Requested by agents</h3>
-      <p class="text-muted">An agent needs these to continue. The value goes straight into the vault; the agent only ever receives the reference.</p>
-      <table><thead><tr><th>Name</th><th>Scope</th><th>What it's for</th><th class='actions-cell'>Actions</th></tr></thead>
+      <p class="text-muted">An agent needs these to continue. The value is stored encrypted; the agent only ever receives the reference.</p>
+      <table><thead><tr><th>Name</th><th>Workspace</th><th>What it's for</th><th class='actions-cell'>Actions</th></tr></thead>
       <tbody>{request_rows}</tbody></table>
     </div>"""
 
     used_header = "<th class='col-used'>Used by</th>" if ctx.is_admin else ""
     if credential_entries:
         credentials_html = f"""
-        <table class='stack-table'><thead><tr><th>Name</th><th class='col-scope'>Scope</th><th class='col-expires'>Expires</th>{used_header}<th class='actions-cell col-actions'>Actions</th></tr></thead>
+        <table class='stack-table'><thead><tr><th>Name</th><th class='col-scope'>Workspace</th><th class='col-expires'>Expires</th>{used_header}<th class='actions-cell col-actions'>Actions</th></tr></thead>
         <tbody>{credential_rows}</tbody></table>"""
     else:
         credentials_html = "<div class='empty'>No credentials yet.</div>"
@@ -280,7 +290,7 @@ def credentials_page(request: Request, session: dict = Depends(require_auth)):
             <label>Expires</label>
             <input type="date" id="fill-request-expires">
           </div>
-          <button type="submit" class="btn btn-primary">Save to vault</button>
+          <button type="submit" class="btn btn-primary">Save</button>
           <button type="button" class="btn btn-secondary" onclick="closeModal('fill-request-modal')">Cancel</button>
         </form>
       </div>

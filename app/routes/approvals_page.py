@@ -95,13 +95,19 @@ def _param_text(value: Any) -> str:
     return str(value)
 
 
-def _row(approval: dict) -> str:
+def _row(approval: dict, decided_names: dict | None = None) -> str:
     approval_id = escape_html(approval.get("id") or "")
     title = escape_html(approval.get("title") or "")
     scope = escape_html(approval.get("scope") or "")
     proposed_by = escape_html(approval.get("proposed_by") or "")
     status_badge = _status_badge(approval.get("status") or "")
     created = local_dt(approval.get("created_at"))
+    decided_cell = ""
+    if decided_names is not None:
+        who = approval.get("decided_by") or ""
+        who = decided_names.get(who) or who
+        when = local_dt(approval.get("decided_at")) if approval.get("decided_at") else ""
+        decided_cell = "<td>" + (escape_html(who) + (" · " if who and when else "") + when or "—") + "</td>"
     return (
         "<tr>"
         "<td><a href='/approvals/" + approval_id + "'>" + title + "</a></td>"
@@ -109,12 +115,13 @@ def _row(approval: dict) -> str:
         "<td>" + proposed_by + "</td>"
         "<td>" + status_badge + "</td>"
         "<td>" + created + "</td>"
+        + decided_cell +
         "</tr>"
     )
 
 
-def _list_rows(approvals: list[dict]) -> str:
-    return "".join(_row(a) for a in approvals)
+def _list_rows(approvals: list[dict], decided_names: dict | None = None) -> str:
+    return "".join(_row(a, decided_names) for a in approvals)
 
 
 def _operation_card(index: int, operation: dict, can_decide: bool) -> str:
@@ -254,7 +261,11 @@ def approvals_page(request: Request, session: dict = Depends(_approvals_session)
     decided = decided[:DECIDED_LIMIT]
 
     pending_rows = _list_rows(pending)
-    decided_rows = _list_rows(decided)
+    from app.database import get_db
+
+    with get_db() as conn:
+        user_names = {r[0]: r[1] or r[0] for r in conn.execute("SELECT id, display_name FROM users")}
+    decided_rows = _list_rows(decided, user_names)
 
     body = """
 <div class="page-header"><h1>Approvals</h1></div>
@@ -264,15 +275,15 @@ def approvals_page(request: Request, session: dict = Depends(_approvals_session)
     An agent proposed an admin change. Nothing runs until a person decides it.
   </p>
   <div style="overflow-x:auto"><table>
-    <thead><tr><th>Title</th><th>Scope</th><th>Proposed by</th><th>Status</th><th>Created</th></tr></thead>
+    <thead><tr><th>Title</th><th>Workspace</th><th>Proposed by</th><th>Status</th><th>Created</th></tr></thead>
     <tbody>""" + (pending_rows or "<tr><td colspan='5' class='empty'>Nothing is waiting on you.</td></tr>") + """</tbody>
   </table></div>
 </div>
 <div class="card">
   <h3>Recently decided</h3>
   <div style="overflow-x:auto"><table>
-    <thead><tr><th>Title</th><th>Scope</th><th>Proposed by</th><th>Status</th><th>Created</th></tr></thead>
-    <tbody>""" + (decided_rows or "<tr><td colspan='5' class='empty'>Nothing has been decided yet.</td></tr>") + """</tbody>
+    <thead><tr><th>Title</th><th>Workspace</th><th>Proposed by</th><th>Outcome</th><th>Created</th><th>Decided</th></tr></thead>
+    <tbody>""" + (decided_rows or "<tr><td colspan='6' class='empty'>Nothing has been decided yet.</td></tr>") + """</tbody>
   </table></div>
 </div>
 """
