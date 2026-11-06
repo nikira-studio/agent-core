@@ -192,6 +192,20 @@ def test_there_is_no_trusted_device_path_any_more(test_client, admin_token):
     assert r.status_code == 401, r.text
 
 
+def test_an_operator_token_in_the_cookie_cannot_decide(test_client, admin_token):
+    from app.services.auth_service import create_operator_token
+
+    approval_id = _proposal(test_client, admin_token)
+    token = create_operator_token("admin", 5)[0]
+    test_client.cookies.clear()
+    test_client.cookies.set("session_token", token, path="/")
+    r = test_client.post(f"/api/approvals/{approval_id}/decide", json={"approve": True})
+    assert r.status_code in (401, 403), r.text
+    from app.services import approval_service
+
+    assert approval_service.get(approval_id)["status"] == "pending"
+
+
 def test_the_overview_lists_a_pending_approval_under_waiting_on_you(test_client, admin_token):
     approval_id = _proposal(test_client, admin_token)
     _browser_admin(test_client)

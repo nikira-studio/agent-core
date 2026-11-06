@@ -118,7 +118,9 @@ def _decider(request: Request) -> dict:
 
     session = validate_session(request.cookies.get("session_token") or "",
                                inactivity_minutes=settings.INACTIVITY_TIMEOUT_MINUTES)
-    if not session:
+    # An operator token pasted into the cookie is still an operator token: only a real
+    # dashboard sign-in decides.
+    if not session or session.get("channel") != "dashboard":
         raise APIError("UNAUTHORIZED", "Authentication required", 401)
     return session
 
