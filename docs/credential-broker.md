@@ -52,6 +52,16 @@ export AGENT_CORE_BROKER_TOKEN_FILE=/path/to/broker.credential
 python agent_core_broker.py --token ac_broker_xxxxx ...
 ```
 
+## Keep the link encrypted
+
+The broker sends its credential to Agent Core and receives raw secret values back. Over plain `http://` to another machine, anyone who can watch that network can read both. A private address or a Docker network name does not change that.
+
+- `http://` to this machine (`localhost`, `127.0.0.1`, `::1`) is fine and says nothing.
+- `https://` is fine anywhere.
+- `http://` to any other host prints a warning to stderr and carries on. Set `AGENT_CORE_BROKER_PLAIN_HTTP=refuse` to make it stop instead.
+- If you trust the link (for example a tunnel you set up yourself), pass `--allow-plain-http` or set `AGENT_CORE_BROKER_ALLOW_PLAIN_HTTP=1`; the warning and the refusal both go away.
+- Anything other than `http://` or `https://` (such as `file://`) is always refused.
+
 To rotate the broker credential (e.g., after a suspected exposure):
 
 ```bash

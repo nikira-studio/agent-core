@@ -14,6 +14,10 @@ Environment:
     AGENT_CORE_BROKER_TOKEN  Broker credential (ac_broker_...)
     AGENT_CORE_BROKER_TOKEN_FILE  File containing broker credential
     AGENT_CORE_TRUSTED_AGENT Override for --agent-id (recommended over passing it in)
+    AGENT_CORE_BROKER_PLAIN_HTTP  What to do when the URL is plain http:// to a host other than this
+                             machine: warn (default) or refuse. The broker credential and every secret
+                             it fetches would cross the network unencrypted. --allow-plain-http (or
+                             AGENT_CORE_BROKER_ALLOW_PLAIN_HTTP=1) says the link is trusted and silences it.
 """
 
 import argparse
@@ -24,6 +28,8 @@ import sys
 import json
 import urllib.request
 import urllib.error
+import ipaddress
+from urllib.parse import urlsplit
 
 
 AC_SECRET_RE = re.compile(r"\b(AC_SECRET_[A-Z0-9_]+)\b")
@@ -31,6 +37,36 @@ DEFAULT_TOKEN_FILES = (
     "data/broker.credential",
     "/data/broker.credential",
 )
+
+
+def _is_loopback_host(host: str) -> bool:
+    if host == "localhost" or host.endswith(".localhost"):
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+
+def check_transport(base_url: str, policy: str = "warn", allow_plain_http: bool = False) -> tuple[bool, str]:
+    """(ok to continue, message to print or ""). Plain http:// is fine only to this machine.
+
+    Only http and https are accepted. Plain http:// to any other host, including a private address or
+    a Docker network name, sends the broker credential and the secret values in the clear to anything
+    that can watch that network, so it warns by default and refuses when the policy says so.
+    """
+    parts = urlsplit(base_url)
+    if parts.scheme not in ("http", "https") or not parts.hostname:
+        return False, f"ERROR: the broker URL must be http:// or https://, got {base_url!r}"
+    if parts.scheme == "https" or _is_loopback_host(parts.hostname) or allow_plain_http:
+        return True, ""
+    message = (
+        f"{'ERROR' if policy == 'refuse' else 'WARNING'}: {base_url} is plain http:// to {parts.hostname}. "
+        "The broker credential and every secret it fetches cross the network unencrypted, readable by "
+        "anything on that network (a private address or a Docker network name does not change that). "
+        "Use https://, or a loopback or tunnelled address. If this link is trusted, pass --allow-plain-http."
+    )
+    return policy != "refuse", message
 
 
 def load_broker_token(explicit_token: str = "", token_file: str = "") -> str:
@@ -150,6 +186,12 @@ def main() -> int:
         default="",
         help="File containing broker credential (default: data/broker.credential or /data/broker.credential)",
     )
+    parser.add_argument(
+        "--allow-plain-http",
+        action="store_true",
+        default=os.environ.get("AGENT_CORE_BROKER_ALLOW_PLAIN_HTTP", "") in ("1", "true", "yes"),
+        help="Say that a plain http:// link to another host is trusted (silences the warning)",
+    )
     parser.add_argument("cmd", nargs=argparse.REMAINDER, help="Command to run")
     args = parser.parse_args()
 
@@ -162,6 +204,13 @@ def main() -> int:
         return 1
     if not args.cmd:
         print("ERROR: -- cmd [...] required", file=sys.stderr)
+        return 1
+
+    policy = os.environ.get("AGENT_CORE_BROKER_PLAIN_HTTP", "warn").strip().lower()
+    proceed, message = check_transport(args.base_url, "refuse" if policy == "refuse" else "warn", args.allow_plain_http)
+    if message:
+        print(message, file=sys.stderr)
+    if not proceed:
         return 1
 
     trusted_agent = os.environ.get("AGENT_CORE_TRUSTED_AGENT", args.agent_id)

@@ -13,3 +13,29 @@ def test_broker_explicit_token_wins(tmp_path):
     token_file.write_text("ac_broker_file\n", encoding="utf-8")
 
     assert load_broker_token("ac_broker_explicit", str(token_file)) == "ac_broker_explicit"
+
+
+def test_plain_http_is_fine_to_this_machine_and_https_anywhere():
+    from runner.agent_core_broker import check_transport
+
+    for url in ("http://localhost:3500", "http://127.0.0.1:3500", "http://[::1]:3500", "https://core.example.com"):
+        assert check_transport(url, "refuse") == (True, "")
+
+
+def test_plain_http_to_another_host_warns_or_refuses_by_policy_and_can_be_allowed():
+    from runner.agent_core_broker import check_transport
+
+    for url in ("http://core.example.com", "http://192.168.1.20:3500", "http://agent-core:3500"):
+        ok, message = check_transport(url, "warn")
+        assert ok and message.startswith("WARNING") and "unencrypted" in message
+        ok, message = check_transport(url, "refuse")
+        assert not ok and message.startswith("ERROR")
+        assert check_transport(url, "refuse", allow_plain_http=True) == (True, "")
+
+
+def test_other_schemes_are_refused():
+    from runner.agent_core_broker import check_transport
+
+    for url in ("file:///etc/passwd", "ftp://host/", "core.example.com"):
+        ok, message = check_transport(url, "warn")
+        assert not ok and "http:// or https://" in message
