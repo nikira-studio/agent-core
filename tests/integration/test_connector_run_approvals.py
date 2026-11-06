@@ -306,15 +306,13 @@ def test_a_reader_sees_the_request_but_not_the_buttons(world):
     assert "wants to run do_thing" in html and "data-approval-approve=" not in html
 
 
-def test_a_trusted_device_session_cannot_decide_a_held_run(world, monkeypatch):
-    from app.config import settings
-    from app.services.auth_service import trust_device
+def test_a_leftover_trusted_device_session_cannot_decide_a_held_run(world):
+    from app.services.auth_service import create_session
 
-    monkeypatch.setattr(settings, "TRUSTED_DEVICES_ENABLED", True)
     _gate(world)
     approval_id = _run(world, world["runner"]).json()["data"]["approval_id"]
     client = world["client"]
     client.cookies.clear()
-    client.cookies.set("approvals_session", trust_device("admin")["session_id"], path="/")
+    client.cookies.set("session_token", create_session("admin", channel="approvals")["session_id"], path="/")
     r = client.post(f"/api/approvals/{approval_id}/decide", headers=csrf_headers(client), json={"approve": True})
-    assert r.status_code == 403 and world["calls"] == []
+    assert r.status_code == 401 and world["calls"] == []

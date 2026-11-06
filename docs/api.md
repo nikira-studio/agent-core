@@ -75,12 +75,9 @@ Agent API keys start with `ac_sk_`. Broker credentials start with `ac_broker_`. 
 | `POST` | `/api/approvals` | Agent key (`admin_propose`) | Propose a bundle of admin operations for a person to approve |
 | `GET` | `/api/approvals` | Session or key | List approvals in scopes you can read (`status`, default `pending`) |
 | `GET` | `/api/approvals/{id}` | Session or key | Status, decision note and result of one approval |
-| `POST` | `/api/approvals/{id}/decide` | Browser session or trusted device | Approve (runs the bundle as you) or reject; cookie only, needs `X-CSRF-Token` |
-| `POST` | `/api/approvals/trust-device` | Browser session | Make this browser a trusted device for approvals |
+| `POST` | `/api/approvals/{id}/decide` | Browser session | Approve (runs the bundle as you) or reject; cookie only, needs `X-CSRF-Token` |
 | `GET` | `/api/connector-types/{id}/gates` | Session or key | Which actions of a service wait for a person, and whom they hold |
 | `PUT` | `/api/connector-types/{id}/gates/{action}` | Browser session, admin | Turn "ask a person first" on or off for one action (`{"enabled": true, "actors": "all" or ["agent-id"]}`); refuses any `Authorization` header, so no key, operator token or bearer session can change a gate |
-| `GET` | `/api/approvals/trusted-devices` | Browser session | List your trusted devices |
-| `DELETE` | `/api/approvals/trusted-devices/{id}` | Browser session | Revoke a trusted device |
 | `POST` | `/api/auth/otp/enroll` | Session + password | Start TOTP enrollment and receive QR data. Reset also requires current OTP. |
 | `POST` | `/api/auth/otp/confirm` | Session | Confirm the first TOTP code and enable OTP |
 | `POST` | `/api/auth/otp/verify` | Pending session | Verify OTP during login |

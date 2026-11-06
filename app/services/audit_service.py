@@ -12,8 +12,6 @@ AUDIT_ACTIONS = (
     "session_logout",
     "operator_token_created",
     "operator_token_revoked",
-    "trusted_device_added",
-    "trusted_device_revoked",
     "approval_requested",
     "approval_approved",
     "approval_rejected",

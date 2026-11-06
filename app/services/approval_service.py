@@ -233,16 +233,6 @@ def decide(approval_id: str, *, session: dict, approve: bool, note: Optional[str
         return public_view(get(approval_id))
 
     operations = operations_of(row)
-    if session.get("channel") == "approvals":
-        widening = [o["name"] for o in operations if admin_registry.get(o["name"]).needs_dashboard_signin]
-        if widening:
-            # Released again: the person can open the dashboard and approve there.
-            with get_db() as conn:
-                conn.execute("UPDATE approvals SET status = 'pending', decided_by = NULL, decided_at = NULL, "
-                             "decision_note = NULL WHERE id = ? AND status = 'executing'", (approval_id,))
-                conn.commit()
-            raise APIError("DASHBOARD_SIGNIN_REQUIRED",
-                           f"{', '.join(widening)} widens what an agent can do, so sign in to the dashboard to approve it", 403)
     for index, op in enumerate(operations):
         definition = admin_registry.get(op["name"])
         for field_name in definition.person_fields:

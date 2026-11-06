@@ -8,7 +8,6 @@ from fastapi import APIRouter, Request, Depends
 from pydantic import BaseModel
 
 from app.branding import CREDENTIAL_PREFIX, ENV_PREFIX
-from app.config import settings as app_settings
 from app.security.dependencies import require_admin
 from app.security.response_helpers import success_response, error_response
 from app.services.auth_service import get_user_by_id
@@ -58,36 +57,6 @@ async function pruneActivity() {
   if (j.ok) { box.innerHTML = '<div class="alert alert-success">Deleted ' + escapeHtml(String(j.data.deleted_count)) + ' tasks older than ' + escapeHtml(date) + '.</div>'; }
   else { showToast((j.error && j.error.message) || 'Delete failed', 'danger'); }
 }
-</script>
-"""
-
-TRUSTED_DEVICES_JS = """
-<script>
-async function loadTrustedDevices() {
-  const box = document.getElementById('trusted-device-list');
-  const j = await apiFetch('/api/approvals/trusted-devices');
-  const devices = (j.ok && j.data.devices) || [];
-  if (!devices.length) { box.innerHTML = '<p class="text-muted">No trusted devices.</p>'; return; }
-  box.innerHTML = '<table><thead><tr><th>Added</th><th>Last used</th><th>Expires</th><th></th></tr></thead><tbody>' +
-    devices.map(d => '<tr><td>' + escapeHtml(d.created_at || '') + '</td><td>' + escapeHtml(d.last_activity || '') +
-      '</td><td>' + escapeHtml(d.expires_at || '') + '</td><td><button class="btn btn-sm" data-device-id="' +
-      escapeHtml(d.id) + '">Revoke</button></td></tr>').join('') + '</tbody></table>';
-  box.querySelectorAll('button[data-device-id]').forEach(function(b) {
-    b.addEventListener('click', async function() {
-      await apiFetch('/api/approvals/trusted-devices/' + encodeURIComponent(b.dataset.deviceId), { method: 'DELETE' });
-      loadTrustedDevices();
-    });
-  });
-}
-document.getElementById('trust-this-device').addEventListener('click', async function() {
-  const res = document.getElementById('trusted-device-result');
-  const j = await apiFetch('/api/approvals/trust-device', { method: 'POST' });
-  res.innerHTML = j.ok
-    ? '<div class="alert alert-success">This device is trusted until ' + escapeHtml(j.data.expires_at) + '.</div>'
-    : '<div class="alert alert-danger">' + escapeHtml((j.error && j.error.message) || 'Could not trust this device') + '</div>';
-  loadTrustedDevices();
-});
-loadTrustedDevices();
 </script>
 """
 
@@ -1588,19 +1557,7 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
       <div id="prune-activity-result" style="margin-top:12px"></div>
     </div>"""
 
-    trusted_devices_html = ""
-    if session.get("channel") == "dashboard" and app_settings.TRUSTED_DEVICES_ENABLED:
-        idle = max(1, min(int(app_settings.TRUSTED_DEVICE_IDLE_DAYS), int(app_settings.TRUSTED_DEVICE_DAYS)))
-        trusted_devices_html = f"""
-    <div class="card">
-      <h3>Trusted devices</h3>
-      <p class="form-hint" style="margin-top:0">For approving from a phone without signing in each time. A trusted device can open and decide approvals, and nothing else. It stays trusted while it is used at least every {idle} days, and for at most {int(app_settings.TRUSTED_DEVICE_DAYS)} days in all. Changes that widen what an agent can do still need a dashboard sign-in. Trust only a device you control.</p>
-      <button type="button" class="btn" id="trust-this-device">Trust this device</button>
-      <div id="trusted-device-result" style="margin-top:12px"></div>
-      <div id="trusted-device-list" style="margin-top:12px"></div>
-    </div>"""
-
-    tabs = [("account", "Account", f"{account_html}{preferences_html}{trusted_devices_html}")]
+    tabs = [("account", "Account", f"{account_html}{preferences_html}")]
     if is_admin:
         tabs += [
             ("memory", "Memory", f"{vector_settings_html}{memory_behavior_html}"),
@@ -1625,7 +1582,7 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
     {admin_modals}
     """,
         "/settings",
-        js + SETTINGS_TABS_JS + (TRUSTED_DEVICES_JS if trusted_devices_html else "") + (PRUNE_JS if prune_html else ""),
+        js + SETTINGS_TABS_JS + (PRUNE_JS if prune_html else ""),
         session=session,
     )
 

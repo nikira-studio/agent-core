@@ -42,22 +42,6 @@ _STATUS_BADGES = {
 _EMPTY_PARAMS_ROW = "<tr><td colspan='2' class='empty'>No parameters.</td></tr>"
 
 
-def _approvals_session(request: Request) -> dict:
-    """The person on an Approvals page.
-
-    A device the person marked as trusted holds a session that only the
-    Approvals routes accept (see auth_service.approvals_session), so approving
-    from a phone needs no sign-in. Everyone else needs the ordinary dashboard
-    session or an operator token, which require_auth handles.
-    """
-    from app.services.auth_service import approvals_session
-
-    session = approvals_session(request)
-    if session:
-        return session
-    return require_auth(request)
-
-
 def _read_scopes(session: dict) -> Optional[list[str]]:
     """The scopes whose approvals this person may see. None means every scope."""
     if session.get("role") == "admin":
@@ -322,7 +306,7 @@ def _not_found_page(session: dict):
 
 
 @router.get("/approvals")
-def approvals_page(request: Request, session: dict = Depends(_approvals_session)):
+def approvals_page(request: Request, session: dict = Depends(require_auth)):
     from app.services import approval_service
 
     scopes = _read_scopes(session)
@@ -361,20 +345,13 @@ def approvals_page(request: Request, session: dict = Depends(_approvals_session)
 </div>
 """
 
-    # Trusted devices are managed in Settings; only a dashboard sign-in can do it.
-    from app.config import settings
-
-    if session.get("channel") == "dashboard" and settings.TRUSTED_DEVICES_ENABLED:
-        body += """
-<p class="text-muted" style="font-size:0.85rem">Approving from a phone without signing in? See <a href="/settings#account">Trusted devices in Settings</a>.</p>
-"""
     extra_js = ""
     return render_page("Approvals", body, nav_active="/approvals", session=session, extra_js=extra_js)
 
 
 @router.get("/approvals/{approval_id}")
 def approval_detail_page(
-    approval_id: str, request: Request, session: dict = Depends(_approvals_session)
+    approval_id: str, request: Request, session: dict = Depends(require_auth)
 ):
     from app.services import approval_service
 

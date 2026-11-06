@@ -385,14 +385,7 @@ def get_session(session_id: str) -> Optional[dict]:
         return dict(row) if row else None
 
 
-TRUSTED_DEVICE_CHANNEL = "approvals"
-TRUSTED_DEVICE_COOKIE = "approvals_session"
-TRUSTED_DEVICE_COOKIE_PATHS = ("/approvals", "/api/approvals")
-
-
-def validate_session(
-    session_token: str, inactivity_minutes: int = 30, *, approvals: bool = False
-) -> Optional[dict]:
+def validate_session(session_token: str, inactivity_minutes: int = 30) -> Optional[dict]:
     if session_token.startswith(OPERATOR_TOKEN_PREFIX):
         # An operator token stands in for its person wherever a session would.
         return validate_operator_token(session_token)
@@ -404,11 +397,9 @@ def validate_session(
     if not session:
         return None
 
-    if session["channel"] == "pending_otp":
-        return None
-    if (session["channel"] == TRUSTED_DEVICE_CHANNEL) != approvals:
-        # A trusted-device session is good for the Approvals pages only, and
-        # those pages take nothing else from that cookie.
+    if session["channel"] != "dashboard":
+        # A half-finished sign-in (pending_otp) never authenticates, and neither does a leftover
+        # row from the removed trusted-device feature (channel "approvals").
         return None
 
     expires_at = parse_utc_datetime(session["expires_at"])
@@ -718,63 +709,4 @@ def csrf_token_for_session_id(session_id: str) -> str:
 def csrf_token_for_session_token(session_token: str) -> Optional[str]:
     session_id = decode_jwt(session_token) if session_token else None
     return csrf_token_for_session_id(session_id) if session_id else None
-
-
-# ---------------------------------------------------------------------------
-# Trusted devices
-#
-# A person marks the device they are signed in on as trusted for approvals.
-# That device gets a separate long-lived session on the "approvals" channel,
-# kept in its own cookie that is sent only to the Approvals routes and that
-# validate_session refuses everywhere else. Approving from a phone then needs
-# no sign-in, while the rest of the dashboard still does.
-
-
-def trusted_device_idle_minutes() -> int:
-    """How long a trusted device may go unused: the idle setting, never more
-    than the lifetime cap."""
-    from app.config import settings
-
-    return max(1, min(settings.TRUSTED_DEVICE_IDLE_DAYS, settings.TRUSTED_DEVICE_DAYS)) * 24 * 60
-
-
-def trust_device(user_id: str) -> dict:
-    from app.config import settings
-
-    return create_session(user_id, channel=TRUSTED_DEVICE_CHANNEL,
-                          expiry_hours=settings.TRUSTED_DEVICE_DAYS * 24)
-
-
-def approvals_session(request) -> Optional[dict]:
-    """The person on an Approvals route: the dashboard cookie session, or else
-    the device's trusted approvals session."""
-    from app.config import settings
-
-    session = validate_session(request.cookies.get("session_token") or "",
-                               inactivity_minutes=settings.INACTIVITY_TIMEOUT_MINUTES)
-    if session:
-        return session
-    if not settings.TRUSTED_DEVICES_ENABLED:
-        return None
-    return validate_session(request.cookies.get(TRUSTED_DEVICE_COOKIE) or "",
-                            inactivity_minutes=trusted_device_idle_minutes(), approvals=True)
-
-
-def list_trusted_devices(user_id: str) -> list[dict]:
-    with get_db() as conn:
-        rows = conn.execute(
-            "SELECT id, expires_at, last_activity, created_at FROM sessions "
-            "WHERE user_id = ? AND channel = ? ORDER BY created_at DESC",
-            (user_id, TRUSTED_DEVICE_CHANNEL),
-        ).fetchall()
-    now = utc_now()
-    return [dict(r) for r in rows if parse_utc_datetime(r["expires_at"]) > now]
-
-
-def revoke_trusted_device(user_id: str, session_id: str) -> bool:
-    with get_db() as conn:
-        cursor = conn.execute("DELETE FROM sessions WHERE id = ? AND user_id = ? AND channel = ?",
-                              (session_id, user_id, TRUSTED_DEVICE_CHANNEL))
-        conn.commit()
-        return cursor.rowcount > 0
 

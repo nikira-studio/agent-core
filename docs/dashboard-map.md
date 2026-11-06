@@ -15,7 +15,7 @@ What an admin does, in order, and where the dashboard sends them today.
 | 3 | Connect that agent's tool to Core | **Integrations** (renamed Connect): choose a user, workspace and agent, then copy the generated key and config | Separate page from Agents. The agent form ends with a link to it. Easy to miss. |
 | 4 | Give it a credential or an outside service | **Credentials** (store a secret), then **Connectors** (to be renamed Services: add a service, then add a binding to it) | Three places for one idea: "let this agent use that service". |
 | 5 | See what it did | **Activity** | Fine. |
-| 6 | Approve something it proposed | **Approvals**, or a phone link for a trusted device | Only appears once something is pending. Nothing on Overview points to it. |
+| 6 | Approve something it proposed | **Approvals** | Only appears once something is pending. Nothing on Overview points to it. |
 
 Proposed: Overview shows a short **Getting started** list on a fresh install (add an agent, connect it, give it a service, watch Activity, approve) that disappears once each step is done, and a single **Waiting on you** list afterwards (see Overview below).
 
@@ -34,7 +34,7 @@ A page that answers two or more questions is flagged. Those are the merge or spl
 | Credentials | Which secrets are stored? | No. |
 | Integrations | How do I connect an AI tool to Core? | No, but it is one step of "add an agent" kept on its own page. |
 | Activity | What are agents doing and what did they do? | Yes today: workspace sync status, assigning work, pruning history. Fixed below. |
-| Approvals | What is waiting for my decision? | Yes today: trusted-device management shares the page. Fixed by moving it to Settings → Account. |
+| Approvals | What is waiting for my decision? | Yes. |
 | Audit | What happened, and who did it? | No (export and prune are tools for the same question). |
 | Webhooks | How does Core talk to the outside, and the outside to Core? | Yes: an inbound receiver and outbound notifications. |
 | Settings | (see below) | Yes: about eight. |
@@ -68,7 +68,7 @@ Settings is the page with the least structure: account, security, preferences, o
 
 | Section | Holds | Its question |
 |---|---|---|
-| **Account** | Name and email, timezone, operator tokens, trusted devices (moved from Approvals) | Who am I, and how do my scripts and devices sign in? |
+| **Account** | Name and email, timezone, operator tokens | Who am I, and how do my scripts and devices sign in? |
 | **Memory** | Vector search and re-embed, duplicate warning, the Memory Clean-up settings (unconfirmed-inference days and importance, consolidation scan) | How does search and review behave? |
 | **Data and backup** | Retention (scratchpad, retracted records, episodic expiry, connector log, webhook log) in one group, pruning activity history (moved from Activity), Run Maintenance, backup and restore, startup checks | What is kept, for how long, and how do I back it up? |
 | **Security** | Encryption key (status, rotate, restore), broker credential, secrets snapshot | How are stored secrets protected? |
@@ -88,7 +88,7 @@ Individual changes:
 
 ## Approvals and Activity
 
-**Approvals** keeps one question, "what is waiting for my decision". Its trusted-devices card moves to Settings → Account; the Approvals page links there for a person who wants to trust a phone.
+**Approvals** keeps one question, "what is waiting for my decision".
 
 **Activity** keeps **Assign work**, the one human action on the page. Pruning history moves to Settings → Data and backup beside the retention controls. Workspace sync status becomes one line in the page header (for example "3 workspaces in sync, 1 behind") that expands, not a section of its own.
 
@@ -141,7 +141,7 @@ The first-five-minutes walk-through still sends an admin through Credentials, Se
 ## How the work is done
 
 1. This audit, reviewed first.
-2. One branch per item, each reviewed before it is merged, in this order: Agents leftovers with the sidebar grouping and the two renames, Overview (including the header search), Settings split and moves (taking in trusted devices and activity pruning), Services, Webhooks, Memory, Connect. Empty-state sentences are added on each page as it is touched.
+2. One branch per item, each reviewed before it is merged, in this order: Agents leftovers with the sidebar grouping and the two renames, Overview (including the header search), Settings split and moves (taking in activity pruning), Services, Webhooks, Memory, Connect. Empty-state sentences are added on each page as it is touched.
 3. As each page is touched, every control that remains gets one line of in-page help, and this document is updated with that page's final controls and what was removed, merged or moved. The final version is the walk-through a reviewer reads to ask "would a stranger's install understand this?".
 4. **A page change is not done until its screenshots have been looked at, at desktop and phone width.** Passing tests is not the bar; the rendered page is. `scripts/ui_sweep.py` signs in as an admin on a copy or throwaway install, opens every page (and each Settings tab) at both widths, saves the screenshots, and flags anything wider than its card or any page that scrolls sideways. Open the images, check long names and empty states, and send before and after shots with the change. Stylesheet and script links carry their file's own content hash, so a changed file reaches browsers that cached the old one without anyone bumping a version by hand.
 
@@ -151,9 +151,9 @@ The first-five-minutes walk-through still sends an admin through Credentials, Se
 |---|---|
 | Agents: role choice, shorter forms, role badge | Built and deployed |
 | Sidebar grouping (Work, Access, Capabilities, System), Connect and Services names | Built and deployed; regrouped and Connect renamed to Connect on branch feat/sidebar-wording |
-| Trusted devices off by default | Built and deployed |
+| Trusted devices | Removed before release: no sign-in path other than the dashboard session (and operator tokens for scripts) |
 | Overview: Waiting on you, Health, Getting started, Search | Built and deployed. The header search on every page was not built: the existing Overview search stays, since a second place to search is a new mechanism. |
-| Settings split into four tabs; proposal caps out of the UI; activity pruning and trusted devices moved in | Built, in review. The webhook retry policy has moved to the Webhooks page. |
+| Settings split into four tabs; proposal caps out of the UI; activity pruning moved in | Built, in review. The webhook retry policy has moved to the Webhooks page. |
 | Services: Add a service, Advanced fields, collapsed runs, empty states | Built and deployed |
 | Webhooks: Receiving and Sending, retry policy moved from Settings | Built and deployed |
 | Memory: Suggestions waiting for you, grouped detail, Advanced | Built and deployed |

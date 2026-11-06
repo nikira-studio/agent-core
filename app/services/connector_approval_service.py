@@ -164,8 +164,6 @@ def decide(row: dict, *, session: dict, approve: bool, note: Optional[str]) -> d
     from app.services import audit_service
 
     approval_id = row["id"]
-    if session.get("channel") == "approvals":
-        raise APIError("DASHBOARD_SIGNIN_REQUIRED", "Sign in to the dashboard to decide this request", 403)
     if not can_decide(session, row["scope"]):
         raise APIError("FORBIDDEN", "You need write access to this workspace to decide this request", 403)
     note = (note or "").strip()[:2000] or None

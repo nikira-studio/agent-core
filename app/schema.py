@@ -1607,7 +1607,10 @@ def _migrate_015_otp_last_used_step(conn) -> None:
 
 
 def _migrate_019_trusted_device_sessions(conn) -> None:
-    """Allow the 'approvals' session channel. SQLite cannot alter a CHECK
+    """(The trusted-device feature that used this channel was removed before release; the revision stays so
+    databases that already ran it keep a continuous history, and nothing writes or accepts the channel.)
+
+    Allow the 'approvals' session channel. SQLite cannot alter a CHECK
     constraint, so the table is rebuilt with the same columns and rows."""
     sql = conn.execute("SELECT sql FROM sqlite_master WHERE name = 'sessions'").fetchone()
     if sql is None or "'approvals'" in sql[0]:

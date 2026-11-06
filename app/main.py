@@ -119,9 +119,7 @@ def create_app() -> FastAPI:
             and "authorization" not in request.headers
             and request.url.path not in CSRF_EXEMPT_PATHS
         ):
-            # The trusted-device cookie authenticates Approvals requests the
-            # same way the dashboard cookie does, so it needs the same token.
-            cookie = request.cookies.get("session_token") or request.cookies.get("approvals_session")
+            cookie = request.cookies.get("session_token")
             if cookie:
                 import hmac
 

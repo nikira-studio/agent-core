@@ -20,7 +20,7 @@ A person can set any action of a service to **ask a person first**. When an agen
 
 ## Not in this version
 
-Batches of runs, trusted-device or one-tap approval links, and notification routing. A front end that carries the link to a person (a chat bot, a briefing) reads the `approval_requested` event or `attention_list`.
+Batches of runs, one-tap approval links, and notification routing. A front end that carries the link to a person (a chat bot, a briefing) reads the `approval_requested` event or `attention_list`.
 
 ## Where the code is
 

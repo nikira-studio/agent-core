@@ -4,7 +4,6 @@ The proposal itself comes from an agent; the decision comes from a person in
 the dashboard. These tests look at the page a person opens.
 """
 
-import pytest
 
 from tests.conftest import csrf_headers
 from tests.integration.test_approvals import (
@@ -13,13 +12,6 @@ from tests.integration.test_approvals import (
     _setup,
     _update_target,
 )
-
-
-@pytest.fixture(autouse=True)
-def trusted_devices_on(monkeypatch):
-    from app.config import settings
-
-    monkeypatch.setattr(settings, "TRUSTED_DEVICES_ENABLED", True)
 
 
 def _proposal(test_client, admin_token, operations=None, title="Widen target-agent"):
@@ -178,46 +170,26 @@ def test_a_proposal_in_a_scope_the_person_cannot_read_is_not_shown(test_client, 
     assert "Widen target-agent" not in r.text
 
 
-def test_the_list_offers_trusting_this_device_only_to_a_dashboard_signin(test_client, admin_token):
-    from app.services.auth_service import trust_device
+def test_there_is_no_trusted_device_path_any_more(test_client, admin_token):
+    """The feature was removed before release: nothing offers it, and a leftover session row of its
+    kind (channel "approvals") authenticates nowhere, not even on the Approvals routes."""
+    from app.config import settings
+    from app.services.auth_service import create_session
 
+    assert not hasattr(settings, "TRUSTED_DEVICES_ENABLED")
     _browser_admin(test_client)
-    html = test_client.get("/settings").text
-    assert 'id="trust-this-device"' in html and "/api/approvals/trust-device" in html
-    assert "onclick" not in html.split('id="trusted-device-list"')[1].split("</section>")[0]  # ids travel in data attributes
-    assert "/settings#account" in test_client.get("/approvals").text  # the Approvals page points there
+    assert "Trusted device" not in test_client.get("/settings").text
+    assert "Trusted device" not in test_client.get("/approvals").text
+    approval_id = _proposal(test_client, admin_token)
+    assert test_client.post("/api/approvals/trust-device", headers=csrf_headers(test_client)).status_code in (404, 405)
 
-    device = trust_device("admin")
+    leftover = create_session("admin", channel="approvals")
     test_client.cookies.clear()
-    test_client.cookies.set("approvals_session", device["session_id"], path="/")
-    phone = test_client.get("/approvals", follow_redirects=False)
-    assert phone.status_code == 200
-    assert 'id="trust-this-device"' not in phone.text  # a trusted device can't trust more
-
-
-def test_the_trusted_device_copy_follows_the_setting(test_client, admin_token, monkeypatch):
-    from app.config import settings
-
-    monkeypatch.setattr(settings, "TRUSTED_DEVICE_DAYS", 90)
-    monkeypatch.setattr(settings, "TRUSTED_DEVICE_IDLE_DAYS", 21)
-    _browser_admin(test_client)
-    html = test_client.get("/settings").text
-    assert "at least every 21 days" in html and "at most 90 days in all" in html
-
-
-def test_the_card_is_hidden_when_trusted_devices_are_off(test_client, admin_token, monkeypatch):
-    from app.config import settings
-
-    monkeypatch.setattr(settings, "TRUSTED_DEVICES_ENABLED", False)
-    _browser_admin(test_client)
-    html = test_client.get("/settings").text
-    assert 'id="trust-this-device"' not in html and "Trusted devices" not in html
-    assert "Trusted devices" not in test_client.get("/approvals").text
-
-
-def test_the_card_says_what_trusted_devices_are_for(test_client, admin_token):
-    _browser_admin(test_client)
-    assert "For approving from a phone without signing in each time" in test_client.get("/settings").text
+    test_client.cookies.set("approvals_session", leftover["session_id"], path="/")
+    test_client.cookies.set("session_token", leftover["session_id"], path="/")
+    assert test_client.get("/approvals", follow_redirects=False).status_code in (302, 303, 307, 401)
+    r = test_client.post(f"/api/approvals/{approval_id}/decide", headers=csrf_headers(test_client), json={"approve": True})
+    assert r.status_code == 401, r.text
 
 
 def test_the_overview_lists_a_pending_approval_under_waiting_on_you(test_client, admin_token):
