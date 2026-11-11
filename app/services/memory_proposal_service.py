@@ -1059,8 +1059,9 @@ def pending_summary(scopes: Optional[list[str]] = None, limit: int = 10) -> dict
     """How many suggestions are waiting for an answer in ``scopes`` (None: every scope), and a short list.
 
     Counted in SQL, so the count is exact whatever the size of the queue and other scopes' suggestions
-    cannot crowd out the viewer's own. Only the fields a person needs to find one are returned; the
-    rationale and the evidence can quote a memory and are not.
+    cannot crowd out the viewer's own. Only what is needed to find and answer one is returned: its rule,
+    scope, date and the ids of the memories it is about, so a caller can read them and answer by checking.
+    The rationale and the evidence can quote a memory and are not.
     """
     if scopes is not None and not scopes:
         return {"count": 0, "items": []}
@@ -1072,11 +1073,19 @@ def pending_summary(scopes: Optional[list[str]] = None, limit: int = 10) -> dict
     with get_db() as conn:
         count = conn.execute(f"SELECT COUNT(*) FROM memory_proposals WHERE {where}", params).fetchone()[0]
         rows = conn.execute(
-            f"SELECT id, rule, scope, created_at FROM memory_proposals WHERE {where} "
+            f"SELECT id, rule, scope, target_ids_json, created_at FROM memory_proposals WHERE {where} "
             "ORDER BY created_at DESC LIMIT ?",
             (*params, max(0, int(limit))),
         ).fetchall()
-    return {"count": count, "items": [dict(r) for r in rows]}
+    items = []
+    for r in rows:
+        item = dict(r)
+        try:
+            item["target_ids"] = json.loads(item.pop("target_ids_json") or "[]")
+        except (TypeError, ValueError):
+            item["target_ids"] = []
+        items.append(item)
+    return {"count": count, "items": items}
 
 
 def get_proposal(proposal_id: str) -> Optional[dict]:

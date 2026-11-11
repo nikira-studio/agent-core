@@ -315,5 +315,7 @@ def test_suggestion_count_is_exact_and_not_crowded_out_by_other_scopes(test_clie
         _suggestion(HIDDEN, f"other-{n}")
     mine = waiting_service.waiting_on_person(scopes=[B], include=("memory_suggestions",))["memory_suggestions"]
     assert mine["count"] == 1 and mine["items"][0]["id"] == "mine-old"
-    everything = waiting_service.waiting_on_person(include=("memory_suggestions",))["memory_suggestions"]
-    assert everything["count"] == 206 and len(everything["items"]) == waiting_service.SUGGESTION_LIST_LIMIT
+    everything = waiting_service.waiting_on_person(include=("memory_suggestions",), limit=10)["memory_suggestions"]
+    assert everything["count"] == 206 and len(everything["items"]) == 10
+    # Each item says which memory it is about, so a caller can read it and answer by checking.
+    assert mine["items"][0]["target_ids"] == ["memory-of-mine-old"]
