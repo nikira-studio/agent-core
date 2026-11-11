@@ -167,7 +167,7 @@ def activity_page(request: Request, session: dict = Depends(require_auth)):
         f"<td class='activity-updated-cell' data-label='Updated'>{local_dt(a.get('updated_at'), style='date')}<br>{local_dt(a.get('updated_at'), style='time')}</td>"
         f"<td><div class='actions-cell activity-actions-cell'>"
         f"<button type='button' class='btn btn-sm btn-secondary' data-activity-reassign='{escape_html(a['id'])}' title='Reassign'>Reassign</button>"
-        f"<button type='button' class='btn btn-sm btn-secondary' data-activity-done='{escape_html(a['id'])}' {'disabled' if a.get('status') not in ('active', 'stale', 'blocked', 'reassigned') else ''} title='Done'>Done</button>"
+        f"<button type='button' class='btn btn-sm btn-secondary' data-activity-done='{escape_html(a['id'])}' data-activity-status='{escape_html(a.get('status', ''))}' {'disabled' if a.get('status') not in ('active', 'stale', 'blocked', 'reassigned') else ''} title='Done'>Done</button>"
         f"<details class='row-more'><summary class='btn btn-sm btn-secondary' title='Start or cancel this task'>More</summary>"
         f"<div class='row-more-list'>"
         f"<button type='button' class='btn btn-sm btn-secondary' data-activity-start='{escape_html(a['id'])}' {'disabled' if a.get('status') not in ('stale', 'blocked', 'reassigned') else ''} title='Start'>Start</button>"
@@ -205,7 +205,17 @@ def activity_page(request: Request, session: dict = Depends(require_auth)):
       const start = ev.target.closest('[data-activity-start]');
       if (start) { ev.preventDefault(); updateActivity(start.dataset.activityStart, 'active'); return; }
       const done = ev.target.closest('[data-activity-done]');
-      if (done) { ev.preventDefault(); updateActivity(done.dataset.activityDone, 'completed'); return; }
+      if (done) {
+        ev.preventDefault();
+        if (done.dataset.activityStatus === 'blocked') {
+          // A blocked task is closed with a reason, which is recorded on it.
+          const why = prompt('Why is this done? It is recorded on the task.', 'Done; closed from the dashboard');
+          if (why && why.trim()) updateActivity(done.dataset.activityDone, 'completed', why.trim());
+          return;
+        }
+        updateActivity(done.dataset.activityDone, 'completed');
+        return;
+      }
       const cancel = ev.target.closest('[data-activity-cancel]');
       if (cancel) { ev.preventDefault(); cancelActivity(cancel.dataset.activityCancel); return; }
       const resolve = ev.target.closest('[data-handoff-resolve]');
@@ -218,8 +228,10 @@ def activity_page(request: Request, session: dict = Depends(require_auth)):
       else { showToast(j.error.message || 'Failed', 'danger'); }
     }
 
-    async function updateActivity(id, status) {
-      const j = await apiFetch('/api/activity/' + id, { method: 'PUT', body: JSON.stringify({ status }) });
+    async function updateActivity(id, status, taskResult) {
+      const body = { status };
+      if (taskResult) body.task_result = taskResult;
+      const j = await apiFetch('/api/activity/' + id, { method: 'PUT', body: JSON.stringify(body) });
       if (j.ok) { showToast('Updated'); refreshActivity(); }
       else { showToast(j.error.message || 'Failed', 'danger'); }
     }

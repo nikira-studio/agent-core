@@ -46,6 +46,13 @@ def _can_activity(ctx: EffectiveAuthority, activity: dict, operation: str) -> bo
     return activity.get("agent_id") == ctx.agent_id and ctx.actor_type == "user"
 
 
+def _may_close_blocked(ctx: EffectiveAuthority, activity: dict, new_status: str) -> bool:
+    """Blocked to completed or cancelled, by an admin or by the agent the record belongs to."""
+    if activity.get("status") != "blocked" or new_status not in ("completed", "cancelled"):
+        return False
+    return ctx.is_admin or (ctx.actor_type == "agent" and ctx.agent_id == activity.get("assigned_agent_id"))
+
+
 def _enforcer(ctx: EffectiveAuthority, agent_id: Optional[str] = None) -> ScopeEnforcer:
     return ScopeEnforcer(
         ctx.read_scopes,
@@ -326,9 +333,19 @@ def update_activity(
     if body.status in ("completed", "cancelled", "blocked") and activity[
         "status"
     ] not in ("active", "stale"):
-        return error_response(
-            "INVALID_TRANSITION", "Cannot close a non-active activity", 400
-        )
+        # One correction is allowed: a record that ended "blocked" can be closed as completed or
+        # cancelled by an admin or by the agent it belongs to, with a reason. Nothing else changes
+        # state once a record has ended, and nothing is revived.
+        if not _may_close_blocked(ctx, activity, body.status):
+            return error_response(
+                "INVALID_TRANSITION", "Cannot close a non-active activity", 400
+            )
+        if not (body.task_result or "").strip():
+            return error_response(
+                "TASK_RESULT_REQUIRED",
+                "Closing a blocked activity needs a task_result that says why it is done",
+                400,
+            )
 
     # A closed task's handoff is amended, not replaced: its asks to a person
     # leave only through a resolution (see activity_service.merge_handoff).

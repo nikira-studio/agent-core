@@ -349,11 +349,15 @@ MANIFEST = {
         },
         {
             "name": "memory_retract",
-            "description": "Retract a memory record by ID",
+            "description": (
+                "Retract a memory record by ID. Give a reason (what you checked) when you retract it because "
+                "it is wrong or gone: that also answers any pending Memory Clean-up suggestion about it."
+            ),
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "record_id": {"type": "string"},
+                    "reason": {"type": "string", "description": "What you checked, e.g. 'the file no longer exists'."},
                 },
                 "required": ["record_id"],
             },
@@ -1749,7 +1753,7 @@ async def _run_custom_mcp_tool(body: dict, ctx: EffectiveAuthority):
             return _mcp_error("NOT_FOUND", "Memory record not found", 404)
         if not ctx.can("memory", "write", scope=record["scope"]):
             return _mcp_error("SCOPE_DENIED", "Access denied to this scope", 403)
-        memory_service.retract_memory(params["record_id"])
+        memory_service.retract_memory(params["record_id"], reason=params.get("reason"), retracted_by=ctx.actor_id)
         audit_service.write_event(
             actor_type="agent",
             actor_id=ctx.agent_id,

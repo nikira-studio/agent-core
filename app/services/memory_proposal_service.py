@@ -1171,6 +1171,65 @@ def decide_proposal(
     return proposal
 
 
+def close_answered(record_id: str, *, answered_by: str, how: str, evidence: str) -> list[dict]:
+    """Close the pending suggestions about one memory because someone has now answered the question.
+
+    ``how`` is ``confirmed`` (the memory was checked against the world and is still true) or
+    ``retracted`` (it was checked and is no longer current). Both need ``evidence``; a call without any
+    closes nothing. A suggestion that asked "is this still true?" is a hit for its rule whichever way the
+    answer went; a suggestion to retract is a hit when the memory was retracted and a miss when it was
+    checked and kept. Suggestions that cover several memories (a duplicate cluster) and pin requests are
+    left for a person.
+
+    The closed rows stay in the history as decided by ``answered_by``, so they leave the person's list
+    without being lost. Returns what was closed.
+    """
+    if how not in ("confirmed", "retracted") or not (evidence or "").strip() or not (answered_by or "").strip():
+        return []
+    closed: list[dict] = []
+    now = utc_now_iso()
+    with get_db() as conn:
+        rows = conn.execute(
+            "SELECT id, rule, action FROM memory_proposals WHERE status = 'pending' "
+            "AND json_valid(target_ids_json) AND json_array_length(target_ids_json) = 1 "
+            "AND json_extract(target_ids_json, '$[0]') = ?",
+            (record_id,),
+        ).fetchall()
+        for row in rows:
+            if row["action"] not in ("confirm", "retract"):
+                continue
+            verdict = "rejected" if (row["action"] == "retract" and how == "confirmed") else "accepted"
+            conn.execute(
+                "UPDATE memory_proposals SET status = ?, decided_at = ?, decided_by = ?, applied_count = 1 "
+                "WHERE id = ? AND status = 'pending'",
+                (verdict, now, answered_by, row["id"]),
+            )
+            closed.append({"id": row["id"], "rule": row["rule"], "action": row["action"], "verdict": verdict})
+        conn.commit()
+    if closed:
+        from app.services import audit_service
+
+        for item in closed:
+            audit_service.write_event(
+                actor_type="system",
+                actor_id=answered_by,
+                action="memory_proposal_answered",
+                resource_type="memory_proposal",
+                resource_id=item["id"],
+                result="success",
+                details={
+                    "rule": item["rule"],
+                    "action": item["action"],
+                    "verdict": item["verdict"],
+                    "answered_by": answered_by,
+                    "how": how,
+                    "record_id": record_id,
+                    "evidence": evidence.strip()[:300],
+                },
+            )
+    return closed
+
+
 def reanchor_proposal(proposal_id: str, anchor: str, decided_by: str) -> dict:
     """Fix the pointer instead of judging the record, then re-check it.
 

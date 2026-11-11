@@ -326,11 +326,13 @@ async def retract_memory(
     ctx: EffectiveAuthority = Depends(get_request_context),
 ):
     record_id = request.query_params.get("record_id")
+    reason = request.query_params.get("reason")
     if not record_id:
         try:
             body = await request.json()
             if isinstance(body, dict):
                 record_id = body.get("record_id")
+                reason = reason or body.get("reason")
         except Exception:
             record_id = None
     if not record_id:
@@ -343,7 +345,9 @@ async def retract_memory(
     if not ctx.can("memory", "write", scope=record["scope"]):
         return error_response("SCOPE_DENIED", "Access denied to this scope", 403)
 
-    success = memory_service.retract_memory(record_id)
+    success = memory_service.retract_memory(
+        record_id, reason=reason if isinstance(reason, str) else None, retracted_by=ctx.actor_id
+    )
     if not success:
         return error_response(
             "ALREADY_RETRACTED", "Record already retracted or not found", 400

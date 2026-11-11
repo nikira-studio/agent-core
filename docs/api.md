@@ -190,7 +190,7 @@ Agent or session authentication accepted, with scope enforcement on every operat
 | `POST` | `/api/memory/search` | Search memory (FTS5 + optional semantic hybrid search) |
 | `POST` | `/api/memory/get` | List records by scope |
 | `POST` | `/api/memory/confirm` | Confirm a record with evidence |
-| `POST` | `/api/memory/retract` | Soft-delete a record |
+| `POST` | `/api/memory/retract` | Soft-delete a record. An optional `reason` (what you checked) also answers any pending Memory Clean-up suggestion about it |
 | `POST` | `/api/memory/move` | Atomically relocate an active record to a new scope (write access to both scopes required) |
 | `POST` | `/api/memory/restore` | Restore a retracted record (retraction is reversible) |
 | `GET` | `/api/memory/{record_id}` | Get one record |
@@ -742,7 +742,7 @@ Dispatch:
 | `memory_search` | Search memory by query. No `scope` = your default recall scopes; pass `scope` to target one specific readable scope on demand |
 | `memory_get` | List records in an authorized scope. `view='compact'` surveys a scope (metadata + content preview, no full bodies); defaults to compact for large pages, full for small. Supports `limit`/`offset` |
 | `memory_write` | Write a memory record |
-| `memory_retract` | Soft-delete a memory record |
+| `memory_retract` | Soft-delete a memory record; with a `reason` (what you checked) it also answers pending Memory Clean-up suggestions about it |
 | `memory_move` | Atomically relocate an active record to a new scope (preserves content/class/topic + lineage; write access to both scopes required) |
 | `memory_confirm` | Mark a record verified against the world as of now. Requires `evidence` naming what was checked; reading a record is not checking it |
 | `memory_feedback` | Say whether a recalled record actually helped; feeds observed usefulness into ranking |

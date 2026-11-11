@@ -1115,6 +1115,10 @@ def confirm_memory(
             (now, provenance, record_id),
         )
         conn.commit()
+    # Checking a memory answers any pending suggestion that asked about it (needs the evidence above).
+    from app.services import memory_proposal_service
+
+    memory_proposal_service.close_answered(record_id, answered_by=verified_by, how="confirmed", evidence=detail)
     return get_memory_record(record_id)
 
 
@@ -1441,7 +1445,9 @@ def get_memory_records_by_ids(record_ids: list[str]) -> list[dict]:
     return [by_id[i] for i in ids if i in by_id]
 
 
-def retract_memory(record_id: str) -> bool:
+def retract_memory(record_id: str, reason: Optional[str] = None, retracted_by: Optional[str] = None) -> bool:
+    """Retract an active record. With a ``reason`` (what was checked) and who did it, the pending
+    suggestions about the record are answered too; without one they stay for a person."""
     with get_db() as conn:
         cursor = conn.execute(
             "UPDATE memory_records SET record_status = 'retracted', status_changed_at = ? "
@@ -1449,7 +1455,14 @@ def retract_memory(record_id: str) -> bool:
             (utc_now_iso(), record_id),
         )
         conn.commit()
-        return cursor.rowcount > 0
+        retracted = cursor.rowcount > 0
+    if retracted and (reason or "").strip() and retracted_by:
+        from app.services import memory_proposal_service
+
+        memory_proposal_service.close_answered(
+            record_id, answered_by=retracted_by, how="retracted", evidence=reason or ""
+        )
+    return retracted
 
 
 def move_memory(

@@ -618,3 +618,13 @@ def test_overview_waiting_list_shows_every_kind_to_an_admin(authenticated_client
     assert "Pick the vendor" in waiting
     assert "needs VENDOR_TOKEN" in waiting
     assert "1 suggestion to review" in waiting
+
+
+def test_done_on_a_blocked_row_asks_for_a_reason(authenticated_client):
+    from app.services import activity_service
+
+    activity = activity_service.create_activity("admin", "admin", "Blocked on the admin's desk")
+    activity_service.update_activity(activity["id"], status="blocked")
+    html = authenticated_client.get("/activity").text
+    assert f"data-activity-done='{activity['id']}' data-activity-status='blocked'" in html
+    assert "Why is this done?" in html

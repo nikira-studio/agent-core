@@ -86,7 +86,7 @@ Once connected, these tools are available in any session:
 | `memory_search` | Search memory by natural language query. No `scope` searches the agent's default recall scopes; pass `scope` to target one specific readable scope on demand |
 | `memory_get` | List records in a specific scope. `view='compact'` surveys a scope (metadata + preview); defaults to compact for large pages, full for small |
 | `memory_write` | Save a memory record (automatically checks for PII on shared scopes) |
-| `memory_retract` | Soft-delete a memory record |
+| `memory_retract` | Soft-delete a memory record; with a `reason` (what you checked) it also answers pending Memory Clean-up suggestions about it |
 | `memory_move` | Atomically move an active record to a new scope (write access to both scopes required) |
 | `credential_get` | Get an `AC_SECRET_*` reference for a stored credential |
 | `credential_list` | List credential entries the agent can access (metadata and references only, no raw values) |
