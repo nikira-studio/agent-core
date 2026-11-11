@@ -62,17 +62,7 @@ def waiting_on_person(
             if _in_scopes(r.get("scope"), scopes)
         ][:limit]
     if "memory_suggestions" in include:
-        pending = [
-            p for p in memory_proposal_service.list_proposals(status="pending", limit=200)
-            if _in_scopes(p.get("scope"), scopes)
-        ]
-        result["memory_suggestions"] = {
-            "count": len(pending),
-            "items": [
-                {"id": p["id"], "rule": p.get("rule"), "scope": p.get("scope"), "created_at": p.get("created_at")}
-                for p in pending[:SUGGESTION_LIST_LIMIT]
-            ],
-        }
+        result["memory_suggestions"] = memory_proposal_service.pending_summary(scopes, SUGGESTION_LIST_LIMIT)
     if "stalled_tasks" in include:
         result["stalled_tasks"] = activity_service.list_attention_activities(user_id=user_id, limit=8)
     return result

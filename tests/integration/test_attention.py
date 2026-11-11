@@ -302,3 +302,18 @@ def test_the_overview_and_attention_list_read_the_same_groups(test_client, admin
     nothing = waiting_service.waiting_on_person(scopes=[])
     assert nothing["handoffs"] == [] and nothing["credential_requests"] == []
     assert nothing["memory_suggestions"]["count"] == 0
+
+
+def test_suggestion_count_is_exact_and_not_crowded_out_by_other_scopes(test_client, admin_token):
+    from app.services import waiting_service
+
+    _setup()
+    _suggestion(B, "mine-old")
+    with get_db() as conn:
+        conn.execute("UPDATE memory_proposals SET created_at = '2020-01-01T00:00:00+00:00' WHERE id = 'mine-old'")
+    for n in range(205):  # newer suggestions in a scope the viewer cannot read
+        _suggestion(HIDDEN, f"other-{n}")
+    mine = waiting_service.waiting_on_person(scopes=[B], include=("memory_suggestions",))["memory_suggestions"]
+    assert mine["count"] == 1 and mine["items"][0]["id"] == "mine-old"
+    everything = waiting_service.waiting_on_person(include=("memory_suggestions",))["memory_suggestions"]
+    assert everything["count"] == 206 and len(everything["items"]) == waiting_service.SUGGESTION_LIST_LIMIT

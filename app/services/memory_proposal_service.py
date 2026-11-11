@@ -1055,6 +1055,30 @@ def list_proposals(
     return [_hydrate(dict(row)) for row in rows]
 
 
+def pending_summary(scopes: Optional[list[str]] = None, limit: int = 10) -> dict:
+    """How many suggestions are waiting for an answer in ``scopes`` (None: every scope), and a short list.
+
+    Counted in SQL, so the count is exact whatever the size of the queue and other scopes' suggestions
+    cannot crowd out the viewer's own. Only the fields a person needs to find one are returned; the
+    rationale and the evidence can quote a memory and are not.
+    """
+    if scopes is not None and not scopes:
+        return {"count": 0, "items": []}
+    where = "status = 'pending'"
+    params: list = []
+    if scopes is not None:
+        where += f" AND scope IN ({', '.join('?' for _ in scopes)})"
+        params.extend(scopes)
+    with get_db() as conn:
+        count = conn.execute(f"SELECT COUNT(*) FROM memory_proposals WHERE {where}", params).fetchone()[0]
+        rows = conn.execute(
+            f"SELECT id, rule, scope, created_at FROM memory_proposals WHERE {where} "
+            "ORDER BY created_at DESC LIMIT ?",
+            (*params, max(0, int(limit))),
+        ).fetchall()
+    return {"count": count, "items": [dict(r) for r in rows]}
+
+
 def get_proposal(proposal_id: str) -> Optional[dict]:
     with get_db() as conn:
         row = conn.execute(
