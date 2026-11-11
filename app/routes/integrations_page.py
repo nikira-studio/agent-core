@@ -6,6 +6,7 @@ dashboard.py no longer exists.
 
 from fastapi import APIRouter, Request, Depends
 from fastapi.responses import PlainTextResponse
+import contextvars
 import json
 from pathlib import Path
 
@@ -24,16 +25,30 @@ from app.security.public_url import public_base_url
 router = APIRouter()
 
 
+# The capabilities of the agent a file is being generated for, so the file names the tools that
+# agent can call and no others (an Assistant has no approval_propose). None means all of them.
+_LISTING_CAPABILITIES: contextvars.ContextVar = contextvars.ContextVar("listing_capabilities", default=None)
+
+
 def _mcp_tool_listing() -> str:
-    """The full MCP tool list as prose, derived from the manifest.
+    """The MCP tools this agent can call, as prose, derived from the manifest.
 
     Every generated prompt names the available tools. Hardcoded copies of that
     list drifted independently (three templates, three different subsets), so
-    it is built from the same MANIFEST that /mcp serves.
+    it is built from the same MANIFEST and the same capability rules that /mcp
+    serves, for the agent the file is for.
     """
-    from app.routes.mcp import MANIFEST
+    from app.routes.mcp import MANIFEST, _TOOL_CAPABILITIES
 
-    names = [f"`{tool['name']}`" for tool in MANIFEST["tools"]]
+    caps = _LISTING_CAPABILITIES.get()
+
+    def allowed(name: str) -> bool:
+        required = _TOOL_CAPABILITIES.get(name)
+        if caps is None or required is None:
+            return True
+        return required in caps or (required == "connectors_read" and "connectors_execute" in caps)
+
+    names = [f"`{tool['name']}`" for tool in MANIFEST["tools"] if allowed(tool["name"])]
     return ", ".join(names[:-1]) + f", and {names[-1]}"
 
 
@@ -515,6 +530,12 @@ async def generate_agent_connection(
         output_type: str = "env"
 
     body = GenerateConnectionBody.model_validate(await request.json())
+    if body.output_type not in KNOWN_OUTPUT_TYPES:
+        return error_response(
+            "INVALID_OUTPUT_TYPE",
+            f"Unknown output type '{body.output_type}'. Use one of: {', '.join(sorted(KNOWN_OUTPUT_TYPES))}.",
+            400,
+        )
     is_admin = session.get("role") == "admin"
     current_user_id = session["user_id"]
 
@@ -1031,12 +1052,41 @@ def _agent_setup_extra_js(base_url):
 # Outputs that embed the agent's API key, and therefore require rotating it.
 # Everything else — the repo instruction files and the prompts — is guidance
 # that carries no credential.
+# Every output type `_build_agent_setup_output` knows. An unknown name used to fall through to the
+# verification prompt without saying so, so a mistyped type looked like it had worked.
+KNOWN_OUTPUT_TYPES = frozenset({
+    "instructions", "session", "claude_md", "agents_md", "assistants_md", "mcp_json", "mcp_tool",
+    "cursor_mcp_json", "windsurf_mcp_json", "env", "claude_code_hook", "verification",
+})
+
 KEY_BEARING_OUTPUTS = frozenset(
     {"env", "mcp_json", "mcp_tool", "cursor_mcp_json", "windsurf_mcp_json", "assistants_md"}
 )
 
 
 def _build_agent_setup_output(
+    user,
+    workspace,
+    agent,
+    target,
+    output_type,
+    base_url,
+    api_key=None,
+):
+    """Build one generated file for this agent; the tool lists in it are the agent's own."""
+    from app.services import agent_service
+
+    caps = agent.get("capabilities")
+    if caps is None and "capabilities_json" in agent:
+        caps = agent_service.parse_capabilities(agent.get("capabilities_json"))
+    token = _LISTING_CAPABILITIES.set(None if caps is None else frozenset(caps))
+    try:
+        return _build_agent_setup_output_for(user, workspace, agent, target, output_type, base_url, api_key)
+    finally:
+        _LISTING_CAPABILITIES.reset(token)
+
+
+def _build_agent_setup_output_for(
     user,
     workspace,
     agent,
@@ -1518,6 +1568,7 @@ Use {APP_NAME} MCP for memory, credential references, and activity tracking. For
 
 The active {APP_NAME} user and agent identities are determined by the MCP/API key configured in your tool, not by this file. Do not commit credentials to this file.
 If your host defers tool availability, run its tool discovery/load step first so the {APP_NAME} MCP tools are available before you try to call them.
+{APP_NAME} MCP tools you can use: {_mcp_tool_listing()}.
 
 ## Memory Scope Guidance
 

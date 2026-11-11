@@ -38,7 +38,6 @@ Agent Core provides:
 
 - durable memory in one place
 - access control for credentials and external services
-- short-lived, narrowed authority for a single task, with human approval
 - server-side services for imported OpenAPI specs, native MCP servers, and **adapters**, which are shareable data-manifest integrations for OAuth, session handshakes, and CLI wrappers (see [docs/adapters.md](docs/adapters.md))
 - activity visibility and on-demand handoffs
 
@@ -285,7 +284,7 @@ data/
 
 - Docker with Compose, **or** Python 3.11 for local development
 - SQLite with FTS5 (standard in the Docker image and most Python 3.11 builds)
-- Optional: [Ollama](https://ollama.com) for semantic (AI-powered) memory search. Without it, Agent Core falls back to full-text search. Configure the endpoint and model from **Settings → Vector Search** in the dashboard after setup
+- Optional: [Ollama](https://ollama.com) for semantic (AI-powered) memory search. Without it, Agent Core falls back to full-text search. Configure the endpoint and model from **Settings → Memory → Search by meaning** in the dashboard after setup
 
 ---
 

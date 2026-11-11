@@ -18,6 +18,9 @@ curl -sS -H "Authorization: Bearer <operator-token>" \
   -o agent-core-backup.zip.enc
 ```
 
+Replace `<operator-token>` with a token from **Settings → Account → Operator tokens** (valid 5 to 60 minutes, shown once). The sign-in session token is refused on these routes.
+
+
 The exported archive contains the same backup contents as before, but encrypted with a separate one-time backup key. The dashboard shows that key once after export. Over REST the key is in the body of the export response (`data.backup_key`); it is not sent as a header any more, because proxies and logs keep headers. A script that read the `X-Agent-Core-Backup-Key` header must read the body instead.
 
 The underlying backup archive contains:
@@ -27,7 +30,7 @@ The underlying backup archive contains:
 - `credential.keyring`: all historical keys (needed to decrypt entries from before a key rotation)
 - `manifest.json`: version, timestamp, and SHA-256 checksums for everything in the archive
 
-You can also trigger a backup from the dashboard: **Settings → Backup → Export Encrypted Backup**.
+You can also trigger a backup from the dashboard: **Settings → Data and backup → Export Encrypted Backup**.
 
 **Store the encrypted archive and the backup key securely, separately.** If either one is lost, restore becomes much harder. The archive is still sensitive even though it is encrypted.
 
@@ -39,7 +42,7 @@ Restore also requires an admin session. It's a destructive operation: it replace
 
 ```bash
 curl -X POST http://localhost:3500/api/backup/restore \
-  -H "Authorization: Bearer <admin-session>" \
+  -H "Authorization: Bearer <operator-token>" \
   -F "backup=@agent-core-backup.zip.enc" \
   -F "backup_key=<one-time-backup-key>" \
   -F "mode=replace_all"
@@ -94,7 +97,7 @@ Admin only. Returns CSV.
 
 ```bash
 curl "http://localhost:3500/api/backup/export/audit?fmt=csv" \
-  -H "Authorization: Bearer <admin-session>" \
+  -H "Authorization: Bearer <operator-token>" \
   -o audit.csv
 ```
 
@@ -106,7 +109,7 @@ Run this to verify Agent Core's operational state; useful after a restore or if 
 
 ```bash
 curl http://localhost:3500/api/backup/startup-checks \
-  -H "Authorization: Bearer <admin-session>"
+  -H "Authorization: Bearer <operator-token>"
 ```
 
 Checks include:
@@ -120,11 +123,11 @@ Checks include:
 
 ## Maintenance
 
-Maintenance runs automatically in-process (default: every 60 minutes, first run 5 minutes after startup; see `AGENT_CORE_MAINTENANCE_INTERVAL_MINUTES` in [configuration](configuration.md)). You can also trigger it manually from **Settings → Backup & Restore** or the API:
+Maintenance runs automatically in-process (default: every 60 minutes, first run 5 minutes after startup; see `AGENT_CORE_MAINTENANCE_INTERVAL_MINUTES` in [configuration](configuration.md)). You can also trigger it manually from **Settings → Data and backup** or the API:
 
 ```bash
 curl -X POST http://localhost:3500/api/backup/maintenance \
-  -H "Authorization: Bearer <admin-session>"
+  -H "Authorization: Bearer <operator-token>"
 ```
 
 What it does:

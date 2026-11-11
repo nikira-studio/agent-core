@@ -17,6 +17,14 @@ Notable changes to Agent Core are documented here. The format follows [Keep a Ch
 
 - Rotating the local credential helper key is now recorded in the audit log (`broker_credential_rotated`: who, when, and that the previous credential was retired; never the credential). A refused or failed encryption-key rotation or restore is recorded too (result `failure`, with the reason and never the key); successful ones were already recorded.
 
+### Fixed
+
+- **Documentation.** Admin examples (backup, key rotation, creating an agent, maintenance) now send an operator token (`Settings → Account → Operator tokens`); the sign-in session token they showed is refused on those routes. The quickstart no longer says creating an agent shows its key (the Connect page generates it), names the right place for two-step sign-in, and the README no longer lists the removed single-task authority. Settings sections are named as they are today (Account, Memory, Data and backup, Security).
+- Connect refuses an output type it does not know (`INVALID_OUTPUT_TYPE`) instead of quietly returning the verification prompt.
+- `PUT /api/agents/{id}` refuses a field it does not know instead of answering "Agent updated" and ignoring it. (An approval proposal that carries an unknown field for `agent.update` is refused too.)
+- A refused `execution_id` says what to do (call `session_context` for a current one, or leave it out when writing to a different scope) instead of "Invalid execution".
+- The generated CLAUDE.md, AGENTS.md and session prompt list the tools the agent they are for can call: an agent without the proposal capability is no longer told about `approval_propose`, and AGENTS.md now lists its tools like the other files do.
+
 ### Removed
 
 - **Image export from service results.** A service answer that carried an inline `data:image/...;base64` picture was written to `<data>/artifacts/connector/` and replaced by a reference. Nothing used it, so it is gone: such an answer now follows the ordinary path (large results are offloaded and read with `result_fetch`). The `connector_artifact_exported` audit action is no longer written; rows from earlier versions, if any, stay readable.

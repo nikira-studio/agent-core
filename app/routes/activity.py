@@ -99,7 +99,7 @@ def create_activity(
         except PermissionError:
             return error_response("EXECUTION_OWNERSHIP", "Execution belongs to another agent", 403)
         except ValueError as exc:
-            return error_response(str(exc), "Invalid execution", 400)
+            return error_response(str(exc), workspace_sync_service.execution_message(str(exc)), 400)
 
     activity = activity_service.create_activity(
         agent_id=effective_agent_id,
@@ -296,7 +296,7 @@ def update_activity(
         except PermissionError:
             return error_response("EXECUTION_OWNERSHIP", "Execution belongs to another agent", 403)
         except ValueError as exc:
-            return error_response(str(exc), "Invalid execution", 400)
+            return error_response(str(exc), workspace_sync_service.execution_message(str(exc)), 400)
 
     if body.status and body.status not in ACTIVITY_STATUSES:
         return error_response("INVALID_STATUS", f"Invalid status: {body.status}", 400)

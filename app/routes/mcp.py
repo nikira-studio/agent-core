@@ -1915,7 +1915,7 @@ async def _run_custom_mcp_tool(body: dict, ctx: EffectiveAuthority):
                     "EXECUTION_OWNERSHIP", "Execution belongs to another agent", 403
                 )
             except ValueError as exc:
-                return _mcp_error(str(exc), "Invalid execution", 400)
+                return _mcp_error(str(exc), workspace_sync_service.execution_message(str(exc)), 400)
         handoff = None
         if params.get("handoff") is not None:
             from app.services.session_context_service import normalize_handoff
@@ -2396,7 +2396,7 @@ async def _run_custom_mcp_tool(body: dict, ctx: EffectiveAuthority):
                 "EXECUTION_OWNERSHIP", "Execution belongs to another agent", 403
             )
         except ValueError as exc:
-            return _mcp_error(str(exc), "Invalid execution or cursor", 400)
+            return _mcp_error(str(exc), workspace_sync_service.execution_message(str(exc), "Invalid execution or cursor"), 400)
         return JSONResponse(content={"ok": True, "data": result})
 
     elif tool == "connectors_list":

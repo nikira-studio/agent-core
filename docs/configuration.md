@@ -72,9 +72,9 @@ Session tokens are signed with their own random key, `session.key` in the data d
 | `AGENT_CORE_MAINTENANCE_INTERVAL_MINUTES` | `60` | How often the in-process maintenance sweep runs: marks stale activities and executions, prunes expired workspace changes and scratchpad memories, sweeps `expires_at` records, and purges retracted or superseded records past retention. Set to `0` to disable the automatic schedule; the manual **Run Maintenance** button in Settings still works |
 | `AGENT_CORE_MAINTENANCE_INITIAL_DELAY_SECONDS` | `300` | Delay before the first automatic run after startup |
 
-The scratchpad and retracted/superseded retention windows themselves (7 and 30 days by default) are configured from **Settings → System Behavior** in the dashboard. The last run's time, trigger, and results are shown in **Settings → Backup & Restore** and available from `GET /api/backup/maintenance/status`.
+The scratchpad and retracted/superseded retention windows themselves (7 and 30 days by default) are configured from **Settings → Data and backup → How long things are kept** in the dashboard. The last run's time, trigger, and results are shown in **Settings → Data and backup** and available from `GET /api/backup/maintenance/status`.
 
-The maintenance sweep also prunes the service execution and webhook delivery logs (30 days by default, `0` keeps them forever), runs the memory verification pass, and can generate capped memory-review proposals. These controls are set from **Settings → System Behavior**.
+The maintenance sweep also prunes the service execution and webhook delivery logs (30 days by default, `0` keeps them forever), runs the memory verification pass, and can generate capped memory-review proposals. These controls are set from **Settings → Data and backup** and **Settings → Memory**.
 
 ### Memory consolidation and workspace awareness
 
@@ -88,9 +88,9 @@ The maintenance sweep also prunes the service execution and webhook delivery log
 | `workspace_awareness_digest_enabled` | `1` | Allow a fresh MCP `activity_update` to return a best-effort `since_last_active` digest |
 | `workspace_awareness_digest_limit` | `10` | Maximum digest change entries; runtime bounds are 1–50 |
 
-The first five settings are editable in **Settings → System Behavior**. The workspace-awareness settings are installation-wide database settings. Proposal generation rechecks all caps and candidate eligibility inside its short write transaction, so simultaneous manual and scheduled runs cannot overfill the queue.
+The unconfirmed-inference days and the scheduled-scan switch are editable in **Settings → Memory → Memory review**. The three proposal caps and the workspace-awareness settings are installation-wide database settings with no dashboard control. Proposal generation rechecks all caps and candidate eligibility inside its short write transaction, so simultaneous manual and scheduled runs cannot overfill the queue.
 
-The embedding provider, endpoint URL, model, and auth type for **vector search** are configured from **Settings → Vector Search** in the dashboard, not through environment variables.
+The embedding provider, endpoint URL, model, and auth type for **vector search** are configured from **Settings → Memory → Search by meaning** in the dashboard, not through environment variables.
 
 Two providers are supported:
 
@@ -257,4 +257,4 @@ For a local setup, the defaults are usually fine. Here's what's actually worth l
 - **`AGENT_CORE_CORS_ORIGINS`**: set this if you're building a separate web app that needs to make authenticated requests
 - **`AGENT_CORE_COOKIE_SECURE`**: set to `true` if serving over HTTPS
 - **`AGENT_CORE_ENCRYPTION_KEY`**: leave as `auto` unless you have a specific reason to manage the key yourself
-- **Vector search settings**: configured from **Settings → Vector Search** in the dashboard, not here. If your Ollama instance is on a different host, update the URL there after starting
+- **Vector search settings**: configured from **Settings → Memory → Search by meaning** in the dashboard, not here. If your Ollama instance is on a different host, update the URL there after starting

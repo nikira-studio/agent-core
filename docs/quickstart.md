@@ -68,7 +68,7 @@ Open `http://localhost:3500` and register the first admin user.
 
 The first time you open the dashboard, you'll be prompted to register. This account becomes the admin: it can manage all agents, view the audit log, and access backup and restore. Keep that password somewhere safe.
 
-After registering, you're in. Take a look around. The dashboard gives you an overview of memory records, agents, credentials, and recent activity.
+After registering, you're in. The **Overview** shows what is waiting on you, whether everything is healthy, and a short **Getting started** list for a new install.
 
 ---
 
@@ -76,7 +76,7 @@ After registering, you're in. Take a look around. The dashboard gives you an ove
 
 To enable login MFA, enroll a TOTP authenticator. It's a one-time setup.
 
-Go to **Settings → Security** and scan the QR code with any authenticator app (Google Authenticator, Authy, 1Password, or anything else that supports TOTP). Confirm the first code to activate it. You can reset or disable OTP later from the same page.
+Go to **Settings → Account**, find **Sign-in**, and scan the QR code with any authenticator app (Google Authenticator, Authy, 1Password, or anything else that supports TOTP). Confirm the first code to activate it. You can reset or disable OTP later from the same page.
 
 You won't be prompted for it during normal use, only at login.
 
@@ -86,13 +86,13 @@ You won't be prompted for it during normal use, only at login.
 
 Agents are the identities that connect to Agent Core. Each one gets its own API key and its own scope of what memory, credentials, and service capabilities it can access. Service capabilities can come from imported OpenAPI specs, native MCP server registrations, the built-in Generic HTTP fallback, or installed **adapters**. Install adapters from the **Adapter Library** on the Services page; user-installed adapter files live in `data/adapters/` and built-in templates ship in `app/adapter_templates/` (see [Adapters](integrations.md#adapters)).
 
-Open **Agents** in the sidebar and create a new agent. Give it a descriptive name like `claude-coding-agent` or `cursor-agent`. When you save it, you'll see the API key **exactly once**, so copy it somewhere safe before closing the page. There's no way to retrieve it later (you can always generate a new one if you lose it).
+Open **Agents** in the sidebar and create a new agent. Give it a descriptive name like `claude-coding-agent` or `cursor-agent`. Creating an agent does not show a key. Open the **Connect** page (the dialog after you save links to it) to generate the agent's key and its tool settings. The key is shown **once**; copy it into the tool right away. There is no way to read it later, but you can generate a new one (which stops the old one working). Through the API, `POST /api/agents/coding-agent/rotate_key` (same header as below) returns the key once.
 
 If you'd rather use the API:
 
 ```bash
 curl -X POST http://localhost:3500/api/agents \
-  -H "Authorization: Bearer <admin-session-token>" \
+  -H "Authorization: Bearer <operator-token>" \
   -H "Content-Type: application/json" \
   -d '{
     "id": "coding-agent",
@@ -142,7 +142,7 @@ curl -X POST http://localhost:3500/mcp \
 You should see:
 
 ```json
-{"ok": true, "data": {"records": [], "count": 0, "retrieval_mode": "fts_only"}}
+{"ok": true, "data": {"records": [], "retrieval_mode": "fts_only", "total": 0, ...}}
 ```
 
 If you get a `401`, you're using the wrong key. Make sure it's the agent API key, not your dashboard password. A connection error means Agent Core isn't running on port 3500.

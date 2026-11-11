@@ -108,8 +108,11 @@ Run the startup health checks:
 
 ```bash
 curl http://localhost:3500/api/backup/startup-checks \
-  -H "Authorization: Bearer <admin-session>"
+  -H "Authorization: Bearer <operator-token>"
 ```
+
+Replace `<operator-token>` with a token from **Settings → Account → Operator tokens** (valid 5 to 60 minutes, shown once). The sign-in session token is refused on these routes.
+
 
 If your SQLite build doesn't include FTS5, the Docker image is the fix; it bundles a compatible Python and SQLite build where FTS5 is always available.
 
@@ -146,7 +149,7 @@ The decrypted backup ZIP must include `agent-core.db`, `credential.key`, and `ma
 
 ### I lost my OTP
 
-If OTP is enabled and you can no longer generate codes, use **Settings → Security** to disable OTP and enroll again with a fresh authenticator app.
+If OTP is enabled and you can no longer generate codes, use **Settings → Account → Sign-in** to turn off two-step sign-in and enroll again with a fresh authenticator app.
 
 ---
 

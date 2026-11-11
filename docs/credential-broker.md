@@ -66,8 +66,11 @@ To rotate the broker credential (e.g., after a suspected exposure):
 
 ```bash
 curl -X POST http://localhost:3500/api/dashboard/broker/rotate \
-  -H "Authorization: Bearer <admin-session>"
+  -H "Authorization: Bearer <operator-token>"
 ```
+
+Replace `<operator-token>` with a token from **Settings → Account → Operator tokens** (valid 5 to 60 minutes, shown once). The sign-in session token is refused on these routes.
+
 
 Agent Core atomically updates `data/broker.credential` and returns the new
 credential once. A broker that reads this file needs no manual update. If a

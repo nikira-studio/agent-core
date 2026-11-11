@@ -32,12 +32,13 @@ The one exception: `GET /mcp` returns the MCP manifest directly.
 
 Three types of callers, three types of credentials:
 
-**Human users** (dashboard and admin operations) use the session token returned after login:
+**People** use the dashboard: a sign-in sets a browser cookie. A script that must act as a person (admin calls such as backup, key rotation or creating an agent) sends an **operator token**:
 ```http
-Authorization: Bearer <session-token>
+Authorization: Bearer <operator-token>
 ```
+Create one in **Settings → Account → Operator tokens** while signed in (5 to 60 minutes, shown once). The session token returned by `/api/auth/login` is accepted as a Bearer key only on `/api/auth/*`; elsewhere it is refused with `SESSION_BEARER_NOT_ALLOWED`.
 
-**Agents** (memory, credentials, activity, MCP) use the API key issued when the agent was created:
+**Agents** (memory, credentials, activity, MCP) use their own API key, generated on the Connect page (or by rotating the key):
 ```http
 Authorization: Bearer <agent-api-key>
 ```
@@ -888,7 +889,7 @@ Restore uses multipart form data:
 
 ```bash
 curl -X POST http://localhost:3500/api/backup/restore \
-  -H "Authorization: Bearer <admin-session>" \
+  -H "Authorization: Bearer <operator-token>" \
   -F "backup=@backup.zip.enc" \
   -F "backup_key=<one-time-backup-key>" \
   -F "mode=replace_all"
@@ -932,7 +933,7 @@ The key is installation-wide (one key at a time). Generate it once via the dashb
 
 ```http
 POST /api/webhooks/inbound/key
-Authorization: Bearer <admin-session>
+Authorization: Bearer <operator-token>
 ```
 
 Response (201):
@@ -953,7 +954,7 @@ Returns 409 if a key already exists. Use the rotate endpoint to replace it.
 
 ```http
 POST /api/webhooks/inbound/key/rotate
-Authorization: Bearer <admin-session>
+Authorization: Bearer <operator-token>
 ```
 
 Response (200): same shape as generate. The previous key is immediately deactivated.
@@ -1083,7 +1084,7 @@ Admin-only. Manage outbound webhook registrations and view delivery history.
 
 ```http
 POST /api/webhooks
-Authorization: Bearer <admin-session>
+Authorization: Bearer <operator-token>
 Content-Type: application/json
 
 {
@@ -1180,7 +1181,7 @@ Signature header: `X-Agent-Core-Signature: sha256=<hex>` (HMAC-SHA256 of raw bod
 
 ```http
 POST /api/webhooks/{id}/test
-Authorization: Bearer <admin-session>
+Authorization: Bearer <operator-token>
 ```
 
 Sends a synthetic payload to the registered URL with `event_type: "test"`. The payload is not a replay of any prior delivery.
@@ -1195,7 +1196,7 @@ Response:
 
 ```http
 GET /api/webhooks/{id}/deliveries?limit=50
-Authorization: Bearer <admin-session>
+Authorization: Bearer <operator-token>
 ```
 
 Returns an array of delivery attempts, ordered newest first. Each entry includes `status` (`success` or `failure`), `http_status`, `event_type`, and `error_message` if applicable.

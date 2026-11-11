@@ -51,7 +51,7 @@ def sync(body: SyncRequest, ctx: EffectiveAuthority = Depends(get_request_contex
     except PermissionError:
         return error_response("EXECUTION_OWNERSHIP", "Execution belongs to another agent", 403)
     except ValueError as exc:
-        return error_response(str(exc), "Invalid execution or cursor", 400)
+        return error_response(str(exc), workspace_sync_service.execution_message(str(exc), "Invalid execution or cursor"), 400)
     return success_response(result)
 
 

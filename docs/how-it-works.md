@@ -142,7 +142,7 @@ A record is `active`, `superseded`, or `retracted`.
 - **Superseding** links new to old (`supersedes_id`) and preserves the chain, readable through `GET /api/memory/{id}/chain`. The old record is not deleted; it is the answer to a point-in-time question.
 - **Retracting** is a soft delete and is **reversible** (`POST /api/memory/restore`). Reversibility is what makes the clean-up flow safe to use: accepting a proposal can never be the last word.
 - **Expiry** (`expires_at`) is for records that stop being true on their own. They drop out of search immediately and are swept on the next maintenance run.
-- **Retention** eventually purges retracted and superseded records, and scratchpad notes, on windows set in **Settings → System Behavior**.
+- **Retention** eventually purges retracted and superseded records, and scratchpad notes, on windows set in **Settings → Data and backup → How long things are kept**.
 
 ### Retrieval
 
@@ -307,7 +307,7 @@ One in-process sweep, hourly by default, does all of it (`AGENT_CORE_MAINTENANCE
 - prunes service execution and webhook delivery logs
 - verifies a batch of anchored facts, least-recently-attempted first
 
-The last run's time, trigger, and results are visible in **Settings → Backup & Restore** and at `GET /api/backup/maintenance/status`.
+The last run's time, trigger, and results are visible in **Settings → Data and backup** and at `GET /api/backup/maintenance/status`.
 
 ---
 

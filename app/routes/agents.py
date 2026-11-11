@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from typing import Optional
 
 from app.services import audit_service, workspace_service
@@ -29,6 +29,10 @@ class CreateAgentRequest(BaseModel):
 
 
 class UpdateAgentRequest(BaseModel):
+    # A field this model does not know used to be dropped and still answered "Agent updated"
+    # (for example is_active: deactivating is DELETE). Refuse it so the caller finds out.
+    model_config = ConfigDict(extra="forbid")
+
     display_name: Optional[str] = None
     description: Optional[str] = None
     read_scopes: Optional[list[str]] = None

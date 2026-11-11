@@ -266,7 +266,7 @@ async def write_memory(
                 "EXECUTION_OWNERSHIP", "Execution belongs to another agent", 403
             ) from exc
         except ValueError as exc:
-            raise MemoryOperationError(str(exc), "Invalid execution", 400) from exc
+            raise MemoryOperationError(str(exc), workspace_sync_service.execution_message(str(exc)), 400) from exc
 
     provenance = memory_service.provenance_for_write(
         actor_type=authority.actor_type,

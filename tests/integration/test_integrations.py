@@ -607,3 +607,69 @@ def test_generating_a_key_for_the_chosen_tool_returns_only_that_tools_config(int
     data = r.json()["data"]
     assert "# Codex CLI" in data["output"] and "# Claude Code" not in data["output"]
     assert data["api_key"] and data["api_key"] in data["output"]
+
+
+def _generate(client, **extra):
+    body = {"user_id": "alex", "workspace_id": "agent-core", "agent_id": "claude-code", "output_type": "claude_md"}
+    body.update(extra)
+    return client.post("/api/integrations/generate-connection", json=body, headers=csrf_headers(client))
+
+
+def test_generate_connection_refuses_an_unknown_output_type(integrations_client):
+    r = _generate(integrations_client, output_type="mcp_config")
+    assert r.status_code == 400
+    assert r.json()["error"]["code"] == "INVALID_OUTPUT_TYPE"
+    assert "mcp_json" in r.json()["error"]["message"]
+
+
+def test_every_listed_output_type_is_accepted(integrations_client):
+    from app.routes.integrations_page import KNOWN_OUTPUT_TYPES, _agent_setup_output_options
+
+    assert {o[0] for o in _agent_setup_output_options()} <= KNOWN_OUTPUT_TYPES
+    assert _generate(integrations_client, output_type="verification").status_code == 200
+
+
+def test_generated_files_name_only_the_tools_that_agent_can_use(integrations_client):
+    create_agent(
+        agent_id="notes-only",
+        display_name="Notes only",
+        owner_user_id="alex",
+        read_scopes=["agent:notes-only", "workspace:agent-core"],
+        write_scopes=["agent:notes-only", "workspace:agent-core"],
+        capabilities=["memory", "coordination"],
+    )
+    narrow = {t: _generate(integrations_client, agent_id="notes-only", output_type=t).json()["data"]["output"]
+              for t in ("claude_md", "agents_md", "session")}
+    def listing(text):
+        # The sentence that lists the tools; other prose may still mention a tool by name.
+        return next(line for line in text.splitlines() if "MCP tools include" in line or "MCP tools you can use" in line)
+
+    for text in narrow.values():
+        line = listing(text)
+        assert "`memory_search`" in line
+        assert "approval_propose" not in line
+        assert "`connectors_run`" not in line
+        assert "`credential_get`" not in line
+    full = _generate(integrations_client, output_type="claude_md").json()["data"]["output"]
+    assert "`connectors_run`" in listing(full) and "approval_propose" not in listing(full)
+    create_agent(
+        agent_id="proposer-x",
+        display_name="Proposer",
+        owner_user_id="alex",
+        read_scopes=["agent:proposer-x", "workspace:agent-core"],
+        write_scopes=["agent:proposer-x"],
+        capabilities=["memory", "admin_propose"],
+    )
+    proposer = _generate(integrations_client, agent_id="proposer-x").json()["data"]["output"]
+    assert "`approval_propose`" in listing(proposer) and "`connectors_run`" not in listing(proposer)
+
+
+def test_agent_update_refuses_a_field_it_does_not_know(integrations_client):
+    r = integrations_client.put(
+        "/api/agents/claude-code", json={"is_active": False}, headers=csrf_headers(integrations_client)
+    )
+    assert r.status_code == 422
+    assert "is_active" in r.text
+    assert integrations_client.put(
+        "/api/agents/claude-code", json={"description": "still works"}, headers=csrf_headers(integrations_client)
+    ).status_code == 200

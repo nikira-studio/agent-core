@@ -82,16 +82,15 @@ def test_the_detail_page_shows_the_operation_summary(test_client, admin_token):
 
 
 def test_the_detail_page_shows_every_param_the_proposal_carries(test_client, admin_token):
+    # A key-looking name inside a param is shown like any other text. (agent.update itself now refuses
+    # a field it does not know, so the carrier here is a binding's extra settings.)
     approval_id = _proposal(test_client, admin_token, operations=[{
-        "name": "agent.update",
+        "name": "binding.create",
         "params": {
-            "agent_id": "target-agent",
-            "display_name": "target-agent",
-            "description": "approved change",
-            "read_scopes": ["workspace:ops"],
-            "write_scopes": ["workspace:ops"],
-            "capabilities": ["memory"],
-            "api_key": "hide-me-1",
+            "connector_type_id": "generic_http",
+            "name": "named binding",
+            "scope": "workspace:ops",
+            "config_json": "{\"api_key\": \"hide-me-1\"}",
         },
     }])
     _browser_admin(test_client)

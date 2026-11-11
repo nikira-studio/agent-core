@@ -42,6 +42,24 @@ def record_change(
     )
 
 
+EXECUTION_MESSAGES = {
+    "EXECUTION_NOT_FOUND": (
+        "That execution_id is not known here (it may be from an old session). "
+        "Call session_context for a current one, or leave execution_id out."
+    ),
+    "EXECUTION_SCOPE_MISMATCH": (
+        "That execution_id was started for a different memory scope than this call uses. "
+        "Leave execution_id out for this call (for example a write to your private agent: scope), "
+        "or use the scope the execution was started for."
+    ),
+}
+
+
+def execution_message(code: str, fallback: str = "Invalid execution") -> str:
+    """What to tell a caller whose execution_id was refused, so the message says what to do."""
+    return EXECUTION_MESSAGES.get(str(code), fallback)
+
+
 def _execution(conn, execution_id: str, agent_id: str, user_id: str, scope: str):
     row = conn.execute(
         "SELECT * FROM agent_executions WHERE id = ?", (execution_id,)

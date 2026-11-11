@@ -154,7 +154,7 @@ Search queries that look like credentials, or are too short/noisy (single stop w
 
 A dashboard sign-in is a browser cookie. The session token returned by `/api/auth/login` also works as a Bearer key, but only on `/api/auth/*`, so an app that uses Agent Core as its sign-in can check who a person is without being able to use the rest of the API as them.
 
-A script that must act as a person everywhere, for example one that creates credential grants under that person's authority, uses an **operator token**. The person creates it in **Settings → Operator Tokens** while signed in. It lasts 5 to 60 minutes, is shown once, can be revoked, and everything done with it is recorded as that person. Operator tokens can only be created from the browser session, never with a Bearer token. Agents never need one; they use their agent keys.
+A script that must act as a person everywhere, for example one that creates credential grants under that person's authority, uses an **operator token**. The person creates it in **Settings → Account → Operator tokens** while signed in. It lasts 5 to 60 minutes, is shown once, can be revoked, and everything done with it is recorded as that person. Operator tokens can only be created from the browser session, never with a Bearer token. Agents never need one; they use their agent keys.
 
 State-changing requests that rely on the session cookie must carry an `X-CSRF-Token` header. Dashboard pages add it automatically.
 
@@ -188,13 +188,13 @@ Rate-limited responses include `X-RateLimit-Limit`, `X-RateLimit-Remaining`, and
 
 If you suspect your encryption key has been exposed, or just as a routine security practice, you can rotate it. This generates a new key, re-encrypts all credential entries, and keeps the old key in the keyring so nothing breaks.
 
-**From the dashboard:** Settings → Encryption Key → Rotate Encryption Key (requires admin access)
+**From the dashboard:** Settings → Security → Encryption Key → Rotate Key (requires admin access)
 
 **Via the API:**
 
 ```bash
 curl -X POST http://localhost:3500/api/credentials/rotate \
-  -H "Authorization: Bearer <admin-session>" \
+  -H "Authorization: Bearer <operator-token>" \
   -H "Content-Type: application/json" \
   -d '{}'
 ```
@@ -213,7 +213,7 @@ After rotation, older entries that were encrypted with previous keys still decry
 
 ```bash
 curl -X POST http://localhost:3500/api/credentials/restore-key \
-  -H "Authorization: Bearer <admin-session>" \
+  -H "Authorization: Bearer <operator-token>" \
   -H "Content-Type: application/json" \
   -d '{"key_base64": "<base64-encoded-fernet-key>"}'
 ```
@@ -250,7 +250,7 @@ def verify(body: bytes, secret: str, header: str) -> bool:
 
 **Manual pruning.** Audit and activity history can be manually pruned by an admin from the dashboard using a cutoff date. This is an explicit action that only deletes the targeted historical rows.
 
-**Automatic retention.** A built-in maintenance sweep (default: hourly) prunes expired scratchpad memories, TTL'd records, and retracted/superseded records past their retention window. Retention windows are configurable in **Settings → System Behavior**; the schedule is configurable via `AGENT_CORE_MAINTENANCE_INTERVAL_MINUTES` (set `0` to disable). Active fact/preference/decision records are never auto-deleted.
+**Automatic retention.** A built-in maintenance sweep (default: hourly) prunes expired scratchpad memories, TTL'd records, and retracted/superseded records past their retention window. Retention windows are configurable in **Settings → Data and backup → How long things are kept**; the schedule is configurable via `AGENT_CORE_MAINTENANCE_INTERVAL_MINUTES` (set `0` to disable). Active fact/preference/decision records are never auto-deleted.
 
 ---
 
