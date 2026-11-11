@@ -205,3 +205,7 @@ Where it lives: the sidebar on a phone, and the row lists on Agents, Services (b
 ## Headings and the Overview (1.2.1)
 
 The page title is the one h1; each card's title is an h2; a section inside a card is an h3 (class `sub-heading`). Pages that group cards under their own h2 (Webhooks, Connect) keep their cards at h3. Overview answers "what needs me, and is it healthy": **Waiting on you**, **Health**, **Search**, **Recent Activity**. The count tiles were removed because each count lives on its own page and none answered something Health does not.
+
+## Parked candidates (not built)
+
+- **An approvable operation for adding an action to a stored service.** `connector_type.actions` only turns existing actions off or on; it cannot add one, so an agent cannot propose "add this action to that service" for a person to approve on the Approvals page. Adding an action to an installed adapter today means editing its manifest on the host and calling the adapter-update route as the person (one short operator token). If this comes up again, a general `connector_type.import`-style operation would let agents propose a spec for a person to approve. Not built: one occurrence does not justify a new mechanism.
