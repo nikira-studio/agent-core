@@ -109,7 +109,9 @@ def activity_page(request: Request, session: dict = Depends(require_auth)):
     page_start_act = offset + 1 if total_activities else 0
     page_end_act = offset + len(activities)
     activity_page_info = f"Page {page} of {total_pages} &nbsp;·&nbsp; Showing {page_start_act}–{page_end_act} of {total_activities}"
-    waiting = activity_service.list_needs_human(user_id=scope_user_id)
+    from app.services import waiting_service
+
+    waiting = waiting_service.waiting_on_person(user_id=scope_user_id, include=("handoffs",), limit=20)["handoffs"]
     waiting_rows = "".join(
         f"<tr><td><div style='white-space:pre-line'>{escape_html(w.get('needs_human') or '')}</div>"
         f"<div class='text-muted' style='font-size:0.8rem'>From {escape_html(agent_labels.get(w['agent_id'], w['agent_id']))}"

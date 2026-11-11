@@ -587,9 +587,11 @@ MANIFEST = {
         {
             "name": "attention_list",
             "description": (
-                "List unresolved handoffs that need a person (needs_human), newest first, across the scopes "
-                "you can read. For coordinators reporting what is waiting on a person; read-only. Each item "
-                "carries task_ref when the work belongs to another system's task."
+                "List what is waiting on a person across the scopes you can read; read-only, for coordinators "
+                "reporting it. `items` are unresolved handoffs (needs_human), newest first, each with task_ref "
+                "when the work belongs to another system's task. `approvals` are requests waiting for a "
+                "decision. `credential_requests` are secrets an agent asked a person to supply. "
+                "`memory_suggestions` is a count and a short list of Memory Clean-up suggestions."
             ),
             "inputSchema": {
                 "type": "object",
@@ -2291,16 +2293,23 @@ async def _run_custom_mcp_tool(body: dict, ctx: EffectiveAuthority):
             limit = min(max(int(params.get("limit", 50) or 50), 0), 200)
         except (TypeError, ValueError):
             return _mcp_error("INVALID_PARAMS", "limit must be an integer", 400)
-        items = activity_service.list_needs_human(
-            authorized_scopes=authorized_scopes,
-            without_task_ref=bool(params.get("without_task_ref")),
-            limit=limit,
-        )
-        from app.services import approval_service
+        from app.services import waiting_service
 
-        approvals = approval_service.list_for_scopes(authorized_scopes, "pending", limit or 1)
+        waiting = waiting_service.waiting_on_person(
+            scopes=authorized_scopes, without_task_ref=bool(params.get("without_task_ref")), limit=limit
+        )
+        items = waiting["handoffs"]
         return JSONResponse(
-            content={"ok": True, "data": {"items": items, "count": len(items), "approvals": approvals}}
+            content={
+                "ok": True,
+                "data": {
+                    "items": items,
+                    "count": len(items),
+                    "approvals": waiting["approvals"],
+                    "credential_requests": waiting["credential_requests"],
+                    "memory_suggestions": waiting["memory_suggestions"],
+                },
+            }
         )
 
     elif tool == "activity_pickup":

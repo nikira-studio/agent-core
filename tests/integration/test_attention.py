@@ -239,3 +239,66 @@ def test_agent_and_superseded_resolutions_reach_webhooks_and_the_change_feed(tes
             "SELECT resource_id FROM workspace_changes WHERE memory_scope = ? AND change_type = 'handoff_resolved'", (A,)
         )}
     assert {first["id"], older["id"]} <= resolved_ids
+
+
+def _suggestion(scope, suggestion_id):
+    with get_db() as conn:
+        conn.execute(
+            "INSERT INTO memory_proposals (id, rule, action, scope, target_ids_json, rationale, evidence_json, status, created_at) "
+            "VALUES (?, 'unconfirmed_inference', 'confirm', ?, ?, 'private rationale text', '{}', 'pending', '2026-11-11T00:00:00+00:00')",
+            (suggestion_id, scope, json.dumps([f"memory-of-{suggestion_id}"])),
+        )
+
+
+def _credential_request(scope, name):
+    from app.services import credential_request_service
+
+    credential_request_service.request_credential(
+        agent_id="att-worker", user_id=None, scope=scope, name=name, purpose=f"needed for {name}"
+    )
+
+
+def test_attention_list_also_carries_credential_requests_and_memory_suggestions(test_client, admin_token):
+    worker, coordinator = _setup()
+    _waiting(A, "Approve the A release")
+    _credential_request(A, "A_TOKEN")
+    _credential_request(HIDDEN, "HIDDEN_TOKEN")
+    _suggestion(B, "sug-b")
+    _suggestion(HIDDEN, "sug-hidden")
+
+    data = _mcp(test_client, coordinator, "attention_list").json()["data"]
+    # The fields a reader already uses are unchanged.
+    assert set(data) >= {"items", "count", "approvals"}
+    assert data["count"] == 1 and data["items"][0]["needs_human"] == "Approve the A release"
+    # The two new kinds arrive as new keys, limited to the scopes the caller reads.
+    assert [r["name"] for r in data["credential_requests"]] == ["A_TOKEN"]
+    assert data["credential_requests"][0]["requested_by"] == "att-worker"
+    assert data["memory_suggestions"]["count"] == 1
+    assert data["memory_suggestions"]["items"][0]["id"] == "sug-b"
+    # A suggestion is named by rule and scope; the rationale (which can quote a memory) is not sent.
+    assert "private rationale text" not in json.dumps(data)
+
+    rest = test_client.get("/api/activity/attention", headers=coordinator).json()["data"]
+    assert rest["credential_requests"] == data["credential_requests"]
+    assert rest["memory_suggestions"] == data["memory_suggestions"]
+
+    narrowed = _mcp(test_client, coordinator, "attention_list", scopes=[B]).json()["data"]
+    assert narrowed["credential_requests"] == [] and narrowed["memory_suggestions"]["count"] == 1
+
+
+def test_the_overview_and_attention_list_read_the_same_groups(test_client, admin_token):
+    from app.services import waiting_service
+
+    _setup()
+    _waiting(A, "Approve the A release")
+    _credential_request(A, "A_TOKEN")
+    _suggestion(A, "sug-a")
+    everything = waiting_service.waiting_on_person()
+    assert len(everything["handoffs"]) == 1
+    assert len(everything["credential_requests"]) == 1
+    assert everything["memory_suggestions"]["count"] == 1
+    only_handoffs = waiting_service.waiting_on_person(include=("handoffs",))
+    assert only_handoffs["credential_requests"] == [] and only_handoffs["memory_suggestions"]["count"] == 0
+    nothing = waiting_service.waiting_on_person(scopes=[])
+    assert nothing["handoffs"] == [] and nothing["credential_requests"] == []
+    assert nothing["memory_suggestions"]["count"] == 0

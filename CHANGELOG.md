@@ -17,6 +17,8 @@ Notable changes to Agent Core are documented here. The format follows [Keep a Ch
 
 - Rotating the local credential helper key is now recorded in the audit log (`broker_credential_rotated`: who, when, and that the previous credential was retired; never the credential). A refused or failed encryption-key rotation or restore is recorded too (result `failure`, with the reason and never the key); successful ones were already recorded.
 
+- **One list of what is waiting on you.** Overview's Waiting on you, the Activity page and `attention_list` now read the same source. `attention_list` (and `GET /api/activity/attention`) keeps `items`, `count` and `approvals` unchanged and adds `credential_requests` (secrets an agent asked a person to supply) and `memory_suggestions` (a count and a short list of Memory Clean-up suggestions, never the memory text), so a coordinator that reports what is waiting on a person no longer misses them.
+
 ### Fixed
 
 - **Documentation.** Admin examples (backup, key rotation, creating an agent, maintenance) now send an operator token (`Settings → Account → Operator tokens`); the sign-in session token they showed is refused on those routes. The quickstart no longer says creating an agent shows its key (the Connect page generates it), names the right place for two-step sign-in, and the README no longer lists the removed single-task authority. Settings sections are named as they are today (Account, Memory, Data and backup, Security).

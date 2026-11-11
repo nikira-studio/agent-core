@@ -145,6 +145,11 @@ def _close_answered(conn) -> None:
     conn.commit()
 
 
+def public_view(request: dict) -> dict:
+    """A request as an agent or a coordinator may see it (no secret is ever part of one)."""
+    return _public(request)
+
+
 def _public(request: dict) -> dict:
     result = {
         "request_id": request["id"],

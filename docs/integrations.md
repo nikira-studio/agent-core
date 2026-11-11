@@ -96,7 +96,7 @@ Once connected, these tools are available in any session:
 | `workspace_sync_ack` | Advance an execution's acknowledged cursor after processing a delivered page |
 | `activity_update` | Create or update an activity record in the supplied `memory_scope`, including progress notes, a completion result and a `handoff`; it never moves an activity across scopes |
 | `activity_handoff_resolve` | Resolve one of your own `needs_human` handoff requests once it has been dealt with, with a short `reason` |
-| `attention_list` | Unresolved `needs_human` handoffs across readable scopes, newest first, with each one's `task_ref`; read-only, for coordinators |
+| `attention_list` | What is waiting on a person across readable scopes: unresolved `needs_human` handoffs (`items`, newest first, each with its `task_ref`), pending `approvals`, `credential_requests` and `memory_suggestions`; read-only, for coordinators |
 | `activity_get` | Get one activity, together with the memory records written during it |
 | `activity_list` | List activities visible to the current agent or user |
 | `activity_pickup` | Claim the next active work item a human assigned to this agent in authorized scopes |

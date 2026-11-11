@@ -595,3 +595,26 @@ def test_every_dashboard_page_has_headings_in_order(authenticated_client):
         for level in levels:
             assert level <= previous + 1, (path, "jumps from h%d to h%d" % (previous, level))
             previous = level
+
+
+def test_overview_waiting_list_shows_every_kind_to_an_admin(authenticated_client):
+    from app.database import get_db
+    from app.services import activity_service, credential_request_service
+
+    activity = activity_service.create_activity("admin", "admin", "Needs a decision")
+    activity_service.set_handoff(activity["id"], {"needs_human": "Pick the vendor"})
+    credential_request_service.request_credential(
+        agent_id="admin", user_id=None, scope="user:admin", name="VENDOR_TOKEN", purpose="x"
+    )
+    with get_db() as conn:
+        conn.execute(
+            "INSERT INTO memory_proposals (id, rule, action, scope, target_ids_json, rationale, evidence_json, status, created_at) "
+            "VALUES ('sug-ov', 'unconfirmed_inference', 'confirm', 'user:admin', '[\"m-ov\"]', 'r', '{}', 'pending', '2026-11-11T00:00:00+00:00')"
+        )
+        conn.commit()
+
+    html = authenticated_client.get("/").text
+    waiting = html.split('id="overview-waiting"', 1)[1].split("</table>", 1)[0]
+    assert "Pick the vendor" in waiting
+    assert "needs VENDOR_TOKEN" in waiting
+    assert "1 suggestion to review" in waiting

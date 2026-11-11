@@ -217,7 +217,7 @@ activity_list     what is stale or pending
 activity_get      one task, plus the memory records written during it
 activity_pickup   claim work a human assigned to this agent
 activity_handoff_resolve  settle a request to a person that the agent itself made
-attention_list    what is waiting on a person across the scopes the caller reads (coordinators)
+attention_list    everything waiting on a person (handoffs, approvals, credential requests, memory suggestions) in the scopes the caller reads (coordinators)
 ```
 
 It is **self-reported on purpose**. There is no detection of agent work: an agent that does not call `activity_update` does not appear, and no handoff is recorded for it. The alternative, inferring activity, would produce a trail that looks authoritative and is quietly incomplete.

@@ -221,7 +221,8 @@ def attention_list(
     limit: int = 50,
     ctx: EffectiveAuthority = Depends(get_request_context),
 ):
-    """Unresolved needs_human handoffs in the scopes the caller reads.
+    """What is waiting on a person in the scopes the caller reads: unresolved needs_human handoffs
+    (`items`), pending approvals, credential requests and Memory Clean-up suggestions.
 
     For a coordinator (an attention reader, a chief-of-staff agent) that has
     to tell a person what is waiting on them. Read-only: resolving stays with
@@ -230,17 +231,21 @@ def attention_list(
     authorized_scopes, denied = _attention_scopes(ctx, scope)
     if denied:
         return error_response("SCOPE_DENIED", f"Access denied to scope: {denied}", 403)
-    items = activity_service.list_needs_human(
-        authorized_scopes=authorized_scopes,
-        without_task_ref=without_task_ref,
-        limit=min(max(limit, 0), 200),
-    )
-    from app.services import approval_service
+    from app.services import waiting_service
 
-    # Pending approvals are the other thing a person must act on. They are a
-    # separate list because they are not activities; each links to its page.
-    approvals = approval_service.list_for_scopes(authorized_scopes, "pending", min(max(limit, 1), 200))
-    return success_response({"items": items, "count": len(items), "approvals": approvals})
+    waiting = waiting_service.waiting_on_person(
+        scopes=authorized_scopes, without_task_ref=without_task_ref, limit=limit
+    )
+    items = waiting["handoffs"]
+    return success_response(
+        {
+            "items": items,
+            "count": len(items),
+            "approvals": waiting["approvals"],
+            "credential_requests": waiting["credential_requests"],
+            "memory_suggestions": waiting["memory_suggestions"],
+        }
+    )
 
 
 def _attention_scopes(ctx: EffectiveAuthority, requested: Optional[list[str]]):

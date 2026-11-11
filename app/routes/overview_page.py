@@ -216,29 +216,30 @@ async def dashboard_search(
     )
 
 
-def _waiting_rows(session: dict, is_admin: bool, attention: list[dict]) -> list[tuple[str, str, str]]:
-    """What is waiting on this person: (what it is, the text, where to deal with it)."""
-    from app.services import (
-        activity_service,
-        approval_service,
-        credential_request_service,
-        memory_proposal_service,
-    )
+def _waiting_rows(session: dict, is_admin: bool) -> list[tuple[str, str, str]]:
+    """What is waiting on this person: (what it is, the text, where to deal with it).
 
+    Read from the one source Overview, Activity and `attention_list` share. An admin sees every group;
+    anyone else sees the handoffs addressed to them and their stalled tasks.
+    """
+    from app.services import waiting_service
+
+    groups = (*waiting_service.ALL_GROUPS, "stalled_tasks") if is_admin else ("handoffs", "stalled_tasks")
+    waiting = waiting_service.waiting_on_person(
+        scopes=None, user_id=None if is_admin else session["user_id"], include=groups, limit=5
+    )
     rows: list[tuple[str, str, str]] = []
-    if is_admin:
-        for a in approval_service.list_for_scopes(None, "pending", 5):
-            rows.append(("Approval", f"{a['title']} (proposed by {a['proposed_by']})", f"/approvals/{a['id']}"))
-    for h in activity_service.list_needs_human(user_id=None if is_admin else session["user_id"], limit=5):
+    for a in waiting["approvals"]:
+        rows.append(("Approval", f"{a['title']} (proposed by {a['proposed_by']})", f"/approvals/{a['id']}"))
+    for h in waiting["handoffs"]:
         rows.append(("Handoff", f"{h['agent_id']} asks: {(h.get('needs_human') or '')[:140]}", "/activity"))
-    for a in attention[:5]:
+    for a in waiting["stalled_tasks"][:5]:
         rows.append((str(a.get("status", "")).capitalize(), (a.get("task_description") or "")[:140], "/activity"))
-    if is_admin:
-        for r in credential_request_service.list_pending()[:5]:
-            rows.append(("Credential", f"{r.get('requested_by_agent_id') or 'An agent'} needs {r['name']} in {r['scope']}", "/credentials"))
-        suggestions = len(memory_proposal_service.list_proposals(status="pending", limit=200))
-        if suggestions:
-            rows.append(("Memory", f"{suggestions} suggestion{'s' if suggestions != 1 else ''} to review", "/memory"))
+    for r in waiting["credential_requests"]:
+        rows.append(("Credential", f"{r.get('requested_by') or 'An agent'} needs {r['name']} in {r['scope']}", "/credentials"))
+    suggestions = waiting["memory_suggestions"]["count"]
+    if suggestions:
+        rows.append(("Memory", f"{suggestions} suggestion{'s' if suggestions != 1 else ''} to review", "/memory"))
     return rows
 
 
@@ -281,18 +282,14 @@ def dashboard_home(request: Request, session: dict = Depends(require_auth)):
         agents = list_agents()
         agent_count = len([a for a in agents if a.get("is_active")])
         recent_activity = activity_service.list_activities(limit=8)
-        attention = activity_service.list_attention_activities(limit=8)
     else:
         agents = list_agents(owner_user_id=session["user_id"])
         agent_count = len([a for a in agents if a.get("is_active")])
         recent_activity = activity_service.list_activities(
             user_id=session["user_id"], limit=8
         )
-        attention = activity_service.list_attention_activities(
-            user_id=session["user_id"], limit=8
-        )
 
-    waiting = _waiting_rows(session, is_admin, attention)
+    waiting = _waiting_rows(session, is_admin)
     if waiting:
         waiting_body = "<table><tbody>" + "".join(
             f"<tr><td><span class='badge'>{escape_html(kind)}</span></td><td>{escape_html(text)}</td>"
