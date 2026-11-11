@@ -434,6 +434,13 @@ MANIFEST = {
                     "task_note": {"type": "string"},
                     "task_result": {"type": "string"},
                     "status": {"type": "string", "enum": list(ACTIVITY_STATUSES)},
+                    "activity_id": {
+                        "type": "string",
+                        "description": (
+                            "Only to close one of your own tasks that ended blocked: give status completed or "
+                            "cancelled and a task_result saying why. Changes nothing else."
+                        ),
+                    },
                     "memory_scope": {"type": "string"},
                     "execution_id": {"type": "string"},
                     "task_ref": {
@@ -1898,6 +1905,43 @@ async def _run_custom_mcp_tool(body: dict, ctx: EffectiveAuthority):
                 details={"scope": result["scope"], "name": name},
             )
         return JSONResponse(content={"ok": True, "data": result})
+
+    elif tool == "activity_update" and params.get("activity_id"):
+        # Correct one of this agent's own tasks that ended blocked: close it as completed or cancelled
+        # with a reason. This is the only thing activity_id does; everything else on this tool works on
+        # the current task. Same rule as PUT /api/activity/{id}.
+        from app.routes.activity import _may_close_blocked
+
+        extra = set(params) - {"activity_id", "status", "task_result", "memory_scope", "execution_id"}
+        if extra or params.get("status") not in ("completed", "cancelled") or not str(params.get("task_result") or "").strip():
+            return _mcp_error(
+                "INVALID_PARAMS",
+                "With activity_id, give status completed or cancelled and a task_result saying why; "
+                "it closes one of your own blocked tasks and changes nothing else.",
+                400,
+            )
+        activity = activity_service.get_activity(params["activity_id"])
+        if not activity:
+            return _mcp_error("NOT_FOUND", "Activity not found", 404)
+        if activity.get("assigned_agent_id") != ctx.agent_id:
+            return _mcp_error("FORBIDDEN", "That task is not yours", 403)
+        if not _may_close_blocked(ctx, activity, params["status"]):
+            return _mcp_error("INVALID_TRANSITION", "Only a task that ended blocked can be closed this way", 400)
+        activity_service.update_activity(activity["id"], status=params["status"], task_result=params["task_result"])
+        updated = activity_service.get_activity(activity["id"]) or activity
+        audit_service.write_event(
+            actor_type=ctx.actor_type,
+            actor_id=ctx.actor_id,
+            action="activity_update",
+            resource_type="activity",
+            resource_id=activity["id"],
+            result="success",
+            details=activity_service.audit_details(
+                updated, previous_status=activity["status"], new_status=params["status"], action="update"
+            ),
+        )
+        activity_service.notify("activity_updated", updated, previous_status=activity["status"])
+        return JSONResponse(content={"ok": True, "data": {"activity": updated}})
 
     elif tool == "activity_update":
         # An agent identity can work in more than one workspace at once. The

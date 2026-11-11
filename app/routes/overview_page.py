@@ -224,7 +224,7 @@ def _waiting_rows(session: dict, is_admin: bool) -> list[tuple[str, str, str]]:
     """
     from app.services import waiting_service
 
-    groups = (*waiting_service.ALL_GROUPS, "stalled_tasks") if is_admin else ("handoffs", "stalled_tasks")
+    groups = ("approvals", "handoffs", "credential_requests", "stalled_tasks") if is_admin else ("handoffs", "stalled_tasks")
     waiting = waiting_service.waiting_on_person(
         scopes=None, user_id=None if is_admin else session["user_id"], include=groups, limit=5
     )
@@ -237,10 +237,25 @@ def _waiting_rows(session: dict, is_admin: bool) -> list[tuple[str, str, str]]:
         rows.append((str(a.get("status", "")).capitalize(), (a.get("task_description") or "")[:140], "/activity"))
     for r in waiting["credential_requests"]:
         rows.append(("Credential", f"{r.get('requested_by') or 'An agent'} needs {r['name']} in {r['scope']}", "/credentials"))
-    suggestions = waiting["memory_suggestions"]["count"]
-    if suggestions:
-        rows.append(("Memory", f"{suggestions} suggestion{'s' if suggestions != 1 else ''} to review", "/memory"))
+    # Memory Clean-up suggestions are optional housekeeping, not something a person is blocked on, so they
+    # are a quiet line under the list (see _memory_cleanup_line), not a row in it.
     return rows
+
+
+def _memory_cleanup_line(is_admin: bool) -> str:
+    """One quiet line about Memory Clean-up suggestions, for an admin when there are any."""
+    if not is_admin:
+        return ""
+    from app.services import memory_proposal_service
+
+    count = memory_proposal_service.pending_summary(None, 0)["count"]
+    if not count:
+        return ""
+    return (
+        '<p class="text-muted" id="overview-memory-cleanup" style="margin:12px 0 0;font-size:0.85rem">'
+        f'Memory clean-up: {count} suggestion{"s" if count != 1 else ""}. '
+        '<a href="/memory#proposal-list">Look when you have a minute</a>; nothing waits on them.</p>'
+    )
 
 
 def _health_items(is_admin: bool) -> list[tuple[str, str, str, bool]]:
@@ -303,6 +318,7 @@ def dashboard_home(request: Request, session: dict = Depends(require_auth)):
       <h2>Waiting on you</h2>
       <p class="text-muted" style="margin-top:-6px">Decisions and requests that need a person. Each row links to where you deal with it.</p>
       {waiting_body}
+      {_memory_cleanup_line(is_admin)}
     </div>"""
 
     health_html = ""

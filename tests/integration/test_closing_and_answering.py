@@ -167,3 +167,24 @@ def test_clusters_and_pin_requests_are_left_for_a_person(test_client, admin_toke
         test_client.post("/mcp", headers=owner, json={"tool": "memory_confirm", "params": {
             "record_id": rid, "evidence": "checked"}})
     assert _status(cluster) == ("pending", None) and _status(pin) == ("pending", None)
+
+
+def _mcp_update(client, headers, **params):
+    return client.post("/mcp", headers=headers, json={"tool": "activity_update", "params": params})
+
+
+def test_an_agent_can_close_its_own_blocked_task_through_the_mcp_tool(test_client, admin_token):
+    owner, other = _setup()
+    activity_id = _blocked()
+    # Only the owner, only completed or cancelled, only with a reason, and nothing else rides along.
+    assert not _mcp_update(test_client, other, activity_id=activity_id, status="completed", task_result="x").json()["ok"]
+    assert not _mcp_update(test_client, owner, activity_id=activity_id, status="completed").json()["ok"]
+    assert not _mcp_update(test_client, owner, activity_id=activity_id, status="active", task_result="x").json()["ok"]
+    assert not _mcp_update(test_client, owner, activity_id=activity_id, status="completed", task_result="x", task_note="y").json()["ok"]
+    assert activity_service.get_activity(activity_id)["status"] == "blocked"
+    ok = _mcp_update(test_client, owner, activity_id=activity_id, status="completed", task_result="work landed")
+    assert ok.json()["ok"], ok.text
+    row = activity_service.get_activity(activity_id)
+    assert row["status"] == "completed" and row["task_result"] == "work landed"
+    again = _mcp_update(test_client, owner, activity_id=activity_id, status="cancelled", task_result="again")
+    assert not again.json()["ok"]  # an ended record cannot be changed again

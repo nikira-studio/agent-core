@@ -617,7 +617,9 @@ def test_overview_waiting_list_shows_every_kind_to_an_admin(authenticated_client
     waiting = html.split('id="overview-waiting"', 1)[1].split("</table>", 1)[0]
     assert "Pick the vendor" in waiting
     assert "needs VENDOR_TOKEN" in waiting
-    assert "1 suggestion to review" in waiting
+    # Memory suggestions are optional housekeeping: not a row, one quiet line under the list.
+    assert "suggestion to review" not in waiting
+    assert "Memory clean-up: 1 suggestion" in html and 'href="/memory#proposal-list"' in html
 
 
 def test_done_on_a_blocked_row_asks_for_a_reason(authenticated_client):

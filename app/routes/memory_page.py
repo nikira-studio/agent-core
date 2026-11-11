@@ -363,7 +363,7 @@ def memory_page(request: Request, session: dict = Depends(require_auth)):
         <h2 style="margin:0">Suggestions waiting for you <span id="proposal-count" class="text-muted" style="font-weight:normal;font-size:0.8rem">({len(pending)} to look at)</span></h2>
         <button class="btn btn-secondary" onclick="generateProposals()">Check for more</button>
       </div>
-      <p class="text-muted" style="font-size:0.85rem;margin:8px 0 12px">Memory Clean-up looks for memories that may no longer be worth keeping — one-off job logs, ticket notes, repeats, or details that go out of date. Each one asks you a question. Nothing changes until you answer, and anything hidden can be restored from Retracted memories below.</p>
+      <p class="text-muted" style="font-size:0.85rem;margin:8px 0 12px">Memory Clean-up looks for memories that may no longer be worth keeping — one-off job logs, ticket notes, repeats, or details that go out of date. Each one asks you a question. Nothing changes until you answer, and anything hidden can be restored from Retracted memories below. None of it is urgent: an agent can answer a suggestion by checking the memory (confirming it with evidence, or retracting it with a reason), which closes it here, and the scheduled scan adds new ones each time it runs, up to a cap, so the list refills.</p>
       <div id="proposal-list">{proposals_html}</div>
       <details style="margin-top:12px">
         <summary class="text-muted" style="cursor:pointer">How good these suggestions have been</summary>

@@ -94,7 +94,7 @@ Once connected, these tools are available in any session:
 | `session_context` | One budgeted session-start block (rules, waiting and unfinished work, recent results with next steps, changes, key-record index) plus the session's `execution_id` |
 | `workspace_sync` | Start or continue an execution and receive pinned context, assigned activities, and workspace changes after its cursor |
 | `workspace_sync_ack` | Advance an execution's acknowledged cursor after processing a delivered page |
-| `activity_update` | Create or update an activity record in the supplied `memory_scope`, including progress notes, a completion result and a `handoff`; it never moves an activity across scopes |
+| `activity_update` | Create or update an activity record in the supplied `memory_scope`, including progress notes, a completion result and a `handoff`; it never moves an activity across scopes; with `activity_id` it closes one of your own tasks that ended blocked (status completed or cancelled, with a `task_result`) |
 | `activity_handoff_resolve` | Resolve one of your own `needs_human` handoff requests once it has been dealt with, with a short `reason` |
 | `attention_list` | What is waiting on a person across readable scopes: unresolved `needs_human` handoffs (`items`, newest first, each with its `task_ref`), pending `approvals`, `credential_requests` and `memory_suggestions`; read-only, for coordinators |
 | `activity_get` | Get one activity, together with the memory records written during it |
