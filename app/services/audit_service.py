@@ -119,7 +119,6 @@ AUDIT_ACTIONS = (
     "adapter_updated",
     "adapter_uninstalled",
     "connector_action_executed",
-    "connector_artifact_exported",
     "webhook_created",
     "webhook_updated",
     "webhook_deleted",

@@ -17,6 +17,10 @@ Notable changes to Agent Core are documented here. The format follows [Keep a Ch
 
 - Rotating the local credential helper key is now recorded in the audit log (`broker_credential_rotated`: who, when, and that the previous credential was retired; never the credential). A refused or failed encryption-key rotation or restore is recorded too (result `failure`, with the reason and never the key); successful ones were already recorded.
 
+### Removed
+
+- **Image export from service results.** A service answer that carried an inline `data:image/...;base64` picture was written to `<data>/artifacts/connector/` and replaced by a reference. Nothing used it, so it is gone: such an answer now follows the ordinary path (large results are offloaded and read with `result_fetch`). The `connector_artifact_exported` audit action is no longer written; rows from earlier versions, if any, stay readable.
+
 ### Added
 
 - `scripts/ui_sweep.py` also saves each page as rendered and runs the design detector on it when it is installed, so the HTML built in Python is checked too.

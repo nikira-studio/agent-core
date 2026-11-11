@@ -2,7 +2,10 @@
 
 A page change is not done until the screenshots have been looked at. This takes
 them. Run it against a copy of an install (or a throwaway one with sample data),
-signed in as an admin, never against data you cannot afford to expose:
+signed in as an admin, never against data you cannot afford to expose. Start a
+throwaway server with its own data folder, and use the exact variable name:
+`AGENT_CORE_DATA_PATH=/tmp/sweep-data uvicorn app.main:app --port 3591` (the
+repo's .env sets it to ./data, and a misspelt name falls back to that folder):
 
     python3 scripts/ui_sweep.py --base http://127.0.0.1:3591 \
         --cookie "$(cat admin.cookie)" --out /tmp/shots/after

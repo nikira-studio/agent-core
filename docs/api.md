@@ -789,25 +789,6 @@ When any MCP tool's output exceeds `AGENT_CORE_TOOL_RESULT_SPILL_THRESHOLD` char
 
 Call `result_fetch` with the handle to read the full payload in chunks, following `next_offset` until `has_more` is false. Each fetch is audited as `tool_result_fetched` against the handle, so `scripts/value_report.py` can report how many offloaded results agents actually read. Handles are scoped to the agent that made the original call and expire after `AGENT_CORE_TOOL_RESULT_SPILL_TTL_HOURS` (default 24h).
 
-### Image data-URL artifacts (connector output)
-
-Connector responses whose body contains a `data:image/<subtype>;base64,...` payload (for example, image generation through OpenRouter, which returns 1–2 MB inline data URLs) are detected and exported to disk before the response reaches the agent. The detected bytes are decoded and written to `<DATA_PATH>/artifacts/connector/<handle>.<ext>`, and the data URL in the response is replaced with a small reference object:
-
-```json
-{
-  "exported": true,
-  "artifact": {
-    "path": "/var/lib/agent-core/data/artifacts/connector/AbC...Ef.png",
-    "mime_type": "image/png",
-    "size_bytes": 1234567,
-    "handle": "AbC...Ef",
-    "format": "data_url"
-  }
-}
-```
-
-The connector result dict also carries `artifacts_exported` (the count of images exported) so callers can branch on it. Supported subtypes: `png`, `jpeg`, `jpg`, `webp`, `gif`, `svg+xml`, `bmp`, `tiff`. Non-image data URLs and malformed base64 payloads are left in place and fall through to the existing spill path. Each export writes a `connector_artifact_exported` audit row with the binding id and the count exported.
-
 ---
 
 ## Dashboard API
