@@ -7,7 +7,7 @@
    fine are listed under *Allowed private addresses* (hosts, addresses or
    ranges), in Settings → Security.
 
-2. Who may call the credential broker (``/internal/credentials/resolve``).
+2. Who may call the local credential helper (``/internal/credentials/resolve``).
    With no list, any caller holding the broker credential is accepted, as before,
    and Overview says so quietly. With a list (addresses or ranges; loopback
    always may) the mode decides: ``audit`` (the default) records every caller it
@@ -386,12 +386,12 @@ def health_lines() -> list[tuple[str, str, bool]]:
         lines.append(("Private addresses", "blocked unless allowed", True))
     broker = state["broker"]
     if not broker["restricted"]:
-        lines.append(("Credential broker", "any caller with its credential (no allowed callers set)", True))
+        lines.append(("Helper callers", "any caller with its key (no allowed callers set)", True))
     elif broker["mode"] == "audit":
         n = broker["would_refuse"]
-        lines.append(("Credential broker", f"report only; {n} callers would be refused" if n else "report only; nothing would be refused", not n))
+        lines.append(("Helper callers", f"report only; {n} callers would be refused" if n else "report only; nothing would be refused", not n))
     else:
-        lines.append(("Credential broker", "only the allowed callers", True))
+        lines.append(("Helper callers", "only the allowed callers", True))
     return lines
 
 
@@ -399,7 +399,7 @@ def startup_warnings() -> list[str]:
     warnings = []
     if not broker_networks():
         warnings.append(
-            "The credential broker accepts any caller that holds the broker credential. "
+            "The local credential helper accepts any caller that holds its key. "
             "Set the allowed callers under Settings → Security."
         )
     if internal_hosts_mode() == "allow":

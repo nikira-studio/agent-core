@@ -718,7 +718,7 @@ def run_startup_checks() -> list[dict]:
             {
                 "check": "broker_credential",
                 "status": "OK",
-                "message": "Broker credential present",
+                "message": "Local credential helper key present",
             }
         )
     else:
@@ -726,7 +726,7 @@ def run_startup_checks() -> list[dict]:
             {
                 "check": "broker_credential",
                 "status": "FAIL",
-                "message": "No broker credential found",
+                "message": "No local credential helper key found",
             }
         )
 

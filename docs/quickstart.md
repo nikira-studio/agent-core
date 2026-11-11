@@ -214,7 +214,7 @@ curl -X POST http://localhost:3500/api/credentials/entries \
 
 The response includes a stable `AC_SECRET_*` reference name, something like `AC_SECRET_SERVICE_TOKEN_1A2B3C4D`. That's what you pass to tools and scripts. The raw value never comes back through regular list/get APIs.
 
-See [Credential Broker](credential-broker.md) for how to use that reference with local tools so the real token gets injected without appearing in your prompt or config files.
+See [Local credential helper](credential-broker.md) for how to use that reference with local tools so the real token gets injected without appearing in your prompt or config files.
 
 ## Step 8: Create a service binding (optional)
 
@@ -233,7 +233,7 @@ The flow:
 
 Credential scope and binding scope are related but not identical. Credential scope controls who may access the stored secret. Binding scope controls where that service is available. In the common case, use the same workspace scope for both. For advanced setups, one personal credential can power multiple workspace bindings.
 
-The key difference from the Credential Broker: with services, Agent Core runs the action and the raw secret never leaves the server. With the broker, your local tool gets the real value injected at runtime. Use whichever fits your situation.
+The key difference from the Local credential helper: with services, Agent Core runs the action and the raw secret never leaves the server. With the helper, your local tool gets the real value injected at runtime. Use whichever fits your situation.
 
 ## Workspace collaboration
 
@@ -254,6 +254,6 @@ This keeps ownership and attribution separate from collaboration. The shared wor
 - [How it works](how-it-works.md): the whole system end to end, and the reasoning behind it
 - [Integrations](integrations.md): tool-specific setup for Claude Code, Cursor, Codex, and others
 - [Configuration](configuration.md): customize port, data path, session timeouts, and more
-- [Credential Broker](credential-broker.md): inject real credential values at runtime without exposing them to models
+- [Local credential helper](credential-broker.md): inject real credential values at runtime without exposing them to models
 - [Security](security.md): understand the scope model and deployment checklist
 - [API reference](api.md): full endpoint documentation

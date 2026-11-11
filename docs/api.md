@@ -43,7 +43,7 @@ Create one in **Settings → Account → Operator tokens** while signed in (5 to
 Authorization: Bearer <agent-api-key>
 ```
 
-**The Credential Broker** (internal credential resolution only) uses the broker credential from `data/broker.credential`:
+**The local credential helper** (internal credential resolution only) uses the helper key from `data/broker.credential`:
 ```http
 Authorization: Broker <broker-credential>
 ```
@@ -361,7 +361,7 @@ Create:
 }
 ```
 
-`expires_at` must be an ISO 8601 instant; anything else is rejected with `422` rather than stored. Sending `null` **clears** the expiry, while omitting the field leaves it alone, the two mean different things. Past its expiry a credential stops resolving: `reveal` answers `410 CREDENTIAL_EXPIRED`, and the broker refuses it. An expiry that cannot be parsed at all (a row written before this was validated) is treated as expired rather than raising. The dashboard shows expired and expiring-soon badges on the credentials list.
+`expires_at` must be an ISO 8601 instant; anything else is rejected with `422` rather than stored. Sending `null` **clears** the expiry, while omitting the field leaves it alone, the two mean different things. Past its expiry a credential stops resolving: `reveal` answers `410 CREDENTIAL_EXPIRED`, and the helper refuses it. An expiry that cannot be parsed at all (a row written before this was validated) is treated as expired rather than raising. The dashboard shows expired and expiring-soon badges on the credentials list.
 
 Update metadata while keeping the current encrypted value:
 ```json
@@ -560,7 +560,7 @@ The dashboard's `/connectors` page provides a UI for all of these operations.
 
 ## Internal broker
 
-Only the local Credential Broker should call this route.
+Only the local credential helper should call this route.
 
 | Method | Path | Description |
 | --- | --- | --- |
@@ -573,7 +573,7 @@ Only the local Credential Broker should call this route.
 }
 ```
 
-The broker credential authenticates the request. The `agent_id` must come from trusted runtime configuration, not model-generated text. Agent Core checks that agent's read scopes before returning a raw value.
+The helper key authenticates the request. The `agent_id` must come from trusted runtime configuration, not model-generated text. Agent Core checks that agent's read scopes before returning a raw value.
 
 ---
 
@@ -816,7 +816,7 @@ Session authentication required. Global overview and audit routes require admin.
 | `POST` | `/api/dashboard/vector-reembed/estimate` | Time a synthetic sample as long as an average record (no memory content is sent) on a model and return seconds per record, estimated re-embed time, the wait each memory write would add, and a warning level; optional body `{"model", "url"}` measures a model before it is saved (admin only) |
 | `POST` | `/api/dashboard/vector-reembed/cancel` | Stop the running re-embed after its current batch (admin only) |
 | `GET` | `/api/dashboard/ollama-models?url=` | List the models an Ollama-compatible endpoint has installed; used by the embedding settings card (admin only) |
-| `POST` | `/api/dashboard/broker/rotate` | Rotate broker credential (admin only) |
+| `POST` | `/api/dashboard/broker/rotate` | Rotate helper key (admin only) |
 
 ---
 

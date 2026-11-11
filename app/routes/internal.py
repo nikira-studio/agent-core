@@ -35,14 +35,14 @@ async def resolve_variable(
     client_ip = get_client_ip(request)
     # agent_id is unauthenticated here; keep what is recorded about it short.
     if not network_policy_service.broker_caller_allowed(client_ip, str(body.agent_id)[:64]):
-        return error_response("FORBIDDEN", "This address may not call the credential broker", 403)
+        return error_response("FORBIDDEN", "This address may not call the local credential helper", 403)
     if not await _verify_broker(authorization):
         # Only failed sign-ins count against an address, so unauthenticated traffic from an
         # address a real runner shares cannot use up the runner's allowance.
         allowed, _ = RL.check("ip", client_ip, "broker_auth_failed")
         if not allowed:
             return error_response("RATE_LIMITED", "Too many failed attempts; wait a moment", 429)
-        return error_response("UNAUTHORIZED", "Broker authentication required", 401)
+        return error_response("UNAUTHORIZED", "The helper key is required", 401)
     allowed, _ = RL.check("agent", body.agent_id, "broker_resolve")
     if not allowed:
         return error_response("RATE_LIMITED", "Too many requests; wait a moment", 429)

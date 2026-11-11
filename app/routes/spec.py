@@ -360,9 +360,9 @@ def spec(
     ]
 
     broker_behavior = {
-        "description": "Credential values are resolved internally by the credential broker and never exposed in API responses, prompts, or logs",
+        "description": "Credential values are resolved internally by the local credential helper and never exposed in API responses, prompts, or logs",
         "resolve_endpoint": "/internal/credentials/resolve",
-        "resolve_auth": "broker credential required; agent API keys cannot call resolve",
+        "resolve_auth": "helper key required; agent API keys cannot call resolve",
         "variable_prefix": CREDENTIAL_PREFIX,
     }
 

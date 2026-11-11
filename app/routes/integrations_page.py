@@ -1490,7 +1490,7 @@ Keep memory content concise. Add a short `topic` as a label. Do not bother tunin
 
 ## Credentials
 
-Use `credential_get` to retrieve `{CREDENTIAL_PREFIX}*` references. The Credential Broker resolves them at execution time.
+Use `credential_get` to retrieve `{CREDENTIAL_PREFIX}*` references. The local credential helper resolves them at execution time.
 Never ask users for raw credential values.
 
 ## Connectors

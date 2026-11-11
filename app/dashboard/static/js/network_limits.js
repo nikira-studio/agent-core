@@ -37,7 +37,7 @@ function initNetworkLimits() {
     document.getElementById('nl-broker-env').style.display = broker.mode_from_environment ? '' : 'none';
     document.getElementById('nl-broker-allowed').value = broker.allowed.join('\n');
     document.getElementById('nl-broker-status').textContent = !broker.restricted
-      ? 'Any caller that holds the broker credential is accepted. Add the addresses that should call it to restrict it.'
+      ? 'Any caller that holds the helper key is accepted. Add the addresses that should call it to restrict it.'
       : (broker.mode === 'enforce'
           ? 'Only the callers listed here (and this server itself) may call it. ' + broker.refused + ' refused in the last 7 days.'
           : 'Report only: nobody is refused yet. ' + broker.would_refuse + ' callers outside the list in the last 7 days would be.');

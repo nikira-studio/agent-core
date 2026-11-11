@@ -124,16 +124,16 @@ If your SQLite build doesn't include FTS5, the Docker image is the fix; it bundl
 
 Work through this checklist:
 
-- Is the broker credential current? Agent Core updates `data/broker.credential`
+- Is the helper key current? Agent Core updates `data/broker.credential`
   during rotation. Update brokers that use `--token` or a copied token file.
-- Is the `Authorization` header using `Broker <credential>` (not `Bearer`)? The broker uses a different auth scheme from agents.
+- Is the `Authorization` header using `Broker <credential>` (not `Bearer`)? The helper uses a different auth scheme from agents.
 - Is the configured `agent_id` active and not deactivated?
 - Does that agent have read access to the credential entry's scope?
 - Does the credential entry have an `expires_at` TTL that has passed?
 
 ### Reveal fails
 
-Revealing a raw credential value requires a user session. Agent API keys can't reveal credentials; this is intentional. Most workflows should not need reveal; use service bindings for server-side actions or the Credential Broker for local process injection.
+Revealing a raw credential value requires a user session. Agent API keys can't reveal credentials; this is intentional. Most workflows should not need reveal; use service bindings for server-side actions or the Local credential helper for local process injection.
 
 ### Credential edits did not change the secret
 

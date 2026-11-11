@@ -487,9 +487,8 @@ def test_delete_asks_for_the_name_and_says_what_goes_with_it(authenticated_clien
 def test_activity_page_puts_tasks_first_and_synchronization_last(authenticated_client):
     html = authenticated_client.get("/activity").text
     assert html.index("<h2>Tasks</h2>") < html.index("Workspace synchronization")
-    # The two coverage percentages stay on the page, behind an Advanced toggle.
-    assert "Advanced: how many tasks are tied to an agent session" in html
-    assert html.index("<h2>Tasks</h2>") < html.index("Advanced: how many tasks")
+    # The snapshot counters and coverage percentages were removed: Waiting on you and the task list answer it.
+    assert "Coordination Snapshot" not in html and "Execution-linked" not in html
     # Empty synchronization is closed; assigning a task is still on this page.
     assert '<details class="card card-fold" id="workspace-sync" >' in html
     assert "+ Assign a task" in html

@@ -270,7 +270,8 @@ class TestActivityPage:
         r = admin_client.get("/activity")
         assert "Reassign" in r.text
         assert "Handoff From" in r.text
-        assert "Coordination Snapshot" in r.text
+        assert "Coordination Snapshot" not in r.text
+        assert "Execution-linked" not in r.text
 
     def test_activity_page_uses_compact_task_first_layout(self, admin_client):
         r = admin_client.get("/activity")
@@ -286,10 +287,10 @@ class TestActivityPage:
         assert "<label>Workspace</label>" in r.text
         assert "Agent private scope" in r.text
 
-    def test_activity_coordination_snapshot_mentions_ownership(self, admin_client):
+    def test_activity_page_has_no_coordination_snapshot(self, admin_client):
         r = admin_client.get("/activity")
-        assert "Current ownership" in r.text
-        assert "Recent Handoffs" in r.text
+        assert "Coordination Snapshot" not in r.text
+        assert "Recent Handoffs" not in r.text and "Current ownership" not in r.text
 
     def test_memory_page_uses_collapsed_advanced_filters(self, admin_client):
         r = admin_client.get("/memory")

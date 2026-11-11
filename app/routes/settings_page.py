@@ -921,12 +921,12 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
       <div class="actions-cell"><button type="button" class="btn" id="nl-save-internal">Save</button></div>
       <div id="nl-internal-note" class="alert" style="display:none;margin-top:8px"></div>
       <hr class="divider">
-      <h3 class="sub-heading section-title">Credential broker callers</h3>
+      <h3 class="sub-heading section-title">Local credential helper callers</h3>
       <p class="text-muted" id="nl-broker-status"></p>
       <div class="form-group">
         <label for="nl-broker-allowed">Allowed callers</label>
         <textarea id="nl-broker-allowed" rows="3" placeholder="192.168.1.20&#10;10.0.0.0/24"></textarea>
-        <p class="form-hint">One address or range per line. This server itself is always allowed. Leave it empty to accept any caller that holds the broker credential.</p>
+        <p class="form-hint">One address or range per line. This server itself is always allowed. Leave it empty to accept any caller that holds the helper key.</p>
       </div>
       <div class="form-group">
         <label for="nl-broker-mode">When a caller is not in the list</label>
@@ -1074,6 +1074,7 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
           <input type="text" id="vector-url" value="{escape_html(vector_url)}" style="width:300px">
           <p class="form-hint" id="vector-url-hint">Base URL of the Ollama server, for example <code>http://localhost:11434</code>.</p>
         </div>
+        <details class="access-details" id="vector-advanced" {"open" if vector_query_prefix else ""}><summary>Advanced: embedding dimension, query prefix</summary>
         <div class="form-group">
           <label>Embedding Dimension</label>
           <input type="number" id="vector-dimension" min="64" max="4096" value="{escape_html(vector_dimension)}" style="width:120px">
@@ -1084,6 +1085,7 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
           <input type="text" id="vector-query-prefix" value="{escape_html(vector_query_prefix)}" maxlength="100" style="width:200px" placeholder="none">
           <p class="form-hint">Added to search text only, never to stored memories, so changing it needs no re-embed. Use what the model card gives for queries, including any trailing space, for example <code>query: </code> for snowflake-arctic-embed. Only for models whose documents take no prefix; leave blank otherwise.</p>
         </div>
+        </details>
         <div class="form-group">
           <label>Auth Type</label>
           <select id="vector-auth-type" style="width:200px">

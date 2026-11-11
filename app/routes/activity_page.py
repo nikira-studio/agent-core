@@ -1,6 +1,5 @@
 """Activity dashboard page."""
 
-from collections import Counter
 from urllib.parse import quote
 
 from fastapi import APIRouter, Request, Depends
@@ -29,7 +28,6 @@ def activity_page(request: Request, session: dict = Depends(require_auth)):
     executions = workspace_sync_service.list_executions(
         limit=25, user_id=None if is_admin else session["user_id"]
     )
-    exec_stats = activity_service.execution_linked_workspace_stats()
     execution_rows = "".join(
         f"<tr><td>{escape_html(e['agent_id'])}</td><td><code>{escape_html(e['memory_scope'])}</code></td>"
         f"<td><span class='badge badge-{escape_html(e['status'])}'>{escape_html(e['status'])}</span></td>"
@@ -87,23 +85,6 @@ def activity_page(request: Request, session: dict = Depends(require_auth)):
     )
     # For reassign modal, we want the same options
     reassign_options = agent_options
-    coordination_activities = [
-        a for a in activities if a.get("status") in ("active", "stale", "blocked")
-    ]
-    attention_activities = [
-        a for a in activities if a.get("status") in ("stale", "blocked")
-    ]
-    owner_counts = Counter(
-        a.get("assigned_agent_id") or a.get("agent_id") or "unassigned"
-        for a in coordination_activities
-    )
-    handoff_count = sum(1 for a in activities if a.get("reassigned_from_agent_id"))
-    active_owner_count = len(owner_counts)
-    coordination_summary = "".join(
-        f"<span class='badge badge-active' style='margin-right:8px;margin-bottom:8px'>{escape_html(agent_labels.get(agent_id, agent_id))}: {count}</span>"
-        for agent_id, count in owner_counts.most_common(6)
-    )
-
     status_filters = [
         "active",
         "stale",
@@ -289,38 +270,6 @@ def activity_page(request: Request, session: dict = Depends(require_auth)):
     <div class="card">
       <h2>Tasks</h2>
       <p class="text-muted" style="font-size:0.85rem;margin-bottom:8px">Assign a task to an agent. It picks the task up the next time it starts or is idle.</p>
-      <div class="card" style="margin-bottom:12px;padding:14px">
-        <div class="section-header" style="margin-bottom:8px">
-          <h2>Coordination Snapshot</h2>
-          <div class="section-note">Who owns each task right now and where handoffs have happened.</div>
-        </div>
-        <div class="stat-grid" style="margin-bottom:10px">
-          <div class="stat-card"><div class="value">{len(coordination_activities)}</div><div class="label">Open tasks</div></div>
-          <div class="stat-card"><div class="value">{active_owner_count}</div><div class="label">Assigned Agents</div></div>
-          <div class="stat-card"><div class="value">{handoff_count}</div><div class="label">Recent Handoffs</div></div>
-          <div class="stat-card"><div class="value">{len(attention_activities)}</div><div class="label">Needs Attention</div></div>
-        </div>
-        <details class="access-details" style="margin-bottom:10px"><summary>Advanced: how many tasks are tied to an agent session</summary>
-        <div class="stat-grid" style="margin-bottom:10px">
-          <div class="stat-card" title="Tasks in a workspace that are tied to an agent session, over the lifetime of the installation. A linked execution proves association with an execution, not that the returned changes were read or acted on.">
-            <div class="value">{exec_stats["workspace_activities_pct_lifetime"]}%</div>
-            <div class="label">Execution-linked workspace activities (lifetime)</div>
-            <div class="text-muted" style="font-size:0.78rem;margin-top:2px">
-              <code>{exec_stats["workspace_activities_execution_linked"]}</code> of <code>{exec_stats["workspace_activities_total"]}</code>
-            </div>
-          </div>
-          <div class="stat-card" title="Same as the lifetime figure but limited to the last 30 days. Production shows these two windows diverge meaningfully — a single blended number would hide that trend.">
-            <div class="value">{exec_stats["workspace_activities_pct_30d"]}%</div>
-            <div class="label">Execution-linked workspace activities (30 days)</div>
-            <div class="text-muted" style="font-size:0.78rem;margin-top:2px">
-              <code>{exec_stats["workspace_activities_execution_linked_30d"]}</code> of <code>{exec_stats["workspace_activities_total_30d"]}</code>
-            </div>
-          </div>
-        </div>
-        </details>
-        <div class="text-muted" style="font-size:0.85rem;margin-bottom:8px">Current ownership:</div>
-        <div>{coordination_summary or "<span class='text-muted'>No open tasks yet.</span>"}</div>
-      </div>
       <div class="filter-bar" style="margin-bottom:12px">
         {status_tabs}
       </div>

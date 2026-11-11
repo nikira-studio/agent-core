@@ -1,4 +1,4 @@
-"""Network limits: who may call the credential broker, and whether private addresses may be reached.
+"""Network limits: who may call the local credential helper, and whether private addresses may be reached.
 
 Read by any admin; changed only by a person in the dashboard. A key, an operator
 token or a bearer session is refused, so a script cannot loosen or tighten these.

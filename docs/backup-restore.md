@@ -117,7 +117,7 @@ Checks include:
 - Data directory is writable
 - SQLite has FTS5 support and the memory FTS table can rebuild
 - Current encryption key file exists
-- Broker credential file exists
+- helper key file exists
 
 ---
 

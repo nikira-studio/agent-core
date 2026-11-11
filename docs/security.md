@@ -48,7 +48,7 @@ Credentials are managed from the **Credentials** page or the `/api/credentials` 
 **The only controlled ways a raw secret leaves Agent Core:**
 
 1. A user with permission calls the reveal endpoint from an authenticated session.
-2. The Credential Broker calls the internal resolution endpoint with a valid broker credential and an authorized agent identity.
+2. The local credential helper calls the internal resolution endpoint with a valid helper key and an authorized agent identity.
 3. A service binding resolves the credential server-side so Agent Core can call the external service directly.
 
 In the service case, the raw secret stays inside the Agent Core process and is not returned to the agent.
@@ -65,7 +65,7 @@ Full backup exports are encrypted with a separate one-time backup key. The encry
 | Agent API keys | SHA-256 hash only, shown once at creation and never stored |
 | Broker credentials | SHA-256 hash in the database; plaintext in `data/broker.credential` |
 
-If an API key or broker credential is lost, rotate it. There's no way to recover the original.
+If an API key or helper key is lost, rotate it. There's no way to recover the original.
 
 ---
 
@@ -92,19 +92,19 @@ A few other things worth knowing:
 
 ---
 
-## The Credential Broker flow
+## The local credential helper flow
 
 Here's what happens from the time you store a secret to when a tool actually uses it:
 
 1. You store a secret in Agent Core.
 2. Agent Core returns an `AC_SECRET_*` reference, not the secret.
 3. The agent's tool configuration includes that reference.
-4. At runtime, the local Credential Broker intercepts the reference.
-5. The broker calls Agent Core's internal `/internal/credentials/resolve` endpoint.
-6. Agent Core checks the broker credential and verifies the agent has read access to the credential's scope.
-7. The broker injects the raw value into the child process environment.
+4. At runtime, the local credential helper intercepts the reference.
+5. The helper calls Agent Core's internal `/internal/credentials/resolve` endpoint.
+6. Agent Core checks the helper key and verifies the agent has read access to the credential's scope.
+7. The helper injects the raw value into the child process environment.
 
-The model's context window never contains your actual secret. It's injected at execution time, on your machine, by the broker.
+The model's context window never contains your actual secret. It's injected at execution time, on your machine, by the helper.
 
 > The `agent_id` for resolution must come from your integration config, not from model-generated text. The model should never be able to influence which agent identity resolves a secret.
 
@@ -264,6 +264,6 @@ Before making Agent Core accessible beyond localhost:
 - [ ] Set `AGENT_CORE_CORS_ORIGINS` to specific origins if browser clients need authenticated access
 - [ ] Set `AGENT_CORE_ALLOWED_IPS` if Agent Core is reachable on a LAN or shared network
 - [ ] Restrict filesystem permissions on `data/credential.key` and `data/broker.credential`
-- [ ] Rotate the broker credential after any suspected exposure
+- [ ] Rotate the helper key after any suspected exposure
 - [ ] Rotate webhook secrets if any are suspected to be exposed
 - [ ] Review the audit log after sensitive operations: credential reveals, backup/restore, key rotation, service execution

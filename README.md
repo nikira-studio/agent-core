@@ -12,7 +12,7 @@ Most installations need only shared memory at first. Add the next layer when a r
 
 1. [Install Agent Core](#get-running-in-minutes), create an agent, and connect it with MCP.
 2. [Write and recall shared memory](#memory-that-persists-across-sessions). This is the default reason to use Agent Core.
-3. Add [encrypted credentials and the Credential Broker](docs/credential-broker.md) when a local tool needs a secret without putting it in a prompt.
+3. Add [encrypted credentials and the local credential helper](docs/credential-broker.md) when a local tool needs a secret without putting it in a prompt.
 4. Add [service bindings](docs/integrations.md#services-agent-core-runs-actions-directly) when Agent Core should call an external service itself.
 5. Use activities, workspaces, webhooks, backups, and administration when your work needs them.
 
@@ -136,7 +136,7 @@ You store a credential entry in Agent Core once. You can edit its name, label, a
 
 From there, there are two common paths:
 
-- If a local tool needs a secret in its own config, Agent Core returns a reference like `AC_SECRET_GITHUB_TOKEN_1A2B3C4D`, and the local Credential Broker resolves it at runtime.
+- If a local tool needs a secret in its own config, Agent Core returns a reference like `AC_SECRET_GITHUB_TOKEN_1A2B3C4D`, and the local credential helper resolves it at runtime.
 - If you run an action through a service binding, Agent Core uses the stored credential server-side to call the external service and returns the result.
 
 In both cases, the raw secret never appears in prompts, logs, or generated configs.
@@ -145,7 +145,7 @@ In both cases, the raw secret never appears in prompts, logs, or generated confi
 You store:   GitHub PAT → encrypted credential entry
 You bind:    imported GitHub connector binding → points at that credential
 Agent gets:  AC_SECRET_GITHUB_TOKEN_1A2B3C4D  (just a reference)
-At runtime:  Broker injects the token locally, or the connector executor uses it server-side
+At runtime:  The local credential helper injects the token locally, or the connector executor uses it server-side
 ```
 
 ![Agent Core service catalog](docs/images/agent-catalog.png)
@@ -255,7 +255,7 @@ For REST-based clients or custom integrations, every feature is also available t
 | [Quickstart](docs/quickstart.md) | Install, connect an agent, write shared memory, then add credentials and services when needed |
 | [Integrations](docs/integrations.md) | Set up MCP, credentials, services, activities, collaboration, and webhooks in that order |
 | [How it works](docs/how-it-works.md) | The system model and full feature set: memory, activity, credentials, services, and maintenance |
-| [Credential Broker](docs/credential-broker.md) | How `AC_SECRET_*` references work and how to resolve them at runtime |
+| [Local credential helper](docs/credential-broker.md) | How `AC_SECRET_*` references work and how to resolve them at runtime |
 | [Credential consumers](docs/credential-consumers.md) | Give a service or container its own identity that fetches only the secrets granted to it |
 | [Configuration](docs/configuration.md) | Environment variables, ports, and data directory layout |
 | [Security](docs/security.md) | Scope model, secret handling, and deployment checklist |
@@ -272,7 +272,7 @@ data/
   agent-core.db       ← SQLite database (memory, agents, credentials, activity)
   credential.key      ← Encryption key for credentials
   credential.keyring  ← Key history (used for decryption after key rotation)
-  broker.credential   ← Local broker credential (auto-generated)
+  broker.credential   ← Key for the local credential helper (auto-generated)
   backups/
 ```
 

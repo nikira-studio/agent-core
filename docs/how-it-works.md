@@ -248,7 +248,7 @@ credential_get → AC_SECRET_GITHUB_TOKEN_1A2B3C4D
 
 From there, two paths:
 
-- **Broker**: a local tool needs the secret in its own config or environment. The [Credential Broker](credential-broker.md) resolves the reference at runtime, on the machine, so the raw value never passes through a prompt, a log, or a generated config file.
+- **Local credential helper**: a local tool needs the secret in its own config or environment. The [Local credential helper](credential-broker.md) resolves the reference at runtime, on the machine, so the raw value never passes through a prompt, a log, or a generated config file.
 - **Service**: Agent Core makes the call itself, server-side, using the stored credential. The secret never leaves the service at all.
 
 Prefer the service path when both are available. The reference is what agents see, and a reference in a transcript is worth nothing to anyone who reads it.
@@ -318,7 +318,7 @@ data/
   agent-core.db       SQLite: memory, activity, agents, credentials, connectors, audit
   credential.key      Fernet encryption key
   credential.keyring  key history, for decrypting after rotation
-  broker.credential   local broker credential (auto-generated)
+  broker.credential   helper key for the local credential helper (auto-generated)
   backups/
 ```
 

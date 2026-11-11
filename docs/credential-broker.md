@@ -1,13 +1,15 @@
-# Credential Broker
+# Local credential helper
 
-Agent Core stores secrets encrypted on disk. When an agent needs one, it doesn't get the actual value; it gets a placeholder reference like `AC_SECRET_SERVICE_TOKEN_1A2B3C4D`. The **Credential Broker** turns that placeholder into the real thing at runtime, injecting it directly into a tool or script without the model ever seeing it.
+> **Names.** This page, the dashboard (Settings → Security) and the Health strip all say *local credential helper*. The program is `runner/agent_core_broker.py`, and the environment variables, API paths and audit action names keep the word "broker" (for example `AGENT_CORE_BROKER_TOKEN_FILE` and `/api/dashboard/broker/rotate`), so searching for them still works.
+
+Agent Core stores secrets encrypted on disk. When an agent needs one, it doesn't get the actual value; it gets a placeholder reference like `AC_SECRET_SERVICE_TOKEN_1A2B3C4D`. The **Local credential helper** turns that placeholder into the real thing at runtime, injecting it directly into a tool or script without the model ever seeing it.
 
 ```
 What the model sees:   AC_SECRET_SERVICE_TOKEN_1A2B3C4D
 What the tool gets:    the real secret value  (injected at runtime)
 ```
 
-Anything you put in a prompt or config file might end up in a log, a response, or a stored conversation. Agent Core sidesteps this entirely. The broker, a small local script, swaps references for real values in the child process environment. Your actual API keys never enter the model's context window.
+Anything you put in a prompt or config file might end up in a log, a response, or a stored conversation. Agent Core sidesteps this entirely. The helper, a small local script, swaps references for real values in the child process environment. Your actual API keys never enter the model's context window.
 
 ## How it works
 
@@ -17,29 +19,29 @@ Here's the full flow from storage to execution:
 2. An agent calls `credential_get` (MCP) or `POST /api/credentials/entries/{id}/reference` (REST).
 3. Agent Core returns an `AC_SECRET_*` reference name, not the secret.
 4. The agent passes that reference into a tool configuration or environment variable.
-5. When you run the tool, you wrap the command with the broker script.
-6. The broker scans the environment for `AC_SECRET_*` references.
+5. When you run the tool, you wrap the command with the helper script.
+6. The helper scans the environment for `AC_SECRET_*` references.
 7. For each one it finds, it calls Agent Core's internal `/internal/credentials/resolve` endpoint.
-8. Agent Core verifies the broker credential, checks the agent's permissions, and returns the raw value.
-9. The broker injects the real value into the child process environment before the tool starts.
+8. Agent Core verifies the helper key, checks the agent's permissions, and returns the raw value.
+9. The helper injects the real value into the child process environment before the tool starts.
 
-> **Important:** The `agent_id` the broker uses for permission checks comes from your integration configuration, not from the model. The model should never be able to specify which agent identity resolves a secret.
+> **Important:** The `agent_id` the helper uses for permission checks comes from your integration configuration, not from the model. The model should never be able to specify which agent identity resolves a secret.
 
-This broker path is for local tools and scripts that need a secret in their own environment. If you want Agent Core itself to run the external action, use the **Services** page and a service binding instead of the broker.
+This helper path is for local tools and scripts that need a secret in their own environment. If you want Agent Core itself to run the external action, use the **Services** page and a service binding instead of the helper.
 
 You can edit credentials from the Credentials page. Metadata changes do not alter the encrypted secret. The secret is replaced only when you enter a new replacement value.
 
 ---
 
-## The broker credential
+## The helper key
 
-The broker needs its own credential to authenticate with Agent Core. This is separate from agent API keys; it's a special token with a narrow purpose: allowing the broker to resolve credentials on behalf of configured agents.
+The helper needs its own credential to authenticate with Agent Core. This is separate from agent API keys; it's a special token with a narrow purpose: allowing the helper to resolve credentials on behalf of configured agents.
 
-When Agent Core starts for the first time, it automatically generates this credential and writes it to `data/broker.credential`. The broker reads that file automatically when run from the repo root or inside the container.
+When Agent Core starts for the first time, it automatically generates this credential and writes it to `data/broker.credential`. The helper reads that file automatically when run from the repo root or inside the container.
 
 **Protect `data/broker.credential` like any other secret.** It's gitignored, and you should keep it out of any shared directories or backups that aren't already secured.
 
-If you move the broker script to a different location (outside the repo), tell it where to find the credential file:
+If you move the helper script to a different location (outside the repo), tell it where to find the credential file:
 
 ```bash
 # Option 1: point to the file explicitly
@@ -54,7 +56,7 @@ python agent_core_broker.py --token ac_broker_xxxxx ...
 
 ## Keep the link encrypted
 
-The broker sends its credential to Agent Core and receives raw secret values back. Over plain `http://` to another machine, anyone who can watch that network can read both. A private address or a Docker network name does not change that.
+The helper sends its credential to Agent Core and receives raw secret values back. Over plain `http://` to another machine, anyone who can watch that network can read both. A private address or a Docker network name does not change that.
 
 - `http://` to this machine (`localhost`, `127.0.0.1`, `::1`) is fine and says nothing.
 - `https://` is fine anywhere.
@@ -62,7 +64,7 @@ The broker sends its credential to Agent Core and receives raw secret values bac
 - If you trust the link (for example a tunnel you set up yourself), pass `--allow-plain-http` or set `AGENT_CORE_BROKER_ALLOW_PLAIN_HTTP=1`; the warning and the refusal both go away. A link you have marked as trusted wins over `refuse`.
 - Anything other than `http://` or `https://` (such as `file://`) is always refused.
 
-To rotate the broker credential (e.g., after a suspected exposure):
+To rotate the helper key (e.g., after a suspected exposure):
 
 ```bash
 curl -X POST http://localhost:3500/api/dashboard/broker/rotate \
@@ -73,15 +75,15 @@ Replace `<operator-token>` with a token from **Settings → Account → Operator
 
 
 Agent Core atomically updates `data/broker.credential` and returns the new
-credential once. A broker that reads this file needs no manual update. If a
-broker uses `--token` or a copied token file, update that value from the
+credential once. A helper that reads this file needs no manual update. If a
+helper uses `--token` or a copied token file, update that value from the
 response.
 
 ---
 
-## Using the broker script
+## Using the helper script
 
-The broker script is at `runner/agent_core_broker.py`. If you installed via **Docker**, copy it out first:
+The helper script is at `runner/agent_core_broker.py`. If you installed via **Docker**, copy it out first:
 
 ```bash
 docker cp agent-core:/app/runner/agent_core_broker.py ./agent_core_broker.py
@@ -119,7 +121,7 @@ python runner/agent_core_broker.py \
 
 ## The resolve endpoint
 
-The broker calls this internally. You generally don't need to use it directly, but it's documented here for transparency and for building custom integrations:
+The helper calls this internally. You generally don't need to use it directly, but it's documented here for transparency and for building custom integrations:
 
 ```bash
 curl -X POST http://localhost:3500/internal/credentials/resolve \
@@ -132,14 +134,14 @@ curl -X POST http://localhost:3500/internal/credentials/resolve \
 ```
 
 Both conditions must be met for this to succeed:
-- Valid broker credential in the `Authorization` header
+- Valid helper key in the `Authorization` header
 - The specified `agent_id` must have read access to the credential entry's scope
 
 **Error responses:**
 
 | Status | Code | Meaning |
 | --- | --- | --- |
-| `401` | — | Missing or invalid broker credential |
+| `401` | — | Missing or invalid helper key |
 | `403` | `SCOPE_DENIED` | The agent doesn't have read access to this credential's scope |
 | `410` | `CREDENTIAL_EXPIRED` | The credential has a TTL and it's past |
 
@@ -147,7 +149,7 @@ Both conditions must be met for this to succeed:
 
 ## Scope requirements
 
-The `agent_id` you configure for the broker determines what credentials it can resolve. The agent needs read access to the scope where the credential entry lives:
+The `agent_id` you configure for the helper determines what credentials it can resolve. The agent needs read access to the scope where the credential entry lives:
 
 | Credential scope | Agent needs this in `read_scopes` |
 | --- | --- |

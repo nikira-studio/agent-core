@@ -209,3 +209,10 @@ The page title is the one h1; each card's title is an h2; a section inside a car
 ## Parked candidates (not built)
 
 - **An approvable operation for adding an action to a stored service.** `connector_type.actions` only turns existing actions off or on; it cannot add one, so an agent cannot propose "add this action to that service" for a person to approve on the Approvals page. Adding an action to an installed adapter today means editing its manifest on the host and calling the adapter-update route as the person (one short operator token). If this comes up again, a general `connector_type.import`-style operation would let agents propose a spec for a person to approve. Not built: one occurrence does not justify a new mechanism.
+
+## Trims after the pre-release review (1.2.1)
+
+- **Activity** lost its Coordination Snapshot (four counters, an ownership line and two execution-link percentages). The page is **Waiting on you**, the task list with its status tabs, and **Workspace synchronization** (closed when empty); Stale and Blocked tasks are one tab each and also appear on Overview's Waiting on you.
+- **One name for the credential broker.** The dashboard, the Health strip, error messages and the docs say **local credential helper**; the Settings card is *Local credential helper*, its allowed callers are *Local credential helper callers* (Settings → Security → Network limits), and the Health line is *Helper callers*. The program, environment variables, API paths and audit action names keep "broker".
+- **Search by meaning** (Settings → Memory): *Embedding dimension* and *Query prefix* sit under **Advanced** (open when a prefix is set); provider, model, URL, auth type and key stay in the first view.
+

@@ -156,9 +156,9 @@ def test_settings_and_overview_show_the_limits_quietly(test_client, admin_token)
     _browser_admin(test_client)
     settings_page = test_client.get("/settings").text
     assert 'id="network-limits"' in settings_page and "Allowed private addresses" in settings_page
-    assert "Credential broker callers" in settings_page and "Report only" in settings_page
+    assert "Local credential helper callers" in settings_page and "Report only" in settings_page
     overview = test_client.get("/").text
-    assert "Private addresses" in overview and "Credential broker" in overview
+    assert "Private addresses" in overview and "Helper callers" in overview
     _set(internal_mode="report")
     policy.note_would_block("192.168.1.99", "192.168.1.99")
     assert "report only; 1 would be blocked" in test_client.get("/").text

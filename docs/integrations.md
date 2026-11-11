@@ -674,18 +674,18 @@ The Connect page is three steps. **1. Who is connecting?** Pick the user, worksp
 
 Agent Core gives you two distinct paths for using stored credentials. Pick the one that fits how the action happens:
 
-**Credential Broker: your local tool needs the secret.** The agent gets an `AC_SECRET_*` reference, your local tool gets the real value injected at runtime, and the broker is what does the injection. The secret travels from Agent Core to your local process only, never through the model.
+**Local credential helper: your local tool needs the secret.** The agent gets an `AC_SECRET_*` reference, your local tool gets the real value injected at runtime, and the helper is what does the injection. The secret travels from Agent Core to your local process only, never through the model.
 
 **Services: Agent Core runs the action for you.** The agent tells Agent Core which binding to use and what action to run. Agent Core uses the stored credential server-side, calls the external service, and returns the result. The raw secret never leaves Agent Core at all.
 
-### Credential Broker flow
+### Local credential helper flow
 
 1. The agent calls `credential_get` (MCP) or `POST /api/credentials/entries/{id}/reference` (REST).
 2. Agent Core returns an `AC_SECRET_*` reference, not the actual token.
 3. The agent includes that reference in the tool configuration.
-4. When the tool runs, the local Credential Broker intercepts the reference and injects the real value into the tool's environment.
+4. When the tool runs, the local credential helper intercepts the reference and injects the real value into the tool's environment.
 
-See [Credential Broker](credential-broker.md) for setup instructions.
+See [Local credential helper](credential-broker.md) for setup instructions.
 
 ### Services: Agent Core runs actions directly
 

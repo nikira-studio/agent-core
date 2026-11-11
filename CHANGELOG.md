@@ -29,6 +29,10 @@ Notable changes to Agent Core are documented here. The format follows [Keep a Ch
 
 - **Image export from service results.** A service answer that carried an inline `data:image/...;base64` picture was written to `<data>/artifacts/connector/` and replaced by a reference. Nothing used it, so it is gone: such an answer now follows the ordinary path (large results are offloaded and read with `result_fetch`). The `connector_artifact_exported` audit action is no longer written; rows from earlier versions, if any, stay readable.
 
+- **Activity** no longer shows the Coordination Snapshot counters or the execution-link percentages; Waiting on you and the task list answer the same questions.
+- The credential broker is called the **local credential helper** everywhere you read it (dashboard, Health strip, error messages, docs); the program, environment variables and API paths keep "broker". Settings → Security → Network limits says *Local credential helper callers*, and Overview's Health line says *Helper callers*.
+- Settings → Memory → Search by meaning puts *Embedding dimension* and *Query prefix* under **Advanced**.
+
 ### Added
 
 - `scripts/ui_sweep.py` also saves each page as rendered and runs the design detector on it when it is installed, so the HTML built in Python is checked too.

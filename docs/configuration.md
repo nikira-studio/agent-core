@@ -13,7 +13,7 @@ For what these settings actually affect, such as the memory model, verification,
 | Variable | Default | What it does |
 | --- | --- | --- |
 | `AGENT_CORE_PORT` | `3500` | The port Agent Core listens on |
-| `AGENT_CORE_DATA_PATH` | `./data` | Where Agent Core stores its database, encryption keys, and broker credential. Set this to `/data` inside Docker (see below) |
+| `AGENT_CORE_DATA_PATH` | `./data` | Where Agent Core stores its database, encryption keys, and helper key. Set this to `/data` inside Docker (see below) |
 | `AGENT_CORE_ENCRYPTION_KEY` | `auto` | Encryption key for stored credentials. Leave as `auto`: Agent Core generates a key on first startup and saves it to `data/credential.key`. Only set this manually if you need to manage the key yourself (advanced use) |
 | `AGENT_CORE_SLOW_REQUEST_LOG_MS` | `1000` | Requests slower than this many milliseconds are logged with their duration, for diagnosing stalls the access log cannot show. Set to `0` to disable |
 
@@ -42,7 +42,7 @@ Session tokens are signed with their own random key, `session.key` in the data d
 | `AGENT_CORE_ALLOWED_IPS` | *(empty)* | Comma-separated IPs or CIDR ranges. When set, requests from any IP not on this list are rejected with `403`. Useful if Agent Core is reachable on a LAN and you want to limit who can connect |
 | *Note* | | The private-address mode covers services, webhooks and imports. It does not cover the embedding backend (vector search) or the model list on the Settings page; those use the address an admin configured, normally a local Ollama. |
 | `AGENT_CORE_INTERNAL_HOSTS_MODE` | *(unset)* | `allow`, `report` or `block` for services, webhooks and imports that point at private addresses. Unset, the dashboard decides (Settings → Security → Network limits): a fresh install starts on `block`, an install that already had data on `allow`. `report` lets everything through and lists what `block` would have refused |
-| `AGENT_CORE_BROKER_ALLOWED_HOSTS` | *(empty)* | Addresses or ranges (comma-separated) that may call the credential broker; this server itself always may. Empty: any caller holding the broker credential. Also editable in Settings → Security |
+| `AGENT_CORE_BROKER_ALLOWED_HOSTS` | *(empty)* | Addresses or ranges (comma-separated) that may call the local credential helper; this server itself always may. Empty: any caller holding the helper key. Also editable in Settings → Security |
 | `AGENT_CORE_BROKER_ALLOWLIST_MODE` | *(unset)* | `audit` (record callers outside the list, refuse nobody) or `enforce`. Unset, the dashboard decides; the default is `audit` |
 | `AGENT_CORE_BLOCK_INTERNAL_HOSTS` | `false` | Set to `true` to block service bindings/imports from reaching private, loopback, or link-local hosts. Use this if you want to disable local probing by default |
 | `AGENT_CORE_CONNECTOR_APPROVAL_EXPIRY_HOURS` | `24` | How long a service action that waits for a person's approval stays open before it expires (1 to 168) |
