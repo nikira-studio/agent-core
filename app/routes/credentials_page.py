@@ -29,7 +29,7 @@ _SCOPE_KIND_TAG = {"workspace": "workspace", "user": "personal", "agent": "agent
 def scope_html(scope: str) -> str:
     """The workspace (or person, or agent) a credential lives in, with a small tag for which it is.
 
-    The name never splits inside itself (home-network stays whole); the tag sits beside or under it.
+    The name never splits inside itself (web-frontend stays whole); the tag sits beside or under it.
     """
     kind, sep, name = scope.partition(":")
     if not sep:

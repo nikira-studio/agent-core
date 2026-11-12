@@ -140,7 +140,7 @@ def test_effective_authority_reports_current_permanent_identity(test_client, age
 
 
 def test_effective_authority_for_a_signed_in_user_is_permanent(test_client, clean_db):
-    """The check OpenAgents makes before it opens a human session."""
+    """The check an external sign-in service makes before it opens a human session."""
     from app.services.auth_service import create_session, create_user
 
     create_user("person", "person@test.local", "testpassword123", "A Person")

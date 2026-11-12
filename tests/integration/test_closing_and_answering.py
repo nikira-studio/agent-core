@@ -112,13 +112,13 @@ def test_confirming_a_memory_with_evidence_answers_its_pending_suggestions(test_
     first = _suggest(record_id, "unconfirmed_inference")
     second = _suggest(record_id, "stale_volatile")
     r = test_client.post("/mcp", headers=owner, json={"tool": "memory_confirm", "params": {
-        "record_id": record_id, "evidence": "ssh nexus: ip a shows 192.0.2.10"}})
+        "record_id": record_id, "evidence": "ssh buildhost: ip a shows 192.0.2.10"}})
     assert r.status_code == 200 and r.json()["ok"], r.text
     assert _status(first) == ("accepted", "close-owner") and _status(second) == ("accepted", "close-owner")
     from app.services import audit_service
 
     answered = audit_service.query_events(action="memory_proposal_answered", limit=10)
-    assert len(answered) == 2 and "ssh nexus" in str(answered[0]) and answered[0]["actor_id"] == "close-owner"
+    assert len(answered) == 2 and "ssh buildhost" in str(answered[0]) and answered[0]["actor_id"] == "close-owner"
     # They left the person's list but stay in the history.
     from app.services import memory_proposal_service
 

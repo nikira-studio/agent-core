@@ -4,6 +4,10 @@ Notable changes to Agent Core are documented here. The format follows [Keep a Ch
 
 ## [Unreleased]
 
+## [1.2.1] - 2026-11-11
+
+**Upgrading from 1.2.0.** Nothing to do beyond the usual: take a backup, pull and restart. The one database change (schema revision 23) is applied on start and only updates the built-in web service's default description. This release is mostly dashboard readability and wording, one list of what is waiting on a person, small fixes to the documentation and API errors, and the removal of two features nothing used (image export from service results, the Activity snapshot counters).
+
 ### Changed
 
 - **On a phone**, the sidebar keeps its group headings (Work, Access, Capabilities, System) with the pages under each, instead of one wrapped cloud of buttons. The Agents list, the Services bindings and recent runs, and Overview's Recent Activity become one block per row, with the labels beside the values and the **Created** column left out, so row buttons are never off-screen. Agents and bindings show **Edit** and **Connect** (or **Edit** and **Test**) and put the rest, including Delete, under **More**, so Delete no longer sits next to Deactivate.
@@ -124,7 +128,7 @@ Notable changes to Agent Core are documented here. The format follows [Keep a Ch
 
 ### Fixed
 
-- `GET /api/auth/effective-authority` (and the MCP `effective_authority` tool) report `authorization_mode: "permanent"` again. The field went away with delegations, and clients that require it, such as OpenAgents' human sign-in, refused every Core user. It is always `permanent` now that delegated authority is gone.
+- `GET /api/auth/effective-authority` (and the MCP `effective_authority` tool) report `authorization_mode: "permanent"` again. The field went away with delegations, and clients that require it, such as an external human sign-in service, refused every Core user. It is always `permanent` now that delegated authority is gone.
 - HTTP-engine adapters return a non-2xx upstream reply (a 404, a session challenge) as `success: false` with its status and body again. Since the response-size cap, the error-response wrapper crashed with a `TypeError` instead.
 - MCP `activity_update` with an unknown `status` returns `400 INVALID_STATUS` instead of a 500; `?page=` values that are not numbers open page one instead of a 500; a malformed credential scope is a 400.
 - Amending a handoff with a `needs_human` after a person resolved the previous request opens a new request even when the text is the same, and a `task_ref`-only update is reported as `activity_updated`, not a heartbeat. `superseded_requests`/`open_requests` report the time the request was made.

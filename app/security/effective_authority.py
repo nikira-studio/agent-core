@@ -141,7 +141,7 @@ class EffectiveAuthority:
             "principal_user_id": self.context.user_id,
             # Compatibility: delegated authority was removed (2026-10-25), so
             # request authority is always permanent. Clients written against
-            # the earlier contract, OpenAgents' human sign-in among them,
+            # the earlier contract, an external human sign-in service among them,
             # refuse a response without this field.
             "authorization_mode": "permanent",
             "effective_read_scopes": self.context.read_scopes,

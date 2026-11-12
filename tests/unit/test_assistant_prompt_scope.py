@@ -67,10 +67,10 @@ def test_prompt_renders_configured_default_recall_set():
     import json
     md = _build_assistants_md(
         BASE, USER, WORKSPACE, AGENT,
-        default_recall_scopes_json=json.dumps([AGENT, "workspace:home-network"]),
+        default_recall_scopes_json=json.dumps([AGENT, "workspace:web-frontend"]),
     )
     assert "default recall scopes are" in md
-    assert "workspace:home-network" in md
+    assert "workspace:web-frontend" in md
     assert "unscoped search" in md
 
 

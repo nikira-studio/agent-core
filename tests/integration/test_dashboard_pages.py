@@ -441,9 +441,9 @@ def test_text_that_looks_like_an_asset_link_cannot_break_a_page(authenticated_cl
 def test_credential_row_buttons_share_a_line_and_scopes_break_only_at_the_colon(authenticated_client):
     from app.services import credential_service
 
-    credential_service.create_credential("workspace:home-network", "a_long_credential_name", "not-shown")
+    credential_service.create_credential("workspace:web-frontend", "a_long_credential_name", "not-shown")
     html = authenticated_client.get("/credentials").text
-    assert "<span class='scope-name'>home-network</span> <span class='scope-kind' title='workspace:home-network'>workspace</span>" in html
+    assert "<span class='scope-name'>web-frontend</span> <span class='scope-kind' title='workspace:web-frontend'>workspace</span>" in html
     assert "a_<wbr>long_<wbr>credential_<wbr>name" in html
     css = open("app/dashboard/static/css/dashboard.css").read()
     assert ".actions-cell .btn { vertical-align: middle; }" in css  # text and icon buttons on one baseline
