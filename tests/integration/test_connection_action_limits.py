@@ -283,7 +283,7 @@ def test_a_person_sets_the_mode_through_the_api_and_it_is_validated_and_audited(
     assert events and "custom" in events[0]["details_json"]
 
 
-def test_an_agent_cannot_choose_what_a_connection_allows_and_a_connection_it_makes_is_read_only(world):
+def test_an_agent_cannot_choose_what_a_connection_allows_and_a_connection_it_makes_allows_nothing_yet(world):
     client = world["client"]
     refused = client.post("/api/connector-bindings", headers=_bearer(world["key"]), json={
         "connector_type_id": SERVICE, "name": "Agent made", "scope": "workspace:ops",
@@ -293,7 +293,12 @@ def test_an_agent_cannot_choose_what_a_connection_allows_and_a_connection_it_mak
         "connector_type_id": SERVICE, "name": "Agent made", "scope": "workspace:ops",
         "config_json": '{"base_url": "http://example.test"}'})
     assert made.status_code == 201, made.text
-    assert made.json()["data"]["binding"]["actions_mode"] == "read_only"  # creating one is never a way round a narrower one
+    assert made.json()["data"]["binding"]["actions_mode"] == "none"  # creating one is never a way round a narrower one
+    assert "allows nothing yet because an agent created it" in made.json()["data"]["note"]
+    refused_write = world["client"].post("/mcp", headers=_bearer(world["key"]), json={"tool": "connectors_run", "params": {
+        "binding_id": made.json()["data"]["binding"]["id"], "action": "create_thing", "params": {}}}).json()
+    assert refused_write["error"]["code"] == "CONNECTION_DISABLED_ACTION"
+    assert "Ask a person to open Services > Edit connection" in refused_write["error"]["message"]  # says what to do
     ro = world["binding"]("Read only", "read_only")
     widen = client.put(f"/api/connector-bindings/{ro['id']}", headers=_bearer(world["key"]), json={"actions_mode": "all"})
     assert widen.status_code == 403
@@ -322,3 +327,95 @@ def test_the_dialogs_offer_the_choice_and_the_table_says_what_a_connection_allow
     assert "Everything the service allows" in page and "Read-only" in page and "Choose actions" in page
     assert "Read-only &middot; 2 of 4 actions" in page and "Chosen actions &middot; 3 of 4 actions" in page
     assert page.count("Everything the service allows") == 2  # the label text; the plain connection adds no note
+
+
+# ---- found by the independent review ----------------------------------------------------------------------------------
+
+def _web_service(world, mode="all", disabled=None, service_disabled=None):
+    cs.create_connector_type(connector_type_id="plain-web", display_name="Plain web", auth_type="none",
+                             provider_type="builtin", backend_type="generic_http", endpoint_url="https://web.example.test",
+                             supported_actions=[], disabled_actions=service_disabled)
+    return cs.create_binding("plain-web", "Web", "workspace:ops", config_json='{"base_url": "https://web.example.test"}',
+                             actions_mode=mode, disabled_actions=disabled)
+
+
+def test_a_read_only_web_connection_cannot_be_made_to_send_a_write_by_a_param_default_or_header(monkeypatch):
+    from app.connectors.generic_http import GenericHttpConnector
+
+    sent = []
+    connector = GenericHttpConnector()
+    monkeypatch.setattr(connector, "_call", lambda credential, config, params, session=None: sent.append(dict(params)) or {"success": True})
+    connector.execute("GET /thing/1", {"method": "DELETE", "url": "https://other.example/x",
+                                       "headers": {"X-HTTP-Method-Override": "DELETE", "Accept": "application/json"}}, None, '{"base_url": "https://web.example.test"}')
+    assert sent[0]["method"] == "GET" and sent[0]["path"] == "/thing/1" and "url" not in sent[0]
+    assert sent[0]["headers"] == {"Accept": "application/json"}
+    connector.execute("DELETE /thing/1", {}, None, '{"base_url": "https://web.example.test"}')
+    assert sent[1]["method"] == "DELETE"  # the action is still what decides
+
+
+def test_a_web_service_action_is_compared_in_one_spelling_so_respelling_it_does_not_get_round_a_limit(world):
+    custom = _web_service(world, "custom", ["DELETE /thing/1"])
+    ct = cs.get_connector_type("plain-web")
+    for spelling in ("DELETE /thing/1", "delete /thing/1", "DELETE   /thing/1", " DELETE /thing/1", "DELETE\t/thing/1"):
+        assert cs.connection_allows(ct, custom, spelling) is False, spelling
+        assert cs.execute_binding_action(custom["id"], spelling, {})["error_code"] == "CONNECTION_DISABLED_ACTION", spelling
+    assert cs.connection_allows(ct, custom, "GET /thing/1") is True
+    # the same for the service's own switch
+    cs.update_connector_type_actions("plain-web", ["POST /x"])
+    ct = cs.get_connector_type("plain-web")
+    plain = cs.create_binding("plain-web", "Web 2", "workspace:ops", config_json='{"base_url": "https://web.example.test"}')
+    for spelling in ("POST /x", "post /x", "POST    /x"):
+        assert cs.execute_binding_action(plain["id"], spelling, {})["error_code"] == "DISABLED_ACTION", spelling
+
+
+def test_read_only_on_a_web_service_allows_only_get_and_head_spellings(world):
+    ro = _web_service(world, "read_only")
+    ct = cs.get_connector_type("plain-web")
+    assert cs.connection_allows(ct, ro, "get /x") and cs.connection_allows(ct, ro, "HEAD /x")
+    assert not any(cs.connection_allows(ct, ro, a) for a in ("DELETE /x", "post /x", "call_endpoint", "PATCH /x"))
+
+
+def test_a_connection_an_agent_made_runs_nothing_until_a_person_chooses(world):
+    made = world["client"].post("/api/connector-bindings", headers=_bearer(world["key"]), json={
+        "connector_type_id": SERVICE, "name": "Agent made", "scope": "workspace:ops",
+        "config_json": '{"base_url": "http://example.test"}'}).json()["data"]["binding"]
+    # it cannot restore a read action a person turned off on another connection by creating its own
+    refused = _run(world, made, "list_things").json()
+    assert refused["error"]["code"] == "CONNECTION_DISABLED_ACTION" and "allows nothing yet" in refused["error"]["message"]
+    assert _actions(world, {"binding_id": made["id"]})["actions"] == []
+    # a person opens it up
+    client = world["client"]
+    ok = client.put(f"/api/connector-bindings/{made['id']}", headers=_bearer(world["admin"]), json={"actions_mode": "read_only"})
+    assert ok.status_code == 200
+    assert _run(world, made, "list_things").json()["ok"] is True
+
+
+def test_an_agent_is_not_told_about_actions_its_connections_do_not_allow_even_when_it_asks(world):
+    ro = world["binding"]("Read only", "read_only")
+    assert _actions(world, {"include_disabled": True})["actions"] == ["list_things", "get_thing"]
+    rest = world["client"].get(f"/api/connector-types/{SERVICE}/tools?include_disabled=true", headers=_bearer(world["key"])).json()["data"]
+    assert [t["action"] for t in rest["tools"]] == ["list_things", "get_thing"]
+    one = world["client"].get(f"/api/connector-bindings/{ro['id']}/tools?include_disabled=true", headers=_bearer(world["key"])).json()["data"]
+    assert [t["action"] for t in one["tools"]] == ["list_things", "get_thing"]
+
+
+def test_an_unreadable_custom_list_allows_nothing_rather_than_everything(world):
+    from app.database import get_db
+
+    custom = world["binding"]("Custom", "custom", ["delete_thing"])
+    with get_db() as conn:
+        conn.execute("UPDATE connector_bindings SET actions_disabled_json = ? WHERE id = ?", ("{not json", custom["id"]))
+        conn.commit()
+    broken = cs.get_binding(custom["id"])
+    assert broken["actions_corrupt"] is True
+    assert cs.effective_actions(cs.get_connector_type(SERVICE), broken) == []
+    assert _run(world, custom, "list_things").json()["error"]["code"] == "CONNECTION_DISABLED_ACTION"
+
+
+def test_resolve_says_no_connection_allows_the_action_instead_of_calling_it_ambiguous(world):
+    from app.security.effective_authority import system_authority
+
+    world["binding"]("Read only", "read_only")
+    with pytest.raises(APIError) as caught:
+        cs.resolve_authorized_binding(system_authority("test"), connector_type_id=SERVICE, action="create_thing")
+    assert caught.value.code == "NO_ALLOWED_CONNECTION" and caught.value.status_code == 403

@@ -170,6 +170,7 @@ def _row_to_binding(row: dict) -> dict:
         "last_test_note": row.get("last_test_note"),
         "actions_mode": row.get("actions_mode") or "all",
         "disabled_actions": _json_list(row.get("actions_disabled_json")),
+        "actions_corrupt": _json_unreadable(row.get("actions_disabled_json")),
         "created_by": row.get("created_by"),
         "created_at": row.get("created_at"),
         "updated_at": row.get("updated_at"),
@@ -446,11 +447,35 @@ def _validate_endpoint_override(connector_type, endpoint_url, credential_id, con
 #   allowed = in the service's catalogue, not switched off by the service, and permitted by the connection's mode
 #
 # Modes: "all" (everything the service allows; every connection that existed before 1.3.1), "read_only" (only actions that
-# declare they change nothing; an action that does not say is treated as one that does) and "custom" (the connection
-# lists what it turns off; a tool that appears later is on unless the service turns it off).
+# declare they change nothing; an action that does not say is treated as one that does), "custom" (the connection
+# lists what it turns off; a tool that appears later is on unless the service turns it off) and "none" (nothing yet: a
+# connection an agent creates starts here until a person chooses).
 
-ACTIONS_MODES = ("all", "read_only", "custom")
+ACTIONS_MODES = ("all", "read_only", "custom", "none")
 _READ_SIDE_EFFECTS = ("none", "read")
+
+
+def _json_unreadable(value) -> bool:
+    """True when a stored list is present but cannot be read: a custom connection then allows nothing, never everything."""
+    if not isinstance(value, str) or not value:
+        return False
+    try:
+        data = json.loads(value)
+    except (TypeError, ValueError):
+        return True
+    return not isinstance(data, list)
+
+
+def canonical_action_name(connector_type: dict, action: str) -> str:
+    """One spelling per action. A plain web service's actions are free text ("get /x", " GET   /x"); the executor
+    reads them loosely, so every check must compare the same canonical "METHOD /path" it will actually send."""
+    if not isinstance(action, str):
+        return action
+    if connector_type.get("backend_type") == "generic_http" or connector_type.get("provider_type") == "generic_http":
+        parts = action.strip().split(None, 1)
+        if parts and action.strip() != "call_endpoint" and parts[0].upper() in ("GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"):
+            return parts[0].upper() + (" " + parts[1].strip() if len(parts) > 1 else "")
+    return action
 
 
 def _json_list(value) -> list[str]:
@@ -556,31 +581,35 @@ def action_side_effect(connector_type: dict, action: str) -> str:
 
 def connection_allows(connector_type: dict, binding: dict, action: str) -> bool:
     """The one rule: may this connection run this action? (The service's switches always win.)"""
-    if not action or action in (connector_type.get("disabled_actions") or []):
+    action = canonical_action_name(connector_type, action)
+    if not action or action in [canonical_action_name(connector_type, a) for a in (connector_type.get("disabled_actions") or [])]:
         return False
     mode = (binding or {}).get("actions_mode") or "all"
     if mode == "all":
         return True
     if mode == "custom":
+        if (binding or {}).get("actions_corrupt"):
+            return False  # an unreadable list fails closed
         return action not in ((binding or {}).get("disabled_actions") or [])
     if mode == "read_only":
         return action_side_effect(connector_type, action) == "read"
-    return False  # an unrecognised mode is never a way to widen
+    return False  # "none" and an unrecognised mode are never a way to widen
 
 
 def connection_narrows(connector_type: dict, binding: dict, action: str) -> bool:
     """True when this connection (not its service) is what stops the action. A service-wide switch keeps its own message."""
-    return action not in (connector_type.get("disabled_actions") or []) and not connection_allows(
+    service_off = [canonical_action_name(connector_type, a) for a in (connector_type.get("disabled_actions") or [])]
+    return canonical_action_name(connector_type, action) not in service_off and not connection_allows(
         connector_type, binding, action
     )
 
 
 def connection_refusal(binding: dict, action: str) -> dict:
     mode = (binding or {}).get("actions_mode") or "all"
-    why = "is read-only" if mode == "read_only" else "does not allow it"
+    why = "is read-only" if mode == "read_only" else ("allows nothing yet" if mode == "none" else "does not allow it")
     return {
         "success": False,
-        "error": f"This connection {why}: {action}. Ask the owner to change the connection's actions.",
+        "error": f"This connection {why}: {action}. Ask a person to open Services > Edit connection and change what it can do.",
         "error_code": "CONNECTION_DISABLED_ACTION",
     }
 
@@ -621,10 +650,10 @@ def validate_actions_setting(connector_type: dict, mode, disabled) -> tuple[str,
     """Check a requested mode and list; returns (mode, disabled list) or raises ValueError with a plain message."""
     mode = mode or "all"
     if mode not in ACTIONS_MODES:
-        raise ValueError("actions_mode must be all, read_only or custom")
+        raise ValueError("actions_mode must be all, read_only, custom or none")
     if mode != "custom":
         return mode, []
-    names = [item for item in (disabled or []) if isinstance(item, str)]
+    names = [canonical_action_name(connector_type, item) for item in (disabled or []) if isinstance(item, str)]
     known = set(catalogue_actions(connector_type))
     unknown = [n for n in names if known and n not in known]
     if unknown:
@@ -872,6 +901,8 @@ def resolve_authorized_binding(
         if not matches:
             raise APIError("BINDING_NOT_FOUND", "No authorized binding matches the requested alias", 404)
         visible = matches
+    if not visible and candidates and action:
+        raise APIError("NO_ALLOWED_CONNECTION", "None of the connections you can use allows this action", 403)
     if len(visible) == 1:
         return visible[0]
     preferred = [item for item in visible if item.get("is_preferred")]
@@ -1478,8 +1509,8 @@ def build_capability_summary(
 
 
 def _validate_action_for_connector(connector_type: dict, action: str) -> Optional[str]:
-    disabled_actions = set(connector_type.get("disabled_actions") or [])
-    if action in disabled_actions:
+    disabled_actions = {canonical_action_name(connector_type, a) for a in (connector_type.get("disabled_actions") or [])}
+    if canonical_action_name(connector_type, action) in disabled_actions:
         return "DISABLED_ACTION"
 
     if connector_type.get("backend_type") == "generic_http":

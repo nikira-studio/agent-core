@@ -474,7 +474,7 @@ If the connector and credential are enough on their own, leave `config_json` emp
 | Method | Path | Auth | Description |
 | --- | --- | --- | --- |
 | `GET` | `/api/connector-bindings` | Agent/session | List visible service connections |
-| `POST` | `/api/connector-bindings` | Agent/session | Create a connection. Optional `actions_mode` (`all`, `read_only`, `custom`) and, for `custom`, `disabled_actions`: what the connection turns off. Only a person may set them; a connection an agent creates is `read_only` |
+| `POST` | `/api/connector-bindings` | Agent/session | Create a connection. Optional `actions_mode` (`all`, `read_only`, `custom`) and, for `custom`, `disabled_actions`: what the connection turns off. Only a person may set them; a connection an agent creates starts as `none` (nothing allowed until a person chooses) |
 | `GET` | `/api/connector-bindings/{binding_id}` | Agent/session | Get a connection |
 | `PUT` | `/api/connector-bindings/{binding_id}` | Agent/session | Update a connection, including `actions_mode` / `disabled_actions` (a person only; they can narrow the service's actions, never widen them) |
 | `DELETE` | `/api/connector-bindings/{binding_id}` | Agent/session | Delete a connection |

@@ -75,8 +75,17 @@ class GenericHttpConnector(BaseConnector):
             path = parts[1] if len(parts) > 1 else ""
             if method not in {"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"}:
                 return {"success": False, "error": f"Unknown action: {action}"}
-            merged_params.setdefault("method", method)
-            merged_params.setdefault("path", path)
+            # The action IS the request: "GET /x" sends a GET to /x whatever the caller's params or the connection's
+            # defaults say. (Otherwise a read-only connection that allows "GET /x" could be made to send a DELETE.)
+            merged_params["method"] = method
+            if path:
+                merged_params["path"] = path  # a bare "GET" still takes its path from the params, as before
+            if path:
+                merged_params.pop("url", None)
+            headers = merged_params.get("headers")
+            if isinstance(headers, dict):
+                blocked = {"x-http-method-override", "x-method-override", "x-http-method"}
+                merged_params["headers"] = {k: v for k, v in headers.items() if str(k).lower() not in blocked}
             if "body" not in merged_params:
                 _transport_keys = {"method", "path", "url", "headers", "query"}
                 body = {

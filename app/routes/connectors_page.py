@@ -381,10 +381,10 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
         if ct and (b.get("actions_mode") or "all") != "all":
             allowed_n = len(connector_service.effective_actions(ct, b))
             total_n = len(connector_service.catalogue_actions(ct))
-            label = "Read-only" if b.get("actions_mode") == "read_only" else "Chosen actions"
+            label = {"read_only": "Read-only", "none": "Nothing allowed yet"}.get(b.get("actions_mode"), "Chosen actions")
             actions_note = (
                 f"<div class='form-hint' style='margin:2px 0 0'>{label}"
-                + (f" &middot; {allowed_n} of {total_n} actions" if total_n else "")
+                + (f" &middot; {allowed_n} of {total_n} actions" if total_n and b.get("actions_mode") != "none" else "")
                 + "</div>"
             )
         oauth_button = ""
@@ -714,7 +714,7 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
           <div class="form-group actions-group" id="binding-actions-group">
             <label>What this connection can do</label>
             <label class="checkbox-label"><input type="radio" name="binding-actions-mode" value="all" checked> Everything the service allows</label>
-            <label class="checkbox-label"><input type="radio" name="binding-actions-mode" value="read_only"> Read-only <span class="form-hint">(it can look things up, never change anything)</span></label>
+            <label class="checkbox-label"><input type="radio" name="binding-actions-mode" value="read_only"> Read-only <span class="form-hint">(only actions that say they change nothing)</span></label>
             <span data-actions-choose-wrap><label class="checkbox-label"><input type="radio" name="binding-actions-mode" value="custom"> Choose actions</label></span>
             <div class="actions-pick" id="binding-actions-list" style="display:none"></div>
             <div class="form-hint">A connection can only narrow what its service allows. Switching an action off for everyone is done on the service card (View Actions).</div>
@@ -772,7 +772,7 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
           <div class="form-group actions-group" id="edit-binding-actions-group">
             <label>What this connection can do</label>
             <label class="checkbox-label"><input type="radio" name="edit-binding-actions-mode" value="all" checked> Everything the service allows</label>
-            <label class="checkbox-label"><input type="radio" name="edit-binding-actions-mode" value="read_only"> Read-only <span class="form-hint">(it can look things up, never change anything)</span></label>
+            <label class="checkbox-label"><input type="radio" name="edit-binding-actions-mode" value="read_only"> Read-only <span class="form-hint">(only actions that say they change nothing)</span></label>
             <span data-actions-choose-wrap><label class="checkbox-label"><input type="radio" name="edit-binding-actions-mode" value="custom"> Choose actions</label></span>
             <div class="actions-pick" id="edit-binding-actions-list" style="display:none"></div>
             <div class="form-hint">A connection can only narrow what its service allows. Switching an action off for everyone is done on the service card (View Actions).</div>

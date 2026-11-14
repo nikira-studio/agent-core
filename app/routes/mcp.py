@@ -2561,7 +2561,8 @@ async def _run_custom_mcp_tool(body: dict, ctx: EffectiveAuthority):
             connector_service.generate_connector_type_tools,
             ct,
             disabled_actions=menu_disabled,
-            include_disabled=bool(params.get("include_disabled", False)),
+            # An agent is not told what its connections do not allow, so it cannot ask for the disabled ones.
+            include_disabled=bool(params.get("include_disabled", False)) and (ctx.is_admin or ctx.actor_type != "agent"),
             query=wanted or params.get("query"),
             limit=200 if wanted else min(int(params.get("limit", 100) or 100), 200),
             offset=0 if wanted else max(int(params.get("offset", 0) or 0), 0),

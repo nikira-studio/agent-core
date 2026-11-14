@@ -249,10 +249,10 @@ def create_binding(
     actions_mode, disabled_actions = body.actions_mode, body.disabled_actions
     if ctx.actor_type == "agent":
         # What a connection allows is a person's decision. An agent cannot choose it, and a connection an agent makes
-        # is read-only, so creating a new connection is never a way around a narrower one.
+        # allows nothing until a person chooses, so creating a new connection is never a way around a narrower one.
         if actions_mode is not None or disabled_actions is not None:
             return error_response("ACTIONS_NOT_FOR_AGENTS", "Only a person can choose what a connection allows", 403)
-        actions_mode = "read_only"
+        actions_mode = "none"
     try:
         binding = connector_service.create_binding(
             connector_type_id=body.connector_type_id,
@@ -282,7 +282,13 @@ def create_binding(
         result="success",
         details={"actions_mode": binding.get("actions_mode")},
     )
-    return success_response({"binding": binding}, status_code=201)
+    payload = {"binding": binding}
+    if ctx.actor_type == "agent":
+        payload["note"] = (
+            "This connection allows nothing yet because an agent created it. A person chooses what it can do under "
+            "Services > Edit connection."
+        )
+    return success_response(payload, status_code=201)
 
 
 @router.post("/{binding_id}/oauth/start")
@@ -550,7 +556,7 @@ async def get_binding_tools(
         connector_service.generate_connector_type_tools,
         connector_type,
         disabled_actions=connector_service.connection_disabled_actions(connector_type, binding),
-        include_disabled=include_disabled,
+        include_disabled=include_disabled and not (ctx.actor_type == "agent" and not ctx.is_admin),
         query=query,
         limit=min(max(int(limit or 100), 1), 200),
         offset=max(int(offset or 0), 0),
@@ -691,6 +697,8 @@ async def get_connector_type_tools(
             if enforcer.can_read(b["scope"])
         ]
         disabled = connector_service.listing_disabled_actions(ct, usable)
+    if ctx.actor_type == "agent" and not ctx.is_admin:
+        include_disabled = False  # an agent is not told what its connections do not allow
     result = await asyncio.to_thread(
         connector_service.generate_connector_type_tools,
         ct,

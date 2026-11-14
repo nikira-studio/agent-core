@@ -84,3 +84,39 @@ def test_the_read_only_preset_saves_and_the_row_says_so(connections):
     assert "Read-only" in row and "1 of 3 actions" in row
     menu = _api(connections, f"/api/connector-bindings/{_binding_id(connections)}/tools")
     assert [t["action"] for t in menu["tools"]] == ["list_things"]
+
+
+def test_saving_without_changing_the_choice_never_rewrites_it(connections):
+    """The dialog sends nothing unless the person changed the choice, so opening and saving cannot widen a connection."""
+    connections.goto(connections.url)
+    connections.wait_for_load_state("load")
+    bid = _binding_id(connections)
+    connections.evaluate("async (id) => apiFetch('/api/connector-bindings/' + id, {method: 'PUT', body: JSON.stringify({actions_mode: 'custom', disabled_actions: ['create_thing']})})", bid)
+    connections.reload()
+    connections.wait_for_load_state("load")
+    _open_edit(connections)
+    connections.wait_for_selector("#edit-binding-actions-list input", state="visible")
+    # simulate the list failing to load: nothing about the actions may be sent
+    connections.evaluate("document.getElementById('edit-binding-actions-group').dataset.loaded = ''")
+    sent = []
+    connections.on("request", lambda r: sent.append(r.post_data) if r.method == "PUT" else None)
+    connections.locator("#edit-binding-form button[type=submit]").click()
+    connections.wait_for_timeout(800)
+    assert sent and "actions_mode" not in sent[0] and "disabled_actions" not in sent[0]
+    stored = _api(connections, f"/api/connector-bindings/{bid}")["binding"]
+    assert stored["actions_mode"] == "custom" and stored["disabled_actions"] == ["create_thing"]
+
+
+def test_a_connection_that_allows_nothing_yet_shows_every_action_unticked(connections):
+    connections.goto(connections.url)
+    connections.wait_for_load_state("load")
+    bid = _binding_id(connections)
+    connections.evaluate("async (id) => apiFetch('/api/connector-bindings/' + id, {method: 'PUT', body: JSON.stringify({actions_mode: 'none'})})", bid)
+    connections.reload()
+    connections.wait_for_load_state("load")
+    assert "Nothing allowed yet" in connections.locator("tr[data-binding-id]", has_text="Pick connection").inner_text()
+    _open_edit(connections)
+    connections.wait_for_selector("#edit-binding-actions-list input", state="visible")
+    enabled = connections.locator("#edit-binding-actions-list input[type=checkbox]:not(:disabled)")
+    assert enabled.count() == 2 and all(not enabled.nth(i).is_checked() for i in range(2))
+    connections.keyboard.press("Escape")

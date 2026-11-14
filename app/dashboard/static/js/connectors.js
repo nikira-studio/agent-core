@@ -1,26 +1,44 @@
 
 // What a connection can do: everything its service allows, read-only, or a chosen set. A connection can only narrow
 // its service; actions the service has switched off for everyone are shown but cannot be switched on here.
+// Nothing is sent unless the person changed it, and a list that did not load is never sent as "nothing is off".
+async function fetchAllTools(typeId) {
+  const tools = [];
+  for (let offset = 0; offset < 5000; offset += 200) {
+    const j = await apiFetch('/api/connector-types/' + encodeURIComponent(typeId) + '/tools?include_disabled=true&limit=200&offset=' + offset);
+    if (!(j.ok && j.data && Array.isArray(j.data.tools))) return null;  // could not read the list
+    tools.push.apply(tools, j.data.tools);
+    if (tools.length >= (j.data.total || 0) || !j.data.tools.length) break;
+  }
+  return tools;
+}
+
 async function initActionsPicker(prefix, typeId, mode, disabled) {
   const group = document.getElementById(prefix + '-actions-group');
   if (!group) return;
   const list = document.getElementById(prefix + '-actions-list');
   group.dataset.typeId = typeId || '';
+  group.dataset.persisted = JSON.stringify(disabled || []);
   group.dataset.disabled = JSON.stringify(disabled || []);
-  const radios = group.querySelectorAll('input[type=radio]');
-  radios.forEach(function(r) { r.checked = r.value === (mode || 'all'); });
+  group.dataset.dirty = '';
+  group.dataset.loaded = '';
+  const shownMode = mode === 'none' ? 'custom' : (mode || 'all');
+  group.querySelectorAll('input[type=radio]').forEach(function(r) { r.checked = r.value === shownMode; });
   group.querySelectorAll('[data-actions-choose-wrap]').forEach(function(w) { w.style.display = ''; });
   list.innerHTML = '';
   list.style.display = 'none';
-  group.dataset.loaded = '';
   if (!typeId) return;
-  const j = await apiFetch('/api/connector-types/' + encodeURIComponent(typeId) + '/tools?include_disabled=true&limit=200');
-  const tools = (j.ok && j.data && j.data.tools) || [];
-  group.dataset.tools = JSON.stringify(tools.map(function(t) { return { action: t.action, enabled: t.enabled !== false, description: t.description || t.summary || '' }; }));
+  const tools = await fetchAllTools(typeId);
+  if (tools === null) {  // keep what the connection has; saving will not touch it
+    group.dataset.failed = '1';
+    return;
+  }
+  group.dataset.failed = '';
+  group.dataset.tools = JSON.stringify(tools.map(function(t) { return { action: t.action, enabled: t.enabled !== false }; }));
   group.dataset.loaded = '1';
+  if (mode === 'none') group.dataset.disabled = JSON.stringify(tools.map(function(t) { return t.action; }));  // nothing is ticked yet
   if (!tools.length) {  // a plain web service has no list of actions to choose from
     group.querySelectorAll('[data-actions-choose-wrap]').forEach(function(w) { w.style.display = 'none'; });
-    if ((mode || 'all') === 'custom') radios.forEach(function(r) { r.checked = r.value === 'all'; });
   }
   renderActionsChoices(prefix);
 }
@@ -47,25 +65,38 @@ function renderActionsChoices(prefix) {
   list.style.display = '';
 }
 
+// What to send: nothing, unless the person changed the choice (so opening and saving never rewrites it).
 function readActionsPicker(prefix) {
   const group = document.getElementById(prefix + '-actions-group');
-  if (!group) return {};
+  if (!group || group.dataset.dirty !== '1') return {};
   const chosen = group.querySelector('input[type=radio]:checked');
   const mode = chosen ? chosen.value : 'all';
   if (mode !== 'custom') return { actions_mode: mode, disabled_actions: [] };
-  const off = Array.from(group.querySelectorAll('#' + prefix + '-actions-list input[type=checkbox]:not(:disabled)'))
-    .filter(function(c) { return !c.checked; }).map(function(c) { return c.dataset.action; });
+  if (group.dataset.loaded !== '1') return {};  // the list did not load: never send "nothing is off"
+  const shown = Array.from(group.querySelectorAll('#' + prefix + '-actions-list input[type=checkbox]'));
+  const shownNames = shown.map(function(c) { return c.dataset.action; });
+  const off = shown.filter(function(c) { return !c.disabled && !c.checked; }).map(function(c) { return c.dataset.action; });
+  let persisted = [];
+  try { persisted = JSON.parse(group.dataset.persisted || '[]'); } catch (e) {}
+  // keep entries for actions the dialog does not list as choices (switched off on the service)
+  persisted.forEach(function(name) {
+    const box = shown.find(function(c) { return c.dataset.action === name; });
+    if ((!box || box.disabled) && off.indexOf(name) === -1) off.push(name);
+  });
   return { actions_mode: 'custom', disabled_actions: off };
 }
 
 document.addEventListener('change', function(ev) {
-  const radio = ev.target.closest && ev.target.closest('.actions-group input[type=radio]');
-  if (!radio) return;
-  const group = radio.closest('.actions-group');
-  group.dataset.disabled = JSON.stringify(
-    Array.from(group.querySelectorAll('.actions-pick input[type=checkbox]:not(:disabled)')).filter(function(c) { return !c.checked; }).map(function(c) { return c.dataset.action; })
-  );
-  renderActionsChoices(group.id.replace('-actions-group', ''));
+  const control = ev.target.closest && ev.target.closest('.actions-group input');
+  if (!control) return;
+  const group = control.closest('.actions-group');
+  group.dataset.dirty = '1';
+  if (control.type === 'radio') {
+    group.dataset.disabled = JSON.stringify(
+      Array.from(group.querySelectorAll('.actions-pick input[type=checkbox]:not(:disabled)')).filter(function(c) { return !c.checked; }).map(function(c) { return c.dataset.action; })
+    );
+    renderActionsChoices(group.id.replace('-actions-group', ''));
+  }
 });
 
 function parseBindingGuidance() {
