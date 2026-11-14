@@ -120,3 +120,22 @@ def test_a_connection_that_allows_nothing_yet_shows_every_action_unticked(connec
     enabled = connections.locator("#edit-binding-actions-list input[type=checkbox]:not(:disabled)")
     assert enabled.count() == 2 and all(not enabled.nth(i).is_checked() for i in range(2))
     connections.keyboard.press("Escape")
+
+
+def test_the_dialog_says_whether_the_limit_holds_whenever_the_choice_is_not_everything(connections):
+    connections.goto(connections.url)
+    connections.wait_for_load_state("load")
+    bid = _binding_id(connections)
+    connections.evaluate("async (id) => apiFetch('/api/connector-bindings/' + id, {method: 'PUT', body: JSON.stringify({actions_mode: 'all'})})", bid)
+    connections.reload()
+    connections.wait_for_load_state("load")
+    _open_edit(connections)
+    box = connections.locator("#edit-binding-credential-reach")
+    connections.wait_for_timeout(600)
+    assert not box.is_visible()  # "everything": nothing to say
+    connections.locator("#edit-binding-actions-group").get_by_label("Read-only").check()
+    connections.wait_for_selector("#edit-binding-credential-reach", state="visible")
+    assert "no credential" in box.inner_text() and "this limit holds" in box.inner_text()
+    connections.locator("#edit-binding-actions-group").get_by_label("Everything the service allows").check()
+    assert not box.is_visible()
+    connections.keyboard.press("Escape")

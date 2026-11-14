@@ -629,6 +629,65 @@ def connection_disabled_actions(connector_type: dict, binding: dict) -> list[str
     return off
 
 
+def credential_reach(binding: dict) -> dict:
+    """Which agents use this connection, and which of them can fetch the credential it runs with.
+
+    "Use" = can read the connection's scope. "Can fetch" = the credential's scope is one of their read scopes: that
+    is what the local credential helper checks before it hands a value to a program holding the helper key (an agent
+    with the credentials capability can also get the reference through MCP). The helper trusts the agent id its
+    caller names, so this says what a named agent could get, not who is calling."""
+    from app.security.effective_authority import EffectiveAuthority
+    from app.security.scope_enforcer import ScopeEnforcer, build_agent_context
+    from app.services import agent_service, credential_service
+
+    credential_scope = None
+    if binding.get("credential_id"):
+        entry = credential_service.get_credential(binding["credential_id"])
+        credential_scope = (entry or {}).get("scope")
+    users: list[str] = []
+    can_fetch: list[str] = []
+    for agent in agent_service.list_agents(is_active=True):
+        context = build_agent_context(agent)
+        if not EffectiveAuthority(context=context).connector_enforcer().can_read(binding["scope"]):
+            continue
+        name = agent.get("display_name") or agent["id"]
+        users.append(name)
+        if credential_scope and ScopeEnforcer(
+            context.read_scopes, context.write_scopes, context.agent_id,
+            is_admin=context.is_admin, active_workspace_ids=context.active_workspace_ids,
+        ).can_read(credential_scope):
+            can_fetch.append(name)
+    return {
+        "has_credential": bool(credential_scope),
+        "credential_scope": credential_scope,
+        "agents": users,
+        "can_fetch": can_fetch,
+    }
+
+
+def _names(names: list[str]) -> str:
+    if len(names) <= 3:
+        return ", ".join(names[:-1]) + (" and " if len(names) > 1 else "") + names[-1]
+    return ", ".join(names[:3]) + f" and {len(names) - 3} more"
+
+
+def credential_reach_sentence(reach: dict) -> dict:
+    """One plain sentence for the Edit connection dialog: does a limit hold against the agents that use it?"""
+    if not reach["has_credential"]:
+        return {"holds": True, "text": "This connection uses no credential, so there is nothing for an agent to fetch and this limit holds."}
+    if not reach["agents"]:
+        return {"holds": True, "text": "No agent uses this connection, so this limit holds."}
+    if not reach["can_fetch"]:
+        return {"holds": True, "text": "The agents using this connection cannot fetch its credential, so this limit holds."}
+    return {
+        "holds": False,
+        "text": (
+            f"This limits what {_names(reach['can_fetch'])} can do through Agent Core. They can still fetch the "
+            "credential and call the service directly; store it in a scope they can't read to make the limit hold."
+        ),
+    }
+
+
 def listing_disabled_actions(connector_type: dict, bindings: list[dict]) -> list[str]:
     """The disabled list for showing a service's actions to a caller who can use ``bindings`` of it.
 

@@ -353,6 +353,27 @@ def get_binding(
     return success_response({"binding": binding})
 
 
+@router.get("/{binding_id}/credential-reach")
+def get_credential_reach(
+    binding_id: str,
+    ctx: EffectiveAuthority = Depends(get_request_context),
+):
+    """One sentence for the Edit connection dialog: can the agents using this connection fetch its credential?"""
+    binding = connector_service.get_binding(binding_id)
+    if not binding:
+        return error_response("NOT_FOUND", "Connection not found", 404)
+    if ctx.actor_type == "agent" or not ctx.connector_enforcer().can_write(binding["scope"]):
+        return error_response("SCOPE_DENIED", "Access denied to this connection", 403)
+    reach = connector_service.credential_reach(binding)
+    sentence = connector_service.credential_reach_sentence(reach)
+    return success_response({
+        **sentence,
+        "agents": reach["agents"],
+        "can_fetch": reach["can_fetch"],
+        "credential_scope": reach["credential_scope"],
+    })
+
+
 @router.put("/{binding_id}")
 def update_binding(
     binding_id: str,

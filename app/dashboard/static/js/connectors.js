@@ -86,6 +86,31 @@ function readActionsPicker(prefix) {
   return { actions_mode: 'custom', disabled_actions: off };
 }
 
+// Whenever the choice is not "everything", say in one sentence whether the limit holds against the agents that use the
+// connection (can they fetch its credential and call the service themselves?).
+async function loadCredentialReach(bindingId) {
+  const box = document.getElementById('edit-binding-credential-reach');
+  if (!box) return;
+  box.dataset.text = '';
+  box.textContent = '';
+  const j = await apiFetch('/api/connector-bindings/' + encodeURIComponent(bindingId) + '/credential-reach');
+  if (j.ok && j.data) {
+    box.dataset.text = j.data.text || '';
+    box.title = j.data.credential_scope ? 'The credential is stored in ' + j.data.credential_scope : '';
+  }
+  updateCredentialReach();
+}
+
+function updateCredentialReach() {
+  const group = document.getElementById('edit-binding-actions-group');
+  const box = document.getElementById('edit-binding-credential-reach');
+  if (!group || !box) return;
+  const chosen = group.querySelector('input[type=radio]:checked');
+  const narrowed = chosen && chosen.value !== 'all';
+  box.textContent = narrowed ? (box.dataset.text || '') : '';
+  box.style.display = narrowed && box.dataset.text ? '' : 'none';
+}
+
 document.addEventListener('change', function(ev) {
   const control = ev.target.closest && ev.target.closest('.actions-group input');
   if (!control) return;
@@ -96,6 +121,7 @@ document.addEventListener('change', function(ev) {
       Array.from(group.querySelectorAll('.actions-pick input[type=checkbox]:not(:disabled)')).filter(function(c) { return !c.checked; }).map(function(c) { return c.dataset.action; })
     );
     renderActionsChoices(group.id.replace('-actions-group', ''));
+    updateCredentialReach();
   }
 });
 
@@ -528,6 +554,7 @@ async function editBinding(id) {
   if (endpointGroup) endpointGroup.style.display = bindingRow?.dataset.providerType === 'mcp' ? '' : 'none';
   if (endpointInput) endpointInput.value = b.endpoint_url_override || '';
   initActionsPicker('edit-binding', b.connector_type_id, b.actions_mode, b.disabled_actions);
+  loadCredentialReach(id);
   openModal('edit-binding-modal');
 }
 

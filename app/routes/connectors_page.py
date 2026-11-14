@@ -776,6 +776,7 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
             <span data-actions-choose-wrap><label class="checkbox-label"><input type="radio" name="edit-binding-actions-mode" value="custom"> Choose actions</label></span>
             <div class="actions-pick" id="edit-binding-actions-list" style="display:none"></div>
             <div class="form-hint">A connection can only narrow what its service allows. Switching an action off for everyone is done on the service card (View Actions).</div>
+            <div class="form-hint credential-reach" id="edit-binding-credential-reach" style="display:none"></div>
           </div>
           <div class="form-group">
             <label class="checkbox-label">

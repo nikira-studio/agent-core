@@ -425,3 +425,83 @@ def test_resolve_says_no_connection_allows_the_action_instead_of_calling_it_ambi
     with pytest.raises(APIError) as caught:
         cs.resolve_authorized_binding(system_authority("test"), connector_type_id=SERVICE, action="create_thing")
     assert caught.value.code == "NO_ALLOWED_CONNECTION" and caught.value.status_code == 403
+
+
+# ---- does the limit hold against the agents that use the connection? ----------------------------------------------
+
+def _vault(world):
+    from app.database import get_db
+    from app.services import workspace_service
+
+    with get_db() as conn:
+        owner = conn.execute("SELECT id FROM users LIMIT 1").fetchone()["id"]
+    workspace_service.create_workspace("vault", "vault", owner)
+
+
+def _bind_with_credential(world, credential_scope, name):
+    from app.services import credential_service
+
+    credential = credential_service.create_credential(credential_scope, f"cred-{name}", "test-secret-value", created_by="admin")
+    return cs.create_binding(SERVICE, name, "workspace:ops", credential_id=credential["id"],
+                             config_json='{"base_url": "http://example.test"}', actions_mode="read_only")
+
+
+def test_the_limit_holds_when_the_agents_using_the_connection_cannot_fetch_its_credential(world):
+    # the credential is in a workspace the agent does not read (an agent reads its own scopes and its person's user scope)
+    _vault(world)
+    binding = _bind_with_credential(world, "workspace:vault", "Held")
+    reach = cs.credential_reach(binding)
+    assert reach["agents"] == ["advisor"] and reach["can_fetch"] == [] and reach["credential_scope"] == "workspace:vault"
+    sentence = cs.credential_reach_sentence(reach)
+    assert sentence["holds"] is True
+    assert sentence["text"] == "The agents using this connection cannot fetch its credential, so this limit holds."
+
+
+def test_an_agent_can_read_its_persons_own_credentials_so_a_limit_there_is_advisory(world):
+    binding = _bind_with_credential(world, "user:admin", "Persons own")  # every agent reads its person's user scope
+    reach = cs.credential_reach(binding)
+    assert reach["can_fetch"] == ["advisor"]
+    assert cs.credential_reach_sentence(reach)["holds"] is False
+
+
+def test_the_limit_is_advisory_when_an_agent_using_the_connection_can_fetch_its_credential(world):
+    binding = _bind_with_credential(world, "workspace:ops", "Advisory")  # a scope the advisor reads
+    reach = cs.credential_reach(binding)
+    assert reach["can_fetch"] == ["advisor"]
+    sentence = cs.credential_reach_sentence(reach)
+    assert sentence["holds"] is False
+    assert sentence["text"] == (
+        "This limits what advisor can do through Agent Core. They can still fetch the credential and call the service "
+        "directly; store it in a scope they can't read to make the limit hold."
+    )
+    assert "workspace:" not in sentence["text"]  # no scope syntax in the sentence
+
+
+def test_a_connection_with_no_credential_or_no_agent_says_the_limit_holds(world):
+    nothing = world["binding"]("No credential", "read_only")
+    assert cs.credential_reach_sentence(cs.credential_reach(nothing))["text"].startswith("This connection uses no credential")
+    from app.services import credential_service
+
+    credential = credential_service.create_credential("workspace:ops", "cred-lonely", "test-secret-value", created_by="admin")
+    lonely = cs.create_binding(SERVICE, "Nobody uses it", "workspace:nobody-reads", credential_id=credential["id"],
+                               config_json='{"base_url": "http://example.test"}')
+    assert cs.credential_reach_sentence(cs.credential_reach(lonely))["text"] == "No agent uses this connection, so this limit holds."
+
+
+def test_many_agents_are_named_briefly():
+    assert cs._names(["a"]) == "a" and cs._names(["a", "b"]) == "a and b" and cs._names(["a", "b", "c"]) == "a, b and c"
+    assert cs._names(["a", "b", "c", "d", "e"]) == "a, b, c and 2 more"
+
+
+def test_the_dialog_asks_the_server_per_connection_and_only_a_person_may(world):
+    _vault(world)
+    held = _bind_with_credential(world, "workspace:vault", "Held")
+    client = world["client"]
+    ok = client.get(f"/api/connector-bindings/{held['id']}/credential-reach", headers=_bearer(world["admin"]))
+    assert ok.status_code == 200, ok.text
+    data = ok.json()["data"]
+    assert data["holds"] is True and data["agents"] == ["advisor"] and data["credential_scope"] == "workspace:vault"
+    # an agent is not told how its own limit could be got round
+    assert client.get(f"/api/connector-bindings/{held['id']}/credential-reach", headers=_bearer(world["key"])).status_code == 403
+    page_js = client.get("/static/js/connectors.js").text
+    assert "credential-reach" in page_js and "loadCredentialReach" in page_js

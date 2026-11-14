@@ -481,6 +481,7 @@ If the connector and credential are enough on their own, leave `config_json` emp
 | `POST` | `/api/connector-bindings/{binding_id}/test` | Agent/session | Test the connection using the stored credential |
 | `POST` | `/api/connector-bindings/{binding_id}/run` | Agent/session | Run a connection action directly through the REST API |
 | `POST` | `/api/connectors/{binding_id}/run` | Agent/session | Alias of the line above (intuitive path for plug-in scripts) |
+| `GET` | `/api/connector-bindings/{binding_id}/credential-reach` | Person | One sentence: can the agents using this connection fetch its credential (so does a limit on it hold)? |
 | `GET` | `/api/connector-bindings/{binding_id}/tools` | Agent/session | List the actions this connection allows (its service's switches and its own narrowing applied) |
 | `GET` | `/api/connector-bindings/{binding_id}/executions` | Agent/session | List execution history for a connection |
 | `POST` | `/api/connector-bindings/{binding_id}/oauth/start` | Agent/session (write scope) | Begin the browser OAuth authorization flow for an oauth2 adapter connection; returns the provider authorization URL |
