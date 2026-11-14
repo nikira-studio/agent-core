@@ -133,13 +133,26 @@ def test_only_the_listed_requests_are_ever_sent(stub):
         ("GET /api/other", {}),
         ("GET /api/data/../other", {}),
         ("GET /api/data?x=1", {}),
-        ("GET /api/data", {"method": "POST"}),
-        ("GET /api/data", {"url": "http://127.0.0.1/api/data"}),
         ("call_endpoint", {"method": "DELETE", "path": "/api/data"}),
     ):
         result = connector.execute(action, params, GOOD, config, session=session)
         assert result.get("error_code") == "REQUEST_NOT_ALLOWED", (action, params, result)
     assert len(stub.requests) == before and stub.writes == 0
+
+
+def test_the_action_decides_the_request_a_callers_method_or_url_cannot_change_it(stub):
+    """"GET /x" always sends a GET to the configured service: a caller's method or url is ignored, so it cannot turn an
+    allowed read into a write or send it elsewhere."""
+    connector = GenericHttpConnector()
+    config = _config(stub)
+    session = connector.refresh_session(GOOD, config, None)["session"]
+    before = len(stub.requests)
+    for params in ({"method": "POST"}, {"url": "http://127.0.0.1:1/api/data"}, {"headers": {"X-HTTP-Method-Override": "DELETE"}}):
+        result = connector.execute("GET /api/data", params, GOOD, config, session=session)
+        assert result.get("success") is True, (params, result)
+    sent = stub.requests[before:]
+    assert [method for method, _path in sent] == ["GET", "GET", "GET"] and stub.writes == 0
+    assert all(path.split("?")[0] == "/api/data" for _method, path in sent)
 
 
 def test_a_stale_session_asks_for_a_new_sign_in_but_a_fresh_refusal_does_not(stub):
