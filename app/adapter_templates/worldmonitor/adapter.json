@@ -2,11 +2,11 @@
   "spec_version": "1.0",
   "id": "worldmonitor",
   "display_name": "WorldMonitor",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "author": "agent-core team",
-  "description": "WorldMonitor REST API connector for read-only global intelligence, conflict, markets, supply-chain, cyber, natural events, and news data. Configure each binding with the base URL of the target WorldMonitor instance.",
+  "description": "WorldMonitor REST API service for read-only global intelligence, conflict, markets, supply-chain, cyber, natural events, and news data. Give each connection the address of the target WorldMonitor instance.",
   "setup": {
-    "instructions": "Connect Agent Core to a WorldMonitor instance.\n\n1. Run or choose a WorldMonitor deployment with its /api routes reachable from Agent Core.\n2. Create the binding with base_url set to the WorldMonitor origin only, for example https://worldmonitor.example.com. Do not include a trailing /api path; each action appends its own path.\n3. API key is optional for public endpoints. For premium/API-gated endpoints, provide a WorldMonitor user key or operator-issued key as api_key; the connector sends it in the X-WorldMonitor-Key header.\n4. To create an unauthenticated public binding, omit the credential and set config auth_mode to none.\n\nAgent Core validates outbound URLs. Private, loopback, and Docker-internal hosts may require the Agent Core internal-host allowlist before they can be used as base_url values.",
+    "instructions": "Connect Agent Core to a WorldMonitor instance.\n\n1. Run or choose a WorldMonitor deployment with its /api routes reachable from Agent Core.\n2. Enter the address of your WorldMonitor instance as the service address (the origin only), for example https://worldmonitor.example.com. Do not include a trailing /api path; each action appends its own path.\n3. API key is optional for public endpoints. For premium/API-gated endpoints, provide a WorldMonitor user key or operator-issued key as api_key; Agent Core sends it in the X-WorldMonitor-Key header.\n4. For an open instance, choose No credential and add {\"auth_mode\": \"none\"} under Advanced → Extra settings.\n\nAgent Core validates outbound URLs. Private, loopback, and Docker-internal hosts may require the Agent Core internal-host allowlist before they can be used as service addresses.",
     "documentation_url": "https://github.com/koala73/worldmonitor"
   },
   "credential_schema": {

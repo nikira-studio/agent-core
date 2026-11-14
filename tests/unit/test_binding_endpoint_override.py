@@ -40,7 +40,7 @@ def test_override_requires_matching_normalized_tool_contract(clean_db, monkeypat
             "native", "Mismatch", "user:u", endpoint_url_override="https://other.example/mcp"
         )
     except ValueError as exc:
-        assert "separate connector type" in str(exc)
+        assert "separate service" in str(exc)
     else:
         raise AssertionError("mismatching endpoint contract was accepted")
 

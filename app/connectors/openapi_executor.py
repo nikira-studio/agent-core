@@ -94,7 +94,10 @@ class OpenApiExecutor(BaseConnector):
         params: dict,
         credential: Optional[str],
         config_json: Optional[str],
+        session: Optional[dict] = None,
     ) -> dict:
+        # `session` is part of every executor's call signature (connector_service passes it to all of
+        # them); an OpenAPI service has no sign-in step, so it is accepted and unused.
         spec = self._load_spec(config_json)
         if not spec:
             return {"success": False, "error": "No spec available"}

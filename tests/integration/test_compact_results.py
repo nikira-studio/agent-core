@@ -94,4 +94,4 @@ def test_session_context_lists_at_most_ten_key_records(test_client, admin_token)
     response = test_client.post("/api/session-context", headers=headers, json={"memory_scope": SCOPE})
     text = response.json()["data"]["context"]
 
-    assert "## Key records (10 of 25 active)" in text
+    assert "## Key records (the 10 most relevant of 25 active; memory_search finds the rest)" in text

@@ -13,6 +13,9 @@ from app.security.response_helpers import success_response, error_response
 from app.services.auth_service import get_user_by_id
 from app.routes.dashboard_shared import (
     render_page,
+    settings_header,
+    secret_state_html,
+    SECRET_SAVED_PLACEHOLDER,
     require_auth,
     escape_html,
     local_dt,
@@ -27,20 +30,40 @@ SETTINGS_TABS_JS = """
 (function() {
   var tabs = document.querySelectorAll('[data-tab]');
   var panels = document.querySelectorAll('[data-tab-panel]');
-  if (!tabs.length) return;
+  if (!tabs.length || !panels.length) return;
+  var keys = {};
+  panels.forEach(function(p) { keys[p.dataset.tabPanel] = true; });
+  // A link can name a field instead of a tab (#retracted-retention-days): open the tab that holds it and bring it into view.
+  function panelOfField(id) {
+    var el = id ? document.getElementById(id) : null;
+    var panel = el && el.closest ? el.closest('[data-tab-panel]') : null;
+    return panel ? { key: panel.dataset.tabPanel, el: el } : null;
+  }
   function show(key) {
-    var found = false;
-    panels.forEach(function(p) { if (p.dataset.tabPanel === key) found = true; });
-    if (!found) key = panels[0].dataset.tabPanel;
+    var field = null;
+    if (!keys[key]) {
+      field = panelOfField(key);
+      key = field ? field.key : panels[0].dataset.tabPanel;
+    }
     panels.forEach(function(p) { p.hidden = p.dataset.tabPanel !== key; });
     tabs.forEach(function(t) {
       var on = t.dataset.tab === key;
       t.classList.toggle('active', on);
-      t.setAttribute('aria-selected', on ? 'true' : 'false');
+      if (on) t.setAttribute('aria-current', 'page'); else t.removeAttribute('aria-current');
     });
-    try { history.replaceState(null, '', '#' + key); } catch (e) {}
+    if (field) {
+      field.el.scrollIntoView({ block: 'center' });
+      field.el.focus({ preventScroll: true });
+    } else {
+      try { history.replaceState(null, '', '#' + key); } catch (e) {}
+    }
   }
-  tabs.forEach(function(t) { t.addEventListener('click', function() { show(t.dataset.tab); }); });
+  tabs.forEach(function(t) {
+    // Only a tab that has a panel on this page switches in place; Users and Webhooks are other pages and just navigate.
+    if (!keys[t.dataset.tab]) return;
+    t.addEventListener('click', function(e) { e.preventDefault(); show(t.dataset.tab); });
+  });
+  window.addEventListener('hashchange', function() { show((location.hash || '').slice(1)); });
   show((location.hash || '').slice(1));
 })();
 </script>
@@ -51,7 +74,7 @@ PRUNE_JS = """
 async function pruneActivity() {
   var date = document.getElementById('prune-activity-before').value;
   if (!date) { showToast('Pick a cutoff date', 'warning'); return; }
-  if (!confirm('Permanently delete finished activity older than ' + date + '?')) return;
+  if (!await confirmDialog('Permanently delete finished activity older than ' + date + '?')) return;
   var j = await apiFetch('/api/dashboard/prune', { method: 'POST', body: JSON.stringify({ resource_type: 'activity', before_date: date }) });
   var box = document.getElementById('prune-activity-result');
   if (j.ok) { box.innerHTML = '<div class="alert alert-success">Deleted ' + escapeHtml(String(j.data.deleted_count)) + ' tasks older than ' + escapeHtml(date) + '.</div>'; }
@@ -73,13 +96,24 @@ async def update_dashboard_user_settings(
     from app.services import auth_service
 
     body = await request.json()
-    timezone = body.get("timezone")
-    if timezone is not None:
-        timezone = str(timezone).strip() or None
-    try:
-        auth_service.update_user_timezone(session["user_id"], timezone)
-    except ValueError as e:
-        return error_response("INVALID_TIMEZONE", str(e), 400)
+    timezone = None
+    if "timezone" in body:
+        timezone = body.get("timezone")
+        if timezone is not None:
+            timezone = str(timezone).strip() or None
+        try:
+            auth_service.update_user_timezone(session["user_id"], timezone)
+        except ValueError as e:
+            return error_response("INVALID_TIMEZONE", str(e), 400)
+    if "getting_started_hidden" in body:
+        from app.services import system_settings_service
+        from app.routes.overview_page import GETTING_STARTED_HIDDEN_KEY
+
+        key = GETTING_STARTED_HIDDEN_KEY.format(user_id=session["user_id"])
+        if body.get("getting_started_hidden"):
+            system_settings_service.write_raw({key: "1"})
+        else:
+            system_settings_service.delete([key])
     return success_response({"timezone": timezone})
 
 
@@ -154,75 +188,8 @@ async def update_dashboard_system_settings(
             )
         settings_to_save["episodic_memory_ttl_days"] = str(episodic_ttl)
 
-    if "unconfirmed_inference_days" in body:
-        try:
-            ui_days = int(str(body.get("unconfirmed_inference_days", "")).strip())
-        except ValueError:
-            return error_response(
-                "INVALID_UNCONFIRMED_INFERENCE_DAYS",
-                "Unconfirmed inference cutoff must be a whole number of days",
-                400,
-            )
-        if ui_days < 1 or ui_days > 90:
-            return error_response(
-                "INVALID_UNCONFIRMED_INFERENCE_DAYS",
-                "Unconfirmed inference cutoff must be between 1 and 90 days",
-                400,
-            )
-        settings_to_save["unconfirmed_inference_days"] = str(ui_days)
-
-    if "unconfirmed_inference_min_importance" in body:
-        try:
-            ui_min_importance = float(
-                str(body.get("unconfirmed_inference_min_importance", "")).strip()
-            )
-        except ValueError:
-            return error_response(
-                "INVALID_UNCONFIRMED_INFERENCE_MIN_IMPORTANCE",
-                "Unconfirmed inference minimum importance must be a number",
-                400,
-            )
-        if not 0.0 <= ui_min_importance <= 1.0:
-            return error_response(
-                "INVALID_UNCONFIRMED_INFERENCE_MIN_IMPORTANCE",
-                "Unconfirmed inference minimum importance must be between 0.0 and 1.0",
-                400,
-            )
-        settings_to_save["unconfirmed_inference_min_importance"] = str(
-            ui_min_importance
-        )
-
-    for key, minimum, maximum in (
-        ("proposal_pending_cap_per_rule", 1, 1000),
-        ("proposal_pending_cap_total", 1, 2000),
-        ("proposal_generation_budget_per_run", 1, 500),
-    ):
-        if key not in body:
-            continue
-        try:
-            value = int(str(body[key]).strip())
-        except ValueError:
-            return error_response(
-                "INVALID_PROPOSAL_CAP",
-                f"{key} must be a whole number",
-                400,
-            )
-        if not minimum <= value <= maximum:
-            return error_response(
-                "INVALID_PROPOSAL_CAP",
-                f"{key} must be between {minimum} and {maximum}",
-                400,
-            )
-        settings_to_save[key] = str(value)
-
-    if "consolidation_scan_enabled" in body:
-        raw = str(body.get("consolidation_scan_enabled", "")).strip().lower()
-        settings_to_save["consolidation_scan_enabled"] = (
-            "1" if raw in ("true", "1") else "0"
-        )
-
     for key, label in (
-        ("execution_log_retention_days", "Connector execution log retention"),
+        ("execution_log_retention_days", "Service run log retention"),
         ("webhook_log_retention_days", "Webhook delivery log retention"),
     ):
         if key in body:
@@ -695,9 +662,6 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
         "execution_log_retention_days": "30",
         "webhook_log_retention_days": "30",
         "memory_dedupe_similarity": "0.92",
-        "unconfirmed_inference_days": "90",
-        "unconfirmed_inference_min_importance": "0.7",
-        "consolidation_scan_enabled": "1",
     }
     with get_db() as conn:
         placeholders = ",".join("?" for _ in defaults)
@@ -715,9 +679,6 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
     execution_log_retention_days = values["execution_log_retention_days"]
     webhook_log_retention_days = values["webhook_log_retention_days"]
     memory_dedupe_similarity = values["memory_dedupe_similarity"]
-    unconfirmed_inference_days = values["unconfirmed_inference_days"]
-    unconfirmed_inference_min_importance = values["unconfirmed_inference_min_importance"]
-    consolidation_scan_enabled = values["consolidation_scan_enabled"] in ("1", "true")
     credential_count = int(count_row["count"] if count_row else 0)
 
     account_html = f"""
@@ -748,6 +709,16 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
         tz_option_list += (
             f'<option value="{escape_html(_zone)}"{_sel}>{escape_html(_zone)}</option>'
         )
+    getting_started_pref = ""
+    if is_admin:
+        from app.routes.overview_page import getting_started_hidden
+
+        shown = "" if getting_started_hidden(session["user_id"]) else " checked"
+        getting_started_pref = (
+            '<div class="form-group"><label class="checkbox-label"><input type="checkbox" id="user-getting-started"'
+            f'{shown}> Show getting started</label>'
+            '<p class="form-hint">The setup list at the bottom of Needs you. It also goes away by itself once every step is done.</p></div>'
+        )
     preferences_html = f"""
     <div class="card">
       <div class="section-header">
@@ -760,6 +731,7 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
           <select id="user-timezone" style="max-width:360px">{tz_option_list}</select>
           <p class="form-hint">Dates and times across the dashboard are shown in this timezone. Stored data stays in UTC.</p>
         </div>
+        {getting_started_pref}
         <button type="submit" class="btn">Save Preferences</button>
         <div id="user-settings-result" style="margin-top:12px"></div>
       </form>
@@ -796,18 +768,30 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
         key_status = get_key_status()
         broker_active = bool(get_broker_credential_hash())
         broker_badge = "active" if broker_active else "stale"
+        earlier = int(key_status.get("earlier_keys") or 0)
+        key_notes = "Your saved credentials are encrypted with the current key."
+        if earlier:
+            when = ""
+            if key_status.get("changed_at"):
+                when = f" (changed {escape_html(str(key_status['changed_at'])[:10])})"
+            key_notes += (
+                f" {earlier} earlier {'key is' if earlier == 1 else 'keys are'} kept so other protected data saved before the last change{when}, "
+                "such as webhook secrets and two-step sign-in, can still be read."
+            )
+        if key_status.get("primary_key_id"):
+            key_notes += f"<div class='form-hint' style='margin-top:4px'>Key ID {escape_html(key_status['primary_key_id'])}</div>"
         snapshot_rows = "".join(
             [
-                f"<tr><td>Credential Entries</td><td>{credential_count}</td><td class='text-muted'>Secrets stored encrypted</td></tr>",
-                f"<tr><td>Encryption Key</td><td><span class='badge badge-{'active' if key_status.get('mode') == 'keyring' else 'stale'}'>{'in use' if key_status.get('mode') == 'keyring' else escape_html(key_status.get('mode', 'unknown'))}</span></td><td class='text-muted'>{escape_html(key_status.get('keyring_size', 0))} {'key' if key_status.get('keyring_size', 0) == 1 else 'keys'} in use <details class='access-details' style='display:inline-block;margin-left:6px'><summary>Key ID</summary>Primary key ID: {escape_html(key_status.get('primary_key_id', 'none'))}</details></td></tr>",
-                f"<tr><td>Local credential helper</td><td><span class='badge badge-{broker_badge}'>{'ready' if broker_active else 'missing'}</span></td><td class='text-muted'>Resolves {CREDENTIAL_PREFIX}* references at runtime</td></tr>",
+                f"<tr><td>Saved credentials</td><td>{credential_count}</td><td class='text-muted'>Stored encrypted</td></tr>",
+                f"<tr><td>Encryption key</td><td><span class='badge badge-{'active' if key_status.get('mode') == 'keyring' else 'stale'}'>{'in use' if key_status.get('mode') == 'keyring' else escape_html(key_status.get('mode', 'unknown'))}</span></td><td class='text-muted'>{key_notes}</td></tr>",
+                f"<tr><td>Local credential helper</td><td><span class='badge badge-{broker_badge}'>{'ready' if broker_active else 'missing'}</span></td><td class='text-muted'>Fills in {CREDENTIAL_PREFIX}* references at runtime, so the tool never holds the secret</td></tr>",
             ]
         )
         secrets_snapshot_html = f"""
     <div class="card">
       <div class="section-header">
-        <h2>Secrets Snapshot</h2>
-        <div class="section-note">Current status for key and secret operations.</div>
+        <h2>How secrets are protected</h2>
+        <div class="section-note">What is stored encrypted, and with which key.</div>
       </div>
       <table>
         <thead><tr><th>Item</th><th>Status</th><th>Notes</th></tr></thead>
@@ -839,7 +823,7 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
             for key, one, many in (
                 ("stale_activities_marked", "idle task marked", "idle tasks marked"),
                 ("scratchpad_pruned", "temporary note deleted", "temporary notes deleted"),
-                ("ttl_swept", "expired memory removed", "expired memories removed"),
+                ("ttl_swept", "expired memory retracted (restorable)", "expired memories retracted (restorable)"),
                 ("retracted_purged", "old retracted memory deleted", "old retracted memories deleted"),
                 ("proposals_generated", "suggestion made", "suggestions made"),
             ):
@@ -864,12 +848,16 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
       </div>
       <div id="backup-result" style="margin-top:12px"></div>
       <hr class=divider>
+      <details class="access-details" id="advanced-maintenance">
+      <summary>Advanced: maintenance</summary>
       <h3 class="sub-heading section-title">Maintenance</h3>
+      <p class="form-hint">Maintenance runs by itself every hour. Run it now only to see the effect of a changed limit.</p>
       <div class="form-group">
         <button class="btn btn-secondary" onclick="runMaintenance()">Run Maintenance</button>
       </div>
-      <p class="form-hint">Maintenance marks tasks stale after the idle limit, deletes temporary scratchpad notes and permanently deletes retracted or replaced memories past the retention limits above. It does not touch credentials or service bindings. {schedule_line}</p>
+      <p class="form-hint">Maintenance marks tasks stale after the idle limit, deletes temporary scratchpad notes and permanently deletes retracted or replaced memories past the retention limits above. It does not touch credentials or service connections. {schedule_line}</p>
       <p class="form-hint" id="maintenance-last-run">{last_run_line}</p>
+      </details>
       <hr class=divider>
       <h3 class="sub-heading section-title">Startup Checks</h3>
       <p class="form-hint">Checks that the data folder is writable, text search is available, and the encryption key and local credential helper are in place. Run it after an upgrade or a restore.</p>
@@ -880,17 +868,17 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
     if is_admin:
         encryption_key_html = """
     <div class="card">
-      <h2>Encryption Key</h2>
-      <p class="text-muted" style="margin-bottom:12px">This key protects stored credential values. Rotate it if you want to re-encrypt all saved secrets with a new primary key, or restore a known-good key if you need to recover from a bad rotation.</p>
+      <h2>Encryption key</h2>
+      <p class="text-muted" style="margin-bottom:12px">Saved credentials are stored encrypted with a key kept on this server. Rotate it after a suspected leak. Earlier keys are kept on purpose, so nothing already stored becomes unreadable.</p>
       <div class="form-group">
-        <button class="btn btn-secondary" onclick="loadCredentialKeyStatus()">Check Status</button>
-        <button class="btn btn-warning" onclick="openModal('credential-key-rotate-modal')">Rotate Key</button>
-        <button class="btn btn-secondary" onclick="openModal('credential-key-restore-modal')">Restore Key</button>
+        <button class="btn btn-secondary" onclick="loadCredentialKeyStatus()">Show status</button>
+        <button class="btn btn-warning" onclick="openModal('credential-key-rotate-modal')">Rotate key</button>
+        <button class="btn btn-secondary" onclick="openModal('credential-key-restore-modal')">Put back an earlier key</button>
       </div>
       <ul class="form-hint" style="margin:0 0 0 18px">
-        <li><strong>Check Status</strong>: shows how many encryption keys are in use.</li>
-        <li><strong>Rotate Key</strong>: makes a new key and re-encrypts every stored secret with it. Use it after a suspected leak.</li>
-        <li><strong>Restore Key</strong>: puts back an earlier key, for example after a failed rotation. It must be able to decrypt every stored secret.</li>
+        <li><strong>Show status</strong>: which key is current and how many earlier ones are kept.</li>
+        <li><strong>Rotate key</strong>: makes a new key and re-encrypts every saved credential with it.</li>
+        <li><strong>Put back an earlier key</strong>: makes an earlier key current again, for example after a failed rotation. It must be able to read every saved credential.</li>
       </ul>
       <div id="credential-key-result" style="margin-top:12px"></div>
     </div>"""
@@ -946,6 +934,7 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
         broker_html = f"""
     <div class="card">
       <h2>Local credential helper</h2>
+      {secret_state_html(broker_active, "helper key", "No helper key saved")}
       <p class="text-muted" style="margin-bottom:12px">The local credential helper swaps <code>{CREDENTIAL_PREFIX}*</code> references for the real value when a command runs. Rotate its key if a local program should stop using the current one.</p>
         <button class="btn btn-warning" onclick="openModal('broker-rotate-modal')">Rotate helper key</button>
       <div id="broker-result" style="margin-top:12px"></div>
@@ -970,25 +959,8 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
         <div class="form-group">
           <label>Warn about near-duplicate memories above</label>
           {_number("memory-dedupe-similarity", memory_dedupe_similarity, 0.5, 1, 0.01)}
-          <p class="form-hint">A new memory this similar to an existing one in the same scope is flagged as a possible duplicate, never blocked. Needs vector search. Lower catches more and raises more false alarms.</p>
+          <p class="form-hint">A new memory this similar to an existing one in the same workspace is flagged as a possible duplicate, never blocked. Needs vector search. Lower catches more and raises more false alarms.</p>
         </div>
-        <h3 class="sub-heading section-title">Memory review</h3>
-        <p class="form-hint">Agent Core asks you to check agent-written facts nobody has confirmed. These settings decide which ones it asks about. The questions appear under Memory Clean-up on the Memory page.</p>
-        <div class="form-group">
-          <label>Ask about unconfirmed facts older than (days)</label>
-          {_number("unconfirmed-inference-days", unconfirmed_inference_days, 1, 90)}
-          <p class="form-hint">1 to 90. Facts you have already confirmed with evidence are never asked about.</p>
-        </div>
-        <div class="form-group">
-          <label>Only ask about facts at least this important</label>
-          {_number("unconfirmed-inference-min-importance", unconfirmed_inference_min_importance, 0, 1, 0.05)}
-          <p class="form-hint">0 to 1. Less important unconfirmed facts quietly drop in search ranking instead of asking you. Raise it for fewer questions.</p>
-        </div>
-        <label class="checkbox-label">
-          <input type="checkbox" id="consolidation-scan-enabled" {"checked" if consolidation_scan_enabled else ""}>
-          Look for suggestions automatically on the maintenance schedule
-        </label>
-        <p class="form-hint">Off means suggestions only appear when you press Check for more on the Memory page.</p>
         <button type="submit" class="btn">Save</button>
         <div class="save-result" style="margin-top:12px"></div>
       </form>
@@ -997,7 +969,7 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
         retention_html = f"""
     <div class="card">
       <h2>How long things are kept</h2>
-      <p class="form-hint" style="margin-top:0;margin-bottom:14px">Run Maintenance (below) deletes anything older than these limits. Nothing here touches credentials or service bindings.</p>
+      <p class="form-hint" style="margin-top:0;margin-bottom:14px">Run Maintenance (below) deletes anything older than these limits. Nothing here touches credentials or service connections.</p>
       <form onsubmit="saveSystemSettings(event)">
         <div class="form-group">
           <label>Scratchpad notes (days)</label>
@@ -1038,11 +1010,17 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
         vector_auth_type = vector_settings["vector_auth_type"]
         vector_has_api_key = vector_settings["vector_has_api_key"]
         vector_checked = "checked" if vector_enabled else ""
+        from app.services.vector_settings_service import api_key_saved_at
+
         vector_api_key_hint = (
-            "Leave blank to keep the stored key."
+            "Leave it empty to keep the saved key; type a new one to replace it."
             if vector_has_api_key
             else "Optional. Stored encrypted when provided."
         )
+        vector_key_state = secret_state_html(
+            vector_has_api_key, "key", "No key saved", api_key_saved_at() if vector_has_api_key else None
+        )
+        vector_key_placeholder = SECRET_SAVED_PLACEHOLDER if vector_has_api_key else "Paste the key"
         vector_settings_html = f"""
     <div class="card">
       <h2>Search by meaning (vector search)</h2>
@@ -1097,7 +1075,8 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
         </div>
         <div class="form-group">
           <label>API Key</label>
-          <input type="password" id="vector-api-key" value="" style="width:300px" autocomplete="off">
+          {vector_key_state}
+          <input type="password" id="vector-api-key" value="" style="width:300px" autocomplete="off" placeholder="{vector_key_placeholder}">
           <p class="form-hint">{escape_html(vector_api_key_hint)}</p>
         </div>
         <div class="form-actions">
@@ -1108,10 +1087,9 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
       </form>
       <div id="vector-settings-result" style="margin-top:12px"></div>
       <div id="vector-estimate-result" style="margin-top:12px"></div>
-      <div style="margin-top:20px;border-top:1px solid var(--border, #ddd);padding-top:16px">
+      <div style="border-top:1px solid var(--border, #ddd);padding-top:16px;margin-top:20px">
         <h3 style="margin:0 0 8px" class="sub-heading">Re-embed memory</h3>
-        <p class="form-hint">Search only uses vectors made by the current model. After changing the model, re-embed so older memories are found by meaning again.</p>
-        <details class="access-details"><summary>More</summary><p class="form-hint">Until then they are matched by text only. A run can be stopped and started again, and it skips memories already done. Each memory keeps one vector, so switching back later means re-embedding again.</p></details>
+        <p class="form-hint">Search only uses vectors made by the current model, so after you change the model, re-embed to find older memories by meaning again; until then they match by text only. A run can be stopped and started again, and skips memories already done. Each memory keeps one vector, so switching back later means re-embedding again.</p>
         <p id="vector-reembed-coverage" class="text-muted">Loading...</p>
         <div class="form-actions">
           <button type="button" class="btn btn-secondary" id="vector-reembed-start" onclick="startReembed()">Re-embed missing memories</button>
@@ -1150,13 +1128,13 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
 
     <div class="modal-overlay" id="credential-key-rotate-modal" style="display:none">
       <div class="modal">
-        <h2>Rotate Encryption Key</h2>
-        <div class="alert alert-warning"><strong>Keeps working:</strong> every stored credential, every agent and every service. The old key stays in the key list, so nothing becomes unreadable.<br>
-        <strong>Changes now:</strong> all stored credential values are re-encrypted with a new key. A backup made before this still restores, but take a new backup afterwards so it holds the new key.</div>
+        <h2>Rotate the encryption key</h2>
+        <div class="alert alert-warning"><strong>Keeps working:</strong> every stored credential, every agent and every service. The old key is kept, so nothing becomes unreadable.<br>
+        <strong>Changes now:</strong> every saved credential is re-encrypted with a new key. A backup made before this still restores, but take a new backup afterwards so it holds the new key.</div>
         <form id="credential-key-rotate-form" onsubmit="rotateCredentialKey(event)">
           <div class="modal-footer">
             <button type="button" class="btn btn-secondary" onclick="closeModal('credential-key-rotate-modal')">Cancel</button>
-            <button type="submit" class="btn btn-warning">Rotate Key</button>
+            <button type="submit" class="btn btn-warning">Rotate key</button>
           </div>
         </form>
       </div>
@@ -1164,7 +1142,7 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
 
     <div class="modal-overlay" id="broker-rotate-modal" style="display:none">
       <div class="modal">
-        <h2>Rotate the local credential helper key</h2>
+        <h2>Rotate the helper key</h2>
         <div class="alert alert-warning"><strong>Keeps working:</strong> agents, services, stored credentials, and any local program that reads the helper key from its file, which picks up the new key the next time it reads the file (the helper wrapper does, each time it starts).<br>
         <strong>Stops working:</strong> any program or script that was given the old helper key by hand, until you give it the new one. The new key is shown once, here, right after you rotate.</div>
         <div class="modal-footer">
@@ -1176,16 +1154,16 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
 
     <div class="modal-overlay" id="credential-key-restore-modal" style="display:none">
       <div class="modal">
-        <h2>Restore Encryption Key</h2>
+        <h2>Put back an earlier encryption key</h2>
         <form id="credential-key-restore-form" onsubmit="restoreCredentialKey(event)">
           <div class="form-group">
-            <label>Encryption key *</label>
+            <label>Earlier key *</label>
             <input type="text" id="credential-key-restore-key" required>
-            <p class="form-hint">The key must decrypt all current credential entries before it is accepted.</p>
+            <p class="form-hint">It is only accepted if it can read every saved credential.</p>
           </div>
           <div class="modal-footer">
             <button type="button" class="btn btn-secondary" onclick="closeModal('credential-key-restore-modal')">Cancel</button>
-            <button type="submit" class="btn btn-danger">Restore Key</button>
+            <button type="submit" class="btn btn-danger">Put back this key</button>
           </div>
         </form>
       </div>
@@ -1196,7 +1174,10 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
     async function saveUserSettings(e) {{
       e.preventDefault();
       const tz = document.getElementById('user-timezone').value;
-      const j = await apiFetch('/api/dashboard/user-settings', {{ method: 'POST', body: JSON.stringify({{ timezone: tz }}) }});
+      const body = {{ timezone: tz }};
+      const gs = document.getElementById('user-getting-started');
+      if (gs) body.getting_started_hidden = !gs.checked;
+      const j = await apiFetch('/api/dashboard/user-settings', {{ method: 'POST', body: JSON.stringify(body) }});
       const res = document.getElementById('user-settings-result');
       if (j.ok) {{
         window.AC_USER_TZ = tz || (Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC');
@@ -1275,7 +1256,7 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
         const add = (n, one, many) => {{ if (n) parts.push(plural(n, one, many)); }};
         add(j.data.stale_activities_marked || 0, 'idle task marked', 'idle tasks marked');
         add(j.data.scratchpad_pruned || 0, 'temporary note deleted', 'temporary notes deleted');
-        add(j.data.ttl_swept || 0, 'expired memory removed', 'expired memories removed');
+        add(j.data.ttl_swept || 0, 'expired memory retracted (restorable)', 'expired memories retracted (restorable)');
         add(j.data.retracted_purged || 0, 'old retracted memory deleted', 'old retracted memories deleted');
         add(j.data.proposals_generated || 0, 'suggestion made', 'suggestions made');
         const outcome = parts.length ? parts.join(', ') : 'nothing to clean up';
@@ -1290,7 +1271,8 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
       const r = await fetch('/api/backup/startup-checks');
       const j = await r.json();
       if (j.ok) {{
-        const checks = j.data.checks.map(c => '<div style="margin:4px 0"><span class="badge badge-' + (c.status==='OK'?'active':'stale') + '">' + c.status + '</span> ' + c.check + ': ' + c.message + '</div>').join('');
+        const names = {{ data_dir_writable: 'Data folder', sqlite_fts5: 'Text search', encryption_key: 'Encryption key', broker_credential: 'Credential helper' }};
+        const checks = j.data.checks.map(c => '<div style="margin:4px 0"><span class="badge badge-' + (c.status==='OK'?'active':'stale') + '">' + (c.status==='OK'?'OK':'Problem') + '</span> ' + (names[c.check] || c.check) + ': ' + c.message + '</div>').join('');
         document.getElementById('startup-checks').innerHTML = checks;
       }} else {{ showToast('Failed', 'danger'); }}
     }}
@@ -1309,8 +1291,8 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
       if (j.ok) {{
         const s = j.data.key_status;
         document.getElementById('credential-key-result').innerHTML =
-          '<div class="alert alert-success">' + s.keyring_size + (s.keyring_size === 1 ? ' key' : ' keys') + ' in use' +
-          '<details class="access-details" style="margin-top:6px"><summary>Details</summary>Mode: <code>' + s.mode + '</code> · Primary key ID: <code>' + s.primary_key_id + '</code></details></div>';
+          '<div class="alert alert-success">Current key ID <code>' + escapeHtml(String(s.primary_key_id || 'none')) + '</code>. ' +
+          (s.earlier_keys ? s.earlier_keys + (s.earlier_keys === 1 ? ' earlier key is' : ' earlier keys are') + ' kept so older protected data can still be read.' : 'No earlier keys are kept.') + '</div>';
       }} else {{ showToast(j.error?.message || 'Status failed', 'danger'); }}
     }}
     async function rotateCredentialKey(e) {{
@@ -1322,7 +1304,7 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
         closeModal('credential-key-rotate-modal');
         document.getElementById('credential-key-rotate-form').reset();
         document.getElementById('credential-key-result').innerHTML =
-          '<div class="alert alert-success">' + j.data.message + ' Re-encrypted: <code>' + j.data.re_encrypted_count + '</code>. Keys in use: <code>' + j.data.keyring_size + '</code>.</div>';
+          '<div class="alert alert-success">' + j.data.message + ' Credentials re-encrypted: <code>' + j.data.re_encrypted_count + '</code>. Earlier keys kept: <code>' + Math.max(j.data.keyring_size - 1, 0) + '</code>.</div>';
       }} else {{ showToast(j.error?.message || 'Rotation failed', 'danger'); }}
     }}
     async function restoreCredentialKey(e) {{
@@ -1350,7 +1332,12 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
       formData.append('mode', 'replace_all');
       const r = await fetch('/api/backup/restore', {{ method: 'POST', body: formData }});
       const j = await r.json();
-      if (j.ok) {{ showToast('Restore complete'); closeModal('restore-modal'); }}
+      if (j.ok) {{
+        closeModal('restore-modal');
+        document.getElementById('backup-result').innerHTML = '<div class="alert alert-success"><strong>Restore complete.</strong> Everything in the backup is back; anything added after it is gone. Reloading...</div>';
+        showToast('Restore complete', 'success');
+        setTimeout(function() {{ location.reload(); }}, 2000);
+      }}
       else {{ showToast(j.error?.message || 'Restore failed', 'danger'); }}
     }}
     async function saveSystemSettings(e) {{
@@ -1360,9 +1347,6 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
         retracted_retention_days: document.getElementById('retracted-retention-days').value,
         episodic_memory_ttl_days: document.getElementById('episodic-memory-ttl-days').value,
         memory_dedupe_similarity: document.getElementById('memory-dedupe-similarity').value,
-        unconfirmed_inference_days: document.getElementById('unconfirmed-inference-days').value,
-        unconfirmed_inference_min_importance: document.getElementById('unconfirmed-inference-min-importance').value,
-        consolidation_scan_enabled: document.getElementById('consolidation-scan-enabled').checked ? 'true' : 'false',
         execution_log_retention_days: document.getElementById('execution-log-retention-days').value,
         webhook_log_retention_days: document.getElementById('webhook-log-retention-days').value,
       }};
@@ -1397,6 +1381,7 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
         body: JSON.stringify(body)
       }});
       if (j.ok) {{
+        if (apiKey) setSecretState('vector-api-key', true, 'key', 'No key saved', new Date().toISOString());
         document.getElementById('vector-api-key').value = '';
         document.getElementById('vector-model').value = model;
         document.getElementById('vector-settings-result').innerHTML = '<div class="alert alert-success">Vector settings saved.</div>';
@@ -1486,7 +1471,7 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
       const est = await measureVectorCost(null, null);
       if (!est) return;
       const warn = (est.level === 'danger' || est.level === 'warning') ? '\\n\\nWarning: ' + est.message : '';
-      if (!confirm('Re-embed ' + est.records_to_embed + ' memories with ' + est.model + '? At ' + est.seconds_per_record + ' s per record this takes about ' + fmtDuration(est.backfill_seconds) + ' and runs in the background. Each record keeps one vector, so vectors from the previous model are replaced.' + warn)) return;
+      if (!await confirmDialog('Re-embed ' + est.records_to_embed + ' memories with ' + est.model + '? At ' + est.seconds_per_record + ' s per record this takes about ' + fmtDuration(est.backfill_seconds) + ' and runs in the background. Each record keeps one vector, so vectors from the previous model are replaced.' + warn)) return;
       const j = await apiFetch('/api/dashboard/vector-reembed', {{ method: 'POST' }});
       if (!j.ok) showToast(j.error?.message || 'Could not start the re-embed', 'danger');
       loadReembedStatus();
@@ -1579,11 +1564,6 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
             ("data", "Data and backup", f"{retention_html}{backup_html}{prune_html}"),
             ("security", "Security", f"{secrets_snapshot_html}{network_limits_html}{encryption_key_html}{broker_html}"),
         ]
-    tab_bar = ""
-    if len(tabs) > 1:
-        tab_bar = '<div class="tabs" role="tablist">' + "".join(
-            f'<button type="button" class="tab" role="tab" data-tab="{key}">{label}</button>' for key, label, _ in tabs
-        ) + "</div>"
     tab_sections = "".join(
         f'<section class="tab-panel" id="tab-{key}" data-tab-panel="{key}">{html}</section>' for key, _, html in tabs
     )
@@ -1591,8 +1571,7 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
     return render_page(
         "Settings",
         f"""
-    <div class="page-header"><h1>Settings</h1></div>
-    {tab_bar}
+    {settings_header("account", is_admin)}
     {tab_sections}
     {admin_modals}
     """,
@@ -1713,12 +1692,12 @@ def settings_otp_page(request: Request, session: dict = Depends(require_auth)):
         <script>
         async function submitOtpReset(e) {
           e.preventDefault();
-          if (!confirm('Reset two-step sign-in? Your existing authenticator setup will be replaced.')) return;
+          if (!await confirmDialog('Reset two-step sign-in? Your existing authenticator setup will be replaced.')) return;
           await startOtpEnrollment('otp-reset-result');
         }
         async function submitOtpDisable(e) {
           e.preventDefault();
-          if (!confirm('Turn off two-step sign-in on this account?')) return;
+          if (!await confirmDialog('Turn off two-step sign-in on this account?')) return;
           const password = document.getElementById('otp-disable-password')?.value || '';
           const otp = document.getElementById('otp-disable-code')?.value || '';
           if (!password || !otp) { showToast('Enter your current password and the code from your authenticator app', 'warning'); return; }
@@ -1727,8 +1706,8 @@ def settings_otp_page(request: Request, session: dict = Depends(require_auth)):
             body: JSON.stringify({ current_password: password, otp_code: otp })
           });
           if (j.ok) {
-            document.getElementById('otp-disable-form').reset();
-            document.getElementById('otp-reset-result').innerHTML = '<div class="alert alert-success"><strong>Two-step sign-in is off.</strong></div>';
+            showToast('Two-step sign-in is off', 'success');
+            location.reload();
           } else {
             showToast(j.error?.message || 'Failed', 'danger');
           }
@@ -1804,8 +1783,8 @@ def settings_otp_page(request: Request, session: dict = Depends(require_auth)):
             body: JSON.stringify({ otp_code: code })
           });
           if (j.ok) {
-            document.getElementById(targetId).innerHTML =
-              '<div class="alert alert-success"><strong>Two-step sign-in is on.</strong></div>';
+            showToast('Two-step sign-in is on', 'success');
+            location.reload();
           } else {
             showToast(j.error?.message || 'Invalid code', 'danger');
           }
@@ -1817,7 +1796,7 @@ def settings_otp_page(request: Request, session: dict = Depends(require_auth)):
     return render_page(
         "Manage two-step sign-in",
         f"""
-    <div class="page-header"><h1>Two-Factor Authentication</h1></div>
+    <div class="page-header"><h1>Two-step sign-in</h1></div>
     <div class="card" style="max-width:600px">
       {body_html}
     </div>

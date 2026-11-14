@@ -31,8 +31,8 @@ def _create_principal_agent(user_id: str, agent_id: str, inherit_user_bindings: 
 
 def _create_user_binding(user_id: str):
     connector_service.create_connector_type(
-        connector_type_id="lifequery",
-        display_name="LifeQuery",
+        connector_type_id="notes-service",
+        display_name="Notes Service",
         auth_type="none",
         supported_actions=[
             {"name": "GET /spaces", "method": "GET"},
@@ -41,11 +41,11 @@ def _create_user_binding(user_id: str):
         backend_type="generic_http",
     )
     credential = credential_service.create_credential(
-        f"user:{user_id}", "lifequery", "test-secret", created_by=user_id
+        f"user:{user_id}", "notes-service", "test-secret", created_by=user_id
     )
     binding = connector_service.create_binding(
-        "lifequery",
-        "LifeQuery",
+        "notes-service",
+        "Notes Service",
         f"user:{user_id}",
         credential_id=credential["id"],
         logical_alias="primary",
@@ -80,7 +80,7 @@ def test_active_principal_user_scope_is_inherited_for_binding_discovery_and_reso
         test_client,
         token,
         "connectors_resolve",
-        {"connector_type_id": "lifequery", "logical_alias": "primary"},
+        {"connector_type_id": "notes-service", "logical_alias": "primary"},
     )
     assert resolved.status_code == 200, resolved.json()
     assert resolved.json()["data"]["binding"]["id"] == binding["id"]
@@ -106,7 +106,7 @@ def test_principal_user_scope_is_isolated_and_removed_when_principal_is_disabled
         test_client,
         alice_token,
         "connectors_resolve",
-        {"connector_type_id": "lifequery", "logical_alias": "primary"},
+        {"connector_type_id": "notes-service", "logical_alias": "primary"},
     )
     assert alice_resolve.json()["ok"] is False
     assert alice_resolve.json().get("data", {}).get("binding") is None
@@ -124,7 +124,7 @@ def test_principal_user_scope_is_isolated_and_removed_when_principal_is_disabled
         test_client,
         owner_token,
         "connectors_resolve",
-        {"connector_type_id": "lifequery", "logical_alias": "primary"},
+        {"connector_type_id": "notes-service", "logical_alias": "primary"},
     )
     assert disabled_resolve.json()["ok"] is False
     assert disabled_resolve.json().get("data", {}).get("binding") is None
@@ -186,7 +186,7 @@ def test_a_new_agent_does_not_run_its_persons_own_services_until_told_to(test_cl
     assert _mcp(test_client, token, "connectors_bindings_list", {"scope": "user:owner"}).status_code == 403
     listed = _mcp(test_client, token, "connectors_bindings_list", {})
     assert listed.json()["data"]["bindings"] == []
-    resolved = _mcp(test_client, token, "connectors_resolve", {"connector_type_id": "lifequery", "logical_alias": "primary"})
+    resolved = _mcp(test_client, token, "connectors_resolve", {"connector_type_id": "notes-service", "logical_alias": "primary"})
     assert resolved.json().get("data", {}).get("binding") is None
     run = _mcp(test_client, token, "connectors_run", {"binding_id": binding["id"], "action": "GET /spaces", "params": {}})
     assert run.json()["ok"] is False and ran == []

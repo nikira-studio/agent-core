@@ -5,7 +5,6 @@ two or three memory searches. They did so unevenly, and when they did, the sync
 payload was often too big to deliver inline. This builds the same orientation
 server-side, from one call a client hook can make before the model's first turn:
 
-- standing rules (pinned records),
 - work that is unfinished or was handed to this agent,
 - the most recent work in the workspace, with its result,
 - what changed since this agent's last session, one line per resource,
@@ -24,6 +23,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from typing import Optional
 
 from app.branding import APP_NAME
@@ -87,19 +87,12 @@ def resolve_scope(
     workspaces = sorted(s for s in readable if s.startswith("workspace:"))
     if len(workspaces) == 1:
         return workspaces[0], "only_workspace"
+    if not workspaces:
+        # An agent with no workspace works from its own private scope; it still gets a session start.
+        private = sorted(s for s in readable if s.startswith("agent:"))
+        if len(private) == 1:
+            return private[0], "private"
     return None, "unmatched"
-
-
-def _pinned(conn, scope: str) -> list[dict]:
-    return [
-        dict(r)
-        for r in conn.execute(
-            """SELECT id, content, memory_class, topic FROM memory_records
-            WHERE scope = ? AND pinned = 1 AND record_status = 'active'
-            ORDER BY created_at""",
-            (scope,),
-        ).fetchall()
-    ]
 
 
 def _attention(conn, scope: str, agent_id: str) -> list[dict]:
@@ -120,9 +113,11 @@ def _attention(conn, scope: str, agent_id: str) -> list[dict]:
 def _recent(conn, scope: str, exclude_ids: set[str]) -> list[dict]:
     rows = conn.execute(
         """SELECT id, agent_id, task_description, task_note, task_result, status, handoff_json,
-                  COALESCE(ended_at, updated_at) AS at
+                  COALESCE(ended_at, updated_at) AS at, updated_at
         FROM agent_activity
-        WHERE memory_scope = ? AND status IN ('completed', 'blocked')
+        WHERE memory_scope = ? AND (status IN ('completed', 'blocked')
+              OR (status = 'cancelled' AND json_valid(handoff_json)
+                  AND COALESCE(json_extract(handoff_json, '$.needs_human'), '') != ''))
         ORDER BY COALESCE(ended_at, updated_at) DESC LIMIT ?""",
         (scope, _RECENT_LIMIT + len(exclude_ids)),
     ).fetchall()
@@ -151,10 +146,10 @@ def _index(conn, scope: str, exclude_ids: set[str]) -> tuple[list[dict], int]:
     """Records in current use first: written or confirmed lately, then recalled
     lately, then the rest. Within a tier decisions lead, since a constraint is
     the most expensive thing to rediscover. Old records nobody touches fall
-    off the list; a rule that must always show belongs in pinned."""
+    off the list."""
     rows = conn.execute(
         f"""SELECT id, content, memory_class, topic FROM memory_records
-        WHERE scope = ? AND record_status = 'active' AND pinned = 0
+        WHERE scope = ? AND record_status = 'active'
           AND memory_class IN ('decision', 'fact', 'preference')
           AND (expires_at IS NULL OR datetime(expires_at) > datetime('now'))
         ORDER BY CASE
@@ -165,7 +160,6 @@ def _index(conn, scope: str, exclude_ids: set[str]) -> tuple[list[dict], int]:
                    ELSE 2
                  END,
                  (memory_class = 'decision') DESC,
-                 COALESCE(helpful_count, 0) - COALESCE(unhelpful_count, 0) DESC,
                  COALESCE(recall_count, 0) DESC,
                  created_at DESC
         LIMIT {_INDEX_LIMIT + len(exclude_ids)}"""
@@ -186,6 +180,23 @@ def _handoff(activity: dict) -> dict:
     except (TypeError, ValueError):
         return {}
     return value if isinstance(value, dict) else {}
+
+
+def _ask_outcome(activity: dict) -> Optional[str]:
+    """One line saying how this task's question to a person ended, with the answer when a person gave one."""
+    handoff = _handoff(activity)
+    ask, resolution = handoff.get("needs_human"), handoff.get("resolution")
+    if not ask or not isinstance(resolution, dict):
+        return None
+    kind, reason = resolution.get("kind"), _one_line(resolution.get("reason"), 300)
+    when = str(resolution.get("at") or "")[:10]
+    if kind == "person":
+        return f"asked: {_one_line(ask, 200)} — answered by {resolution.get('resolved_by') or 'a person'} {when}: {reason or '(no answer text; marked resolved)'}; resolved"
+    if kind == "expired":
+        return f"asked: {_one_line(ask, 200)} — lapsed {when}: nobody answered; resolved"
+    if kind == "agent":
+        return f"asked: {_one_line(ask, 200)} — you resolved it {when}: {reason or 'dealt with'}"
+    return None
 
 
 _WAITING_LIMIT = 5
@@ -222,14 +233,6 @@ def _render(scope: str, execution_id: str, parts: dict, limits: dict) -> str:
         f"activity_update(status=active, memory_scope={scope}).",
     ]
 
-    pinned = parts["pinned"]
-    if pinned:
-        lines += ["", "## Standing rules (pinned)"]
-        for record in pinned[: limits["pinned"]]:
-            lines.append(f"- {_one_line(record['content'], limits['pinned_chars'])}")
-        if len(pinned) > limits["pinned"]:
-            lines.append(f"- … {len(pinned) - limits['pinned']} more: memory_pinned lists them")
-
     waiting = parts.get("needs_human") or []
     if waiting:
         lines += ["", "## Waiting on a person"]
@@ -260,6 +263,9 @@ def _render(scope: str, execution_id: str, parts: dict, limits: dict) -> str:
                 f"- [{activity['status']}] {activity['id']}{owner}: "
                 f"{_one_line(activity['task_description'], 200)}" + (f" — last note: {note}" if note else "")
             )
+            outcome = _ask_outcome(activity)
+            if outcome:
+                lines.append(f"  {outcome}")
 
     recent = parts["recent"][: limits["recent"]]
     if recent:
@@ -267,12 +273,20 @@ def _render(scope: str, execution_id: str, parts: dict, limits: dict) -> str:
         for position, activity in enumerate(recent):
             detail_limit = limits["recent_lead_chars"] if position == 0 else limits["recent_chars"]
             outcome = activity["task_result"] or activity["task_note"]
+            later = (
+                f" (closed out {str(activity['updated_at'])[:10]})"
+                if str(activity["updated_at"])[:10] != str(activity["at"])[:10]
+                else ""
+            )
             lines.append(
-                f"- {str(activity['at'])[:10]} {activity['agent_id']} {activity['status']}: "
+                f"- {str(activity['at'])[:10]} {activity['agent_id']} {activity['status']}{later}: "
                 f"{_one_line(activity['task_description'], 160)}"
                 + (f" → {_one_line(outcome, detail_limit)}" if outcome and detail_limit else "")
             )
             handoff = _handoff(activity)
+            outcome = _ask_outcome(activity) if detail_limit else None
+            if outcome:
+                lines.append(f"  {outcome}")
             if handoff.get("next_steps") and detail_limit:
                 lines.append(f"  next steps: {_one_line('; '.join(handoff['next_steps']), detail_limit)}")
             if handoff.get("open_questions") and detail_limit:
@@ -304,7 +318,12 @@ def _render(scope: str, execution_id: str, parts: dict, limits: dict) -> str:
 
     index = parts["index"][: limits["index"]]
     if parts["index_total"]:
-        lines += ["", f"## Key records ({len(index)} of {parts['index_total']} active)"]
+        if not index:
+            lines += ["", f"## Key records: {parts['index_total']} active in this workspace, none listed here; memory_search finds them"]
+        elif len(index) < parts["index_total"]:
+            lines += ["", f"## Key records (the {len(index)} most relevant of {parts['index_total']} active; memory_search finds the rest)"]
+        else:
+            lines += ["", f"## Key records ({len(index)} active)"]
         for record in index:
             topic = f" · {record['topic']}" if record.get("topic") else ""
             lines.append(
@@ -331,13 +350,6 @@ def _reduce(limits: dict, parts: dict) -> Optional[dict]:
         return {**limits, "changes": limits["changes"] // 2}
     if limits["recent"] > 1:
         return {**limits, "recent": limits["recent"] - 1}
-    if limits["pinned_chars"] > 300:
-        return {**limits, "pinned_chars": 300}
-    if limits["pinned_chars"] > 150:
-        return {**limits, "pinned_chars": 150}
-    # Last: fewer pinned rules, so waiting and unfinished work still show.
-    if limits["pinned"] > 5:
-        return {**limits, "pinned": max(5, limits["pinned"] // 2)}
     return None
 
 
@@ -348,8 +360,6 @@ def fit(scope: str, execution_id: str, parts: dict, budget: int) -> tuple[str, d
         "recent": len(parts["recent"]),
         "recent_chars": 220,
         "recent_lead_chars": 900,
-        "pinned_chars": 1500,
-        "pinned": len(parts["pinned"]),
     }
     text = _render(scope, execution_id, parts, limits)
     reductions = 0
@@ -361,7 +371,7 @@ def fit(scope: str, execution_id: str, parts: dict, budget: int) -> tuple[str, d
         text = _render(scope, execution_id, parts, limits)
         reductions += 1
     if len(text) > budget:
-        # Header and pinned rules alone overflow: cut at a line boundary rather
+        # The header alone overflows: cut at a line boundary rather
         # than hand the host a block it will replace with a stub.
         cut = text[: budget - 2]
         text = cut[: cut.rfind("\n")] + "\n…" if "\n" in cut else cut + "…"
@@ -397,7 +407,6 @@ def build_session_context(
         host_session_ref=host_session_ref,
     )
     with get_db() as conn:
-        pinned = _pinned(conn, scope)
         attention = _attention(conn, scope, agent_id)
         attention_ids = {a["id"] for a in attention}
         recent = _recent(conn, scope, attention_ids)
@@ -408,11 +417,10 @@ def build_session_context(
     # carries the rest rather than repeating it.
     changed_memory = {c["resource_id"] for c in changes if c["resource_type"] == "memory"}
     with get_db() as conn:
-        index, index_total = _index(conn, scope, {p["id"] for p in pinned} | changed_memory)
+        index, index_total = _index(conn, scope, changed_memory)
 
     parts = {
         "agent_id": agent_id,
-        "pinned": pinned,
         "needs_human": needs_human,
         "attention": attention,
         "recent": recent,
@@ -424,8 +432,7 @@ def build_session_context(
     text, limits, reductions = fit(scope, execution["execution_id"], parts, budget)
 
     injected_memory = (
-        [p["id"] for p in pinned[: limits["pinned"]]]
-        + [c["resource_id"] for c in changes[: limits["changes"]] if c["resource_type"] == "memory"]
+        [c["resource_id"] for c in changes[: limits["changes"]] if c["resource_type"] == "memory"]
         + [r["id"] for r in index[: limits["index"]]]
     )
     injected_activity = [a["id"] for a in attention] + [a["id"] for a in recent[: limits["recent"]]]
@@ -463,8 +470,21 @@ def build_session_context(
     }
 
 
-HANDOFF_FIELDS = ("completed", "next_steps", "open_questions", "needs_human")
+HANDOFF_FIELDS = ("completed", "next_steps", "open_questions", "needs_human", "needs_human_url")
 HANDOFF_MAX_CHARS = 4000
+
+
+_NO_ACTION = re.compile(
+    r"^\W*(no\s+(?:further\s+|human\s+|manual\s+)?(?:action|input|decision|approval)s?\b"
+    r"|nothing\s+(?:is\s+|else\s+)?(?:needed|required|to\s+do|now|right\s+now|at\s+the\s+moment|for\s+now)\b|none\b|n/?a\b|not\s+applicable\b)",
+    re.IGNORECASE,
+)
+
+
+class Handoff(dict):
+    """A validated handoff; `notice` says what normalize_handoff changed, to tell the caller."""
+
+    notice: Optional[str] = None
 
 
 def normalize_handoff(value) -> dict:
@@ -482,10 +502,13 @@ def normalize_handoff(value) -> dict:
     handoff: dict = {}
     for key in ("completed", "needs_human"):
         if value.get(key) is not None:
-            if not isinstance(value[key], str):
-                raise ValueError(f"handoff.{key} must be a string")
-            if value[key].strip():
-                handoff[key] = value[key].strip()
+            text = value[key]
+            if isinstance(text, list) and all(isinstance(i, str) for i in text):
+                text = "; ".join(i.strip() for i in text if i.strip())  # a list reads as one line
+            if not isinstance(text, str):
+                raise ValueError(f"handoff.{key} must be a string or a list of strings")
+            if text.strip():
+                handoff[key] = text.strip()
     for key in ("next_steps", "open_questions"):
         items = value.get(key)
         if items is None:
@@ -497,11 +520,32 @@ def normalize_handoff(value) -> dict:
         cleaned = [i.strip() for i in items if i.strip()]
         if cleaned:
             handoff[key] = cleaned
+    url = value.get("needs_human_url")
+    if url is not None:
+        if not isinstance(url, str) or not re.fullmatch(r"https?://[^\s<>\"']{3,500}", url.strip()):
+            raise ValueError("handoff.needs_human_url must be an http or https link, up to 500 characters, with no spaces")
+        if handoff.get("needs_human"):
+            handoff["needs_human_url"] = url.strip()
+    notice = None
+    ask = handoff.get("needs_human")
+    if ask and _NO_ACTION.match(ask):
+        # needs_human puts the task on the Needs you page. A text that says nothing is needed is not an ask:
+        # keep the words, as an open question, and take the task off the page.
+        del handoff["needs_human"]
+        handoff.pop("needs_human_url", None)
+        handoff["open_questions"] = [*handoff.get("open_questions", []), ask]
+        notice = (
+            "Your needs_human text says no action is needed, so it was not raised to a person; it was kept as "
+            "an open question. Leave needs_human out when nothing is waiting on a person. If a person really "
+            "must act, restate it as that action."
+        )
     if not handoff:
         raise ValueError("handoff has no content")
     if len(json.dumps(handoff)) > HANDOFF_MAX_CHARS:
         raise ValueError(f"handoff is over {HANDOFF_MAX_CHARS} characters; keep it to what the next session needs")
-    return handoff
+    result = Handoff(handoff)
+    result.notice = notice
+    return result
 
 
 def handoff_check(*, agent_id: str, user_id: str, host_session_ref: str) -> dict:
@@ -559,10 +603,11 @@ def handoff_check(*, agent_id: str, user_id: str, host_session_ref: str) -> dict
     )
     reason = (
         f'{APP_NAME}: activity {activity["id"]} ("{_one_line(activity["task_description"], 120)}") '
-        "is open with no handoff. If this task is finished or waiting on someone, record one now: "
+        "is open with no result. If this task is finished or waiting on someone, close it now: "
         f'activity_update(memory_scope="{activity["memory_scope"]}", status="completed" or "blocked", '
-        'task_result="...", handoff={"completed": "...", "next_steps": [...], '
-        '"open_questions": [...], "needs_human": "what a person must do, if anything"}). '
+        'task_result="one or two sentences: what was done and where (a commit, a file)", '
+        'handoff={"next_steps": [...], "needs_human": "what a person must do, if anything"}). '
+        "Keep it short: the detail belongs in the repository, not here. "
         "If you are still mid-task, say so in one line and carry on. You will not be asked again for this task."
     )
     return {"nudge": True, "activity_id": activity["id"], "reason": reason}

@@ -78,7 +78,7 @@ class TestEventTypeValidation:
 
     def test_modify_events_require_activity_id(self):
         from app.services import inbound_webhook_service as svc
-        for event_type in ("activity.assign", "activity.update", "activity.cancel", "activity.note"):
+        for event_type in ("activity.update", "activity.cancel", "activity.note"):
             with pytest.raises(ValueError, match="activity_id"):
                 svc.handle_inbound(event_type, {})
 
@@ -123,28 +123,6 @@ class TestActivityCreate:
 
 
 class TestActivityAssign:
-    def test_assign_requires_assigned_agent_id(self):
-        from app.services import inbound_webhook_service as svc
-        with pytest.raises(ValueError, match="assigned_agent_id"):
-            svc.handle_inbound("activity.assign", {"activity_id": "act-1"})
-
-    def test_assign_calls_reassign(self):
-        from app.services import inbound_webhook_service as svc
-        reassigned = {}
-
-        def fake_reassign(activity_id, new_agent_id):
-            reassigned["activity_id"] = activity_id
-            reassigned["new_agent_id"] = new_agent_id
-            return {"id": activity_id}
-
-        with patch("app.services.inbound_webhook_service.activity_service.reassign_activity", side_effect=fake_reassign), \
-             patch("app.services.inbound_webhook_service.activity_service.update_activity"):
-            svc.handle_inbound("activity.assign", {"activity_id": "act-1", "assigned_agent_id": "opus"})
-
-        assert reassigned == {"activity_id": "act-1", "new_agent_id": "opus"}
-
-
-class TestActivityUpdate:
     def test_update_requires_at_least_one_field(self):
         from app.services import inbound_webhook_service as svc
         with pytest.raises(ValueError, match="at least one"):

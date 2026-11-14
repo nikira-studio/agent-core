@@ -1,6 +1,7 @@
 import secrets
 import hashlib
 import json
+from app.time_utils import utc_now_iso
 from typing import Optional
 
 from app.database import get_db
@@ -334,6 +335,14 @@ def delete_agent_hard(agent_id: str) -> bool:
             """,
             (normalized_id, normalized_id, normalized_id),
         )
+        # What the deleted agent left waiting must not keep waiting on a person: its credential requests are
+        # cancelled (nobody is left to receive the credential), and its session records go with it.
+        conn.execute(
+            "UPDATE credential_requests SET status = 'cancelled', resolved_at = ?, resolved_by = 'agent deleted' "
+            "WHERE requested_by_agent_id = ? AND status = 'pending'",
+            (utc_now_iso(), normalized_id),
+        )
+        conn.execute("DELETE FROM agent_executions WHERE agent_id = ?", (normalized_id,))
         cursor = conn.execute("DELETE FROM agents WHERE id = ?", (normalized_id,))
         conn.commit()
         return cursor.rowcount > 0

@@ -237,6 +237,10 @@ def test_create_schema_records_and_skips_applied_revision(monkeypatch):
         {"revision": 21, "name": "agent-inherit-user-bindings"},
         {"revision": 22, "name": "private-address-policy"},
         {"revision": 23, "name": "builtin-service-description"},
+        {"revision": 24, "name": "credential-request-activity"},
+        {"revision": 25, "name": "memory-cleanup-queue-removed"},
+        {"revision": 26, "name": "drop-unused-settings-and-column"},
+        {"revision": 27, "name": "binding-test-note"},
     ]
     assert conn.execute(
         "SELECT 1 FROM sqlite_master WHERE type='table' AND name='credential_resolution_daily'"

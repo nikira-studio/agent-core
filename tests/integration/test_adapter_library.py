@@ -190,6 +190,130 @@ class TestAdapterLibrary:
         assert reinstall_r.status_code == 201, reinstall_r.text
         assert installed_path.exists()
 
+    def test_uninstalling_an_adapter_whose_shipped_template_is_gone_keeps_its_only_copy(
+        self, test_client, admin_token, monkeypatch, tmp_path
+    ):
+        """An adapter installed from a shipped template that a later release dropped has no template to fall back to:
+        removing it from the service list must not delete the installed copy, or it could never be added again."""
+        from app.config import settings
+        from app.services import connector_service
+
+        monkeypatch.setattr(settings, "DATA_PATH", str(tmp_path), raising=False)
+        headers = {"Authorization": f"Bearer {admin_token}"}
+        assert test_client.post("/api/connector-types/adapters/transmission/install", headers=headers, json={}).status_code == 201
+        installed = Path(tmp_path) / "adapters" / "transmission" / "adapter.json"
+        assert installed.exists()
+
+        real = adapter_loader._source_entries
+
+        def without_the_shipped_copy():
+            system, user = real()
+            return [e for e in system if e["id"] != "transmission"], user
+
+        monkeypatch.setattr(adapter_loader, "_source_entries", without_the_shipped_copy)
+        adapter_loader.clear_adapter_source_cache()
+        response = test_client.delete("/api/connector-types/adapters/transmission/install", headers=headers)
+        assert response.status_code == 200, response.text
+        assert connector_service.get_connector_type("transmission") is None
+        assert installed.exists()  # the only copy is kept
+
+        library = test_client.get("/api/connector-types/adapters", headers=headers).json()["data"]["adapters"]
+        entry = next(a for a in library if a["id"] == "transmission")
+        assert entry["installed"] is False and entry["shipped"] is False  # listed as an added adapter, installable again
+        assert test_client.post("/api/connector-types/adapters/transmission/install", headers=headers, json={}).status_code == 201
+
+    def test_old_update_backups_are_pruned_the_newest_kept_for_an_installed_adapter(
+        self, test_client, admin_token, monkeypatch, tmp_path
+    ):
+        import os
+        import time
+
+        from app.config import settings
+
+        monkeypatch.setattr(settings, "DATA_PATH", str(tmp_path), raising=False)
+        headers = {"Authorization": f"Bearer {admin_token}"}
+        assert test_client.post("/api/connector-types/adapters/transmission/install", headers=headers, json={}).status_code == 201
+        root = Path(tmp_path) / "adapters"
+
+        def make(name, age_hours):
+            folder = root / name
+            folder.mkdir()
+            (folder / "adapter.json").write_text("{}")
+            stamp = time.time() - age_hours * 3600
+            os.utime(folder, (stamp, stamp))
+            return folder
+
+        old, newer = make(".transmission.backup-aaaa", 72), make(".transmission.backup-bbbb", 5)
+        gone_a, gone_b = make(".paperclip.backup-cccc", 100), make(".paperclip.backup-dddd", 3)  # not installed
+        stale_staging, fresh_staging = make(".transmission.staging-old", 30), make(".transmission.staging-new", 1)
+
+        removed = adapter_loader.prune_adapter_backups()
+        assert removed == 4
+        assert newer.exists() and not old.exists()                       # newest kept for an installed adapter
+        assert not gone_a.exists() and not gone_b.exists()               # an uninstalled adapter keeps none
+        assert not stale_staging.exists() and fresh_staging.exists()     # a day-old half-made copy goes, a fresh one stays
+        assert (root / "transmission" / "adapter.json").exists()          # the installed tree is never touched
+
+        # uninstalling clears its backups too
+        assert test_client.delete("/api/connector-types/adapters/transmission/install", headers=headers).status_code == 200
+        assert not newer.exists()
+
+    def test_maintenance_reports_the_adapter_backups_it_pruned(self, test_client, admin_token, monkeypatch, tmp_path):
+        from app.config import settings
+        from app.services import backup_service
+
+        monkeypatch.setattr(settings, "DATA_PATH", str(tmp_path), raising=False)
+        leftover = Path(tmp_path) / "adapters" / ".ghost.backup-abcd"
+        leftover.mkdir(parents=True)
+        result = backup_service.run_scheduled_maintenance()
+        assert result["adapter_backups_pruned"] == 1 and not leftover.exists()
+
+    @pytest.mark.parametrize("adapter_id", ["lifequery", "healthquery"])
+    def test_lifequery_and_healthquery_are_built_in_and_an_older_install_updates_in_place(
+        self, adapter_id, test_client, admin_token, monkeypatch, tmp_path
+    ):
+        """The two public-product services ship with Agent Core again: they read "Built-in", and an install made from
+        the earlier copy (version 1.0.0) is offered Update, which keeps its connections."""
+        import shutil
+
+        from app.adapter_paths import SYSTEM_ADAPTER_DIR as shipped_root
+        from app.config import settings
+
+        headers = {"Authorization": f"Bearer {admin_token}"}
+        assert (shipped_root / adapter_id / "adapter.json").exists()
+        shipped = json.loads((shipped_root / adapter_id / "adapter.json").read_text())
+        assert shipped["version"] == "1.0.1" and all("side_effect" in a for a in shipped["actions"])
+        assert shipped["backend"]["test_action"] in {a["name"] for a in shipped["actions"] if a["side_effect"] == "read"}
+
+        # an install made from the earlier copy
+        older_root = tmp_path / "older-templates"
+        shutil.copytree(shipped_root / adapter_id, older_root / adapter_id)
+        older = json.loads((older_root / adapter_id / "adapter.json").read_text())
+        older["version"] = "1.0.0"
+        (older_root / adapter_id / "adapter.json").write_text(json.dumps(older))
+        monkeypatch.setattr(adapter_loader, "SYSTEM_ADAPTER_DIR", older_root, raising=False)
+        monkeypatch.setattr(settings, "DATA_PATH", str(tmp_path / "data"), raising=False)
+        adapter_loader.clear_adapter_source_cache()
+        assert test_client.post(f"/api/connector-types/adapters/{adapter_id}/install", headers=headers, json={}).status_code == 201
+        binding = connector_service.create_binding(
+            connector_type_id=adapter_id, name=f"{adapter_id} connection", scope="workspace:test",
+            config_json=json.dumps({"base_url": "http://example.test"}),
+        )
+
+        # the shipped template is the newer one
+        monkeypatch.setattr(adapter_loader, "SYSTEM_ADAPTER_DIR", shipped_root, raising=False)
+        adapter_loader.clear_adapter_source_cache()
+        entry = next(a for a in test_client.get("/api/connector-types/adapters", headers=headers).json()["data"]["adapters"] if a["id"] == adapter_id)
+        assert entry["shipped"] is True  # the card reads "Built-in", not "Added here"
+        assert entry["installed_version"] == "1.0.0" and entry["available_version"] == "1.0.1" and entry["update_available"] is True
+
+        updated = test_client.post(f"/api/connector-types/adapters/{adapter_id}/update", headers=headers, json={})
+        assert updated.status_code == 200, updated.text
+        assert updated.json()["data"]["adapter"]["installed_version"] == "1.0.1"
+        kept = connector_service.list_bindings(connector_type_id=adapter_id)
+        assert [b["id"] for b in kept] == [binding["id"]]
+        assert kept[0]["config_json"] and json.loads(kept[0]["config_json"])["base_url"] == "http://example.test"
+
     def test_update_builtin_adapter_refreshes_install_without_losing_bindings(
         self, test_client, admin_token, monkeypatch, tmp_path
     ):

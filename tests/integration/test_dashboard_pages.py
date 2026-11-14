@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 
 import pytest
@@ -138,6 +139,9 @@ def test_overview_attention_omits_resolved_and_historical_activities(authenticat
     activity_service.update_activity(retry["id"], status="completed")
     current = activity_service.create_activity("admin", "admin", "Current blocker")
     activity_service.update_activity(current["id"], status="blocked")
+    activity_service.set_handoff(current["id"], {"needs_human": "Pick a vendor"})
+    plain = activity_service.create_activity("admin", "admin", "Blocked but asking nobody")
+    activity_service.update_activity(plain["id"], status="blocked")
     with get_db() as conn:
         conn.execute(
             "UPDATE agent_activity SET updated_at = '2020-01-01T00:00:00+00:00' WHERE id = ?",
@@ -147,7 +151,8 @@ def test_overview_attention_omits_resolved_and_historical_activities(authenticat
 
     html = authenticated_client.get("/").text
     attention = html.split('id="overview-waiting"', 1)[1].split("</table>", 1)[0]
-    assert "Current blocker" in attention
+    assert "Pick a vendor" in attention  # a task that asks a person is shown by its ask
+    assert "Blocked but asking nobody" not in attention  # a blocked task with no question is not a chore
     assert "Old blocked task" not in attention
     assert "Resolved retry" not in attention
 
@@ -229,28 +234,39 @@ def test_connectors_directory_page_surfaces_mcp_import(authenticated_client):
     assert "import-spec-import-btn" in html
 
 
-def test_dashboard_nav_order_and_admin_audit_placement(authenticated_client):
-    r = authenticated_client.get("/")
-    assert r.status_code == 200
-    html = r.text
-    expected = [
-        '<a href="/" class="active" aria-current="page"><span>Overview</span></a>',
-        '<a href="/activity" class=""><span>Activity</span></a>',
-        '<a href="/approvals" class=""><span>Approvals</span></a>',
-        '<a href="/memory" class=""><span>Memory</span></a>',
-        '<a href="/users" class=""><span>Users</span></a>',
-        '<a href="/agents" class=""><span>Agents</span></a>',
-        '<a href="/workspaces" class=""><span>Workspaces</span></a>',
-        '<a href="/integrations" class=""><span>Connect</span></a>',
-        '<a href="/connectors" class=""><span>Services</span></a>',
-        '<a href="/credentials" class=""><span>Credentials</span></a>',
-        '<a href="/audit" class=""><span>Audit</span></a>',
-        '<a href="/webhooks" class=""><span>Webhooks</span></a>',
-        '<a href="/settings" class=""><span>Settings</span></a>',
+def test_dashboard_has_six_entries_in_two_groups_and_the_rest_are_tabs(authenticated_client):
+    html = authenticated_client.get("/").text
+    nav = html.split('<nav aria-label="Main" id="main-nav">', 1)[1].split("</nav>", 1)[0]
+    entries = re.findall(r'<a href="([^"]+)" class="[^"]*"[^>]*><span>([^<]+)</span>', nav)
+    assert entries == [
+        ("/", "Needs you"), ("/activity", "Activity"), ("/memory", "Memory"),
+        ("/agents", "Agents"), ("/connectors", "Services"), ("/settings", "Settings"),
     ]
-    positions = [html.index(item) for item in expected]
-    assert positions == sorted(positions)
-    assert '<a href="/audit"' in html.split("<nav>", 1)[1].split("</nav>", 1)[0]
+    assert "Handle exceptions" not in nav and "Set up" not in nav and "nav-heading" not in nav  # one plain list
+    # The other pages are tabs inside their entry, with the right tab and entry highlighted.
+    agents = authenticated_client.get("/integrations").text
+    assert 'class="page-tab active" aria-current="page">Connect</a>' in agents
+    for tab in ("/agents", "/workspaces"):
+        assert f'href="{tab}" class="page-tab' in agents
+    assert 'href="/agents" class="active"' in agents  # the Agents entry stays highlighted on its tab
+    # Settings is ONE row under the heading: the four settings tabs, then Users and Webhooks. Same on all six, no second row.
+    for route, active in (("/settings", "account"), ("/users", "users"), ("/webhooks", "webhooks")):
+        page = authenticated_client.get(route).text
+        assert page.count("<h1>") == 1 and "<h1>Settings</h1>" in page
+        assert page.count('class="page-tabs"') == 1
+        row = page.split('<nav class="page-tabs" aria-label="Settings">', 1)[1].split("</nav>", 1)[0]
+        assert re.findall(r">([^<]+)</a>", row) == ["Account", "Memory", "Data and backup", "Security", "Users", "Webhooks"]
+        assert f'data-tab="{active}" class="page-tab active"' in row
+        assert page.index("<h1>Settings</h1>") < page.index('class="page-tabs"')  # heading first, row under it
+        assert 'aria-label="In this section"' not in page  # no second bar above the heading
+    # Same place on every page: the heading first, then the one row of tabs under it.
+    for route in ("/", "/approvals", "/activity", "/audit", "/agents", "/integrations", "/workspaces",
+                  "/connectors", "/credentials", "/settings", "/users", "/webhooks"):
+        page = authenticated_client.get(route).text
+        assert page.count('class="page-tabs"') == 1, route
+        assert page.index("<h1>") < page.index('class="page-tabs"'), route
+    assert 'href="/audit" class="page-tab' in authenticated_client.get("/activity").text
+    assert 'href="/credentials" class="page-tab' in authenticated_client.get("/connectors").text
 
 
 def test_dashboard_shared_accessibility_behaviour(authenticated_client):
@@ -310,7 +326,7 @@ def test_workspace_edit_modal_has_collaborator_panel_and_separate_save_form(auth
 
 def test_overview_says_so_when_nothing_is_waiting_and_shows_health(authenticated_client):
     html = authenticated_client.get("/").text
-    assert "Nothing is waiting on you." in html
+    assert "Nothing needs you" in html
     health = html.split('id="overview-health"', 1)[1]
     for label in ("Agent Core", "Services", "Webhooks", "Local credential helper"):
         assert label in health
@@ -343,7 +359,7 @@ def test_services_page_has_one_add_entry_and_explains_itself(authenticated_clien
     for way in ("From an API spec", "From an MCP server", "A plain web service"):
         assert way in header
     assert "+ New Credential" not in header and "Browse Adapters" not in header
-    assert "No bindings yet." in html  # built-in services exist, bindings do not
+    assert "No connections yet." in html  # built-in services exist, connections do not
     assert "Getting a service working" in html  # nothing is bound yet
 
 
@@ -359,8 +375,11 @@ def test_services_page_tucks_expert_fields_under_advanced(authenticated_client):
 
 def test_services_page_run_history_is_collapsed(authenticated_client):
     html = authenticated_client.get("/connectors").text
-    assert '<details class="card" id="executions">' in html
-    assert "<details class=\"card\" id=\"executions\" open" not in html
+    assert '<details class="card fold-card" id="executions">' in html
+    assert 'id="executions" open' not in html
+    # arrow, title and a hint on one line: no heading inside the summary
+    summary = html.split('id="executions"', 1)[1].split("</summary>", 1)[0]
+    assert "<h2" not in summary and 'class="fold-title"' in summary and 'class="fold-hint"' in summary
 
 
 def _hint_follows(html, element_id):
@@ -484,14 +503,14 @@ def test_delete_asks_for_the_name_and_says_what_goes_with_it(authenticated_clien
     assert "Type the agent ID to confirm" in agents and "its private memory" in agents
 
 
-def test_activity_page_puts_tasks_first_and_synchronization_last(authenticated_client):
+def test_activity_page_has_no_synchronization_panel_and_no_stale_tab(authenticated_client):
     html = authenticated_client.get("/activity").text
-    assert html.index("<h2>Tasks</h2>") < html.index("Workspace synchronization")
-    # The snapshot counters and coverage percentages were removed: Waiting on you and the task list answer it.
+    assert "<h2>Tasks</h2>" in html
+    # The snapshot counters, coverage percentages and the sync panel are gone; nothing there is for a person to do.
     assert "Coordination Snapshot" not in html and "Execution-linked" not in html
-    # Empty synchronization is closed; assigning a task is still on this page.
-    assert '<details class="card card-fold" id="workspace-sync" >' in html
-    assert "+ Assign a task" in html
+    assert "Workspace synchronization" not in html
+    assert "status=stale" not in html  # an abandoned task closes itself; there is no Stale tab to clear
+    assert "Assign a task" not in html and "Reassign" not in html
 
 
 def test_write_access_chips_are_not_the_danger_colour():
@@ -509,7 +528,7 @@ def test_wording_batch_two(authenticated_client):
     assert "vault" not in settings.lower()
     assert "Search by meaning (vector search)" in settings and "Enable search by meaning" in settings
     assert "Keyring size" not in settings
-    assert "Rotate Key</strong>: makes a new key" in settings
+    assert "Rotate key</strong>: makes a new key" in settings
     # The Audit Log shortcut no longer sits in the Backup & Restore header.
     assert '<a href="/audit" class="btn btn-sm btn-secondary">Audit Log</a>' not in settings
     assert "Checks that the data folder is writable" in settings
@@ -543,10 +562,38 @@ def test_memory_list_is_paged_and_can_be_filtered_by_workspace(authenticated_cli
     assert authenticated_client.get("/memory?page=999").status_code == 200  # clamps instead of failing
 
 
+def test_retracted_memories_use_the_same_table_with_restore_and_say_who_retracted(authenticated_client):
+    from app.services import audit_service, memory_service
+
+    record, _ = memory_service.write_memory(
+        content="Alex decided 2026-11-12, as relayed by the planning session: yes to all three. Question 2 as put to him: propose, never start.",
+        memory_class="decision", scope="workspace:studio", topic="The builder may propose work, never start it without approval",
+    )
+    keeper, _ = memory_service.write_memory(content="A fact that stays active", memory_class="fact", scope="workspace:studio", topic="stays")
+    memory_service.retract_memory(record["id"], retracted_by="rule:duplicate_cluster")
+    audit_service.write_event(actor_type="system", actor_id="rule:duplicate_cluster", action="memory_auto_retracted",
+                              resource_type="memory_record", resource_id=record["id"], result="success", details={"rule": "duplicate_cluster"})
+    active = authenticated_client.get("/memory").text
+    assert "Retracted (1)" in active and "Active (1)" in active and "data-memory-retract=" in active and "data-memory-restore=" not in active
+    shown = authenticated_client.get("/memory?show=retracted").text
+    rows = shown.split('id="mem-results-body"', 1)[1].split("</tbody>", 1)[0]
+    # same table, same columns and Detail button; Restore where Retract was; who and when in the State cell
+    assert "data-memory-detail=" in rows and "data-memory-restore=" in rows and "data-memory-retract=" not in rows
+    assert "by an automatic clean-up (a duplicate of another memory)" in rows and "rule:duplicate_cluster" not in rows and "Retracted 20" in rows and "A fact that stays active" not in rows
+    assert 'class="stack-cards"' in shown and "Search</button>" not in shown.split("page-actions", 1)[1].split("</div>", 1)[0]
+    detail = authenticated_client.get(f"/api/memory/{record['id']}").json()["data"]["record"]
+    assert detail["retraction"]["by"] == "rule:duplicate_cluster" and detail["retraction"]["when"]
+    memory_service.retract_memory(keeper["id"], retracted_by="claude-code")
+    audit_service.write_event(actor_type="agent", actor_id="claude-code", action="memory_retract", resource_type="memory_record",
+                              resource_id=keeper["id"], result="success", details={"reason": "superseded by the new spec"})
+    why = authenticated_client.get(f"/api/memory/{keeper['id']}").json()["data"]["record"]["retraction"]
+    assert why["reason"] == "superseded by the new spec" and why["by"]
+
+
 def test_new_binding_dialog_shows_one_credential_choice_at_a_time(authenticated_client):
     html = authenticated_client.get("/connectors").text
     assert 'id="binding-existing-credential-fields" class="form-group" style="display:none"' in html
-    assert "Who may use it" in html and "A binding lets agents in one workspace" in html
+    assert "Who may use it" in html and "A connection lets agents in one workspace" in html
     assert "<label>Scope *</label>" not in html and "Just me (personal)" in html
 
 
@@ -604,22 +651,14 @@ def test_overview_waiting_list_shows_every_kind_to_an_admin(authenticated_client
     activity = activity_service.create_activity("admin", "admin", "Needs a decision")
     activity_service.set_handoff(activity["id"], {"needs_human": "Pick the vendor"})
     credential_request_service.request_credential(
-        agent_id="admin", user_id=None, scope="user:admin", name="VENDOR_TOKEN", purpose="x"
+        agent_id="vendor-requester", user_id=None, scope="user:admin", name="VENDOR_TOKEN", purpose="x"
     )
-    with get_db() as conn:
-        conn.execute(
-            "INSERT INTO memory_proposals (id, rule, action, scope, target_ids_json, rationale, evidence_json, status, created_at) "
-            "VALUES ('sug-ov', 'unconfirmed_inference', 'confirm', 'user:admin', '[\"m-ov\"]', 'r', '{}', 'pending', '2026-11-11T00:00:00+00:00')"
-        )
-        conn.commit()
-
     html = authenticated_client.get("/").text
     waiting = html.split('id="overview-waiting"', 1)[1].split("</table>", 1)[0]
     assert "Pick the vendor" in waiting
     assert "needs VENDOR_TOKEN" in waiting
-    # Memory suggestions are optional housekeeping: not a row, one quiet line under the list.
-    assert "suggestion to review" not in waiting
-    assert "Memory clean-up: 1 suggestion" in html and 'href="/memory#proposal-list"' in html
+    # Nothing about memory clean-up is shown: it runs by itself.
+    assert "suggestion" not in waiting and "Memory clean-up" not in html
 
 
 def test_done_on_a_blocked_row_asks_for_a_reason(authenticated_client):

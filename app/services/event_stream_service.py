@@ -10,6 +10,8 @@ class _EventHub:
     def __init__(self):
         self._lock = threading.Lock()
         self._queues: dict[str, queue.Queue] = {}
+        # Set when the server has been asked to stop: open event streams end at once instead of holding it up.
+        self.closing = False
 
     def register(self) -> tuple[str, queue.Queue]:
         client_id = str(uuid.uuid4())

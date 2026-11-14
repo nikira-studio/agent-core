@@ -119,7 +119,7 @@ function renderBindingCredentialEditor(guidance) {
         '<div class="form-hint">This credential is optional. Leave credential mode set to No credential for public or unauthenticated access.</div>';
       return;
     }
-    wrap.innerHTML = '<div class="form-hint">This connector does not declare a credential payload.</div>';
+    wrap.innerHTML = '<div class="form-hint">This service does not say which credential fields it needs.</div>';
     return;
   }
 
@@ -171,7 +171,7 @@ function updateBindingFormContext(defaultName) {
   if (recipe) {
     const bits = [];
     if (guidance?.suggested_binding_name) {
-      bits.push('Suggested binding: ' + guidance.suggested_binding_name);
+      bits.push('Suggested name: ' + guidance.suggested_binding_name);
     }
     if (Array.isArray(guidance?.credential_fields) && guidance.credential_fields.length) {
       bits.push('Credential JSON fields: ' + guidance.credential_fields.join(', '));
@@ -181,7 +181,7 @@ function updateBindingFormContext(defaultName) {
     if (Array.isArray(guidance?.config_fields) && guidance.config_fields.length) {
       bits.push('Config JSON fields: ' + guidance.config_fields.join(', '));
     }
-    recipe.textContent = bits.length ? bits.join(' · ') : 'No extra binding requirements declared.';
+    recipe.textContent = bits.length ? bits.join(' · ') : 'No extra connection requirements declared.';
   }
 
   if (setupGroup && setupEl) {
@@ -194,7 +194,7 @@ function updateBindingFormContext(defaultName) {
       setupEl.appendChild(document.createTextNode(instructions));
     }
     if (hasDocumentationUrl) {
-      if (instructions) setupEl.appendChild(document.createTextNode('\\n'));
+      if (instructions) setupEl.appendChild(document.createTextNode('\n'));
       const link = document.createElement('a');
       link.href = documentationUrl;
       link.target = '_blank';
@@ -245,6 +245,11 @@ function bindingConnectorTypeChanged() {
   const typeOption = document.getElementById('binding-connector-type').selectedOptions[0];
   const endpointGroup = document.getElementById('binding-mcp-endpoint-group');
   if (endpointGroup) endpointGroup.style.display = typeOption?.dataset.providerType === 'mcp' ? '' : 'none';
+  const baseUrlGroup = document.getElementById('binding-base-url-group');
+  if (baseUrlGroup) {
+    baseUrlGroup.style.display = typeOption?.dataset.needsBaseUrl === '1' ? '' : 'none';
+    document.getElementById('binding-base-url').required = baseUrlGroup.style.display !== 'none';
+  }
   const guidance = parseBindingGuidance();
   if (credentialMode) credentialMode.value = defaultCredentialModeForGuidance(guidance);
   updateBindingFormContext();
@@ -320,29 +325,39 @@ async function createBinding(e) {
   }
 
   if (credentialRequired && !credentialId) {
-    showToast('This adapter needs a credential for: ' + requiredCredentialFields.join(', '), 'danger');
+    showToast('This service needs a credential for: ' + requiredCredentialFields.join(', '), 'danger');
     return;
   }
 
-  if ((guidance.config_fields || []).length) {
+  const baseUrlGroup = document.getElementById('binding-base-url-group');
+  const baseUrlValue = baseUrlGroup && baseUrlGroup.style.display !== 'none'
+    ? (document.getElementById('binding-base-url').value || '').trim() : '';
+  if (baseUrlGroup && baseUrlGroup.style.display !== 'none' && !baseUrlValue) {
+    showToast('Enter the address this service is reached at', 'danger');
+    return;
+  }
+  const configFields = (guidance.config_fields || []).filter(function(field) {
+    return !(baseUrlValue && field === 'base_url');
+  });
+  if (configFields.length) {
     const configEl = document.getElementById('binding-config');
     let configValue = (configEl && configEl.value ? configEl.value.trim() : '');
     if (!configValue) {
-      showToast('This adapter needs binding config JSON with: ' + guidance.config_fields.join(', '), 'danger');
+      showToast('This service needs connection config JSON with: ' + configFields.join(', '), 'danger');
       return;
     }
     let parsedConfig = null;
     try {
       parsedConfig = JSON.parse(configValue);
     } catch (err) {
-      showToast('Binding config must be valid JSON', 'danger');
+      showToast('The extra settings must be valid JSON', 'danger');
       return;
     }
-    const missingConfig = (guidance.config_fields || []).filter(function(field) {
+    const missingConfig = configFields.filter(function(field) {
       return parsedConfig[field] === undefined || parsedConfig[field] === null || parsedConfig[field] === '';
     });
     if (missingConfig.length) {
-      showToast('Binding config must include: ' + missingConfig.join(', '), 'danger');
+      showToast('These settings are required: ' + missingConfig.join(', '), 'danger');
       return;
     }
     if (configEl && configEl.dataset.template === 'true') {
@@ -351,12 +366,20 @@ async function createBinding(e) {
     }
   }
 
+  let configJson = document.getElementById('binding-config').value || null;
+  if (baseUrlValue) {
+    let merged = {};
+    try { merged = configJson && configJson.trim() && !(document.getElementById('binding-config').dataset.template === 'true') ? JSON.parse(configJson) : {}; } catch (err) { merged = {}; }
+    if (!merged || typeof merged !== 'object' || Array.isArray(merged)) merged = {};
+    merged.base_url = baseUrlValue;
+    configJson = JSON.stringify(merged);
+  }
   const body = {
     connector_type_id: document.getElementById('binding-connector-type').value,
     name: document.getElementById('binding-name').value,
     scope: bindingScope,
     credential_id: credentialId,
-    config_json: document.getElementById('binding-config').value || null,
+    config_json: configJson,
     enabled: document.getElementById('binding-enabled').checked,
   };
   const endpointOverride = document.getElementById('binding-mcp-endpoint');
@@ -366,13 +389,16 @@ async function createBinding(e) {
   }
   const j = await apiFetch('/api/connector-bindings', { method: 'POST', body: JSON.stringify(body) });
   if (j.ok) {
-    showToast('Binding created', 'success');
+    // Test it straight away: a connection that was never tried is a chore later, and a wrong address shows now.
+    const tested = await apiFetch('/api/connector-bindings/' + j.data.binding.id + '/test', { method: 'POST' });
+    const worked = tested.ok && tested.data && tested.data.result && tested.data.result.success !== false;
+    showToast(worked ? 'Connection created and tested: it works' : 'Connection created, but its test failed: ' + (tested.error?.message || tested.data?.result?.error || 'see Test on the row'), worked ? 'success' : 'danger');
     closeModal('create-binding-modal');
     document.getElementById('create-binding-form').reset();
     toggleBindingCredentialMode();
-    location.reload();
+    setTimeout(function() { location.reload(); }, worked ? 600 : 2500);
   } else {
-    showToast(j.error?.message || 'Failed to create binding', 'danger');
+    showToast(j.error?.message || 'Failed to create the connection', 'danger');
   }
 }
 
@@ -422,16 +448,21 @@ async function submitEditBinding(e) {
 }
 
 async function deleteBinding(id) {
-  if (!confirm('Delete this binding? This cannot be undone.')) return;
+  const row = document.querySelector('tr[data-binding-id="' + id + '"] td');
+  const label = row ? row.textContent.trim() : '';
+  if (!await confirmDialog('Delete the connection' + (label ? ' "' + label + '"' : '') + '? Agents can no longer use it, and its recent-runs list goes with it (the audit log keeps the record of what ran). This cannot be undone.')) return;
   const j = await apiFetch('/api/connector-bindings/' + id, { method: 'DELETE' });
-  if (j.ok) { showToast('Deleted', 'success'); location.reload(); }
+  if (j.ok) { showToast('Connection deleted', 'success'); location.reload(); }
   else { showToast(j.error?.message || 'Failed', 'danger'); }
 }
 
 async function deleteConnectorType(id) {
-  if (!confirm('Delete this service and all its bindings? This cannot be undone.')) return;
+  const card = document.querySelector('[data-connector-type-delete="' + id + '"]');
+  const nameEl = card && card.closest('.connector-type-card') && card.closest('.connector-type-card').querySelector('.connector-type-name');
+  const svc = nameEl ? nameEl.textContent.trim() : '';
+  if (!await confirmDialog('Delete the service' + (svc ? ' "' + svc + '"' : '') + ' and all its connections? Their recent-runs lists go with them (the audit log keeps the record of what ran). This cannot be undone.')) return;
   const j = await apiFetch('/api/connector-types/' + id, { method: 'DELETE' });
-  if (j.ok) { showToast('Deleted', 'success'); location.reload(); }
+  if (j.ok) { showToast('Service deleted', 'success'); location.reload(); }
   else { showToast(j.error?.message || 'Failed', 'danger'); }
 }
 
@@ -442,13 +473,82 @@ async function testBinding(id) {
     const content = document.getElementById('test-result-content');
     if (r.success) {
       content.innerHTML = '<div class="alert alert-success">Connection successful!</div>';
+    } else if (r.untestable) {
+      content.innerHTML = '<div class="alert">Can\'t be tested. ' + escapeHtml(r.note || '') + '</div>';
+    } else if (r.error_code === 'TOOLS_CHANGED') {
+      content.innerHTML = '<div class="alert alert-warning">' + escapeHtml(r.error || '') + '</div>' + toolUpdateButton(id);
     } else {
       content.innerHTML = '<div class="alert alert-danger">Connection failed: ' + escapeHtml(r.error || 'Unknown error') + '</div>';
     }
     openModal('test-result-modal');
   } else {
-    showToast(j.error?.message || 'Failed to test binding', 'danger');
+    showToast(j.error?.message || 'Failed to test the connection', 'danger');
   }
+  reloadAfterTestResult = true;  // the row and the card show the stored result once the dialog is closed
+}
+
+let reloadAfterTestResult = false;
+
+function closeTestResult() {
+  closeModal('test-result-modal');
+  if (reloadAfterTestResult) { reloadAfterTestResult = false; location.reload(); }
+}
+
+function toolUpdateButton(bindingId) {
+  return '<p><button type="button" class="btn" data-tools-update-binding="' + escapeHtml(bindingId) + '">Update tool list</button></p>';
+}
+
+// Update tool list: read the server's list again through a connection of this service, show what changed,
+// and save only when the person says so.
+let pendingToolUpdate = null;
+
+function toolChangeLines(changes) {
+  const lines = [];
+  (changes.added || []).forEach(function(n) { lines.push('<li><strong>New:</strong> ' + escapeHtml(n) + '</li>'); });
+  (changes.removed || []).forEach(function(n) { lines.push('<li><strong>Gone:</strong> ' + escapeHtml(n) + '</li>'); });
+  (changes.changed || []).forEach(function(c) {
+    const bits = [];
+    if (c.inputs_added.length) bits.push('new input: ' + c.inputs_added.map(escapeHtml).join(', '));
+    if (c.inputs_removed.length) bits.push('input removed: ' + c.inputs_removed.map(escapeHtml).join(', '));
+    if (c.newly_required.length) bits.push('now required: ' + c.newly_required.map(escapeHtml).join(', '));
+    if (c.other) bits.push('its own description of itself changed');
+    lines.push('<li><strong>Changed:</strong> ' + escapeHtml(c.name) + ' (' + bits.join('; ') + ')</li>');
+  });
+  return lines.join('');
+}
+
+async function openToolUpdate(typeId, bindingId) {
+  const body = bindingId ? { binding_id: bindingId } : {};
+  const j = await apiFetch('/api/connector-types/' + encodeURIComponent(typeId) + '/tool-changes', { method: 'POST', body: JSON.stringify(body) });
+  if (!j.ok) { showToast(j.error?.message || 'Could not read the tool list', 'danger'); return; }
+  const d = j.data;
+  pendingToolUpdate = { typeId: typeId, bindingId: d.binding_id };
+  const content = document.getElementById('tool-update-content');
+  const save = document.getElementById('tool-update-save');
+  if (d.unchanged) {
+    content.innerHTML = '<div class="alert alert-success">The tool list is up to date (' + d.tool_count + ' tools).</div>';
+    save.style.display = 'none';
+  } else {
+    content.innerHTML = '<p>The service now lists these differences from what was saved. Nothing changes until you save.</p><ul>' + toolChangeLines(d.changes) + '</ul>';
+    save.style.display = '';
+  }
+  reloadAfterTestResult = false;
+  closeModal('test-result-modal');
+  openModal('tool-update-modal');
+}
+
+async function saveToolUpdate() {
+  if (!pendingToolUpdate) return;
+  const btn = document.getElementById('tool-update-save');
+  btn.disabled = true;
+  const j = await apiFetch('/api/connector-types/' + encodeURIComponent(pendingToolUpdate.typeId) + '/refresh', {
+    method: 'POST', body: JSON.stringify({ binding_id: pendingToolUpdate.bindingId })
+  });
+  btn.disabled = false;
+  if (!j.ok) { showToast(j.error?.message || 'Could not save the tool list', 'danger'); return; }
+  closeModal('tool-update-modal');
+  showToast('Tool list updated (' + j.data.tool_count + ' tools).', 'success');
+  setTimeout(function() { location.reload(); }, 600);
 }
 
 async function authorizeBindingOAuth(id) {
@@ -494,7 +594,7 @@ function continueOAuthAuthorization() {
   const success = getUrlParam('oauth_success');
   const error = getUrlParam('oauth_error');
   if (success) {
-    showToast('OAuth authorization completed. The binding is ready to test.', 'success');
+    showToast('OAuth authorization completed. The connection is ready to test.', 'success');
     setUrlParam('oauth_success', null);
   } else if (error) {
     showToast('OAuth authorization failed: ' + error, 'danger');
@@ -506,19 +606,32 @@ function renderHealthResult(data) {
   const total = data.total || 0;
   const passed = data.passed || 0;
   const failed = data.failed || 0;
+  const cannot = data.cannot_test || 0;
   const skipped = data.skipped || 0;
   const content = document.getElementById('test-result-content');
   if (!content) return;
   const rows = (data.results || []).map(function(r) {
-    const status = r.success
-      ? '<span class="badge badge-success">Passed</span>'
-      : '<span class="badge badge-danger">Failed</span>';
-    return '<tr><td>' + escapeHtml(r.binding_name || r.binding_id || '') + '</td><td><code>' + escapeHtml(r.scope || '') + '</code></td><td>' + status + '</td><td>' + escapeHtml(r.error || '') + '</td></tr>';
+    let status, detail;
+    if (r.state === 'cannot_test') {
+      status = '<span class="badge">Can\'t be tested</span>';
+      detail = escapeHtml(r.note || '');
+    } else if (r.state === 'passed' || (!r.state && r.success)) {
+      status = '<span class="badge badge-success">Passed</span>';
+      detail = '';
+    } else {
+      status = '<span class="badge badge-danger">Failed</span>';
+      detail = escapeHtml(r.error || '');
+      if (r.error_code === 'TOOLS_CHANGED') detail += ' ' + '<button type="button" class="btn btn-sm" data-tools-update-type="' + escapeHtml(r.connector_type_id || '') + '" data-tools-update-binding="' + escapeHtml(r.binding_id || '') + '">Update tool list</button>';
+    }
+    return '<tr><td>' + escapeHtml(r.binding_name || r.binding_id || '') + '</td><td>' + escapeHtml(r.scope_label || r.scope || '') + '</td><td>' + status + '</td><td>' + detail + '</td></tr>';
   }).join('');
+  const parts = [passed + ' passed', failed + ' failed'];
+  if (cannot) parts.push(cannot + ' can\'t be tested');
+  const noun = total === 1 ? 'connection' : 'connections';
   content.innerHTML =
-    '<div class="' + (failed ? 'alert alert-warning' : 'alert alert-success') + '">Checked ' + total + ' binding(s): ' + passed + ' passed, ' + failed + ' failed.</div>' +
-    (skipped ? '<p class="form-hint">' + skipped + ' more were not checked (at most ' + (data.limit || 25) + ' at a time). Use Test on a binding to check one.</p>' : '') +
-    (rows ? '<table><thead><tr><th>Binding</th><th>Scope</th><th>Status</th><th>Error</th></tr></thead><tbody>' + rows + '</tbody></table>' : '<div class="empty">No enabled bindings to check.</div>');
+    '<div class="' + (failed ? 'alert alert-warning' : 'alert alert-success') + '">Checked ' + total + ' ' + noun + ': ' + parts.join(', ') + '.</div>' +
+    (skipped ? '<p class="form-hint">' + skipped + ' more were not checked (at most ' + (data.limit || 25) + ' at a time). Use Test on a connection to check one.</p>' : '') +
+    (rows ? '<table><thead><tr><th>Connection</th><th>Who can use it</th><th>Result</th><th>Details</th></tr></thead><tbody>' + rows + '</tbody></table>' : '<div class="empty">No enabled connections to check.</div>');
   openModal('test-result-modal');
 }
 
@@ -562,6 +675,15 @@ function openNewBinding(typeId, defaultName) {
   const el = document.getElementById('binding-connector-type');
   if (el) {
     el.value = typeId;
+    // Show the fields this service needs (its address, an MCP endpoint) as plain fields, not JSON under Advanced.
+    const typeOption = el.selectedOptions[0];
+    const endpointGroup = document.getElementById('binding-mcp-endpoint-group');
+    if (endpointGroup) endpointGroup.style.display = typeOption && typeOption.dataset.providerType === 'mcp' ? '' : 'none';
+    const baseUrlGroup = document.getElementById('binding-base-url-group');
+    if (baseUrlGroup) {
+      baseUrlGroup.style.display = typeOption && typeOption.dataset.needsBaseUrl === '1' ? '' : 'none';
+      document.getElementById('binding-base-url').required = baseUrlGroup.style.display !== 'none';
+    }
   }
   updateBindingFormContext(defaultName);
   const guidance = parseBindingGuidance();
@@ -666,7 +788,7 @@ async function previewSpec(e) {
       '<h3 style="margin-top:0" class="sub-heading">Preview</h3>' +
       '<table style="width:100%">' +
         '<tr><td style="padding:4px 8px 4px 0;color:var(--muted)">Name</td><td>' + escapeHtml(preview.display_name || preview.connector_type_id || 'API') + '</td></tr>' +
-        '<tr><td style="padding:4px 8px 4px 0;color:var(--muted)">Connector ID</td><td><code>' + escapeHtml(preview.connector_type_id || '-') + '</code></td></tr>' +
+        '<tr><td style="padding:4px 8px 4px 0;color:var(--muted)">Service ID</td><td><code>' + escapeHtml(preview.connector_type_id || '-') + '</code></td></tr>' +
         '<tr><td style="padding:4px 8px 4px 0;color:var(--muted)">Auth</td><td>' + escapeHtml(preview.auth_type || 'none') + '</td></tr>' +
         '<tr><td style="padding:4px 8px 4px 0;color:var(--muted)">Servers</td><td style="word-break:break-word">' + (servers || '<em>none</em>') + '</td></tr>' +
         '<tr><td style="padding:4px 8px 4px 0;color:var(--muted)">Actions</td><td>' + escapeHtml(String(preview.operation_count || 0)) + '</td></tr>' +
@@ -799,7 +921,7 @@ async function addHttpConnector(e) {
 
   const j = await apiFetch('/api/connector-types/create-http', { method: 'POST', body: JSON.stringify(body) });
   if (!j.ok) {
-    showToast(j.error?.message || 'Failed to create connector', 'danger');
+    showToast(j.error?.message || 'Failed to add the service', 'danger');
     return;
   }
 
@@ -898,7 +1020,7 @@ function filterActions() {
   renderActions();
 }
 
-// "Ask a person first": a gate belongs to the service and the action, not to a binding.
+// "Ask a person first": a gate belongs to the service and the action, not to a connection.
 // A change is saved at once (and recorded with who and when), not with the Save button.
 function gateModal() { return document.getElementById('view-actions-modal'); }
 
@@ -1042,5 +1164,12 @@ document.addEventListener('click', function(ev) {
     return;
   }
   const typeDelete = ev.target.closest('[data-connector-type-delete]');
-  if (typeDelete) { ev.preventDefault(); deleteConnectorType(typeDelete.dataset.connectorTypeDelete); }
+  if (typeDelete) { ev.preventDefault(); deleteConnectorType(typeDelete.dataset.connectorTypeDelete); return; }
+  const toolUpdate = ev.target.closest('[data-tools-update-type],[data-tools-update-binding],[data-tools-update-card]');
+  if (toolUpdate) {
+    ev.preventDefault();
+    const typeId = toolUpdate.dataset.toolsUpdateType || toolUpdate.dataset.toolsUpdateCard
+      || (document.querySelector('[data-binding-id="' + (toolUpdate.dataset.toolsUpdateBinding || '') + '"]') || { dataset: {} }).dataset.connectorTypeId;
+    if (typeId) openToolUpdate(typeId, toolUpdate.dataset.toolsUpdateBinding || null);
+  }
 });

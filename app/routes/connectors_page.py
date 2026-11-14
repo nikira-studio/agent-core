@@ -56,7 +56,7 @@ def _binding_guidance_for_connector_type(
     ) and "base_url" not in config_fields:
         config_fields.append("base_url")
 
-    display_name = ct.get("display_name") or ct.get("id") or "Binding"
+    display_name = ct.get("display_name") or ct.get("id") or "Connection"
     setup = (adapter_entry or {}).get("setup") or {}
     auth_type = ct.get("auth_type") or "none"
     return {
@@ -72,20 +72,20 @@ def _binding_guidance_for_connector_type(
 
 
 def _binding_recipe_line(guidance: dict) -> str:
-    bits = [f"Suggested binding: {guidance.get('suggested_binding_name') or ''}".strip()]
+    bits = [f"Suggested name: {guidance.get('suggested_binding_name') or ''}".strip()]
     credential_fields = guidance.get("credential_fields") or []
     config_fields = guidance.get("config_fields") or []
     if credential_fields:
         bits.append("Credential JSON fields: " + ", ".join(credential_fields))
     if config_fields:
         bits.append("Config JSON fields: " + ", ".join(config_fields))
-    return " · ".join([b for b in bits if b and b != "Suggested binding: "])
+    return " · ".join([b for b in bits if b and b != "Suggested name: "])
 
 
 def _render_adapter_cards(adapter_entries: list[dict], ctx) -> str:
     adapter_cards = ""
     for adapter in adapter_entries:
-        source_label = "System" if adapter["source_kind"] == "system" else "Local"
+        source_label = "Built-in" if adapter.get("shipped") else "Added here"
         installed = bool(adapter.get("installed"))
         installable = bool(adapter.get("installable"))
         update_available = bool(adapter.get("update_available"))
@@ -97,7 +97,7 @@ def _render_adapter_cards(adapter_entries: list[dict], ctx) -> str:
         source_version = adapter.get("available_version") or adapter.get("version")
         installed_version = adapter.get("installed_version")
         guidance = {
-            "suggested_binding_name": adapter.get("display_name") or adapter.get("id") or "Binding",
+            "suggested_binding_name": adapter.get("display_name") or adapter.get("id") or "Connection",
             "credential_fields": credential_fields,
             "config_fields": required_config,
         }
@@ -109,7 +109,7 @@ def _render_adapter_cards(adapter_entries: list[dict], ctx) -> str:
         if credential_fields:
             req_bits.append("Credential JSON fields: " + ", ".join(credential_fields))
         if required_config:
-            req_bits.append("Binding config JSON: " + ", ".join(required_config))
+            req_bits.append("Connection config JSON: " + ", ".join(required_config))
         recipe_line = _binding_recipe_line(guidance)
         req_text = " · ".join(req_bits)
         req_hover = " | ".join(req_bits)
@@ -172,7 +172,7 @@ def _render_adapter_cards(adapter_entries: list[dict], ctx) -> str:
             )
 
         adapter_cards += f"""
-        <div class='connector-type-card' data-adapter-card data-search-text="{escape_html((adapter.get("display_name", "") or "") + " " + (adapter.get("description", "") or "") + " " + (source_version or "") + " " + (installed_version or "") + " " + adapter.get("source_kind", "") + " " + req_text)}">
+        <div class='connector-type-card' data-adapter-card data-search-text="{escape_html((adapter.get("display_name", "") or "") + " " + (adapter.get("description", "") or "") + " " + (source_version or "") + " " + (installed_version or "") + " " + source_label + " " + req_text)}">
           <div style="padding:0 0 0.5rem">
             <div class='connector-type-name' style="margin:0">{escape_html(adapter["display_name"])}</div>
             <div style="font-size:0.875em;color:var(--text-muted);margin-top:0.1rem">
@@ -219,7 +219,7 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
     }
 
     all_bindings = connector_service.list_bindings()
-    # Indexed once for the binding table below; see failing_actions_by_binding.
+    # Indexed once for the connection table below; see failing_actions_by_binding.
     failing_by_binding = connector_service.failing_actions_by_binding()
     visible_bindings = [b for b in all_bindings if enforcer.can_read(b["scope"])]
     connector_type_count = len(connector_types)
@@ -267,6 +267,9 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
     ]
 
     user_scope = f"user:{session['user_id']}"
+    scope_names = {user_scope: "Just me (personal)"}
+    scope_names.update({f"workspace:{p['id']}": (p.get("name") or p["id"]) for p in workspaces})
+    scope_names.update({f"agent:{a['id']}": (a.get("display_name") or a["id"]) for a in agents})
     workspace_scope_opts = "".join(
         f'<option value="workspace:{p["id"]}">{escape_html(p.get("name") or p["id"])}</option>'
         for p in workspaces
@@ -287,6 +290,7 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
             f'<option value="{ct["id"]}" '
             f'data-display-name="{escape_html(ct["display_name"])}" '
             f'data-provider-type="{escape_html(ct.get("provider_type") or "openapi")}" '
+            f'data-needs-base-url="{"1" if ((ct.get("backend_type") == "generic_http" or ct.get("provider_type") == "generic_http") and not ct.get("endpoint_url")) or "base_url" in (binding_guidance.get(ct["id"], {}).get("config_fields") or []) else "0"}" '
             f'data-guidance="{escape_html(json.dumps(binding_guidance.get(ct["id"], {})))}">'
             f'{escape_html(ct["display_name"])}'
             f'</option>'
@@ -307,9 +311,10 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
             binding_counts[b["connector_type_id"]] += 1
 
     # Per connector-type health, derived from the last stored test result on each
-    # visible enabled binding. Surfaced as a badge on the Service Catalog card and
+    # visible enabled connection. Surfaced as a badge on the Service Catalog card and
     # refreshed when the operator runs Check Health.
     ct_health = {}
+    ct_last_check = {}
     for ct in connector_types:
         enabled = [
             b
@@ -317,17 +322,25 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
             if b["connector_type_id"] == ct["id"] and b.get("enabled")
         ]
         failed = [b for b in enabled if b.get("last_error")]
+        cannot_test = [b for b in enabled if b.get("last_tested_at") and not b.get("last_error") and b.get("last_test_note")]
         tested_ok = [
-            b for b in enabled if b.get("last_tested_at") and not b.get("last_error")
+            b for b in enabled if b.get("last_tested_at") and not b.get("last_error") and not b.get("last_test_note")
         ]
+        checked = [b["last_tested_at"] for b in enabled if b.get("last_tested_at")]
+        ct_last_check[ct["id"]] = (
+            max(checked)[:10] if checked else None,
+            len(tested_ok), len(cannot_test), len(failed),
+        )
         if not enabled:
             ct_health[ct["id"]] = ("none", 0)
         elif failed:
             ct_health[ct["id"]] = ("issues", len(failed))
-        elif len(tested_ok) == len(enabled):
-            ct_health[ct["id"]] = ("healthy", len(enabled))
+        elif len(tested_ok) + len(cannot_test) < len(enabled):
+            ct_health[ct["id"]] = ("untested", len(enabled) - len(tested_ok) - len(cannot_test))
+        elif not tested_ok:
+            ct_health[ct["id"]] = ("cannot_test", len(cannot_test))  # nothing safe to try; not a problem
         else:
-            ct_health[ct["id"]] = ("untested", len(enabled) - len(tested_ok))
+            ct_health[ct["id"]] = ("healthy", len(enabled))
     for b in visible_bindings:
         ct = next(
             (c for c in connector_types if c["id"] == b["connector_type_id"]), None
@@ -346,7 +359,10 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
                 else ("Disabled" if not b.get("enabled") else "OK")
             )
         if b.get("last_error"):
-            status_text = f"Error: {str(b['last_error'])[:40]}"
+            status_text = f"Error: {str(b['last_error'])[:70]}"
+        elif b.get("last_tested_at") and b.get("last_test_note"):
+            status_cls = "status-neutral"
+            status_text = f"Can't be tested ({b['last_tested_at'][:10]})"
         elif b.get("last_tested_at"):
             status_text = f"OK ({b['last_tested_at'][:10]})"
 
@@ -375,15 +391,15 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
         <tr data-binding-id="{b["id"]}" data-connector-type-id="{escape_html(b.get("connector_type_id", ""))}" data-provider-type="{escape_html(ct.get("provider_type", "") if ct else "")}">
           <td style="{text_style}">{escape_html(b.get("name", ""))}</td>
           <td data-label="Service" style="{text_style}">{escape_html(ct.get("display_name", "") if ct else b.get("connector_type_id", ""))}</td>
-          <td data-label="Workspace" style="{text_style}"><code>{escape_html(b.get("scope", ""))}</code></td>
-          <td data-label="Status" class="{status_cls}" style="{text_style}">{escape_html(status_text)}</td>
+          <td data-label="Workspace" style="{text_style}" title="{escape_html(b.get("scope", ""))}">{escape_html(scope_names.get(b.get("scope", ""), b.get("scope", "")))}</td>
+          <td data-label="Status" class="{status_cls}" style="{text_style}"{(' title="' + escape_html(b["last_test_note"]) + '"') if (b.get("last_test_note") and not b.get("last_error")) else ((' title="' + escape_html(b["last_error"]) + '"') if b.get("last_error") else "")}>{escape_html(status_text)}</td>
           <td class='actions-cell'>
             {oauth_button}
             <button type='button' class='btn btn-sm btn-secondary' data-binding-edit="{escape_html(b["id"])}">Edit</button>
             <button type='button' class='btn btn-sm btn-secondary' data-binding-test="{escape_html(b["id"])}">Test</button>
             <details class='row-more'><summary class='btn btn-sm btn-secondary' title='History, delete'>More</summary><div class='row-more-list'>
               <button type='button' class='btn btn-sm btn-secondary' data-binding-history="{escape_html(b["id"])}">History</button>
-              <button type='button' class='btn btn-sm btn-danger icon-delete-btn' data-binding-delete="{escape_html(b["id"])}" title='Delete binding' aria-label='Delete binding'>{get_icon("delete")}</button>
+              <button type='button' class='btn btn-sm btn-danger icon-delete-btn' data-binding-delete="{escape_html(b["id"])}" title='Delete connection' aria-label='Delete connection'>{get_icon("delete")} Delete</button>
             </div></details>
           </td>
         </tr>"""
@@ -394,7 +410,7 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
         <tbody>{bindings_rows}</tbody></table>"""
     else:
         bindings_html = (
-            "<div class='empty'>No bindings yet. Use <strong>Add Binding</strong> on a service above to let agents use it.</div>"
+            "<div class='empty'>No connections yet. Use <strong>Add Connection</strong> on a service above to let agents use it.</div>"
         )
 
     execution_rows_html = ""
@@ -420,11 +436,11 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
     if execution_rows_html:
         executions_html = f"""
         <table class="stack-phone">
-          <thead><tr><th>Binding</th><th>Action</th><th>Result</th><th>When</th><th>Notes</th></tr></thead>
+          <thead><tr><th>Connection</th><th>Action</th><th>Result</th><th>When</th><th>Notes</th></tr></thead>
           <tbody>{execution_rows_html}</tbody>
         </table>"""
     else:
-        executions_html = "<div class='empty'>Nothing has run yet. Test a binding or run an action and it will appear here.</div>"
+        executions_html = "<div class='empty'>Nothing has run yet. Test a connection or run an action and it will appear here.</div>"
 
     ct_cards = ""
     for ct in connector_types:
@@ -434,14 +450,30 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
         )
         disabled_actions = ct.get("disabled_actions") or []
         provider_type = ct.get("provider_type") or "openapi"
-        if provider_type == "mcp":
-            type_chip = '<span style="display:inline-block;font-size:0.875em;font-weight:600;line-height:1;padding:3px 8px;border-radius:10px;background:#7c3aed;color:#fff;letter-spacing:0.03em;white-space:nowrap">MCP</span>'
-        elif provider_type == "generic_http" or ct.get("backend_type") == "generic_http":
-            type_chip = '<span style="display:inline-block;font-size:0.875em;font-weight:600;line-height:1;padding:3px 8px;border-radius:10px;background:rgba(80,200,120,0.15);color:var(--success);letter-spacing:0.03em;white-space:nowrap">HTTP</span>'
-        elif provider_type == "builtin":
-            type_chip = '<span style="display:inline-block;font-size:0.875em;font-weight:600;line-height:1;padding:3px 8px;border-radius:10px;background:#6b7280;color:#fff;letter-spacing:0.03em;white-space:nowrap">Built-in</span>'
+        # One origin chip with one meaning for every card: "Built-in" ships with Agent Core, "Added here" is everything
+        # else (an imported MCP server or API spec, a web service, an adapter someone added to this install).
+        adapter_for_chip = available_adapters.get(ct["id"])
+        if adapter_for_chip is not None:
+            built_in = bool(adapter_for_chip.get("shipped"))
         else:
-            type_chip = '<span style="display:inline-block;font-size:0.875em;font-weight:600;line-height:1;padding:3px 8px;border-radius:10px;background:#2563eb;color:#fff;letter-spacing:0.03em;white-space:nowrap">API</span>'
+            built_in = ct["id"] == "generic_http"  # the one service type Agent Core seeds itself; a web service someone added is "Added here"
+        chip_style = (
+            "display:inline-block;font-size:0.875em;font-weight:600;line-height:1;padding:3px 8px;border-radius:10px;"
+            "letter-spacing:0.03em;white-space:nowrap;"
+        )
+        if built_in:
+            type_chip = f'<span class="origin-chip" style="{chip_style}background:#6b7280;color:#fff">Built-in</span>'
+        else:
+            type_chip = f'<span class="origin-chip" style="{chip_style}border:1px solid var(--border);color:var(--muted)">Added here</span>'
+        # How it talks is detail, not a chip: it goes on the meta line.
+        if provider_type == "mcp":
+            transport_text = "MCP server"
+        elif provider_type == "openapi":
+            transport_text = "API spec"
+        elif ct.get("backend_type") in ("http", "generic_http") or provider_type == "generic_http":
+            transport_text = "HTTP"
+        else:
+            transport_text = ""
         action_count = len(supported_action_names)
         enabled_action_count = max(
             action_count
@@ -461,30 +493,49 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
             else ""
         )
         binding_count = binding_counts.get(ct["id"], 0)
-        binding_action_line = f"Bindings: {binding_count}"
+        binding_action_line = f"Connections: {binding_count}"
         if action_count:
             binding_action_line += (
                 f" &middot; {enabled_action_count}/{action_count} actions"
             )
+        if transport_text:
+            binding_action_line += f" &middot; {transport_text}"
         health_state, health_n = ct_health.get(ct["id"], ("none", 0))
         if health_state == "issues":
-            health_badge = f'<span class="badge badge-danger" title="Enabled bindings whose last health check failed">{health_n} issue(s)</span>'
+            health_badge = f'<span class="badge badge-danger" title="Enabled connections whose last health check failed">{health_n} issue(s)</span>'
         elif health_state == "healthy":
-            health_badge = '<span class="badge badge-success" title="All enabled bindings passed their last health check">Healthy</span>'
+            health_badge = '<span class="badge badge-success" title="All enabled connections passed their last health check">Healthy</span>'
         elif health_state == "untested":
-            health_badge = f'<span class="badge badge-warning" title="Enabled bindings not yet health-checked">{health_n} untested</span>'
+            health_badge = f'<span class="badge badge-warning" title="Enabled connections not yet health-checked">{health_n} untested</span>'
+        elif health_state == "cannot_test":
+            health_badge = '<span class="badge" title="This service has no read-only action to try. It is checked when it is next used.">Can\'t be tested</span>'
         else:
             health_badge = ""
+        last_check_line = ""
+        last_date, n_ok, n_skip, n_bad = ct_last_check.get(ct["id"], (None, 0, 0, 0))
+        if last_date:
+            bits = [f"{n_ok} passed"] if n_ok else []
+            if n_skip:
+                bits.append(f"{n_skip} can't be tested")
+            if n_bad:
+                bits.append(f"{n_bad} failed")
+            last_check_line = f'<div class="form-hint" style="margin:0" title="Result of the last health check">Last check {last_date}: {", ".join(bits)}</div>'
+
         adapter_entry = available_adapters.get(ct["id"])
         adapter_installed = bool(adapter_entry and adapter_entry.get("installed"))
         adapter_update_available = bool(
             adapter_entry and adapter_entry.get("update_available")
         )
+        # Every card here is installed by definition, so there is no "Installed" chip; only an update is worth saying.
         adapter_badges = ""
-        if adapter_installed:
-            adapter_badges = '<span class="badge badge-success">Installed</span>'
-            if adapter_update_available:
-                adapter_badges += ' <span class="badge badge-warning">Update available</span>'
+        if adapter_installed and adapter_update_available:
+            adapter_badges = '<span class="badge badge-warning">Update available</span>'
+        tools_btn = (
+            f"<button type='button' class='btn btn-sm btn-secondary' data-tools-update-card=\"{escape_html(ct['id'])}\" "
+            f"title='Read this service&#39;s tool list again and review what changed'>Update tool list</button>"
+            if ct.get("provider_type") == "mcp" and ctx.is_admin and binding_count
+            else ""
+        )
         update_btn = ""
         if adapter_update_available and ctx.is_admin:
             update_btn = (
@@ -499,12 +550,14 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
             <div class='connector-type-desc' style="margin-top:0.35rem">{escape_html(ct.get("description", "") or "")}</div>
           </div>
           <div class='connector-type-footer' style="margin-top:auto; display:flex; flex-direction:column; gap:8px; align-items:stretch;">
-            <div style="display:flex;align-items:center;gap:0.4rem;min-width:0;overflow:hidden;">{type_chip}{health_badge}{adapter_badges}</div>
+            <div style="display:flex;align-items:center;gap:0.4rem;min-width:0;flex-wrap:wrap;white-space:nowrap;">{type_chip}{health_badge}{adapter_badges}</div>
+            {last_check_line}
             <div class="connector-card-actions">
               {view_actions_btn}
-              <button type='button' class='btn btn-sm btn-secondary' data-newbinding-type-id="{escape_html(ct["id"])}" data-newbinding-name="{escape_html(ct["display_name"])}">Add Binding</button>
+              <button type='button' class='btn btn-sm btn-secondary' data-newbinding-type-id="{escape_html(ct["id"])}" data-newbinding-name="{escape_html(ct["display_name"])}">Add Connection</button>
               {update_btn}
-              <button type='button' class='btn btn-sm btn-danger icon-delete-btn' data-connector-type-delete="{escape_html(ct["id"])}" title='{ "Uninstall adapter" if adapter_installed else "Delete service" }' aria-label='{ "Uninstall adapter" if adapter_installed else "Delete service" }'>{get_icon("delete")}</button>
+              {tools_btn}
+              <button type='button' class='btn btn-sm btn-danger icon-delete-btn' data-connector-type-delete="{escape_html(ct["id"])}" title='{ "Uninstall adapter" if adapter_installed else "Delete service" }' aria-label='{ "Uninstall adapter" if adapter_installed else "Delete service" }'>{get_icon("delete")} Delete</button>
             </div>
           </div>
         </div>"""
@@ -512,13 +565,13 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
     quick_start_html = "" if visible_binding_count else """<div class="card">
       <div class="section-header">
         <h2>Getting a service working</h2>
-        <div class="section-note">Four steps, shown until the first binding exists.</div>
+        <div class="section-note">Four steps, shown until the first connection exists.</div>
       </div>
       <ol style="margin:0;padding-left:20px;line-height:1.6">
         <li>Add the service with the <strong>Add a service</strong> button above.</li>
         <li>Store its key or token on the <a href="/credentials">Credentials</a> page.</li>
-        <li>Create a binding: it says which scope may use the service, and with which credential.</li>
-        <li>Test the binding, then ask an agent to use it.</li>
+        <li>Create a connection: it says which workspace may use the service, and with which credential.</li>
+        <li>Test the connection, then ask an agent to use it.</li>
       </ol>
     </div>"""
 
@@ -527,7 +580,7 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
       <div>
         <h1>Services</h1>
         <p class="text-muted" style="max-width:760px;margin-top:8px">
-          The outside services agents can use. Add a service, then create a binding to say who may
+          The outside services agents can use. Add a service, then create a connection to say who may
           use it and with which credential.
         </p>
       </div>
@@ -543,7 +596,7 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
       </div>
     </div>
 
-    <p class="text-muted" id="services-summary" style="margin:0 0 12px">{connector_type_count} service{"" if connector_type_count == 1 else "s"}, {visible_binding_count} binding{"" if visible_binding_count == 1 else "s"}{(", <strong style='color:var(--danger)'>" + str(failed_binding_count) + " with errors</strong>") if failed_binding_count else ""}</p>
+    <p class="text-muted" id="services-summary" style="margin:0 0 12px">{connector_type_count} service{"" if connector_type_count == 1 else "s"}, {visible_binding_count} connection{"" if visible_binding_count == 1 else "s"}{(", <strong style='color:var(--danger)'>" + str(failed_binding_count) + " with errors</strong>") if failed_binding_count else ""}</p>
 
     {quick_start_html}
 
@@ -553,32 +606,29 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
           <h2>Service Catalog</h2>
           <div class="section-note">Built-in and added services, shared across this install. Ready-made ones are in the <a href="/connectors/directory">service directory</a> and <a href="/connectors/adapters">ready-made services</a>.</div>
         </div>
-        <button type="button" class="btn btn-sm btn-secondary" onclick="checkHealth(this)" title="Test every enabled binding now">Check Health</button>
+        <button type="button" class="btn btn-sm btn-secondary" onclick="checkHealth(this)" title="Test every enabled connection now">Check Health</button>
       </div>
       <div class="connector-types-grid">{ct_cards or "<div class='empty'>No services yet. Add one so agents can act in an outside system, or browse the <a href='/connectors/directory'>service directory</a>.</div>"}</div>
     </div>
 
     <div class="card" id="bindings">
       <div class="section-header">
-        <h2>Bindings</h2>
-        <div class="section-note">A binding says which workspace may use a service, and with which credential.</div>
+        <h2>Connections</h2>
+        <div class="section-note">A connection says which workspace may use a service, and with which credential.</div>
       </div>
       <div id="bindings-list">{bindings_html}</div>
     </div>
 
-    <details class="card" id="executions">
-      <summary class="section-header" style="cursor:pointer">
-        <h2 style="display:inline">Recent runs ({len(visible_executions)})</h2>
-        <span class="section-note" style="margin-left:8px">What agents and tests have run through bindings. Click to open.</span>
-      </summary>
+    <details class="card fold-card" id="executions">
+      <summary><span class="fold-title">Recent runs ({len(visible_executions)})</span><span class="fold-hint">What agents and tests have run through connections</span></summary>
       <div id="executions-list" style="margin-top:12px">{executions_html}</div>
     </details>
 
-    <!-- Create Binding Modal -->
+    <!-- Create Connection Modal -->
     <div class="modal-overlay" id="create-binding-modal" style="display:none">
       <div class="modal">
-        <h2>New Binding</h2>
-        <p class="form-hint" style="margin-bottom:12px">A binding lets agents in one workspace use a service with one credential.</p>
+        <h2>New Connection</h2>
+        <p class="form-hint" style="margin-bottom:12px">A connection lets agents in one workspace use a service with one credential.</p>
         <form id="create-binding-form" onsubmit="createBinding(event)">
           <div class="form-group">
             <label>Service *</label>
@@ -597,7 +647,7 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
           <div class="form-group">
             <label>Name *</label>
             <input type="text" id="binding-name" placeholder="e.g. Workspace API" autocomplete="off" required>
-            <div class="form-hint">A label for this binding, such as the account or environment it covers.</div>
+            <div class="form-hint">A label for this connection, such as the account or environment it covers.</div>
           </div>
           <div class="form-group">
             <label>Who may use it *</label>
@@ -605,7 +655,7 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
               <option value="">Select a workspace...</option>
               {scope_options}
             </select>
-            <div class="form-hint">Only agents that can reach this workspace may use the binding.</div>
+            <div class="form-hint">Only agents that can reach this workspace may use the connection.</div>
           </div>
           <div class="form-group">
             <label>Credential</label>
@@ -632,6 +682,11 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
             </div>
             <div id="binding-new-credential-editor"></div>
           </div>
+          <div class="form-group" id="binding-base-url-group" style="display:none">
+            <label for="binding-base-url">Service address *</label>
+            <input type="url" id="binding-base-url" placeholder="https://api.example.com" autocomplete="off">
+            <div class="form-hint">The address Core calls for this service. It is tested as soon as the connection is created.</div>
+          </div>
           <details class="access-details">
             <summary>Advanced</summary>
             <div class="form-group">
@@ -642,7 +697,7 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
             <div class="form-group" id="binding-mcp-endpoint-group" style="display:none">
               <label>Different MCP server address</label>
               <input type="url" id="binding-mcp-endpoint" placeholder="https://instance.example/mcp" autocomplete="off">
-              <div class="form-hint">Use another server for this binding only. It must offer the same tools, or add it as a separate service.</div>
+              <div class="form-hint">Use another server for this connection only. It must offer the same tools, or add it as a separate service.</div>
             </div>
           </details>
           <div class="form-group">
@@ -650,29 +705,29 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
               <input type="checkbox" id="binding-enabled" checked> Enabled <span class="form-hint">(untick to pause it without deleting)</span>
             </label>
           </div>
-          <button type="submit" class="btn btn-primary">Create Binding</button>
+          <button type="submit" class="btn btn-primary">Create Connection</button>
           <button type="button" class="btn btn-secondary" onclick="closeModal('create-binding-modal')">Cancel</button>
         </form>
       </div>
     </div>
 
-    <!-- Edit Binding Modal -->
+    <!-- Edit Connection Modal -->
     <div class="modal-overlay" id="edit-binding-modal" style="display:none">
       <div class="modal">
-        <h2>Edit Binding</h2>
+        <h2>Edit Connection</h2>
         <form id="edit-binding-form" onsubmit="submitEditBinding(event)">
           <input type="hidden" id="edit-binding-id">
           <div class="form-group">
             <label>Name</label>
             <input type="text" id="edit-binding-name" autocomplete="off">
-            <div class="form-hint">A label for this binding, such as the account or environment it covers.</div>
+            <div class="form-hint">A label for this connection, such as the account or environment it covers.</div>
           </div>
           <div class="form-group">
             <label>Who may use it</label>
             <select id="edit-binding-scope">
               {scope_options}
             </select>
-            <div class="form-hint">Only agents that can reach this workspace may use the binding.</div>
+            <div class="form-hint">Only agents that can reach this workspace may use the connection.</div>
           </div>
           <div class="form-group">
             <label>Credential</label>
@@ -787,7 +842,7 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
               <input type="text" id="import-mcp-auth-value" placeholder="Value (e.g. Bearer YOUR_KEY)" autocomplete="off">
             </div>
             <div class="form-hint">
-              Used only during import and refresh — not stored in the binding. For standard Bearer auth use header <code>Authorization</code> and value <code>Bearer YOUR_KEY</code>. For custom headers like Context7, use <code>CONTEXT7_API_KEY</code> and the raw key as the value.
+              Used only during import and refresh — not stored in the connection. For standard Bearer auth use header <code>Authorization</code> and value <code>Bearer YOUR_KEY</code>. For custom headers like Context7, use <code>CONTEXT7_API_KEY</code> and the raw key as the value.
             </div>
           </div>
           <button type="submit" class="btn btn-primary">Import MCP Server</button>
@@ -844,14 +899,14 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
 
     <!-- View Actions Modal -->
     <div class="modal-overlay" id="view-actions-modal" style="display:none" data-admin="{'1' if ctx.is_admin else '0'}" data-agents="{escape_html(json.dumps([{'id': a['id'], 'name': a.get('display_name') or a['id']} for a in agents if a.get('is_active')]) if ctx.is_admin else '[]')}">
-      <div class="modal" style="max-width:700px">
+      <div class="modal modal-detail">
         <h2 id="view-actions-title">Actions</h2>
         <div style="display:flex;gap:8px;margin-bottom:12px">
           <input type="text" id="view-actions-filter" placeholder="Filter actions..." oninput="filterActions()" style="flex:1" autocomplete="off">
           <button type="button" class="btn btn-sm btn-secondary" onclick="bulkSetActions(true)">Select All</button>
           <button type="button" class="btn btn-sm btn-secondary" onclick="bulkSetActions(false)">Clear All</button>
         </div>
-        <div id="view-actions-content" style="max-height:400px;overflow-y:auto"></div>
+        <div id="view-actions-content"></div>
         <div style="margin-top:12px;display:flex;gap:8px;justify-content:flex-end">
           <button type="button" class="btn btn-primary" onclick="saveActionSettings()">Save Changes</button>
           <button type="button" class="btn btn-secondary" onclick="closeModal('view-actions-modal')">Close</button>
@@ -861,16 +916,28 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
 
     <!-- Test Result Modal -->
     <div class="modal-overlay" id="test-result-modal" style="display:none">
-      <div class="modal">
+      <div class="modal modal-detail">
         <h2>Connection Test Result</h2>
         <div id="test-result-content"></div>
-        <button type="button" class="btn" onclick="closeModal('test-result-modal')">Close</button>
+        <button type="button" class="btn" onclick="closeTestResult()">Close</button>
+      </div>
+    </div>
+
+    <!-- Update tool list: what changed on the server, saved only when you say so -->
+    <div class="modal-overlay" id="tool-update-modal" style="display:none">
+      <div class="modal modal-detail">
+        <h2>Update tool list</h2>
+        <div id="tool-update-content"></div>
+        <div class="modal-actions">
+          <button type="button" class="btn" id="tool-update-save" onclick="saveToolUpdate()">Save the new tool list</button>
+          <button type="button" class="btn btn-secondary" onclick="closeModal('tool-update-modal')">Close</button>
+        </div>
       </div>
     </div>
 
     <!-- OAuth Redirect Modal -->
     <div class="modal-overlay" id="oauth-redirect-modal" style="display:none">
-      <div class="modal" style="max-width:760px">
+      <div class="modal modal-wide">
         <h2>Google OAuth Redirect URI</h2>
         <div class="form-hint" style="margin-bottom:8px">
           Add this exact URL to the Google OAuth client’s Authorized redirect URIs.
@@ -886,9 +953,9 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
       </div>
     </div>
 
-    <!-- Binding Executions Modal -->
+    <!-- Connection Executions Modal -->
     <div class="modal-overlay" id="executions-modal" style="display:none">
-      <div class="modal" style="max-width:700px">
+      <div class="modal modal-detail">
         <h2>Execution History</h2>
         <div id="executions-content"></div>
         <button type="button" class="btn" onclick="closeModal('executions-modal')">Close</button>
@@ -898,7 +965,7 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
 
     extra_js = (
         '<script src="/static/js/adapter-actions.js?v=20260902"></script>'
-        '<script src="/static/js/connectors.js?v=20260902"></script>'
+        '<script src="/static/js/connectors.js?v=20261113a"></script>'
     )
     return render_page("Services", body, "/connectors", extra_js, session=session)
 
@@ -930,7 +997,7 @@ async def connectors_adapters_page(
       <div class="section-header" style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px">
         <div>
           <h2>Ready-made services</h2>
-          <div class="section-note">Install one into the service catalog, then add a binding for it like any other service.</div>
+          <div class="section-note">Install one into the service catalog, then add a connection for it like any other service.</div>
         </div>
         <div class="section-note">{len(adapter_entries)} available</div>
       </div>
@@ -982,7 +1049,7 @@ def connectors_help_page(request: Request, session: dict = Depends(require_auth)
       <p>Once you import a spec, the workflow is:</p>
       <ol>
         <li><strong>Create a credential</strong> — store your API key or token (a personal access token, for example)</li>
-        <li><strong>Create a binding</strong> — link the service to your credential and choose a workspace</li>
+        <li><strong>Create a connection</strong> — link the service to your credential and choose a workspace</li>
         <li><strong>Test the connection</strong> — click Test to verify the credential works</li>
         <li><strong>Use it</strong> — AI agents discover available actions via MCP and execute them through <code>connectors_run</code></li>
       </ol>
@@ -1109,7 +1176,7 @@ def connectors_directory_page(
               <input type="text" id="directory-import-mcp-auth-header" placeholder="Header name" autocomplete="off">
               <input type="text" id="directory-import-mcp-auth-value" placeholder="Value" autocomplete="off">
             </div>
-            <div class="form-hint">Used only during import and refresh — not stored in the binding.</div>
+            <div class="form-hint">Used only during import and refresh — not stored in the connection.</div>
           </div>
           <div class="modal-actions">
             <button type="submit" class="btn">Import</button>
@@ -1120,7 +1187,7 @@ def connectors_directory_page(
     </div>
 
     <div class="modal-overlay" id="dir-detail-modal" style="display:none">
-      <div class="modal" style="max-width:650px">
+      <div class="modal modal-detail">
         <div id="dir-detail-content"></div>
         <div class="modal-actions" id="dir-detail-actions"></div>
       </div>

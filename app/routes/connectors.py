@@ -64,6 +64,34 @@ class CreateHttpConnectorRequest(BaseModel):
 class RefreshMcpServerRequest(BaseModel):
     timeout_ms: int = 60000
     headers_json: Optional[str] = None
+    # Read the tool list through this connection's own credential instead of typed-in headers.
+    binding_id: Optional[str] = None
+
+
+def _scope_label(scope: str, ctx) -> str:
+    """Who can use something, in plain words: You, a person's name, an agent's name or a workspace's name."""
+    kind, _, ident = (scope or "").partition(":")
+    try:
+        if kind == "user":
+            if ident == ctx.user_id:
+                return "You"
+            from app.services.auth_service import get_user_by_id
+
+            user = get_user_by_id(ident)
+            return (user or {}).get("display_name") or ident
+        if kind == "agent":
+            from app.services import agent_service
+
+            agent = agent_service.get_agent_by_id(ident)
+            return (agent or {}).get("display_name") or ident
+        if kind == "workspace":
+            from app.services import workspace_service
+
+            workspace = workspace_service.get_workspace_by_id(ident)
+            return (workspace or {}).get("name") or ident
+    except Exception:
+        pass
+    return ident or scope
 
 
 class CreateBindingRequest(BaseModel):
@@ -139,6 +167,23 @@ def _private_address_problem(config_json, endpoint_override) -> str | None:
     return None
 
 
+def _missing_base_url(ct: dict, config_json) -> str | None:
+    """A generic web service cannot be called without an address; say so when it is saved, not at Test."""
+    if ct.get("backend_type") != "generic_http" and ct.get("provider_type") != "generic_http":
+        return None
+    if ct.get("endpoint_url"):
+        return None
+    try:
+        config = json.loads(config_json) if config_json else {}
+    except ValueError:
+        return "The extra settings are not valid JSON"
+    if isinstance(config, dict) and any(
+        isinstance(config.get(key), str) and config[key].strip() for key in ("base_url", "test_url")
+    ):
+        return None
+    return "This service needs a Base URL: the address it is reached at, such as https://api.example.com"
+
+
 @router.get("")
 def list_bindings(
     scope: Optional[str] = None,
@@ -189,6 +234,9 @@ def create_binding(
             return error_response(
                 "SCOPE_DENIED", "Access denied to linked credential", 403
             )
+    missing = _missing_base_url(ct, body.config_json)
+    if missing:
+        return error_response("BASE_URL_REQUIRED", missing, 400)
     problem = _private_address_problem(body.config_json, body.endpoint_url_override)
     if problem:
         return error_response("PRIVATE_ADDRESS", problem, 400)
@@ -229,10 +277,10 @@ async def start_binding_oauth(
 ):
     binding = connector_service.get_binding(binding_id)
     if not binding:
-        return error_response("NOT_FOUND", "Binding not found", 404)
+        return error_response("NOT_FOUND", "Connection not found", 404)
     enforcer = ctx.connector_enforcer()
     if not enforcer.can_write(binding["scope"]):
-        return error_response("SCOPE_DENIED", "Access denied to this binding", 403)
+        return error_response("SCOPE_DENIED", "Access denied to this connection", 403)
     redirect_uri = f"{public_base_url(request)}/api/connector-bindings/oauth/callback"
     try:
         authorization_url = await asyncio.to_thread(
@@ -276,10 +324,10 @@ def get_binding(
 ):
     binding = connector_service.get_binding(binding_id)
     if not binding:
-        return error_response("NOT_FOUND", "Binding not found", 404)
+        return error_response("NOT_FOUND", "Connection not found", 404)
     enforcer = ctx.connector_enforcer()
     if not enforcer.can_read(binding["scope"]):
-        return error_response("SCOPE_DENIED", "Access denied to this binding", 403)
+        return error_response("SCOPE_DENIED", "Access denied to this connection", 403)
     return success_response({"binding": binding})
 
 
@@ -291,10 +339,10 @@ def update_binding(
 ):
     binding = connector_service.get_binding(binding_id)
     if not binding:
-        return error_response("NOT_FOUND", "Binding not found", 404)
+        return error_response("NOT_FOUND", "Connection not found", 404)
     enforcer = ctx.connector_enforcer()
     if not enforcer.can_write(binding["scope"]):
-        return error_response("SCOPE_DENIED", "Access denied to this binding", 403)
+        return error_response("SCOPE_DENIED", "Access denied to this connection", 403)
     if body.scope and not enforcer.can_write(body.scope):
         return error_response("SCOPE_DENIED", "Access denied to new scope", 403)
     if body.credential_id:
@@ -322,6 +370,10 @@ def update_binding(
             update_fields["endpoint_url_override"] = None
         elif body.endpoint_url_override is not None:
             update_fields["endpoint_url_override"] = body.endpoint_url_override
+        if body.config_json is not None:
+            missing = _missing_base_url(connector_service.get_connector_type(binding["connector_type_id"]) or {}, body.config_json)
+            if missing:
+                return error_response("BASE_URL_REQUIRED", missing, 400)
         problem = _private_address_problem(body.config_json, update_fields.get("endpoint_url_override"))
         if problem:
             return error_response("PRIVATE_ADDRESS", problem, 400)
@@ -340,10 +392,10 @@ def delete_binding(
 ):
     binding = connector_service.get_binding(binding_id)
     if not binding:
-        return error_response("NOT_FOUND", "Binding not found", 404)
+        return error_response("NOT_FOUND", "Connection not found", 404)
     enforcer = ctx.connector_enforcer()
     if not enforcer.can_write(binding["scope"]):
-        return error_response("SCOPE_DENIED", "Access denied to this binding", 403)
+        return error_response("SCOPE_DENIED", "Access denied to this connection", 403)
     connector_service.delete_binding(binding_id)
     audit_service.write_event(
         actor_type=ctx.actor_type,
@@ -353,7 +405,7 @@ def delete_binding(
         resource_id=binding_id,
         result="success",
     )
-    return success_response({"message": "Binding deleted"})
+    return success_response({"message": "Connection deleted"})
 
 
 @router.post("/{binding_id}/test")
@@ -365,10 +417,10 @@ async def test_binding(
         return error_response("CAPABILITY_DENIED", "This operation requires the connectors_execute capability", 403)
     binding = connector_service.get_binding(binding_id)
     if not binding:
-        return error_response("NOT_FOUND", "Binding not found", 404)
+        return error_response("NOT_FOUND", "Connection not found", 404)
     enforcer = ctx.connector_enforcer()
     if not enforcer.can_read(binding["scope"]):
-        return error_response("SCOPE_DENIED", "Access denied to this binding", 403)
+        return error_response("SCOPE_DENIED", "Access denied to this connection", 403)
     result = await asyncio.to_thread(connector_service.test_binding, binding_id)
     audit_service.write_event(
         actor_type=ctx.actor_type,
@@ -376,7 +428,7 @@ async def test_binding(
         action="connector_binding_tested",
         resource_type="connector_binding",
         resource_id=binding_id,
-        result=result.get("success") and "success" or "failure",
+        result="success" if (result.get("success") or result.get("untestable")) else "failure",
     )
     return success_response({"result": result})
 
@@ -427,10 +479,10 @@ def list_binding_executions(
 ):
     binding = connector_service.get_binding(binding_id)
     if not binding:
-        return error_response("NOT_FOUND", "Binding not found", 404)
+        return error_response("NOT_FOUND", "Connection not found", 404)
     enforcer = ctx.connector_enforcer()
     if not enforcer.can_read(binding["scope"]):
-        return error_response("SCOPE_DENIED", "Access denied to this binding", 403)
+        return error_response("SCOPE_DENIED", "Access denied to this connection", 403)
     limit = max(1, min(limit, 200))
     offset = max(0, offset)
     executions = connector_service.list_executions(
@@ -451,10 +503,10 @@ async def get_binding_tools(
 ):
     binding = connector_service.get_binding(binding_id)
     if not binding:
-        return error_response("NOT_FOUND", "Binding not found", 404)
+        return error_response("NOT_FOUND", "Connection not found", 404)
     enforcer = ctx.connector_enforcer()
     if not enforcer.can_read(binding["scope"]):
-        return error_response("SCOPE_DENIED", "Access denied to this binding", 403)
+        return error_response("SCOPE_DENIED", "Access denied to this connection", 403)
 
     connector_type = connector_service.get_connector_type(binding["connector_type_id"])
     if not connector_type:
@@ -538,20 +590,25 @@ async def connector_health_check(
             action="connector_binding_tested",
             resource_type="connector_binding",
             resource_id=binding["id"],
-            result=result.get("success") and "success" or "failure",
+            result=(result.get("success") and "success") or ("success" if result.get("untestable") else "failure"),
             details={
                 "connector_type_id": binding["connector_type_id"],
                 "batch": True,
             },
         )
+        untestable = bool(result.get("untestable"))
         results.append(
             {
                 "binding_id": binding["id"],
                 "binding_name": binding["name"],
                 "connector_type_id": binding["connector_type_id"],
                 "scope": binding["scope"],
+                "scope_label": _scope_label(binding["scope"], ctx),
+                # Three outcomes: passed, failed, can't be tested (nothing read-only to try; not a problem).
+                "state": "cannot_test" if untestable else ("passed" if result.get("success") else "failed"),
                 "success": bool(result.get("success")),
-                "error": result.get("error"),
+                "error": None if untestable else result.get("error"),
+                "note": result.get("note"),
                 "error_code": result.get("error_code"),
             }
         )
@@ -560,8 +617,9 @@ async def connector_health_check(
         {
             "results": results,
             "total": len(results),
-            "passed": len([r for r in results if r["success"]]),
-            "failed": len([r for r in results if not r["success"]]),
+            "passed": len([r for r in results if r["state"] == "passed"]),
+            "failed": len([r for r in results if r["state"] == "failed"]),
+            "cannot_test": len([r for r in results if r["state"] == "cannot_test"]),
             "skipped": len(all_visible) - len(visible),
             "limit": HEALTH_CHECK_LIMIT,
         }
@@ -612,7 +670,7 @@ def update_connector_type_actions(
         if action not in valid_actions:
             return error_response(
                 "INVALID_ACTION",
-                f"Unknown action for this connector type: {action}",
+                f"Unknown action for this service: {action}",
                 400,
             )
         disabled_actions.append(action)
@@ -621,7 +679,7 @@ def update_connector_type_actions(
     overrides = {}
     for action, policy in body.capability_policy_overrides.items():
         if action not in valid_actions:
-            return error_response("INVALID_ACTION", f"Unknown action for this connector type: {action}", 400)
+            return error_response("INVALID_ACTION", f"Unknown action for this service: {action}", 400)
         if not isinstance(policy, dict) or not set(policy).issubset(allowed_policy_fields):
             return error_response("INVALID_POLICY", "Capability policy contains unsupported fields", 400)
         overrides[action] = policy
@@ -1090,7 +1148,7 @@ def create_http_connector(
     ctx: EffectiveAuthority = Depends(get_request_context),
 ):
     if not ctx.is_admin:
-        return error_response("FORBIDDEN", "Admin access required to create connectors", 403)
+        return error_response("FORBIDDEN", "Admin access required to add services", 403)
 
     allowed_auth_types = {"bearer", "header", "query", "none"}
     if body.auth_type not in allowed_auth_types:
@@ -1136,12 +1194,12 @@ def create_http_connector(
     connector_type_id = openapi_service.generate_connector_id(body.display_name)
     existing = connector_service.get_connector_type(connector_type_id)
     if existing:
-        return error_response("CONFLICT", f"Connector '{body.display_name}' already exists", 409)
+        return error_response("CONFLICT", f"A service named '{body.display_name}' already exists", 409)
 
     ct = connector_service.create_connector_type(
         connector_type_id=connector_type_id,
         display_name=body.display_name,
-        description=f"Generic HTTP connector for {body.base_url}",
+        description=f"A web service at {body.base_url}",
         provider_type="builtin",
         auth_type=body.auth_type if body.auth_type != "none" else "none",
         supported_actions=[],
@@ -1277,6 +1335,78 @@ async def import_mcp_server(
     )
 
 
+def _stored_mcp_tools(ct: dict) -> list:
+    try:
+        snapshot = json.loads(ct.get("tool_snapshot_json") or "{}")
+    except (TypeError, ValueError):
+        return []
+    tools = snapshot.get("tools") if isinstance(snapshot, dict) else None
+    return [t for t in (tools or []) if isinstance(t, dict)]
+
+
+async def _discover_tools_for_refresh(ct: dict, body: "RefreshMcpServerRequest"):
+    """Read an MCP service's tool list: through a connection's own credential when binding_id is given,
+    otherwise with the headers typed in (or none)."""
+    timeout_ms = int(body.timeout_ms or 60000)
+    endpoint_url = ct.get("endpoint_url")
+    headers = None
+    if body.binding_id:
+        binding = connector_service.get_binding_with_credential(body.binding_id)
+        if not binding or binding.get("connector_type_id") != ct["id"]:
+            raise ValueError("That connection does not belong to this service")
+        endpoint_url, headers, timeout_ms = connector_service._mcp_binding_request_config(
+            binding, ct, binding.get("credential")
+        )
+    elif body.headers_json:
+        try:
+            parsed_headers = json.loads(body.headers_json)
+        except json.JSONDecodeError:
+            raise ValueError("headers_json must be valid JSON")
+        if isinstance(parsed_headers, dict):
+            headers = {str(k): str(v) for k, v in parsed_headers.items() if str(k).strip()}
+    return await asyncio.to_thread(
+        mcp_provider_service.discover_mcp_server, endpoint_url, timeout_ms=timeout_ms, headers=headers
+    )
+
+
+@connector_types_router.post("/{connector_type_id}/tool-changes")
+async def preview_mcp_tool_changes(
+    connector_type_id: str,
+    body: RefreshMcpServerRequest,
+    ctx: EffectiveAuthority = Depends(get_request_context),
+):
+    """What would change if this MCP service's tool list were read again. Saves nothing."""
+    if not ctx.is_admin:
+        return error_response("FORBIDDEN", "Admin access required", 403)
+    ct = connector_service.get_connector_type(connector_type_id)
+    if not ct:
+        return error_response("NOT_FOUND", "Service not found", 404)
+    if ct.get("provider_type") != "mcp":
+        return error_response("INVALID_REQUEST", "This service is not an MCP server", 400)
+    if not body.binding_id and not body.headers_json:
+        # Default to a connection of this service, so its own credential does the reading.
+        candidates = connector_service.list_bindings(connector_type_id=connector_type_id, enabled=True)
+        candidates.sort(key=lambda b: 0 if b.get("credential_id") else 1)
+        if candidates:
+            body.binding_id = candidates[0]["id"]
+    try:
+        discovery = await _discover_tools_for_refresh(ct, body)
+    except ValueError as e:
+        return error_response("REFRESH_FAILED", str(e), 400)
+    except Exception as e:
+        return error_response("REFRESH_FAILED", f"Unexpected error: {e}", 500)
+    changes = connector_service.mcp_tool_changes(_stored_mcp_tools(ct), discovery.tools)
+    return success_response(
+        {
+            "changes": changes,
+            "summary": connector_service.describe_tool_changes(changes),
+            "unchanged": not (changes["added"] or changes["removed"] or changes["changed"]),
+            "tool_count": len(discovery.tools),
+            "binding_id": body.binding_id,
+        }
+    )
+
+
 @connector_types_router.post("/{connector_type_id}/refresh")
 async def refresh_mcp_connector_type(
     connector_type_id: str,
@@ -1289,34 +1419,20 @@ async def refresh_mcp_connector_type(
     if not ct:
         return error_response("NOT_FOUND", "Service not found", 404)
     if ct.get("provider_type") != "mcp":
-        return error_response("INVALID_REQUEST", "Connector type is not an MCP provider", 400)
+        return error_response("INVALID_REQUEST", "This service is not an MCP server", 400)
     endpoint_url = ct.get("endpoint_url")
     if not endpoint_url:
-        return error_response("INVALID_REQUEST", "MCP connector has no endpoint_url", 400)
-
-    timeout_ms = int(body.timeout_ms or 60000)
-    headers = None
-    if body.headers_json:
-        try:
-            parsed_headers = json.loads(body.headers_json)
-            if isinstance(parsed_headers, dict):
-                headers = {
-                    str(k): str(v) for k, v in parsed_headers.items() if str(k).strip()
-                }
-        except json.JSONDecodeError:
-            return error_response("INVALID_REQUEST", "headers_json must be valid JSON", 400)
+        return error_response("INVALID_REQUEST", "This MCP service has no address", 400)
 
     try:
-        discovery = await asyncio.to_thread(
-            mcp_provider_service.discover_mcp_server,
-            endpoint_url,
-            timeout_ms=timeout_ms,
-            headers=headers,
-        )
+        discovery = await _discover_tools_for_refresh(ct, body)
     except ValueError as e:
         return error_response("REFRESH_FAILED", str(e), 400)
     except Exception as e:
         return error_response("REFRESH_FAILED", f"Unexpected error: {e}", 500)
+    previous = connector_service.mcp_tool_changes(
+        _stored_mcp_tools(ct), discovery.tools
+    )
 
     tool_snapshot = json.dumps(
         {
@@ -1347,9 +1463,13 @@ async def refresh_mcp_connector_type(
         operations_json=None,
     )
     if not ok:
-        return error_response("REFRESH_FAILED", "Unable to update MCP connector type", 500)
+        return error_response("REFRESH_FAILED", "Unable to update this MCP service", 500)
 
     refreshed = connector_service.get_connector_type(connector_type_id)
+    # Connections that were flagged only because the stored tool list was out of date are fine now.
+    for stale in connector_service.list_bindings(connector_type_id=connector_type_id):
+        if str(stale.get("last_error") or "").startswith(connector_service.TOOLS_CHANGED_MESSAGE):
+            connector_service.update_binding(stale["id"], last_error=None)
     audit_service.write_event(
         actor_type=ctx.actor_type,
         actor_id=ctx.actor_id,
@@ -1360,6 +1480,9 @@ async def refresh_mcp_connector_type(
         details={
             "provider_type": "mcp",
             "tool_count": len(discovery.tools),
+            "tools_added": previous["added"],
+            "tools_removed": previous["removed"],
+            "tools_changed": [c["name"] for c in previous["changed"]],
             "endpoint_url": endpoint_url,
             "transport_type": refreshed.get("transport_type") if refreshed else ct.get("transport_type"),
         },
@@ -1415,4 +1538,4 @@ async def delete_connector_type(
         resource_id=connector_type_id,
         result="success",
     )
-    return success_response({"message": "Connector type deleted"})
+    return success_response({"message": "Service deleted"})

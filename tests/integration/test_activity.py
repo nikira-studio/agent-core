@@ -148,27 +148,15 @@ def test_activity_requires_agent(test_client, admin_token):
     assert r.status_code == 400
 
 
-def test_admin_can_create_activity_for_assigned_agent(test_client, admin_token):
-    create_agent = test_client.post(
-        "/api/agents",
-        headers={"Authorization": f"Bearer {admin_token}"},
-        json={"id": "dashboardagent", "display_name": "Dashboard Agent"},
-    )
-    assert create_agent.status_code == 201, f"agent create failed: {create_agent.json()}"
-
+def test_an_admin_can_no_longer_assign_a_task_to_an_agent(test_client, admin_token):
     r = test_client.post(
         "/api/activity",
         headers={"Authorization": f"Bearer {admin_token}"},
-        json={
-            "assigned_agent_id": "dashboardagent",
-            "task_description": "Dashboard-created activity",
-            "memory_scope": "agent:dashboardagent",
-        },
+        json={"assigned_agent_id": "dashboardagent", "task_description": "Dashboard-created activity"},
     )
-    assert r.status_code == 201, f"admin activity create failed: {r.json()}"
-    activity = r.json()["data"]["activity"]
-    assert activity["agent_id"] == "dashboardagent"
-    assert activity["assigned_agent_id"] == "dashboardagent"
+    assert r.status_code == 410 and r.json()["error"]["code"] == "REMOVED"
+    assert "1.3.0" in r.json()["error"]["message"]
+
 
 
 def test_heartbeat_activity(test_client, agent_token):

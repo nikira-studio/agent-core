@@ -125,73 +125,8 @@ def test_mcp_schema_defines_the_classes(test_client, agent_token):
     assert "settled by deciding" in described
 
 
-def test_generated_agent_docs_explain_the_split(test_client, admin_token):
-    from app.routes.integrations_page import (
-        _build_claude_md,
-        _build_agents_md,
-        _build_instructions,
-    )
-
-    args = ("http://localhost:3500", "user:alex", "workspace:proj", "agent:codex")
-    for text in (
-        _build_claude_md(*args, "Codex", "Proj"),
-        _build_agents_md(*args, "Proj"),
-        _build_instructions(
-            "http://localhost:3500", "codex", "user:alex", "workspace:proj",
-            "agent:codex", "Codex", "Alex", "Proj",
-        ),
-    ):
-        assert "settled by checking" in text, "the fact/decision test must be stated"
-        assert "activity_update" in text
 
 
-def test_every_agent_template_teaches_the_current_workflow():
-    """The generated instructions are how an agent learns to use the system.
-
-    They are easy to leave behind when a capability lands, and an agent that was
-    never told about a tool will not use it — so the templates are asserted
-    against, not just hand-checked.
-    """
-    from app.routes.integrations_page import (
-        _build_agents_md,
-        _build_claude_md,
-        _build_instructions,
-        _build_session_prompt,
-    )
-
-    required = (
-        "settled by checking",     # what separates a fact from a decision
-        "subject_anchor",          # what would verify a fact
-        "days_since_confirmed",    # how to read a stale record
-        "memory_confirm",          # how to mark one checked
-        "memory_feedback",         # how ranking learns
-        "memory_reanchor",         # how to save a record whose subject moved
-        "memory_pin",              # how to request standing context
-        "valid_from",              # that "when it was true" is its own timeline
-        "as_of",                   # how to ask what was true then
-        "activity_search",         # where "what did we do" is answered
-    )
-    rendered = {
-        "CLAUDE.md": _build_claude_md(
-            "http://localhost:3500", "user:alex", "workspace:proj", "agent:codex", "Codex", "Proj"
-        ),
-        "AGENTS.md": _build_agents_md(
-            "http://localhost:3500", "user:alex", "workspace:proj", "agent:codex", "Proj"
-        ),
-        "instructions": _build_instructions(
-            "http://localhost:3500", "codex", "user:alex", "workspace:proj",
-            "agent:codex", "Codex", "Alex", "Proj",
-        ),
-        "session prompt": _build_session_prompt(
-            "claude-code", "http://localhost:3500", "user:alex", "workspace:proj",
-            "agent:codex", "Codex", "Alex", "Proj",
-        ),
-    }
-    for name, text in rendered.items():
-        for needle in required:
-            assert needle in text, f"{name} never mentions {needle}"
-        # Retired fields must not come back as advice.
-        assert "domain/topic" not in text, f"{name} still teaches the retired domain field"
 
 
 def test_the_verification_prompt_is_a_coherent_numbered_list():
@@ -200,7 +135,7 @@ def test_the_verification_prompt_is_a_coherent_numbered_list():
 
     from app.routes.integrations_page import _build_verification_prompt
 
-    text = _build_verification_prompt("user:alex", "workspace:proj")
+    text = _build_verification_prompt("workspace:proj")
     numbers = [int(m.group(1)) for m in re.finditer(r"^(\d+)\. ", text, re.M)]
     assert numbers == list(range(1, len(numbers) + 1)), numbers
-    assert "activity_search" in text
+    assert "memory_search" in text

@@ -63,6 +63,8 @@ AUDIT_ACTIONS = (
     "memory_proposals_generated",
     "memory_proposal_decided",
     "memory_proposal_answered",
+    "memory_auto_retracted",
+    "memory_write_refused",
     "retrieval_degraded",
     "tool_result_offloaded",
     "tool_result_fetched",

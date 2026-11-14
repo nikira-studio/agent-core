@@ -103,59 +103,9 @@ def _verify_service(value: str, record: dict) -> tuple[str, str]:
     return UNVERIFIABLE, f"binding {binding.get('name')} is currently failing"
 
 
-def _bindings_for_host(host: str) -> list[dict]:
-    """Bindings whose configured target is this host.
-
-    Going through a binding rather than teaching the verifier to reach hosts
-    keeps credentials in the connector layer, which is the only place they are
-    scoped, audited and swappable. The verifier gains no new way in.
-    """
-    import json as _json
-
-    from app.services import connector_service
-
-    matches = []
-    for binding in connector_service.list_bindings(enabled=True):
-        config = binding.get("config_json") or "{}"
-        try:
-            parsed = _json.loads(config)
-        except (TypeError, ValueError):
-            continue
-        target = " ".join(
-            str(parsed.get(key, "")) for key in ("base_url", "url", "host", "endpoint")
-        )
-        if host and host in target:
-            matches.append(binding)
-    return matches
-
-
-def _verify_host(value: str, record: dict) -> tuple[str, str]:
-    # Never MISSING. A host that does not answer is a host that does not answer;
-    # it is not proof that a memory about it is false, and treating it as such
-    # would turn every outage into a wave of bogus staleness evidence.
-    from app.services import connector_service
-
-    matches = _bindings_for_host(value)
-    if not matches:
-        return UNVERIFIABLE, f"no connector binding targets {value}"
-    if len(matches) > 1:
-        names = ", ".join(sorted(b["name"] for b in matches)[:3])
-        return UNVERIFIABLE, f"several bindings target {value} ({names}); ambiguous"
-
-    binding = matches[0]
-    try:
-        result = connector_service.test_binding(binding["id"])
-    except Exception as exc:
-        return UNVERIFIABLE, f"binding test could not run: {exc}"
-    if result.get("success") or result.get("ok"):
-        return VERIFIED, f"{binding['name']} reached {value} successfully"
-    return UNVERIFIABLE, f"{binding['name']} could not reach {value} right now"
-
-
 BUILTIN_VERIFIERS: dict[str, Callable[[str, dict], tuple[str, str]]] = {
     "repo": _verify_repo,
     "service": _verify_service,
-    "host": _verify_host,
 }
 
 
@@ -291,6 +241,15 @@ def _note_attempts(record_ids: list[str]) -> None:
         logger.debug("Could not record verification attempts", exc_info=True)
 
 
+ANCHOR_MISSING_CONFIRM_HOURS = 1
+
+
+def _hours_since(iso: str) -> float:
+    from app.time_utils import parse_utc_datetime, utc_now
+
+    return (utc_now() - parse_utc_datetime(iso)).total_seconds() / 3600
+
+
 def verify_scope(
     scope: Optional[str] = None, limit: int = 200, scopes: Optional[list] = None
 ) -> dict:
@@ -300,21 +259,29 @@ def verify_scope(
     run rotates across everything rather than re-checking the same head of the
     queue forever.
 
-    Missing anchors become proposals rather than retractions. The file being
-    gone is strong evidence and weak proof: code moves, and a record about a
-    renamed module is often still true about the system. A person decides;
-    the pass supplies the evidence.
+    A missing anchor is strong evidence and weak proof (code moves), so one miss only notes the time. A
+    second miss at least an hour later, with nothing found in between, retracts the record on behalf of
+    the ``anchor_missing`` rule (soft and restorable, audited). A pass that finds the subject again clears
+    the note. Someone who moved the subject can repoint the record with memory_reanchor first.
     """
-    from app.services import memory_proposal_service
+    from app.services import memory_hygiene_service
 
-    conditions = ["record_status = 'active'", "memory_class = 'fact'", "subject_anchor IS NOT NULL"]
-    params: list = []
+    # Only anchors something can check take a place in the pass: a `host:` anchor is a plain label (it was
+    # never checked in practice and used up the budget), as is any type nothing is registered for.
+    types = sorted(available_anchor_types())
+    conditions = [
+        "record_status = 'active'",
+        "memory_class = 'fact'",
+        "subject_anchor IS NOT NULL",
+        "(" + " OR ".join("subject_anchor LIKE ?" for _ in types) + ")" if types else "0",
+    ]
+    params: list = [f"{t}:%" for t in types]
     if scope:
         conditions.append("scope = ?")
         params.append(scope)
     elif scopes is not None:
         if not scopes:
-            return {"results": [], "tally": {VERIFIED: 0, MISSING: 0, UNVERIFIABLE: 0}, "queued": 0}
+            return {"results": [], "tally": {VERIFIED: 0, MISSING: 0, UNVERIFIABLE: 0}, "auto_retracted": 0}
         conditions.append(f"scope IN ({','.join('?' for _ in scopes)})")
         params.extend(scopes)
     params.append(max(limit, 0))
@@ -333,30 +300,25 @@ def verify_scope(
     for result in results:
         tally[result["status"]] = tally.get(result["status"], 0) + 1
 
-    queued = 0
+    retracted = 0
     for result in results:
-        if result["status"] != MISSING:
-            continue
-        if memory_proposal_service.queue_proposal(
-            rule="anchor_missing",
-            action="confirm",
-            scope=result["scope"],
-            target_ids=[result["record_id"]],
-            evidence={
-                "anchor": result["anchor"],
-                "detail": result["detail"],
-                "looks_like_runtime_state": memory_service.anchor_looks_like_runtime_state(
-                    result["anchor"]
-                ),
-            },
-        ):
-            queued += 1
+        if result["status"] == VERIFIED:
+            memory_service.clear_anchor_missing(result["record_id"])
+        elif result["status"] == MISSING:
+            first_seen = memory_service.note_anchor_missing(result["record_id"])
+            if first_seen and _hours_since(first_seen) >= ANCHOR_MISSING_CONFIRM_HOURS:
+                if memory_hygiene_service.retract_for_rule(
+                    "anchor_missing",
+                    result["record_id"],
+                    detail={"anchor": result["anchor"], "first_missing": first_seen, "check": result["detail"]},
+                ):
+                    retracted += 1
 
     return {
         "checked": len(results),
         "verified": tally[VERIFIED],
         "missing": tally[MISSING],
         "unverifiable": tally[UNVERIFIABLE],
-        "proposals_queued": queued,
+        "auto_retracted": retracted,
         "results": results,
     }

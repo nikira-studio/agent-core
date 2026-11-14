@@ -40,6 +40,16 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="", tags=["mcp"])
 
+# Tools that were removed, with what an old client should do instead. A call to one answers with this
+# message (error TOOL_REMOVED) rather than "unknown tool", so a client written against an older release
+# learns what happened.
+REMOVED_TOOLS = {
+    "memory_pin": "memory_pin was removed in Agent Core 1.3.0 (pinned standing context is gone). Write a decision with memory_write; the session context lists the key records.",
+    "memory_feedback": "memory_feedback was removed in Agent Core 1.3.0 (its counts only nudged ranking and were almost never used). Nothing replaces it; just keep working.",
+    "activity_pickup": "activity_pickup was removed in Agent Core 1.3.0 (agents are not assigned work). The session context lists the work that is open for you; call session_context.",
+    "memory_pinned": "memory_pinned was removed in Agent Core 1.3.0 (pinned standing context is gone). The session context lists the key records of a workspace.",
+}
+
 # Keep tool discovery and execution on one closed policy table. A tool omitted
 # here is a release error, not an implicitly public endpoint.
 _TOOL_CAPABILITIES = {
@@ -49,11 +59,9 @@ _TOOL_CAPABILITIES = {
             "memory_search",
             "memory_get",
             "memory_write",
-            "memory_pin",
             "memory_confirm",
             "memory_reanchor",
             "memory_verify",
-            "memory_feedback",
             "memory_retract",
             "memory_move",
         )
@@ -61,12 +69,10 @@ _TOOL_CAPABILITIES = {
     **{
         name: "coordination"
         for name in (
-            "memory_pinned",
             "activity_update",
             "activity_get",
             "activity_list",
             "activity_search",
-            "activity_pickup",
             "activity_handoff_resolve",
             "attention_list",
             "workspace_sync",
@@ -114,7 +120,6 @@ MANIFEST = {
                     "scope": {"type": "string"},
                     "topic": {"type": "string"},
                     "memory_class": {"type": "string", "enum": list(MEMORY_CLASSES)},
-                    "min_confidence": {"type": "number"},
                     "subject_anchor": {
                         "type": "string",
                         "description": "Only records anchored to this repo path, host, or service — prefix match, so 'repo:app/services' matches everything under it.",
@@ -179,9 +184,7 @@ MANIFEST = {
         {
             "name": "memory_write",
             "description": (
-                "Write a durable memory record — something that will still be worth "
-                "knowing in a future session. Reporting what you just did belongs in "
-                "activity_update instead."
+                "Write a memory only for something a future session cannot get from the code, the config or the task history, and that will still be true: a decision with its reason, a constraint that cost effort to find, who or where something is (an account, a host, an owner), or how things are wired. Do not write: that you finished, deployed or fixed something (use activity_update); what the code or API already says; an experiment or benchmark result; a ticket or review log; a status that was true for a day; a guess about a cause. One record per lasting insight; replace it when it changes."
             ),
             "inputSchema": {
                 "type": "object",
@@ -250,33 +253,6 @@ MANIFEST = {
             },
         },
         {
-            "name": "memory_pinned",
-            "description": (
-                "Standing context for your authorized scopes. workspace_sync already returns "
-                "pinned records for its workspace. Call memory_pinned at session start only "
-                "when you also need standing rules from other authorized scopes or no "
-                "workspace sync applies. Pinned records are loaded, not searched for."
-            ),
-            "inputSchema": {"type": "object", "properties": {}},
-        },
-        {
-            "name": "memory_pin",
-            "description": (
-                "Request that a record become standing context shown to every session, or "
-                "that it stop being. Reserved for the few rules that should apply regardless "
-                "of the task. This queues the request for an operator: standing context "
-                "reaches every session in the scope, so it is granted rather than taken."
-            ),
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "record_id": {"type": "string"},
-                    "pinned": {"type": "boolean", "default": True},
-                },
-                "required": ["record_id"],
-            },
-        },
-        {
             "name": "memory_confirm",
             "description": (
                 "Mark a record as verified against the world, as of now. Only call this "
@@ -318,10 +294,11 @@ MANIFEST = {
         {
             "name": "memory_verify",
             "description": (
-                "Check anchored facts against the thing they describe — a repo path or a "
-                "connector binding. A present anchor sets anchor_checked_at; it does not "
+                "Check anchored facts against the thing they describe — a repo path (only where the "
+                "operator mapped the workspace to a directory on the Core host) or a "
+                "connector binding an operator mapped to the anchor type. A present anchor sets anchor_checked_at; it does not "
                 "confirm the record, which needs memory_confirm with evidence. Records "
-                "whose anchor has vanished are queued for review rather than retracted. "
+                "whose anchor has vanished in two checks an hour apart retract themselves (restorable). "
                 "Reports verified / missing / unverifiable counts."
             ),
             "inputSchema": {
@@ -333,25 +310,10 @@ MANIFEST = {
             },
         },
         {
-            "name": "memory_feedback",
-            "description": (
-                "Say whether a recalled record actually helped. Feeds ranking with "
-                "observed usefulness instead of the writer's own estimate."
-            ),
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "record_id": {"type": "string"},
-                    "helpful": {"type": "boolean"},
-                },
-                "required": ["record_id", "helpful"],
-            },
-        },
-        {
             "name": "memory_retract",
             "description": (
-                "Retract a memory record by ID. Give a reason (what you checked) when you retract it because "
-                "it is wrong or gone: that also answers any pending Memory Clean-up suggestion about it."
+                "Retract a memory record by ID (soft: it stays restorable until the owner's retention limit, 30 days unless changed). A reason "
+                "(what you checked) is kept with the audit entry."
             ),
             "inputSchema": {
                 "type": "object",
@@ -433,7 +395,7 @@ MANIFEST = {
                     "task_description": {"type": "string"},
                     "task_note": {"type": "string"},
                     "task_result": {"type": "string"},
-                    "status": {"type": "string", "enum": list(ACTIVITY_STATUSES)},
+                    "status": {"type": "string", "enum": ["active", "completed", "blocked", "cancelled"]},
                     "activity_id": {
                         "type": "string",
                         "description": (
@@ -461,10 +423,11 @@ MANIFEST = {
                             "new asks are appended, existing ones are never removed."
                         ),
                         "properties": {
-                            "completed": {"type": "string", "description": "One line on what got done."},
-                            "next_steps": {"type": "array", "items": {"type": "string"}},
-                            "open_questions": {"type": "array", "items": {"type": "string"}},
-                            "needs_human": {"type": "string", "description": "What a person must do or decide, if anything."},
+                            "completed": {"type": ["string", "array"], "items": {"type": "string"}, "description": "What got done: a line of text, or a list of lines."},
+                            "next_steps": {"type": ["string", "array"], "items": {"type": "string"}},
+                            "open_questions": {"type": ["string", "array"], "items": {"type": "string"}},
+                            "needs_human": {"type": ["string", "array"], "items": {"type": "string"}, "description": "What a person must do or decide, if anything."},
+                            "needs_human_url": {"type": "string", "description": "Where the person acts, when it is in another system (an http or https link): Needs you then offers Open in <that site> as the main action."},
                         },
                     },
                 },
@@ -601,8 +564,7 @@ MANIFEST = {
                 "List what is waiting on a person across the scopes you can read; read-only, for coordinators "
                 "reporting it. `items` are unresolved handoffs (needs_human), newest first, each with task_ref "
                 "when the work belongs to another system's task. `approvals` are requests waiting for a "
-                "decision. `credential_requests` are secrets an agent asked a person to supply. "
-                "`memory_suggestions` is a count and a short list of Memory Clean-up suggestions."
+                "decision. `credential_requests` are secrets an agent asked a person to supply."
             ),
             "inputSchema": {
                 "type": "object",
@@ -622,16 +584,8 @@ MANIFEST = {
             },
         },
         {
-            "name": "activity_pickup",
-            "description": "Claim the next active work item assigned to this agent in authorized scopes. Call this at startup or when idle to discover work a human has assigned. Returns the claimed activity or null when no work is waiting.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {},
-            },
-        },
-        {
             "name": "workspace_sync",
-            "description": "Synchronize pinned context, assigned activities, memory changes, and activity changes since this execution's cursor. Process each stable change id only once even when it appears in more than one group.",
+            "description": "Synchronize assigned activities, memory changes, and activity changes since this execution's cursor. Process each stable change id only once even when it appears in more than one group.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -647,11 +601,12 @@ MANIFEST = {
         {
             "name": "session_context",
             "description": (
-                "Start a session: one call returns standing rules, unfinished or handed-off work, "
+                "Call this FIRST in every session (before any other tool). One call returns unfinished or handed-off work, "
                 "recent results, changes since your last session, and an index of key records, "
                 "fitted to max_chars, plus the execution_id to use for the session. Call it once at "
-                "session start instead of workspace_sync plus several memory searches. Clients with "
-                "a SessionStart hook receive this automatically."
+                "session start instead of workspace_sync plus several memory searches. Pass a "
+                "workspace as memory_scope, or your own private scope (agent:<your id>) if you have "
+                "no workspace. Clients with a SessionStart hook receive this automatically."
             ),
             "inputSchema": {
                 "type": "object",
@@ -668,7 +623,7 @@ MANIFEST = {
         },
         {
             "name": "workspace_sync_ack",
-            "description": "Acknowledge workspace changes through a delivered cursor for this execution",
+            "description": "Acknowledge workspace changes through a delivered cursor for this execution. Call it once you have read or skipped the page you were given: until you do, the same changes are delivered again on the next sync, and the session digest keeps repeating them.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -1187,9 +1142,11 @@ async def _handle_mcp_jsonrpc(body: dict, request: Request, ctx: EffectiveAuthor
                 },
                 "instructions": (
                     f"{APP_NAME} provides workspace memory, activity tracking, and credential access. "
-                    "At the start of every non-trivial task: call activity_update (status=active, memory_scope=workspace:<your-scope>), "
+                    "FIRST, at the start of every session and before any other tool: call session_context (memory_scope=workspace:<your-scope>) and use the execution_id it returns; "
+                    "if your context already holds an \"Agent Core session context\" block, that is done. "
+                    "Then, at the start of every non-trivial task: call activity_update (status=active, memory_scope=workspace:<your-scope>), "
                     "then run 2-3 memory_search queries for relevant context. "
-                    "Send activity_update heartbeats or task_note progress updates every 1-2 minutes while working; when finishing or stopping, set status completed or blocked with task_result and a handoff (completed, next_steps, open_questions, needs_human). "
+                    "While working, a short task_note progress update (or an empty activity_update) every few minutes keeps the task alive; one with no update for 5 minutes is marked stale and the next update brings it back. When finishing or stopping, set status completed or blocked with task_result and a handoff (completed, next_steps, open_questions, needs_human). "
                     "When a needs_human request you made has been dealt with, resolve it with activity_handoff_resolve. "
                     f"Use credential_get for {CREDENTIAL_PREFIX}* references — never ask the user for raw secrets; use credential_request when one is missing. "
                     "If tools appear unavailable, your host may defer MCP schemas — run the host's tool discovery or schema-load step first."
@@ -1263,7 +1220,77 @@ def _activity_page(activities: list[dict], view: Optional[str]) -> dict:
     )
 
 
+# When each agent was last seen calling a tool in this process. An agent whose first call after a long gap is any tool at
+# all gets the session context in that response, so the session start does not depend on a hook or a remembered step.
+_LAST_CALL: dict[str, float] = {}
+_NO_CONTEXT_TOOLS = ("session_context", "result_fetch")
+
+
 async def _handle_custom_mcp_tool(body: dict, ctx: EffectiveAuthority):
+    response = await _handle_custom_mcp_tool_inner(body, ctx)
+    try:
+        return await _attach_session_context(body, ctx, response)
+    except Exception:  # the context is additive: it can never fail the call
+        logger.warning("Session context could not be attached to a tool response", exc_info=True)
+        return response
+
+
+async def _attach_session_context(body: dict, ctx: EffectiveAuthority, response):
+    tool = body.get("tool")
+    agent_id = ctx.agent_id
+    if not agent_id or not isinstance(tool, str):
+        return response
+    now = time.time()
+    last = _LAST_CALL.get(agent_id)
+    _LAST_CALL[agent_id] = now
+    idle = settings.SESSION_CONTEXT_IDLE_MINUTES
+    params = body.get("params") if isinstance(body.get("params"), dict) else {}
+    if (
+        idle <= 0
+        or tool in _NO_CONTEXT_TOOLS
+        or tool in REMOVED_TOOLS
+        or (params.get("execution_id") and b"EXECUTION_ID_IGNORED" not in getattr(response, "body", b""))
+        or (last is not None and now - last < idle * 60)
+        or not isinstance(response, JSONResponse)
+        or response.status_code >= 400
+    ):
+        return response
+    try:
+        payload = json.loads(response.body)
+    except (TypeError, ValueError):
+        return response
+    if not payload.get("ok") or not isinstance(payload.get("data"), dict):
+        return response
+    scope = params.get("memory_scope") or params.get("scope")
+    if not isinstance(scope, str) or not (scope.startswith("workspace:") or scope == f"agent:{agent_id}"):
+        scope = None
+    # The context must fit beside the answer inside the inline limit, or the whole result would be offloaded to a
+    # handle and the agent would get neither. A big answer is delivered as it is; the next call carries the context.
+    limit = settings.TOOL_RESULT_SPILL_THRESHOLD
+    budget = 6000 if limit <= 0 else min(6000, limit - len(response.body) - 600)
+    if budget < 1500:
+        _LAST_CALL[agent_id] = last if last is not None else 0.0
+        return response
+    inner = await _run_custom_mcp_tool(
+        {"tool": "session_context", "params": {"memory_scope": scope, "host_session_ref": "first-call", "max_chars": budget} if scope else {"host_session_ref": "first-call", "max_chars": budget}},
+        ctx,
+    )
+    if inner.status_code >= 400:
+        return response
+    context = json.loads(inner.body).get("data")
+    if not isinstance(context, dict) or not context.get("execution_id"):
+        # No workspace could be chosen for this call: an empty context helps nobody, so the next call tries again.
+        _LAST_CALL[agent_id] = last if last is not None else 0.0
+        return response
+    payload["data"]["session_context"] = context
+    payload["data"]["session_context_note"] = (
+        "Core attached the session context because this is your first call in this session: read it, and pass its "
+        "execution_id to activity_update and memory_write. You do not need to call session_context yourself now."
+    )
+    return JSONResponse(content=payload, status_code=response.status_code)
+
+
+async def _handle_custom_mcp_tool_inner(body: dict, ctx: EffectiveAuthority):
     tool = body.get("tool")
     if tool in _RATE_LIMITED_TOOLS and ctx.agent_id:
         allowed, info = RL.check("agent", ctx.agent_id, tool)
@@ -1297,6 +1324,9 @@ async def _run_custom_mcp_tool(body: dict, ctx: EffectiveAuthority):
     if not isinstance(tool, str) or not tool:
         return _mcp_error("TOOL_REQUIRED", "tool name is required", 400)
 
+    if tool in REMOVED_TOOLS:
+        return _mcp_error("TOOL_REMOVED", REMOVED_TOOLS[tool], 410)
+
     required_capability = _TOOL_CAPABILITIES.get(tool)
     if required_capability and not ctx.has_capability(required_capability):
         return _mcp_error(
@@ -1304,6 +1334,9 @@ async def _run_custom_mcp_tool(body: dict, ctx: EffectiveAuthority):
             f"This operation requires the {required_capability} capability",
             403,
         )
+
+    if tool == "memory_search" and isinstance(params, dict):
+        params.pop("min_confidence", None)  # removed in 1.3.0; an old client is not refused for sending it
 
     invalid = _invalid_params_message(tool, params)
     if invalid:
@@ -1386,11 +1419,9 @@ async def _run_custom_mcp_tool(body: dict, ctx: EffectiveAuthority):
             return _mcp_error(
                 "INVALID_CLASS", f"memory_class must be one of {MEMORY_CLASSES}", 400
             )
-        min_confidence = params.get("min_confidence", 0.0)
-        if not 0.0 <= min_confidence <= 1.0:
-            return _mcp_error(
-                "INVALID_CONFIDENCE", "min_confidence must be between 0.0 and 1.0", 400
-            )
+        # min_confidence was removed in 1.3.0 (confidence is whatever the writer typed); an old client that
+        # still sends it is not refused, the filter is simply gone.
+        min_confidence = 0.0
         search_scope = params.get("scope")
         if search_scope:
             # On-demand: target one specific scope (e.g. another project), gated
@@ -1410,7 +1441,7 @@ async def _run_custom_mcp_tool(body: dict, ctx: EffectiveAuthority):
                 data = budget_search_response(
                     {
                         "records": [],
-                        "retrieval_mode": "fts_only",
+                        "retrieval_mode": "no_candidates",
                         "embedding_backend_status": embedding_service.backend_label(
                             embedding_status
                         ),
@@ -1421,9 +1452,11 @@ async def _run_custom_mcp_tool(body: dict, ctx: EffectiveAuthority):
             except MemoryOperationError as exc:
                 return _mcp_error(exc.code, exc.message, exc.status_code)
             return JSONResponse(content={"ok": True, "data": data})
+        diag: dict = {}
         try:
             records, mode = await asyncio.to_thread(
                 memory_service.search_memory,
+                diagnostics=diag,
                 query=query_text,
                 authorized_scopes=allowed,
                 topic=params.get("topic"),
@@ -1479,6 +1512,13 @@ async def _run_custom_mcp_tool(body: dict, ctx: EffectiveAuthority):
                 "embedding_backend_status": embedding_service.backend_label(
                     embedding_status
                 ),
+                # Why a search found what it found: where it looked, how many records were eligible
+                # there, and what the embedding step did for this search.
+                "scope": search_scope or None,
+                "scopes": allowed[:20],
+                "candidates": diag.get("candidates"),
+                "embedding": diag.get("embedding"),
+                "scored": diag.get("scored"),
             },
         )
         if mode == "fts_only" and embedding_service.retrieval_is_degraded(
@@ -1558,78 +1598,6 @@ async def _run_custom_mcp_tool(body: dict, ctx: EffectiveAuthority):
         except MemoryOperationError as exc:
             return _mcp_error(exc.code, exc.message, exc.status_code)
         return JSONResponse(content={"ok": True, "data": payload}, status_code=201)
-
-    elif tool == "memory_pinned":
-        candidates = ctx.default_recall_scopes or ctx.read_scopes
-        scopes = ctx.filter_scopes("memory", "read", candidates)
-        records = memory_service.pinned_records(scopes)
-        return JSONResponse(
-            content={
-                "ok": True,
-                "data": {
-                    "records": [memory_service.lean_record(r) for r in records],
-                    "count": len(records),
-                },
-            }
-        )
-
-    elif tool == "memory_pin":
-        record = memory_service.get_memory_record(params["record_id"])
-        if not record:
-            return _mcp_error("NOT_FOUND", "Record not found", 404)
-        if not ctx.can("memory", "write", scope=record["scope"]):
-            return _mcp_error("SCOPE_DENIED", "Access denied to this scope", 403)
-        if record["record_status"] != "active":
-            return _mcp_error("NOT_ACTIVE", "Only an active record can be pinned", 400)
-
-        desired = bool(params.get("pinned", True))
-        # An agent asking is not an agent deciding. A pinned record enters every
-        # future session in the scope — including other agents' sessions —
-        # without anyone searching for it, which makes it the most influential
-        # thing an agent could write and the obvious target for a bad one. So
-        # agents request, and the operator grants, through the same queue that
-        # governs every other change to the corpus.
-        from app.services import memory_proposal_service
-
-        proposal_id = memory_proposal_service.queue_proposal(
-            rule="pin_request",
-            action="pin",
-            scope=record["scope"],
-            target_ids=[params["record_id"]],
-            evidence={
-                "pin": desired,
-                "requested_by": ctx.agent_id or ctx.actor_id,
-                "records": [memory_proposal_service._preview(record)],
-            },
-        )
-        audit_service.write_event(
-            actor_type="agent",
-            actor_id=ctx.agent_id,
-            action="memory_pin_requested",
-            resource_type="memory_record",
-            resource_id=params["record_id"],
-            result="success",
-            details={
-                "pin": desired,
-                "scope": record["scope"],
-                "proposal_id": proposal_id,
-            },
-        )
-        return JSONResponse(
-            content={
-                "ok": True,
-                "data": {
-                    "queued": bool(proposal_id),
-                    "proposal_id": proposal_id,
-                    "message": (
-                        "Queued for review. Standing context applies to every session in "
-                        "the scope, so an operator grants it."
-                        if proposal_id
-                        else "Already requested; it is waiting in the review queue."
-                    ),
-                },
-            }
-        )
 
     elif tool == "memory_confirm":
         try:
@@ -1721,39 +1689,6 @@ async def _run_custom_mcp_tool(body: dict, ctx: EffectiveAuthority):
         )
         return JSONResponse(content={"ok": True, "data": result})
 
-    elif tool == "memory_feedback":
-        record = memory_service.get_memory_record(params["record_id"])
-        if not record:
-            return _mcp_error("NOT_FOUND", "Record not found", 404)
-        # Read access is the bar: judging whether a record helped you is not a
-        # mutation of its content, and a reader who cannot rate what it was
-        # given is a reader whose experience never reaches the ranking.
-        if not ctx.can("memory", "read", scope=record["scope"]):
-            return _mcp_error("SCOPE_DENIED", "Access denied to this scope", 403)
-        helpful = bool(params.get("helpful"))
-        updated = memory_service.record_feedback(params["record_id"], helpful)
-        if not updated:
-            return _mcp_error("NOT_FOUND", "Record not found", 404)
-        audit_service.write_event(
-            actor_type="agent",
-            actor_id=ctx.agent_id,
-            action="memory_feedback",
-            resource_type="memory_record",
-            resource_id=params["record_id"],
-            result="success",
-            details={"helpful": helpful, "scope": record["scope"]},
-        )
-        return JSONResponse(
-            content={
-                "ok": True,
-                "data": {
-                    "record_id": params["record_id"],
-                    "helpful_count": updated.get("helpful_count"),
-                    "unhelpful_count": updated.get("unhelpful_count"),
-                },
-            }
-        )
-
     elif tool == "memory_retract":
         record = memory_service.get_memory_record(params["record_id"])
         if not record:
@@ -1768,6 +1703,9 @@ async def _run_custom_mcp_tool(body: dict, ctx: EffectiveAuthority):
             resource_type="memory_record",
             resource_id=params["record_id"],
             result="success",
+            details={"reason": params["reason"][:300]}
+            if isinstance(params.get("reason"), str) and params["reason"].strip()
+            else None,
         )
         return JSONResponse(
             content={"ok": True, "data": {"message": "Memory record retracted"}}
@@ -1928,6 +1866,10 @@ async def _run_custom_mcp_tool(body: dict, ctx: EffectiveAuthority):
         if not _may_close_blocked(ctx, activity, params["status"]):
             return _mcp_error("INVALID_TRANSITION", "Only a task that ended blocked can be closed this way", 400)
         activity_service.update_activity(activity["id"], status=params["status"], task_result=params["task_result"])
+        closed_ask = activity_service.resolve_ask_on_close(
+            activity, params["status"], new_handoff=None, actor_type="agent", actor_id=ctx.agent_id,
+            task_result=params["task_result"],
+        )
         updated = activity_service.get_activity(activity["id"]) or activity
         audit_service.write_event(
             actor_type=ctx.actor_type,
@@ -1941,7 +1883,9 @@ async def _run_custom_mcp_tool(body: dict, ctx: EffectiveAuthority):
             ),
         )
         activity_service.notify("activity_updated", updated, previous_status=activity["status"])
-        return JSONResponse(content={"ok": True, "data": {"activity": updated}})
+        return JSONResponse(
+            content={"ok": True, "data": {"activity": updated, **activity_service.closed_ask_followup(closed_ask)}}
+        )
 
     elif tool == "activity_update":
         # An agent identity can work in more than one workspace at once. The
@@ -1950,22 +1894,18 @@ async def _run_custom_mcp_tool(body: dict, ctx: EffectiveAuthority):
         memory_scope = params.get("memory_scope") or f"agent:{ctx.agent_id}"
         if not enforcer.can_write(memory_scope):
             return _mcp_error("SCOPE_DENIED", "Access denied to memory_scope", 403)
-        if params.get("execution_id"):
+        # An id that is stale, another agent's or for another scope must not lose the write: it is dropped
+        # (never attributed) and a warning says so.
+        execution_id, execution_warning = params.get("execution_id"), None
+        if execution_id:
             from app.services import workspace_sync_service
 
-            try:
-                workspace_sync_service.validate_execution(
-                    execution_id=params["execution_id"],
-                    agent_id=ctx.agent_id,
-                    user_id=ctx.user_id or "",
-                    memory_scope=memory_scope,
-                )
-            except PermissionError:
-                return _mcp_error(
-                    "EXECUTION_OWNERSHIP", "Execution belongs to another agent", 403
-                )
-            except ValueError as exc:
-                return _mcp_error(str(exc), workspace_sync_service.execution_message(str(exc)), 400)
+            execution_id, execution_warning = workspace_sync_service.usable_execution(
+                execution_id=execution_id,
+                agent_id=ctx.agent_id,
+                user_id=ctx.user_id or "",
+                memory_scope=memory_scope,
+            )
         handoff = None
         if params.get("handoff") is not None:
             from app.services.session_context_service import normalize_handoff
@@ -1986,15 +1926,41 @@ async def _run_custom_mcp_tool(body: dict, ctx: EffectiveAuthority):
                 f"status must be one of: {', '.join(ACTIVITY_STATUSES)}",
                 400,
             )
-        existing = activity_service.get_active_activity_for_agent(
-            ctx.agent_id, ctx.user_id, memory_scope=memory_scope
+        existing = activity_service.find_record_for_execution(
+            ctx.agent_id, ctx.user_id, memory_scope, execution_id
         )
-        if existing:
+        extra_warnings: list = [execution_warning] if execution_warning else []
+        if existing and activity_service.is_different_task(existing.get("task_description"), params.get("task_description")):
+            # A new description for a different task is not a rename: the open task is kept and ended, and the new
+            # one starts. (Before this, the first task silently became the second and vanished from the history.)
+            ended = activity_service.end_replaced_task(existing, params["task_description"], ctx.agent_id)
+            extra_warnings.append(
+                {
+                    "code": "PREVIOUS_TASK_ENDED",
+                    "message": (
+                        f"Task {ended['id']} was still open and is a different task, so it was ended as cancelled "
+                        "(\"Ended without report\") and this one started. Close a task with status completed and a "
+                        "task_result before starting the next."
+                    ),
+                }
+            )
+            existing = None
+
+        def _apply_update(existing, created_payload=None):
             metadata_json = (
                 activity_service.with_task_ref(existing.get("metadata_json"), task_ref)
                 if task_ref is not None
                 else None
             )
+            if params.get("status") == "completed" and not (
+                (params.get("task_result") or existing.get("task_result") or "").strip()
+            ):
+                return _mcp_error(
+                    "TASK_RESULT_REQUIRED",
+                    "Completing a task needs a task_result: one or two sentences on what was done and where "
+                    "(a commit, file or record), so the next session can see what happened without asking.",
+                    400,
+                )
             if params.get("status"):
                 if params["status"] in (
                     "completed",
@@ -2011,7 +1977,8 @@ async def _run_custom_mcp_tool(body: dict, ctx: EffectiveAuthority):
                     task_result=params.get("task_result"),
                     status=params["status"],
                     metadata_json=metadata_json,
-                    source_execution_id=params.get("execution_id"),
+                    source_execution_id=execution_id,
+                    alive=True,
                 )
             elif (
                 params.get("task_description")
@@ -2025,10 +1992,15 @@ async def _run_custom_mcp_tool(body: dict, ctx: EffectiveAuthority):
                     task_note=params.get("task_note"),
                     task_result=params.get("task_result"),
                     metadata_json=metadata_json,
-                    source_execution_id=params.get("execution_id"),
+                    source_execution_id=execution_id,
+                    alive=True,
                 )
             else:
                 activity_service.heartbeat_activity(existing["id"])
+            closed_ask = activity_service.resolve_ask_on_close(
+                existing, params.get("status"), new_handoff=handoff, actor_type="agent", actor_id=ctx.agent_id,
+                task_result=params.get("task_result"),
+            )
             if handoff:  # after the transition check, so a refused close writes nothing
                 activity_service.set_handoff(existing["id"], handoff)
             _updated = activity_service.get_activity(existing["id"]) or existing
@@ -2054,7 +2026,9 @@ async def _run_custom_mcp_tool(body: dict, ctx: EffectiveAuthority):
                 ),
             )
             _new_status = params.get("status")
-            if (
+            if existing["status"] == "stale" and _updated.get("status") == "active":
+                _event = "activity_recovered"
+            elif (
                 not _new_status
                 and not params.get("task_description")
                 and not params.get("task_note")
@@ -2079,7 +2053,17 @@ async def _run_custom_mcp_tool(body: dict, ctx: EffectiveAuthority):
                     actor_id=ctx.agent_id,
                 ),
             }
-            return JSONResponse(content={"ok": True, "data": data})
+            from app.routes.activity import _merge_followups
+
+            _merge_followups(data, activity_service.closed_ask_followup(closed_ask))
+            if extra_warnings:
+                data["warnings"] = [*(data.get("warnings") or []), *extra_warnings]
+            if created_payload is not None:
+                data.update({k: v for k, v in created_payload.items() if k != "activity"})
+            return JSONResponse(content={"ok": True, "data": data}, status_code=201 if created_payload is not None else 200)
+
+        if existing:
+            return _apply_update(existing)
         elif handoff and not any(
             params.get(key) for key in ("task_description", "task_note", "task_result", "status", "task_ref")
         ) and (
@@ -2120,13 +2104,20 @@ async def _run_custom_mcp_tool(body: dict, ctx: EffectiveAuthority):
                 return _mcp_error(
                     "TASK_REQUIRED", "task_description required to create activity", 400
                 )
+            if params.get("status") == "completed" and not (params.get("task_result") or "").strip():
+                return _mcp_error(
+                    "TASK_RESULT_REQUIRED",
+                    "Completing a task needs a task_result: one or two sentences on what was done and where "
+                    "(a commit, file or record), so the next session can see what happened without asking.",
+                    400,
+                )
             act = activity_service.create_activity(
                 agent_id=ctx.agent_id,
                 user_id=ctx.user_id or "",
                 task_description=params["task_description"],
                 memory_scope=memory_scope,
                 metadata_json=activity_service.with_task_ref(None, task_ref) if task_ref else None,
-                source_execution_id=params.get("execution_id"),
+                source_execution_id=execution_id,
             )
             audit_service.write_event(
                 actor_type="agent",
@@ -2155,18 +2146,27 @@ async def _run_custom_mcp_tool(body: dict, ctx: EffectiveAuthority):
                 and memory_scope.startswith("workspace:")
                 and enforcer.can_read(memory_scope)
             ):
-                digest = _maybe_attach_digest(
-                    ctx,
-                    memory_scope,
-                    act["id"],
-                    execution_id=params.get("execution_id"),
-                )
+                try:
+                    digest = _maybe_attach_digest(
+                        ctx,
+                        memory_scope,
+                        act["id"],
+                        execution_id=execution_id,
+                    )
+                except Exception:
+                    logger.warning("since_last_active digest failed; the task was still created", exc_info=True)
+                    digest = None
                 # `_maybe_attach_digest` swallows its own errors and returns
                 # None. The outer try/except below is a belt-and-braces for
                 # anything that escapes it — `since_last_active` is purely
                 # additive, and a failure here must never fail the create.
                 if digest is not None:
                     payload["since_last_active"] = digest
+            if extra_warnings:
+                payload["warnings"] = extra_warnings
+            if params.get("status") in ("completed", "blocked", "cancelled") or params.get("task_result") or params.get("task_note") or handoff:
+                # Open and close in one call: apply everything the caller sent to the record just created.
+                return _apply_update(act, payload)
             return JSONResponse(content={"ok": True, "data": payload}, status_code=201)
 
     elif tool in ("approval_propose", "approval_get"):
@@ -2355,32 +2355,6 @@ async def _run_custom_mcp_tool(body: dict, ctx: EffectiveAuthority):
                     "count": len(items),
                     "approvals": waiting["approvals"],
                     "credential_requests": waiting["credential_requests"],
-                    "memory_suggestions": waiting["memory_suggestions"],
-                },
-            }
-        )
-
-    elif tool == "activity_pickup":
-        authorized_scopes = enforcer.filter_readable_scopes(ctx.read_scopes)
-        activity = activity_service.claim_next_activity(ctx.agent_id, authorized_scopes)
-        if activity:
-            audit_service.write_event(
-                actor_type=ctx.actor_type,
-                actor_id=ctx.actor_id,
-                action="activity_pickup",
-                resource_type="activity",
-                resource_id=activity["id"],
-                result="success",
-                details=activity_service.audit_details(activity, action="pickup"),
-            )
-        return JSONResponse(
-            content={
-                "ok": True,
-                "data": {
-                    "activity": activity,
-                    "message": None
-                    if activity
-                    else "No assigned work found for this agent in authorized scopes",
                 },
             }
         )
@@ -2396,7 +2370,8 @@ async def _run_custom_mcp_tool(body: dict, ctx: EffectiveAuthority):
             if params.get(field) is not None and not isinstance(params[field], str):
                 return _mcp_error("INVALID_PARAMS", f"{field} must be a string", 400)
         if requested and (
-            not requested.startswith("workspace:") or not enforcer.can_read(requested)
+            not (requested.startswith("workspace:") or requested == f"agent:{ctx.agent_id}")
+            or not enforcer.can_read(requested)
         ):
             return _mcp_error("SCOPE_DENIED", "Access denied to this workspace", 403)
         readable = readable_workspace_scopes(ctx)
@@ -2538,7 +2513,7 @@ async def _run_custom_mcp_tool(body: dict, ctx: EffectiveAuthority):
         enforcer = ctx.connector_enforcer()
         binding = connector_service.get_binding(params["binding_id"])
         if not binding:
-            return _mcp_error("NOT_FOUND", "Binding not found", 404)
+            return _mcp_error("NOT_FOUND", "Connection not found", 404)
         if not enforcer.can_read(binding["scope"]):
             return _mcp_error("SCOPE_DENIED", "Access denied to this binding", 403)
         result = await asyncio.to_thread(
@@ -2550,7 +2525,7 @@ async def _run_custom_mcp_tool(body: dict, ctx: EffectiveAuthority):
             action="connector_binding_tested",
             resource_type="connector_binding",
             resource_id=params["binding_id"],
-            result=result.get("success") and "success" or "failure",
+            result="success" if (result.get("success") or result.get("untestable")) else "failure",
             details={"connector_type_id": binding["connector_type_id"]},
         )
         return JSONResponse(content={"ok": True, "data": result})
@@ -2560,7 +2535,7 @@ async def _run_custom_mcp_tool(body: dict, ctx: EffectiveAuthority):
 
         ct = connector_service.get_connector_type(params["connector_type_id"])
         if not ct:
-            return _mcp_error("NOT_FOUND", "Connector type not found", 404)
+            return _mcp_error("NOT_FOUND", "Service not found", 404)
         wanted = params.get("action")
         view = "full" if wanted else params.get("view", "compact")
         if view not in ("compact", "full"):
@@ -2661,7 +2636,7 @@ async def _run_custom_mcp_tool(body: dict, ctx: EffectiveAuthority):
         binding = outcome.binding
         result = outcome.result
         if not result.get("success") and result.get("error_code") == "DISABLED":
-            return _mcp_error("DISABLED", "Binding is disabled", 200)
+            return _mcp_error("DISABLED", "This connection is switched off", 200)
         if not result.get("success") and result.get("error_code") == "DISABLED_ACTION":
             return _mcp_error("DISABLED_ACTION", result["error"], 200)
         if not result.get("success") and result.get("error_code") == "INVALID_ACTION":

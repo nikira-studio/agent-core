@@ -122,11 +122,11 @@ def test_execute_binding_action_normalizes_declared_param_aliases(monkeypatch):
     _patch_common(monkeypatch, svc, binding, connector_type, captured_params)
 
     result = svc.execute_binding_action(
-        "binding-1", "get_issue", {"issueId": "STA-132"}
+        "binding-1", "get_issue", {"issueId": "PROJ-132"}
     )
 
     assert result["success"] is True
-    assert captured_params["issue_id"] == "STA-132"
+    assert captured_params["issue_id"] == "PROJ-132"
 
 
 def test_execute_binding_action_infers_camel_case_alias_from_schema(monkeypatch):
@@ -149,11 +149,11 @@ def test_execute_binding_action_infers_camel_case_alias_from_schema(monkeypatch)
     _patch_common(monkeypatch, svc, binding, connector_type, captured_params)
 
     result = svc.execute_binding_action(
-        "binding-1", "get_issue", {"issueId": "STA-132"}
+        "binding-1", "get_issue", {"issueId": "PROJ-132"}
     )
 
     assert result["success"] is True
-    assert captured_params["issue_id"] == "STA-132"
+    assert captured_params["issue_id"] == "PROJ-132"
 
 
 def test_execute_binding_action_still_rejects_missing_required_param(monkeypatch):

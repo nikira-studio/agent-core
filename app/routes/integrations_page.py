@@ -76,19 +76,23 @@ If it would be settled by checking, it is a `fact`. If it would be settled by so
 
 A recommendation nobody has committed to yet — candidate next steps, options under consideration — is not a `decision`. Write it as `scratchpad` so it stays cheaply searchable, then promote it to a `decision` once someone actually picks one. Don't let it live only inside an activity's `task_result`: the activity trail is for what happened, and digging through it for "what should we do next" is far more expensive than a scoped memory lookup.
 
-On a `fact`, set `subject_anchor` to what a later session would check: `repo:<path>`, `host:<name-or-ip>`, or `service:<binding_id>`, with repo paths relative to the workspace root. Omit it when nothing could verify the record. Anchored facts are re-checked automatically; if a check reports the subject missing but it only moved, call `memory_reanchor` to repoint the record instead of letting it be proposed for removal.
+On a `fact`, set `subject_anchor` to what a later session would check: `repo:<path>`, `host:<name-or-ip>`, or `service:<binding_id>`, with repo paths relative to the workspace root. Omit it when nothing could verify the record. A `repo:` anchor is checked only where the operator mapped the workspace to a directory on the Core host and a `service:` anchor through that service connection; a `host:` anchor is only a label. A check that finds the subject there changes nothing visible; one that finds it gone queues a suggestion. If a check reports the subject missing but it only moved, call `memory_reanchor` to repoint the record instead of letting it be proposed for removal.
 
 `valid_from` and `valid_to` say when the content was true in the world, separately from when you wrote it. Set them when a record covers a period other than "from now on", and pass `as_of` to `memory_search` to ask what was true at a past moment.
 
-`workspace_sync` returns pinned records for its workspace. Call `memory_pinned` once at session start only when you also need standing rules from other authorized scopes or no workspace sync applies. Treat pinned records as applying to everything you do, not just the current task. Search results carry `days_since_confirmed`. Treat a fact nobody has confirmed in months as a lead, not as current truth. Check it, then `memory_confirm` it with evidence naming what you checked, or supersede it if it has changed. Call `memory_feedback` when a recalled record clearly did or did not help. If something should apply to every session in the scope rather than only this task, call `memory_pin` to request it. An operator decides because standing context reaches every agent in the scope."""
+Search results carry `days_since_confirmed`. Treat a fact nobody has confirmed in months as a lead, not as current truth. Check it, then `memory_confirm` it with evidence naming what you checked, or supersede it if it has changed."""
 
-MEMORY_DISCIPLINE_GUIDANCE = """One memory per insight, not per occurrence: when a recurring task (heartbeat, monitor tick, scheduled review, watchdog retry) keeps producing the same finding, write ONE record the first time and supersede it if the situation changes — never a new record per tick, per fire, or per re-check. Per-occurrence status belongs in `activity_update` (`task_note`/`task_result`) or the source system, not in memory. To find what has already been done — "what did we do on X", "has this been tried" — search the activity trail with `activity_search` rather than memory; memory is for what stays true, the trail is for what happened. Before writing a `fact` or `decision`, search for an existing record on the same topic and supersede it (`supersedes_id`) instead of adding a near-duplicate. For notes that stop being true on their own (for example "service X is down right now"), use `scratchpad` or set `expires_at`."""
+MEMORY_WRITE_WHEN = "Write a memory only for something a future session cannot get from the code, the config or the task history, and that will still be true: a decision with its reason, a constraint that cost effort to find, who or where something is (an account, a host, an owner), or how things are wired. Do not write: that you finished, deployed or fixed something (use `activity_update`); what the code or API already says; an experiment or benchmark result; a ticket or review log; a status that was true for a day; a guess about a cause. One record per lasting insight; replace it when it changes."
+
+MEMORY_DISCIPLINE_GUIDANCE = """Write a memory only for something a future session cannot get from the code, the config or the task history, and that will still be true: a decision with its reason, a constraint that cost effort to find, who or where something is (an account, a host, an owner), or how things are wired. Do not write: that you finished, deployed or fixed something (use activity_update); what the code or API already says; an experiment or benchmark result; a ticket or review log; a status that was true for a day; a guess about a cause. One record per lasting insight; replace it when it changes.
+
+One memory per insight, not per occurrence: when a recurring task (heartbeat, monitor tick, scheduled review, watchdog retry) keeps producing the same finding, write ONE record the first time and supersede it if the situation changes — never a new record per tick, per fire, or per re-check. Per-occurrence status belongs in `activity_update` (`task_note`/`task_result`) or the source system, not in memory. To find what has already been done — "what did we do on X", "has this been tried" — search the activity trail with `activity_search` rather than memory; memory is for what stays true, the trail is for what happened. Before writing a `fact` or `decision`, search for an existing record on the same topic and supersede it (`supersedes_id`) instead of adding a near-duplicate. For notes that stop being true on their own (for example "service X is down right now"), use `scratchpad` or set `expires_at`."""
 
 REPOSITORY_BOUNDARY_GUIDANCE = """Workspace context is not repository access. If a task points to files outside the current checkout, switch to an authorized checkout or report the mismatch. Do not use memory summaries as a substitute for reviewing the source."""
 
 WORKSPACE_SYNC_OPERATING_RULES = """Pass the session's `execution_id` to supported writes, including `activity_update` and `memory_write`. If a fresh `activity_update` returns `since_last_active`, process it as a bounded fallback digest, not complete history; a caught-up execution normally suppresses it. If `has_more` is true, process and acknowledge the current page, then sync again until `has_more` is false. If `cursor_reset` is true, treat the returned bootstrap as incomplete history and inspect the relevant memory and activity trail. If sync fails, continue only when the task does not depend on current shared state. For a review, resume, or handoff, stop and report the sync failure."""
 
-CONNECTOR_BINDING_GUIDANCE = """A visible connector binding grants access to every action enabled on its connector type. Use the connector type's action controls to disable actions for all bindings."""
+CONNECTOR_BINDING_GUIDANCE = """A visible connector connection grants access to every action enabled on its connector type. Use the connector type's action controls to disable actions for all connections."""
 
 
 # ─── INTEGRATIONS ─────────────────────────────────────────────────────────────
@@ -629,7 +633,7 @@ async def generate_agent_connection(
             "filename": filename,
             "output": output,
             "api_key": api_key,
-            "warning": "This key is shown once. Generating again rotates the agent key and invalidates the previous key.",
+            "warning": "This agent API key is shown once. Generating again rotates it and invalidates the previous one.",
         }
     )
 
@@ -698,6 +702,8 @@ def integrations_page(
         else workspace_service.list_workspaces(owner_user_id=current_user_id)
     )
     workspaces.sort(key=lambda workspace: _label_sort_key(workspace, "name"))
+    if not workspace_id and "workspace_id" not in request.query_params and len(workspaces) == 1:
+        workspace_id = workspaces[0]["id"]  # one workspace: that is the one, no choosing
     project_options = "".join(
         f'<option value="{p["id"]}" {"selected" if p["id"] == workspace_id else ""}>{escape_html(p["name"])}</option>'
         for p in workspaces
@@ -790,7 +796,11 @@ def integrations_page(
             checks_html += f"<div class='{cls}'><span class='check-icon'>{icon}</span>{escape_html(check['label'])}</div>"
         checks_html += "</div>"
         if any(c["status"] in ("warning", "blocked") for c in access_checks):
-            checks_html += "<p class='text-muted' style='font-size:0.8rem;margin-top:8px'>Warnings mean something is missing. Review access on the Agents page, or generate the output anyway.</p>"
+            checks_html += (
+                "<p class='text-muted' style='font-size:0.8rem;margin-top:8px'>Something this agent needs is missing.</p>"
+                "<button type='button' class='btn btn-sm' id='apply-access-btn' onclick='applyRecommendedAccess()'>Give access</button> "
+                "<span id='apply-status' class='text-muted' style='font-size:0.85rem'></span>"
+            )
         else:
             checks_html = (
                 "<div class='access-checks'><div class='check-ok'><span class='check-icon'>&#10003;</span>Everything this agent needs is in place</div></div>"
@@ -877,10 +887,11 @@ def integrations_page(
     def _section(label, text, file_name, key_button=""):
         return (
             "<div class='output-section'>"
-            f"<div class='output-label'>{escape_html(label)}</div>"
+            # The key button comes first, in reading order, not below a screenful of config text.
+            + (f"<div class='output-actions' style='margin-bottom:8px'>{key_button}</div>" if key_button else "")
+            + f"<div class='output-label'>{escape_html(label)}</div>"
             f"<pre class='output-block'>{escape_html(text)}</pre>"
             "<div class='output-actions'>"
-            f"{key_button}"
             "<button type='button' class='btn btn-sm btn-secondary' onclick=\"copyGeneratedOutput(this)\">Copy</button>"
             f"<button type='button' class='btn btn-sm btn-secondary' data-download-filename='{escape_html(file_name)}'>Download</button>"
             "</div></div>"
@@ -917,8 +928,8 @@ def integrations_page(
             f"Generate One-Time Key + {escape_html(_name)} MCP Config</button>"
         )
         hook_item = (
-            "<li><h3>Optional: add context at the start of each session</h3>"
-            "<p>A hook runs when a Claude Code session starts. The steps are under "
+            "<li><h3>Add the session start hook</h3>"
+            "<p>A hook runs when a Claude Code session starts and hands the agent its session context (open work, recent results, key records) with no step to remember. The steps are under "
             f"<a href=\"{page_path}?{urlencode({**current_params, 'output_type': 'claude_code_hook'})}#other-outputs\">Other outputs → Claude Code Hook</a>.</p></li>"
             if target == "claude_code"
             else ""
@@ -971,10 +982,7 @@ def integrations_page(
               {agent_options}
             </select>
             <p class="form-hint">The agent identity the tool signs in as. It decides what the tool may read and write.</p>
-            <details class="access-details">
-              <summary>What does Generate One-Time Key do?</summary>
-              <p class="form-hint">Choosing a user, workspace or agent only updates the preview below. Nothing is issued until you press the blue <strong>Generate One-Time Key</strong> button under the output, which creates a new key for the selected agent and replaces its old one. That button appears only for outputs that include a key (MCP Config, Environment Variables, Assistants). CLAUDE.md, AGENTS.md, Instructions and the prompts are the same for every agent and safe to regenerate at any time.</p>
-            </details>
+            <p class="form-hint">Choosing a user, workspace or agent only updates the preview below. Nothing is issued until you press <strong>Generate One-Time Key</strong> under the output (shown only for outputs that include a key), which replaces that agent's old key. CLAUDE.md, AGENTS.md, Instructions and the prompts are the same for every agent and safe to regenerate at any time.</p>
           </div>
         </div>
       </div>
@@ -1002,8 +1010,8 @@ def integrations_page(
         {verification_html}
       </div>
 
-      <details class="card" id="other-outputs" {other_open}>
-        <summary><h3>Other outputs</h3></summary>
+      <details class="card fold-card" id="other-outputs" {other_open}>
+        <summary><span class="fold-title">Other outputs</span><span class="fold-hint">Instruction files for other tools, environment variables, raw config</span></summary>
         <p class="form-hint">Everything this page can generate, as tabs: environment variables, the session prompt, the Claude Code hook, and the full MCP config for every tool.</p>
         {destination_section}
         <div class="form-section" id="generated-output">
@@ -1173,7 +1181,7 @@ def _build_agent_setup_output_for(
         content = _build_claude_code_hook(base_url)
     else:
         label = "Verification Prompt"
-        content = _build_verification_prompt(user_scope, default_scope)
+        content = _build_verification_prompt(workspace_scope or agent_scope)
 
     return label, content
 
@@ -1247,68 +1255,11 @@ def _build_instructions(
 - Available tools: {_mcp_tool_listing()}.
 """
 
-    return f"""# {APP_NAME} Setup Instructions
+    context = _compact_workspace_context(base_url, user_scope, workspace_scope, agent_scope, workspace_name)
+    return f"""{context}
+User: {user_display}. Agent: {agent_display}.
 
-You are connected to {APP_NAME}.
-
-**User:** {user_display}
-**Workspace:** {workspace_name}
-**Agent:** {agent_display}
-**Base URL:** {base_url}
-
-## Scopes
-
-{scope_guide}
-
-## Getting Started
-
-1. At session startup: If your context already contains an "{APP_NAME} session context" block (a SessionStart hook injects it), reuse its `execution_id` and skip the startup sync. Otherwise call `session_context` once for `{default_scope}`; it returns standing rules, unfinished and handed-off work, recent results, changes since your last session, an index of key records, and the `execution_id` to reuse for that host session.
-2. Sync before resuming, reviewing, handing off, or completing shared work. Process each stable change ID once, including when it appears in both its resource group and `other_session_changes`. Call `workspace_sync_ack` only after you incorporate or intentionally skip the delivered page.
-3. Call `activity_pickup` at startup or when idle to check for assigned work. If it returns an activity, read it, start working, and send heartbeats. If it returns null, proceed with the user's task.
-4. Search memory in `{default_scope}` for relevant older context. If the search returns little or nothing, retry with exact topic values, exact keywords, or a known record ID. For a handoff, resume, or review, the session context already shows recent work with its next steps and open questions; use `activity_search` or `activity_get` when you need older history.
-5. Search `{user_scope}` for user preferences and owner context. Active agents automatically inherit read access to their principal's user scope.
-6. Create or update an activity record when starting a meaningful task. Include `{default_scope}` as `memory_scope` on every heartbeat, progress note, completion, or blocked update. {APP_NAME} updates only the activity in that scope and never moves one across scopes. Use `task_note` for progress and `task_result` when closing the task.
-7. Store durable decisions and handoff notes in `{default_scope}`.
-8. Use `credential_list` and `credential_get` to retrieve credential references. Never ask for raw secrets: when a credential you need does not exist, call `credential_request` with a scope, name and purpose, and call it again later to get the reference once a person has filled it.
-9. Use connector tools to find and run server-side connector bindings before asking the user to configure an external service manually.
-
-{REPOSITORY_BOUNDARY_GUIDANCE}
-
-{WORKSPACE_SYNC_OPERATING_RULES}
-
-## Memory Write Rules
-
-{MEMORY_CLASS_GUIDANCE}
-- Use `{workspace_scope_label}` for workspace memory when a workspace is selected, `{user_scope}` for stable user preferences, and `{agent_scope}` for private scratch context.
-- `topic` is a short label for listings. `confidence` is caller-assigned and not used for ranking: ranking uses observed evidence (recall, feedback, confirmation age), not self-assessment.
-- {MEMORY_DISCIPLINE_GUIDANCE}
-
-## Credentials And Connectors
-
-When a task may require an external service, credential, API token, repository host, chat service, browser service, or connector, check {APP_NAME} before asking the user for setup details.
-
-1. Use `credential_list` to discover available credential references in authorized scopes.
-2. Use `credential_get` only when you need a specific `{CREDENTIAL_PREFIX}*` reference for a local tool or command. Never ask the user for raw secrets and never print raw secrets. When a credential you need does not exist, call `credential_request` (scope, name, purpose): a person fills it on the Credentials page, and calling it again returns the reference.
-3. Use `connectors_summary` for a compact capability overview, or `connectors_list` and `connectors_bindings_list` when you need raw connector and binding lists.
-4. Use `connectors_actions_list` before running an unfamiliar connector action.
-5. Use `connectors_bindings_test` when a binding may be stale or unverified.
-6. Use `connectors_run` when {APP_NAME} should perform the external action server-side.
-
-Prefer connector bindings over local secret handling when both are available, because the raw credential stays inside {APP_NAME}.
-{CONNECTOR_BINDING_GUIDANCE}
-
-## API Key
-
-Set `{ENV_PREFIX}API_KEY` in your local environment using the key shown when this agent was created or rotated.
-Do not commit API keys to workspace files.
-
-{tool_tips}
-## Tool Configuration
-
-- MCP endpoint: {base_url}/mcp
-- REST base: {base_url}
-- Auth: Bearer token with your agent API key
-"""
+{tool_tips}"""
 
 
 def _build_user_instructions(
@@ -1387,273 +1338,61 @@ def _build_session_prompt(
         "cursor": "You are Cursor's AI agent.",
         "windsurf": "You are Windsurf's AI agent.",
     }.get(target, "You are an MCP-capable AI agent.")
-    return f"""{tool_line} You are working for {user_display} on {workspace_name}.
+    context = _compact_workspace_context(base_url, user_scope, workspace_scope, agent_scope, workspace_name)
+    return f"""{tool_line} Paste-in prompt for this session.
 
-Use {APP_NAME} MCP for durable workspace memory, handoffs, and workspace context. For a handoff, resume, or review of prior work, the session context already shows recent work with its next steps and open questions. Use `activity_search` or `activity_get` when you need older history.
-Default memory scope for this setup is `{default_scope}`.
-Core MCP tools include {_mcp_tool_listing()}.
-Use your private scope `{agent_scope}` only for tool-specific scratch context.
-Use full prefixed scope names exactly as shown; do not use plain workspace IDs or agent IDs as memory scopes.
-Read `{user_scope}` for stable {user_display} preferences and other owner-context details. Active agents automatically inherit read access to their principal's user scope.
-Use credential references through {APP_NAME} MCP; never request or print raw secrets.
-Activity records are operational task tracking, not durable memory. At session startup, if your context already contains an "{APP_NAME} session context" block (a SessionStart hook injects it), reuse its `execution_id` and skip the startup sync. Otherwise call `session_context` once for `{default_scope}` before starting meaningful work. Reuse the returned `execution_id` for that session. Call `workspace_sync` with it before resuming, reviewing, handing off, or completing shared work. Process each stable change ID once even when it appears in both a resource group and `other_session_changes`, then call `workspace_sync_ack` after incorporating or intentionally skipping the page. At the start of every non-trivial user task, immediately call `activity_update` with a concise `task_description`, `memory_scope` set to `{default_scope}`, and `status` set to `active`. When you are starting fresh or have gone idle, call `activity_pickup` to claim work a human assigned to you in your scopes. It returns nothing when nothing is waiting; work is pulled, never pushed, so an agent that never asks never sees it.
+{context}"""
 
-{REPOSITORY_BOUNDARY_GUIDANCE}
 
-{WORKSPACE_SYNC_OPERATING_RULES}
+def _compact_workspace_context(base_url, user_scope, workspace_scope, agent_scope, workspace_name, extra=""):
+    """What is specific to this workspace, and nothing the MCP server already says.
 
-If the session reloads, a handoff begins, or no active activity exists yet, open a fresh activity first with `status: active` before attempting to close it. While actively working, use `task_note` for short progress updates and call `activity_update` again every 1-2 minutes as a heartbeat. Include `{default_scope}` as `memory_scope` on every later update: Core updates only the activity in that scope and never moves one across scopes. When finishing or stopping a task, call `activity_update` with `status: completed` (or `status: blocked` if you cannot proceed and need user input), a short `task_result`, and `handoff={{completed, next_steps, open_questions, needs_human}}` so the next session can pick the work up. If the work came from a task in another system (an issue tracker ticket, a job from a scheduler or another agent platform), also pass `task_ref` as `<system>:<id>` so readers can link the two. A `needs_human` request replaces your open requests in that scope from earlier sessions: the response lists them in `superseded_requests`. Restate any that still apply; after closing, send a `handoff` with only the restated ask and it is added to the asks already there. When a request you made has been dealt with, call `activity_handoff_resolve` with its `activity_id` and a short `reason`.
-If the session has to stop early or hits a token limit, leave the activity current and write durable decisions or handoff notes to memory so another agent can continue from the saved state.
-If work needs to move across users or workspaces, make that explicit in the activity scope and handoff notes rather than assuming a hidden policy layer.
-If the client has hooks or plugins, use them to automate memory/activity capture; if it does not, treat this prompt as the source of truth for those expectations.
-When an external service is needed, use `credential_list`, `credential_get`, `connectors_summary`, `connectors_list`, `connectors_bindings_list`, `connectors_actions_list`, `connectors_bindings_test`, and `connectors_run` instead of asking the user to hand-wire secrets or run manual service calls.
-{CONNECTOR_BINDING_GUIDANCE}
+    The tools, their parameters and the memory classes are described by the MCP server's own
+    instructions and tool descriptions, so a generated file only needs the scopes, the session rhythm
+    and the one rule that decides whether a memory is worth writing.
+    """
+    default_scope = workspace_scope or agent_scope
+    session_line = (
+        f"- FIRST, every session, before any other tool: if your context already holds an \"{APP_NAME} session context\" block (a SessionStart hook injects it), use it; otherwise call `session_context` with `memory_scope` `{workspace_scope}`. It lists open work, recent results and key records, and gives the `execution_id` to pass to `activity_update` and `memory_write`. Other agents' work shows up there, not in real time."
+        if workspace_scope
+        else f"- FIRST, every session, before any other tool: call `session_context` with `memory_scope` `{agent_scope}`: it lists your open work, recent results and key memories, and gives the `execution_id` to pass to `activity_update` and `memory_write`. With no workspace you see only your own work; ask the owner for a workspace to share with other agents."
+    )
+    scope_line = (
+        f"- Workspace: `{workspace_scope}`: read and write its memory and tasks. Preferences of your owner: `{user_scope}` (read). Private scratch only: `{agent_scope}`."
+        if workspace_scope
+        else f"- No workspace is selected, so work and notes go in your private scope `{agent_scope}`; ask the owner for a workspace before saving anything others should see. Preferences of your owner: `{user_scope}` (read)."
+    )
+    return f"""# {APP_NAME}: {workspace_name}
 
-## Memory Workflow
+{APP_NAME} ({base_url}) is this workspace's shared memory and task log. Your MCP connection supplies the tools and how to use them; this file says only what is specific here.
 
-At the start of a meaningful task:
-
-1. Start or refresh the activity record using `activity_update`.
-2. Search `{default_scope}` with 2-3 focused queries for relevant architecture, decisions, prior bugs, and current project state. If the search returns little or nothing, retry with exact topic values, exact keywords from prior records, or a known record id. When embeddings are unavailable, broad conceptual queries can miss; exact tokens and known ids are more reliable.
-3. Search `{user_scope}` when user preferences or personal workflow may matter.
-4. Use `memory_get` with `ids` to read records named in the session context index, or with a scope to list them; use `memory_search` to find records by query, topic, or class.
-
-Write memory only when it will help a future session:
-
-- `decision` in `{default_scope}` for durable choices, tradeoffs, rejected options, and why they were chosen — things only a person can revise.
-- `fact` in `{default_scope}` for observations someone could re-check later: implementation details, integration details, constraints, and verified behavior.
-- `preference` in the authenticated/default user scope only if your key has user-scope write; otherwise treat the user scope as read-only owner context and write the preference to `{default_scope}` instead.
-- `scratchpad` in `{agent_scope}` for temporary private notes, or in `{default_scope}` only for short-lived workspace handoff notes.
-
-{MEMORY_CLASS_GUIDANCE}
-
-Do not write memory for routine progress, command output, facts already obvious from files, secrets, raw credentials, or noisy transient debugging notes.
-{MEMORY_DISCIPLINE_GUIDANCE} Use concise content and add a short `topic` as a label. Ranking uses observed evidence — how often a record is recalled, whether it helped, and when it was last confirmed — not self-assessment, so do not spend effort tuning `confidence` or `importance`.
-Use this prompt to bootstrap behavior in clients without lifecycle hooks; it is not a substitute for a configured MCP server or plugin.
-
-Start by confirming you can reach {APP_NAME} at {base_url}/mcp, then search `{default_scope}` for relevant context before making changes.
+{scope_line}
+{session_line}
+- Work: open a task with `activity_update` (`status: active`, `memory_scope: {default_scope}`) and keep it alive with a short note every few minutes. Close it with a `task_result` of one or two sentences saying what was done and where (a commit, a file). Put a request to a person in the handoff's `needs_human`.
+- Before deciding something earlier sessions may have settled, `memory_search` `{default_scope}`; if it finds nothing, retry with exact words.
+- {MEMORY_WRITE_WHEN}
+- Secrets: `credential_get` returns an `{CREDENTIAL_PREFIX}*` reference; never ask for or print a raw secret. If one is missing, `credential_request`.
+- Use full prefixed scope names exactly as shown.{extra}
 """
 
 
 def _build_claude_md(
     base_url, user_scope, workspace_scope, agent_scope, agent_display, workspace_name
 ):
-    default_scope = (
-        workspace_scope
-        or f"the authenticated/default user scope from your {APP_NAME} connection"
+    return _compact_workspace_context(
+        base_url, user_scope, workspace_scope, agent_scope, workspace_name,
+        extra=(
+            f"\n- Claude Code defers MCP schemas: before the first {APP_NAME} call in a session, load them with "
+            f"`ToolSearch(\"select:mcp__{APP_SLUG}__session_context,mcp__{APP_SLUG}__activity_update,"
+            f"mcp__{APP_SLUG}__memory_search,mcp__{APP_SLUG}__memory_write\")`. Never put an API key in this file."
+        ),
     )
-    workspace_scope_label = workspace_scope or "No workspace scope selected"
-    private_scope_guidance = f"Use your authenticated {APP_NAME} private scope, usually `agent:<your-agent-id>`, only for tool-specific scratch context."
-    return f"""# {APP_NAME} Workspace Context
-
-You are working on the {workspace_name} workspace.
-
-Use {APP_NAME} for durable workspace memory, activity tracking, handoffs, and credential references. For a handoff, resume, or review of prior work, the session context already shows recent work with its next steps and open questions. Use `activity_search` or `activity_get` when you need older history.
-Core MCP tools include {_mcp_tool_listing()}.
-
-## Connection
-
-- **{APP_NAME} URL:** {base_url}
-- **Workspace scope:** {workspace_scope_label}
-
-The active {APP_NAME} user and agent identities are determined by the MCP/API key configured in your tool, not by this file. Do not add API keys to this file.
-
-## Memory Scopes
-
-Use `{default_scope}` for default memory in this setup.
-Read the authenticated/default user scope from your {APP_NAME} connection for stable personal preferences and owner-context details. Active agents automatically inherit read access to their principal's user scope.
-{private_scope_guidance}
-Use full prefixed scope names exactly as shown. Do not use plain workspace IDs like `{workspace_name}` or agent IDs like `{agent_display}` as memory scopes.
-
-## Memory Workflow
-
-At the start of a meaningful task:
-
-1. Start or refresh the activity record using the Activity Tracking workflow below.
-2. Search `{default_scope}` with 2-3 focused queries for relevant architecture, decisions, prior bugs, and current project state. If the search returns little or nothing, retry with exact topic values, exact keywords from prior records, or a known record id. When embeddings are unavailable, broad conceptual queries can miss; exact tokens and known ids are more reliable.
-3. Search the authenticated/default user scope when user preferences or personal workflow may matter.
-4. Use `memory_get` with `ids` to read records named in the session context index, or with a scope to list them; use `memory_search` to find records by query, topic, or class.
-
-Write memory only when it will help a future session:
-
-- `decision` in `{default_scope}` for durable choices, tradeoffs, rejected options, and why they were chosen — things only a person can revise.
-- `fact` in `{default_scope}` for observations someone could re-check later: implementation details, integration details, constraints, and verified behavior.
-- `preference` in the authenticated/default user scope only if your key has user-scope write; otherwise treat the user scope as read-only owner context and write the preference to `{default_scope}` instead.
-- `scratchpad` in the authenticated private agent scope for temporary private notes, or in `{default_scope}` only for short-lived workspace handoff notes.
-
-{MEMORY_CLASS_GUIDANCE}
-
-Do not write memory for routine progress, command output, facts already obvious from files, secrets, raw credentials, or noisy transient debugging notes.
-{MEMORY_DISCIPLINE_GUIDANCE}
-
-Keep memory content concise. Add a short `topic` as a label. Do not bother tuning `confidence` — ranking ignores it; what matters is the class, the anchor, and confirming a fact when you have actually checked it.
-
-## Credentials
-
-Use `credential_get` to retrieve `{CREDENTIAL_PREFIX}*` references. The local credential helper resolves them at execution time.
-Never ask users for raw credential values.
-
-## Connectors
-
-When a task may require an external service, credential, API token, repository host, chat service, browser service, or connector, check {APP_NAME} before asking the user for setup details.
-
-1. Use `credential_list` to discover available credential references in authorized scopes.
-2. Use `credential_get` only when you need a specific `{CREDENTIAL_PREFIX}*` reference for a local tool or command. Never ask the user for raw secrets and never print raw secrets. When a credential you need does not exist, call `credential_request` (scope, name, purpose): a person fills it on the Credentials page, and calling it again returns the reference.
-3. Use `connectors_summary` for a compact capability overview, or `connectors_list` and `connectors_bindings_list` when you need raw connector and binding lists.
-4. Use `connectors_actions_list` before running an unfamiliar connector action.
-5. Use `connectors_bindings_test` when a binding may be stale or unverified.
-6. Use `connectors_run` when {APP_NAME} should perform the external action server-side.
-
-Prefer connector bindings over local secret handling when both are available, because the raw credential stays inside {APP_NAME}.
-{CONNECTOR_BINDING_GUIDANCE}
-
-## Activity Tracking
-
-Activity records are operational task tracking, not durable memory.
-
-At session startup, if your context already contains an "{APP_NAME} session context" block (a SessionStart hook injects it), reuse its `execution_id` and skip the startup sync. Otherwise call `session_context` once for `{default_scope}`, and reuse its `execution_id` for the session. Call `workspace_sync` before resuming, reviewing, handing off, or completing shared work. Process each stable change ID once, including when it appears in both its resource group and `other_session_changes`. Acknowledge a page with `workspace_sync_ack` only after you incorporate or intentionally skip it.
-
-{REPOSITORY_BOUNDARY_GUIDANCE}
-
-{WORKSPACE_SYNC_OPERATING_RULES}
-
-At the start of every non-trivial user task, call `activity_update` immediately with:
-
-- `task_description`: a concise description of the current task
-- `memory_scope`: `{default_scope}`
-- `status`: `active`
-
-When the task is a handoff, resume, or review of prior work, start from the session context, which shows recent work with its next steps and open questions. Use workspace memory, not agent-private scratch notes, as the durable source of truth for prior work.
-Use `activity_search` or `activity_get` when you need older history from MCP instead of the dashboard.
-
-While actively working, call `activity_update` again every 1-2 minutes as a heartbeat. Use `task_note` for interim progress updates and update `task_description` if the task changes materially.
-Include `{default_scope}` as `memory_scope` on every heartbeat, progress note, completion, or blocked update. Core updates only the activity in that scope and never moves one across scopes.
-
-When you are starting fresh or have gone idle, call `activity_pickup` to claim work a human assigned to you in your scopes. It returns nothing when nothing is waiting; work is pulled, never pushed, so an agent that never asks never sees it.
-
-If the session reloads, a handoff begins, or no active activity exists yet, open a fresh activity first with `status: active` before attempting to close it. When finishing or stopping a task, call `activity_update` with `status: completed` (or `status: blocked` if you cannot proceed and need user input), a short `task_result`, and `handoff={{completed, next_steps, open_questions, needs_human}}` so the next session can pick the work up. If the work came from a task in another system (an issue tracker ticket, a job from a scheduler or another agent platform), also pass `task_ref` as `<system>:<id>` so readers can link the two. A `needs_human` request replaces your open requests in that scope from earlier sessions: the response lists them in `superseded_requests`. Restate any that still apply; after closing, send a `handoff` with only the restated ask and it is added to the asks already there. When a request you made has been dealt with, call `activity_handoff_resolve` with its `activity_id` and a short `reason`. Use `task_note` for in-flight updates. Do not create activity records for trivial one-shot answers that do not inspect or modify project state.
-If the session has to stop early or hits a token limit, leave the activity current and write durable decisions or handoff notes to memory so another agent can continue from the saved state.
-If work needs to move across users or workspaces, make that explicit in the activity scope and handoff notes rather than assuming a hidden policy layer.
-If the client supports hooks or plugins, use them to automate these calls. If it does not, keep using this file as the manual operating contract.
-
-
-## Claude Code Notes
-
-- Claude Code automatically reads this `CLAUDE.md` file when present in the workspace root.
-- Claude Code uses the configured MCP connection or your shell environment's `{ENV_PREFIX}API_KEY`. That key determines which {APP_NAME} user and agent are active.
-- Do not add your API key to this file.
-- **Tool availability:** Claude Code defers MCP tool schemas at startup to save context. Before calling any {APP_NAME} tool in a new session, load the startup schemas with `ToolSearch("select:mcp__{APP_SLUG}__session_context,mcp__{APP_SLUG}__workspace_sync,mcp__{APP_SLUG}__workspace_sync_ack,mcp__{APP_SLUG}__memory_search,mcp__{APP_SLUG}__activity_update,mcp__{APP_SLUG}__memory_write")`. Skipping this causes `InputValidationError`. Add other tool names to the select list as needed.
-- If Claude Code can't reach {APP_NAME}, run the Verification Prompt output to verify the full end-to-end setup.
-"""
 
 
 def _build_agents_md(
     base_url, user_scope, workspace_scope, agent_scope, workspace_name
 ):
-    default_scope = (
-        workspace_scope
-        or f"the authenticated/default user scope from your {APP_NAME} connection"
-    )
-    workspace_scope_label = workspace_scope or "No workspace scope selected"
-    return f"""# {APP_NAME} Workspace Context
-
-You are working on the {workspace_name} workspace.
-
-## {APP_NAME}
-
-Use {APP_NAME} MCP for memory, credential references, and activity tracking. For a handoff, resume, or review of prior work, the session context already shows recent work with its next steps and open questions. Use `activity_search` or `activity_get` when you need older history.
-
-- **Base URL:** {base_url}
-- **Workspace scope:** {workspace_scope_label}
-
-The active {APP_NAME} user and agent identities are determined by the MCP/API key configured in your tool, not by this file. Do not commit credentials to this file.
-If your host defers tool availability, run its tool discovery/load step first so the {APP_NAME} MCP tools are available before you try to call them.
-{APP_NAME} MCP tools you can use: {_mcp_tool_listing()}.
-
-## Memory Scope Guidance
-
-Default memory scope for this setup is `{default_scope}`.
-Read the authenticated/default user scope from your {APP_NAME} connection for stable personal preferences and owner-context details. Active agents automatically inherit read access to their principal's user scope.
-Use your authenticated {APP_NAME} private scope, usually `agent:<your-agent-id>`, for private scratch notes only.
-Use full prefixed scope names exactly as shown. Do not use plain workspace IDs or agent IDs as memory scopes.
-
-## Activity Workflow
-
-Activity records are operational task tracking, not durable memory.
-
-At session startup, if your context already contains an "{APP_NAME} session context" block (a SessionStart hook injects it), reuse its `execution_id` and skip the startup sync. Otherwise call `session_context` once for `{default_scope}`, and reuse its `execution_id` for the session. Call `workspace_sync` before resuming, reviewing, handing off, or completing shared work. Process each stable change ID once, including when it appears in both its resource group and `other_session_changes`. Acknowledge a page with `workspace_sync_ack` only after you incorporate or intentionally skip it.
-
-{REPOSITORY_BOUNDARY_GUIDANCE}
-
-{WORKSPACE_SYNC_OPERATING_RULES}
-
-At the start of every non-trivial user task, call `activity_update` immediately with:
-
-- `task_description`: a concise description of the current task
-- `memory_scope`: `{default_scope}`
-- `status`: `active`
-
-When the task is a handoff, resume, or review of prior work, start from the session context, which shows recent work with its next steps and open questions. Use workspace memory, not agent-private scratch notes, as the durable source of truth for prior work.
-Use `activity_search` or `activity_get` when you need older history from MCP instead of the dashboard.
-
-While actively working, call `activity_update` again every 1-2 minutes as a heartbeat. Use `task_note` for interim progress updates and update `task_description` if the task changes materially.
-Include `{default_scope}` as `memory_scope` on every heartbeat, progress note, completion, or blocked update. Core updates only the activity in that scope and never moves one across scopes.
-
-When you are starting fresh or have gone idle, call `activity_pickup` to claim work a human assigned to you in your scopes. It returns nothing when nothing is waiting; work is pulled, never pushed, so an agent that never asks never sees it.
-
-If the session reloads, a handoff begins, or no active activity exists yet, open a fresh activity first with `status: active` before attempting to close it. When finishing or stopping a task, call `activity_update` with `status: completed` (or `status: blocked` if you cannot proceed and need user input), a short `task_result`, and `handoff={{completed, next_steps, open_questions, needs_human}}` so the next session can pick the work up. If the work came from a task in another system (an issue tracker ticket, a job from a scheduler or another agent platform), also pass `task_ref` as `<system>:<id>` so readers can link the two. A `needs_human` request replaces your open requests in that scope from earlier sessions: the response lists them in `superseded_requests`. Restate any that still apply; after closing, send a `handoff` with only the restated ask and it is added to the asks already there. When a request you made has been dealt with, call `activity_handoff_resolve` with its `activity_id` and a short `reason`. Use `task_note` for in-flight updates. Do not create activity records for trivial one-shot answers that do not inspect or modify project state.
-If the session has to stop early or hits a token limit, leave the activity current and write durable decisions or handoff notes to memory so another agent can continue from the saved state.
-If work needs to move across users or workspaces, make that explicit in the activity scope and handoff notes rather than assuming a hidden policy layer.
-If the client supports hooks or plugins, use them to automate these calls. If it does not, keep using this file as the manual operating contract.
-
-## Memory Workflow
-
-At the start of a meaningful task:
-
-1. Confirm {APP_NAME} is reachable at {base_url}/mcp if this is a new setup or connectivity is uncertain.
-2. Start or refresh the activity record using the Activity Workflow above.
-3. Search `{default_scope}` with 2-3 focused queries for relevant architecture, decisions, prior bugs, and current project state. If the search returns little or nothing, retry with exact topic values, exact keywords from prior records, or a known record id. When embeddings are unavailable, broad conceptual queries can miss; exact tokens and known ids are more reliable.
-4. If this is a handoff, resume, or review of prior work, start from the recent work, next steps, and open questions in the session context before making changes. Use `activity_search` or `activity_get` for older history.
-5. Search the authenticated/default user scope when user preferences or personal workflow may matter.
-6. Use `memory_get` with `ids` to read records named in the session context index, or with a scope to list them; use `memory_search` to find records by query, topic, or class.
-
-Write memory only when it will help a future session:
-
-- `decision` in `{default_scope}` for durable choices, tradeoffs, rejected options, and why they were chosen — things only a person can revise.
-- `fact` in `{default_scope}` for observations someone could re-check later: implementation details, integration details, constraints, and verified behavior.
-- `preference` in the authenticated/default user scope only if your key has user-scope write; otherwise treat the user scope as read-only owner context and write the preference to `{default_scope}` instead.
-- `scratchpad` in the authenticated private agent scope for temporary private notes, or in `{default_scope}` only for short-lived workspace handoff notes.
-
-{MEMORY_CLASS_GUIDANCE}
-
-Do not write memory for routine progress, command output, facts already obvious from files, secrets, raw credentials, or noisy transient debugging notes.
-{MEMORY_DISCIPLINE_GUIDANCE}
-
-Keep memory content concise. Add a short `topic` as a label. Do not bother tuning `confidence` — ranking ignores it; what matters is the class, the anchor, and confirming a fact when you have actually checked it.
-
-## Credentials And Connectors
-
-When a task may require an external service, credential, API token, repository host, chat service, browser service, or connector, check {APP_NAME} before asking the user for setup details.
-
-1. Use `credential_list` to discover available credential references in authorized scopes.
-2. Use `credential_get` only when you need a specific `{CREDENTIAL_PREFIX}*` reference for a local tool or command. Never ask the user for raw secrets and never print raw secrets. When a credential you need does not exist, call `credential_request` (scope, name, purpose): a person fills it on the Credentials page, and calling it again returns the reference.
-3. Use `connectors_summary` for a compact capability overview, or `connectors_list` and `connectors_bindings_list` when you need raw connector and binding lists.
-4. Use `connectors_actions_list` before running an unfamiliar connector action.
-5. Use `connectors_bindings_test` when a binding may be stale or unverified.
-6. Use `connectors_run` when {APP_NAME} should perform the external action server-side.
-
-Prefer connector bindings over local secret handling when both are available, because the raw credential stays inside {APP_NAME}.
-{CONNECTOR_BINDING_GUIDANCE}
-This file is the manual fallback when the client has no lifecycle hook or plugin layer.
-
-## Codex Notes
-
-- Codex reads `AGENTS.md` at the start of each session.
-- This file is workspace-centric and can be shared by multiple agents in the same repository. The MCP/API key determines whether the active agent is Codex, OpenCode, Claude Code, or another configured agent.
-- For multi-agent collaboration, select a workspace and ensure each agent has read/write access to that workspace scope.
-- Use the MCP tools (`memory_search`, `memory_write`, `activity_update`, `credential_list`, `credential_get`, `connectors_*`) rather than raw API calls for better scope enforcement.
-- If Codex loses connectivity, run the verification prompt to verify the full end-to-end setup.
-"""
+    return _compact_workspace_context(base_url, user_scope, workspace_scope, agent_scope, workspace_name)
 
 
 def _build_assistants_md(base_url, user_scope, workspace_scope, agent_scope, api_key=None, default_recall_scopes_json=None):
@@ -1723,7 +1462,7 @@ Read `{user_scope}` for stable owner preferences and context. It is read-only un
 2. Before a meaningful task, call `activity_update` with `memory_scope` set to `{durable_scope}` and `status` set to `active`. Keep updates in that scope, use `task_note` for progress, and when finishing or stopping, set `status` to completed or blocked with `task_result` and `handoff={{completed, next_steps, open_questions, needs_human}}`. When a `needs_human` request you made has been dealt with, call `activity_handoff_resolve`.
 3. Search relevant workspace memory before acting. For a handoff, review, or resume, the session context shows recent work with its next steps and open questions; use `activity_search` or `activity_get` for older history.
 4. Write durable facts and decisions to {durable_label}. A fact needs a `subject_anchor`; routine progress belongs in activity records, not memory.
-5. Before requesting manual setup or a raw secret, check available credential references and connector bindings. Run connector actions through {APP_NAME} when possible.
+5. Before requesting manual setup or a raw secret, check available credential references and connector connections. Run connector actions through {APP_NAME} when possible.
 
 For full operational guidance, use the generated `AGENTS.md` or `CLAUDE.md` for the relevant repository.
 """
@@ -1934,28 +1673,18 @@ def _get_destination_guidance(target, output_type):
     elif output_type == "claude_code_hook":
         return "Follow these steps on each machine that runs Claude Code. The hook contains no key; it reuses the MCP configuration."
     elif output_type == "verification":
-        return "Paste this into your connected agent after setup. It runs the end-to-end verification flow and reports memory, credential, and service access."
+        return "Paste this into your connected agent after setup. It writes, finds and closes one note in a scope the agent can write to, and reports whether each step worked."
     return ""
 
 
-def _build_verification_prompt(user_scope, workspace_scope):
-    return f"""Run the {APP_NAME} verification flow end to end:
+def _build_verification_prompt(scope):
+    """Four steps in one scope the agent can write to: write, search, activity, done."""
+    return f"""Check that {APP_NAME} works for you, in `{scope}`:
 
-1. Call `workspace_sync` for `{workspace_scope}` without an `execution_id`. Save the returned execution ID and report how many pinned records, assigned activities, and changes came back.
-2. Call `activity_update` with `task_description` set to "{APP_NAME} verification", `memory_scope` set to `{workspace_scope}`, `status` set to `active`, and `execution_id` set to the saved value.
-3. Write a memory record to `{workspace_scope}` that says this agent is connected and is safe to use for this workspace. Pass the saved `execution_id` and capture the returned record ID.
-4. Call `workspace_sync` again with the saved `execution_id`. Confirm that `memory_changes` contains the new record's stable change ID. Call `workspace_sync_ack` with `next_cursor` only after checking the page.
-5. Call `memory_get` with `scope` set to `{workspace_scope}`, `view` set to `full`, and a small `limit`. Confirm that the returned records include the captured record ID.
-6. Call `memory_search` in `{workspace_scope}` for an exact token from the record. If the first search returns no results, retry once with the exact token and the record's `topic`.
-7. Call `memory_pinned` and report how many standing-context records came back. Zero is correct on a fresh install. `workspace_sync` already returned the workspace's pinned records; this call checks standing context across the caller's other authorized scopes.
-8. Call `activity_search` for a word from your task description and confirm that this session's activity comes back.
-9. Call `credential_list` and report whether credential references are visible. Do not reveal or print raw secrets.
-10. Call `connectors_summary` to list visible connector capability and binding health. Then call `connectors_bindings_list` with no scope to see everything visible to this agent. Call it again with `scope` set to `{user_scope}` and again with `scope` set to `{workspace_scope}`. Report user-scoped and workspace-scoped bindings separately.
-11. Call `connectors_actions_list` with a real connector type ID from `connectors_list`. Report whether connector actions are visible.
-12. If at least one enabled binding is visible, call `connectors_bindings_test` on a non-destructive binding and report the result. If none are visible, say so.
-13. Use `task_note` for intermediate updates. Finish with `activity_update`, the same `memory_scope` and `execution_id`, `status` set to `completed`, and a short `task_result`. If the session reloads or no active activity exists, open a fresh verification activity before closing it.
-14. Call `workspace_sync` one last time before reporting completion. Process and acknowledge the delivered page.
-15. Report which scope you wrote to and summarize the sync, memory, credential, and connector checks.
+1. Write a memory record to `{scope}` with `memory_class` set to `scratchpad` that says this agent is connected. Note the returned record ID.
+2. Call `memory_search` with `scope` set to `{scope}` and a word from that record. Confirm the record ID from step 1 comes back.
+3. Call `activity_update` with `task_description` "{APP_NAME} verification", `memory_scope` `{scope}` and `status` `active`; then again with `status` `completed` and a one-line `task_result`.
+4. Report the scope you wrote to and whether each step worked. Do not print any secrets.
 
-Use the full prefixed scope name exactly as shown. Do not use a plain workspace ID as a memory scope.
+Use the full prefixed scope name exactly as shown.
 """

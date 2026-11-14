@@ -13,7 +13,6 @@ INBOUND_KEY_PREFIX = "ac_inbound_"
 INBOUND_EVENT_TYPES = frozenset(
     {
         "activity.create",
-        "activity.assign",
         "activity.update",
         "activity.cancel",
         "activity.note",
@@ -21,7 +20,7 @@ INBOUND_EVENT_TYPES = frozenset(
 )
 
 _ACTIVITY_MODIFY_EVENTS = frozenset(
-    {"activity.assign", "activity.update", "activity.cancel", "activity.note"}
+    {"activity.update", "activity.cancel", "activity.note"}
 )
 
 
@@ -135,6 +134,8 @@ def handle_inbound(
     Raises ValueError for unknown event types or missing required fields.
     Raises PermissionError when an asserted workspace does not match the target.
     """
+    if event_type == "activity.assign":
+        raise ValueError("activity.assign was removed in Agent Core 1.3.0 (agents are not assigned work)")
     if event_type not in INBOUND_EVENT_TYPES:
         raise ValueError(f"Unknown event type: {event_type}")
 
@@ -146,8 +147,6 @@ def handle_inbound(
 
     if event_type == "activity.create":
         return _handle_create(payload, ip_address)
-    if event_type == "activity.assign":
-        return _handle_assign(payload, ip_address)
     if event_type == "activity.update":
         return _handle_update(payload, ip_address)
     if event_type == "activity.cancel":
@@ -188,32 +187,6 @@ def _handle_create(payload: dict, ip_address: Optional[str]) -> dict:
         ip_address=ip_address,
     )
     return {"activity_id": activity["id"], "status": activity["status"]}
-
-
-def _handle_assign(payload: dict, ip_address: Optional[str]) -> dict:
-    activity_id = payload["activity_id"]
-    new_agent_id = payload.get("assigned_agent_id")
-    if not new_agent_id:
-        raise ValueError("activity.assign requires assigned_agent_id")
-
-    activity = activity_service.reassign_activity(activity_id, new_agent_id)
-    if not activity:
-        raise ValueError(f"Activity not found or not assignable: {activity_id}")
-
-    memory_scope = payload.get("memory_scope")
-    if memory_scope:
-        activity_service.update_activity(activity_id, memory_scope=memory_scope)
-
-    audit_service.write_event(
-        actor_type="system",
-        actor_id="inbound-webhook",
-        action="inbound_webhook_received",
-        resource_type="activity",
-        resource_id=activity_id,
-        details={"event_type": "activity.assign", "new_agent_id": new_agent_id},
-        ip_address=ip_address,
-    )
-    return {"activity_id": activity_id, "assigned_agent_id": new_agent_id}
 
 
 def _handle_update(payload: dict, ip_address: Optional[str]) -> dict:

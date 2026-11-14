@@ -32,6 +32,7 @@ def login_page(request: Request):
         <div class="form-group">
           <label>Password</label>
           <input type="password" name="password" minlength="8" autocomplete="new-password" required>
+          <p class="form-hint">At least 8 characters.</p>
         </div>
         <button type="submit" class="btn">Create Account</button>
       </form>
@@ -42,7 +43,7 @@ def login_page(request: Request):
       const fd = new FormData(e.target);
       const r = await fetch('/api/auth/register', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(Object.fromEntries(fd))});
       const j = await r.json();
-      if (j.ok) { showToast('Account created. Set up two-factor authentication next.', 'success'); window.location.href = '/settings/otp?first_run=1'; }
+      if (j.ok) { showToast('Account created. Welcome.', 'success'); window.location.href = '/'; }
       else { showToast(j.error.message || 'Error', 'danger'); }
     }
     </script>
@@ -92,10 +93,10 @@ def login_page(request: Request):
 @router.get("/otp")
 def otp_page(request: Request):
     return render_page(
-        "OTP Verification",
+        "Two-step sign-in",
         """
     <div class="card" style="max-width:400px;margin:60px auto">
-      <h2>Two-Factor Authentication</h2>
+      <h2>Two-step sign-in</h2>
       <p class="text-muted" style="margin-bottom:16px">Enter the 6-digit code from your authenticator app.</p>
       <form id="otp-form" onsubmit="submitOtp(event)">
         <div class="form-group">

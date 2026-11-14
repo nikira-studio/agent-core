@@ -20,6 +20,12 @@ class Settings(BaseSettings):
     SHARED_SCOPE_AGENTS: str = ""
     TRUSTED_PROXIES: str = ""
     STALE_THRESHOLD_MINUTES: int = 5
+    # An open task nobody has updated for this long is closed as "ended without report" (0 turns it off).
+    ABANDONED_AFTER_HOURS: int = 48
+    # An ask to a person nobody has touched for this many days stops waiting (0 turns it off).
+    ASK_EXPIRES_AFTER_DAYS: int = 7
+    # An agent that has made no MCP call for this many minutes gets the session context on its next call (0 turns it off).
+    SESSION_CONTEXT_IDLE_MINUTES: int = 60
     # The Overview's attention list is a current-work queue, not an archive of
     # every activity that was ever blocked. Older records remain available on
     # the Activity page.

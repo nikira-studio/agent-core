@@ -31,6 +31,18 @@ WEBHOOK_EVENT_TYPES = (
     "approval_requested",
 )
 
+# What each event means, in the words the Webhooks page shows (the identifier stays what the receiver gets).
+WEBHOOK_EVENT_LABELS = {
+    "activity_created": ("A task starts", "An agent opens a task."),
+    "activity_updated": ("A task changes", "An agent adds a note, a result or a new status to its task."),
+    "activity_heartbeat": ("A task is still alive", "An agent signals that its task is still being worked on."),
+    "activity_cancelled": ("A task is cancelled", "A task is cancelled, or closed by itself after sitting idle."),
+    "activity_recovered": ("A stalled task resumes", "A task that had gone quiet is worked on again."),
+    "activity_handoff_resolved": ("A question is answered", "A question an agent asked a person is answered or dismissed."),
+    "connector_executed": ("A service action runs", "An agent runs an action on one of your connected services."),
+    "approval_requested": ("An approval is requested", "An agent proposes a change that waits for a person."),
+}
+
 DELIVERY_TIMEOUT_SECONDS = 5
 LEASE_SECONDS = 30
 POLL_SECONDS = 0.5

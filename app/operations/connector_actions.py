@@ -29,7 +29,7 @@ def run_connector_action(
     if not binding:
         return ConnectorActionOutcome(
             error_code="NOT_FOUND",
-            error_message="Binding not found",
+            error_message="Connection not found",
             status_code=404,
         )
     if not authority.has_capability("connectors_execute"):
@@ -50,14 +50,14 @@ def run_connector_action(
         return ConnectorActionOutcome(
             binding=binding,
             error_code="DISABLED",
-            error_message="Binding is disabled",
+            error_message="This connection is switched off",
         )
     connector_type = connector_service.get_connector_type(binding["connector_type_id"])
     if not connector_type:
         return ConnectorActionOutcome(
             binding=binding,
             error_code="NOT_FOUND",
-            error_message="Connector type not found",
+            error_message="Service not found",
             status_code=404,
         )
 

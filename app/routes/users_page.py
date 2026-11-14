@@ -5,6 +5,7 @@ import json
 from fastapi import APIRouter, Request, Depends
 
 from app.routes.dashboard_shared import (
+    settings_header,
     render_page,
     require_auth,
     escape_html,
@@ -26,7 +27,7 @@ def users_page(request: Request, session: dict = Depends(require_auth)):
     <div class="page-header"><h1>Admin Access Required</h1></div>
     <div class="card">
       <p class="text-muted">Users are managed by administrators.</p>
-      <a href="/" class="btn btn-secondary">Back to Overview</a>
+      <a href="/" class="btn btn-secondary">Back to Needs you</a>
     </div>
     """,
             "/",
@@ -62,7 +63,7 @@ def users_page(request: Request, session: dict = Depends(require_auth)):
             # The name is carried as data, not spliced into a JS call: an
             # HTML-escaped value inside onclick is decoded before the script is
             # parsed, so &#39; would become a quote and end the string early.
-            else f"<button type='button' class='btn btn-sm btn-danger icon-delete-btn' data-user-id='{escape_html(u['id'])}' data-user-name='{escape_html(u['display_name'])}' onclick=\"deleteUser(this)\" title='Delete user' aria-label='Delete user'>{get_icon('delete')}</button>"
+            else f"<button type='button' class='btn btn-sm btn-danger icon-delete-btn' data-user-id='{escape_html(u['id'])}' data-user-name='{escape_html(u['display_name'])}' onclick=\"deleteUser(this)\" title='Delete user' aria-label='Delete user'>{get_icon('delete')} Delete</button>"
         )
         actions = f"<div class='actions-cell'><button type='button' class='btn btn-sm btn-secondary' data-user='{user_payload}' onclick=\"editUser(this)\">Edit</button>{delete_action}</div>"
         return (
@@ -127,7 +128,7 @@ def users_page(request: Request, session: dict = Depends(require_auth)):
     async function deleteUser(btn) {
       const id = btn.dataset.userId;
       const name = btn.dataset.userName;
-      if (!confirm('Delete user "' + name + '"? This cannot be undone.')) return;
+      if (!await confirmDialog('Delete user "' + name + '"? This cannot be undone.')) return;
       const j = await apiFetch('/api/auth/users/' + id, { method: 'DELETE' });
       if (j.ok) { showToast('User deleted'); location.reload(); }
       else { showToast(j.error?.message || 'Failed', 'danger'); }
@@ -137,11 +138,9 @@ def users_page(request: Request, session: dict = Depends(require_auth)):
     return render_page(
         "Users",
         f"""
-    <div class="page-header"><h1>Users</h1><div class="page-actions">
-      <button class="btn" onclick="openModal('create-user-modal')">+ Add User</button>
-    </div></div>
+    {settings_header("users", True)}
     <div class="card">
-      <h2>All Users</h2>
+      <div class="card-head-row"><h2>All Users</h2><button class="btn" onclick="openModal('create-user-modal')">+ Add User</button></div>
       <p class="text-muted" style="margin-bottom:12px">Only admins see this page. Admins add people here and choose their role.</p>
       <table><thead><tr><th>Name</th><th>ID</th><th>Email</th><th>Role</th><th>Status</th><th>Two-step sign-in</th><th>Created</th><th class="actions-cell">Actions</th></tr></thead>
       <tbody>{rows}</tbody></table>
@@ -172,7 +171,7 @@ def users_page(request: Request, session: dict = Depends(require_auth)):
           <div class="form-group"><label>Email</label><input type="email" id="eu-email" autocomplete="email" required><p class="form-hint">They sign in with this address.</p></div>
           <div class="form-row">
             <div class="form-group"><label>Role</label><select id="eu-role"><option value="user">User</option><option value="admin">Admin</option></select><p class="form-hint">Admins manage users, audit, webhooks and system settings. Users work in the workspaces they are given.</p></div>
-            <div class="form-group"><label>New Password</label><input type="password" id="eu-password" minlength="8" autocomplete="new-password" placeholder="Leave unchanged"><p class="form-hint">Only fill this in to set a new password for them.</p></div>
+            <div class="form-group"><label>Password</label><div class="secret-state"><span class="badge badge-success">A password is set</span></div><input type="password" id="eu-password" minlength="8" autocomplete="new-password" placeholder="\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022 set; type to replace"><p class="form-hint">Leave it empty to keep their password.</p></div>
           </div>
           <div class="form-group"><label><input type="checkbox" id="eu-active" checked> Account active</label><p class="form-hint">Turning an account off signs it out everywhere immediately.</p></div>
           <div class="modal-footer">

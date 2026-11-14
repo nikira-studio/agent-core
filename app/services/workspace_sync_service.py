@@ -42,6 +42,29 @@ def record_change(
     )
 
 
+def latest_sequence(conn, memory_scope: str) -> int:
+    """The newest change number in a workspace, taken before a write that may add changes."""
+    row = conn.execute(
+        "SELECT COALESCE(MAX(sequence), 0) FROM workspace_changes WHERE memory_scope = ?", (memory_scope,)
+    ).fetchone()
+    return row[0]
+
+
+def attribute_changes_since(conn, memory_scope: str, after_sequence: int, actor: Optional[str]) -> None:
+    """Name who really made the changes written since ``after_sequence``.
+
+    The triggers that write workspace changes only know the record: a memory's author or a task's owner.
+    A retraction by a person in the dashboard, or a task another agent closed, would otherwise read as
+    something its author did. Call this inside the same transaction as the write.
+    """
+    if not actor or actor == "unknown" or not (memory_scope or "").startswith("workspace:"):
+        return
+    conn.execute(
+        "UPDATE workspace_changes SET source_agent_id = ? WHERE memory_scope = ? AND sequence > ?",
+        (actor, memory_scope, after_sequence),
+    )
+
+
 EXECUTION_MESSAGES = {
     "EXECUTION_NOT_FOUND": (
         "That execution_id is not known here (it may be from an old session). "
@@ -72,6 +95,47 @@ def _execution(conn, execution_id: str, agent_id: str, user_id: str, scope: str)
     if item["memory_scope"] != scope:
         raise ValueError("EXECUTION_SCOPE_MISMATCH")
     return item
+
+
+IGNORED_EXECUTION_WARNINGS = {
+    "EXECUTION_NOT_FOUND": (
+        "execution_id ignored: it is not known here (it may be from an old session or another install). "
+        "The call was saved without it. Leave execution_id out, or use the one session_context returns."
+    ),
+    "EXECUTION_OWNERSHIP": (
+        "execution_id ignored: it belongs to another agent. The call was saved without it. "
+        "Leave execution_id out, or use the one session_context returns for you."
+    ),
+    "EXECUTION_SCOPE_MISMATCH": (
+        "execution_id ignored: it was started for a different memory scope than this call uses. "
+        "The call was saved without it."
+    ),
+}
+
+
+def usable_execution(
+    *, execution_id: Optional[str], agent_id: str, user_id: str, memory_scope: str
+) -> tuple:
+    """For a write that carries an execution_id only as attribution: ``(execution_id_to_use, warning)``.
+
+    A caller that remembers an id from before a restart, passes another agent's, or uses one for another scope
+    must not lose its write. The id is dropped (never attributed to an execution the caller does not own) and
+    the warning says so. Where the id is the whole target of a call (workspace_sync, its acknowledgement) the
+    hard error stays.
+    """
+    if not execution_id:
+        return None, None
+    try:
+        validate_execution(
+            execution_id=execution_id, agent_id=agent_id, user_id=user_id, memory_scope=memory_scope
+        )
+    except PermissionError:
+        reason = "EXECUTION_OWNERSHIP"
+    except ValueError as exc:
+        reason = str(exc) if str(exc) in IGNORED_EXECUTION_WARNINGS else "EXECUTION_NOT_FOUND"
+    else:
+        return execution_id, None
+    return None, {"code": "EXECUTION_ID_IGNORED", "reason": reason, "message": IGNORED_EXECUTION_WARNINGS[reason]}
 
 
 def _new_execution(
@@ -121,9 +185,12 @@ def start_session_execution(
             row = conn.execute(
                 """SELECT id FROM agent_executions
                 WHERE agent_id = ? AND user_id = ? AND memory_scope = ?
-                  AND host_session_ref = ? AND status = 'active'
+                  AND host_session_ref = ? AND last_seen_at >= ?
                 ORDER BY started_at DESC LIMIT 1""",
-                (agent_id, user_id, memory_scope, host_session_ref),
+                (
+                    agent_id, user_id, memory_scope, host_session_ref,
+                    (utc_now() - timedelta(minutes=settings.EXECUTION_STALE_MINUTES)).isoformat(),
+                ),
             ).fetchone()
             execution_id = row["id"] if row else None
         reused = execution_id is not None
@@ -159,6 +226,12 @@ def validate_execution(
         return
     with get_db() as conn:
         _execution(conn, execution_id, agent_id, user_id, memory_scope)
+        # Any write that carries the execution is a sign that the session is alive.
+        conn.execute(
+            "UPDATE agent_executions SET last_seen_at = ? WHERE id = ?",
+            (utc_now_iso(), execution_id),
+        )
+        conn.commit()
 
 
 def sync_workspace(
@@ -223,7 +296,7 @@ def sync_workspace(
             changes.append(item)
         next_cursor = int(changes[-1]["sequence"]) if changes else start
         conn.execute(
-            "UPDATE agent_executions SET status = 'active', last_seen_at = ? WHERE id = ?",
+            "UPDATE agent_executions SET last_seen_at = ? WHERE id = ?",
             (now, execution_id),
         )
         conn.execute(
@@ -233,15 +306,6 @@ def sync_workspace(
             (next_cursor, now, execution_id, memory_scope),
         )
 
-        pinned = [
-            dict(r)
-            for r in conn.execute(
-                """SELECT id, content, memory_class, topic, subject_anchor, record_status
-            FROM memory_records WHERE scope = ? AND pinned = 1 AND record_status = 'active'
-            ORDER BY created_at""",
-                (memory_scope,),
-            ).fetchall()
-        ]
         assigned = [
             dict(r)
             for r in conn.execute(
@@ -278,7 +342,6 @@ def sync_workspace(
         "has_more": has_more,
         "cursor_reset": cursor_reset,
         "cursor_reset_reason": "cursor_expired" if cursor_reset else None,
-        "pinned": pinned,
         "assigned_activities": assigned,
         **groups,
     }
@@ -306,28 +369,10 @@ def acknowledge(
             (acknowledged, now, execution_id, memory_scope),
         )
         conn.execute(
-            "UPDATE agent_executions SET status = 'active', last_seen_at = ? WHERE id = ?",
+            "UPDATE agent_executions SET last_seen_at = ? WHERE id = ?",
             (now, execution_id),
         )
     return {"execution_id": execution_id, "acknowledged_cursor": acknowledged}
-
-
-def end_execution(*, agent_id: str, user_id: str, execution_id: str) -> dict:
-    now = utc_now_iso()
-    with get_db() as conn:
-        row = conn.execute(
-            "SELECT * FROM agent_executions WHERE id = ?", (execution_id,)
-        ).fetchone()
-        if not row:
-            raise ValueError("EXECUTION_NOT_FOUND")
-        item = dict(row)
-        if item["agent_id"] != agent_id or item["user_id"] != user_id:
-            raise PermissionError("EXECUTION_OWNERSHIP")
-        conn.execute(
-            "UPDATE agent_executions SET status = 'ended', ended_at = ?, last_seen_at = ? WHERE id = ?",
-            (now, now, execution_id),
-        )
-    return {"execution_id": execution_id, "status": "ended"}
 
 
 def list_executions(limit: int = 100, user_id: Optional[str] = None) -> list[dict]:
@@ -347,21 +392,14 @@ def list_executions(limit: int = 100, user_id: Optional[str] = None) -> list[dic
 
 
 def run_maintenance() -> dict:
-    stale_cutoff = (
-        utc_now() - timedelta(minutes=settings.EXECUTION_STALE_MINUTES)
-    ).isoformat()
     change_cutoff = (
         utc_now() - timedelta(days=settings.WORKSPACE_CHANGE_RETENTION_DAYS)
     ).isoformat()
     with get_db() as conn:
-        stale = conn.execute(
-            "UPDATE agent_executions SET status = 'stale' WHERE status = 'active' AND last_seen_at < ?",
-            (stale_cutoff,),
-        ).rowcount
         pruned = conn.execute(
             "DELETE FROM workspace_changes WHERE created_at < ?", (change_cutoff,)
         ).rowcount
-    return {"stale_executions_marked": stale, "workspace_changes_pruned": pruned}
+    return {"workspace_changes_pruned": pruned}
 
 
 def digest_for_new_arrival(

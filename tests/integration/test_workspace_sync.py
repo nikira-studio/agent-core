@@ -3,6 +3,15 @@ from app.database import get_db
 from app.services import activity_service, agent_service, memory_service, workspace_service
 
 
+
+def _hand_to(activity_id, agent_id):
+    """Make a task another agent's, as a handoff leaves it (reassigning through the product was removed)."""
+    from app.database import get_db
+
+    with get_db() as conn:
+        conn.execute("UPDATE agent_activity SET assigned_agent_id = ? WHERE id = ?", (agent_id, activity_id))
+        conn.commit()
+
 def _agent(admin_token):
     with get_db() as conn:
         owner_id = conn.execute("SELECT id FROM users LIMIT 1").fetchone()["id"]
@@ -101,7 +110,6 @@ def test_memory_lifecycle_changes_cover_all_trigger_branches(clean_db):
     assert memory_service.set_subject_anchor(
         replacement["id"], "repo:app/schema.py", changed_by="test-agent"
     )
-    assert memory_service.set_pinned(replacement["id"], True)
 
     retracted, error = memory_service.write_memory(
         "Temporary fact", "fact", "workspace:lifecycle", topic="temporary"
@@ -119,7 +127,6 @@ def test_memory_lifecycle_changes_cover_all_trigger_branches(clean_db):
     assert ("memory_superseded", original["id"]) in changes
     assert ("memory_confirmed", replacement["id"]) in changes
     assert ("memory_reanchored", replacement["id"]) in changes
-    assert ("memory_pin_changed", replacement["id"]) in changes
     assert ("memory_retracted", retracted["id"]) in changes
 
 
@@ -147,17 +154,6 @@ def test_unattended_reconfirm_does_not_emit_workspace_change(clean_db):
     )
     assert confirm_changes() == 1
 
-    # A pin change on a verifier-confirmed record still reports the pin.
-    assert memory_service.confirm_memory(
-        record["id"], "anchor check: file exists", "verification-pass"
-    )
-    assert memory_service.set_pinned(record["id"], True)
-    with get_db() as conn:
-        last = conn.execute(
-            "SELECT change_type FROM workspace_changes WHERE memory_scope = "
-            "'workspace:quiet-confirm' ORDER BY sequence DESC LIMIT 1"
-        ).fetchone()[0]
-    assert last == "memory_pin_changed"
     assert confirm_changes() == 1
 
 
@@ -168,7 +164,7 @@ def test_activity_lifecycle_changes_cover_trigger_branches(clean_db):
     )
     activity_service.heartbeat_activity(first["id"])
     assert activity_service.update_activity(first["id"], task_note="Progress")
-    assert activity_service.reassign_activity(first["id"], "agent-b")
+    _hand_to(first["id"], "agent-b")
     assert activity_service.update_activity(first["id"], status="blocked")
 
     second = activity_service.create_activity(

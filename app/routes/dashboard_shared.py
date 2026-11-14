@@ -115,6 +115,100 @@ def require_auth(request: Request):
     return session
 
 
+# Each sidebar entry and the pages that are tabs inside it: (route, tab label). A page keeps its own route.
+_SECTION_TABS = {
+    "/": [("/", "Needs you"), ("/approvals", "Approvals")],
+    "/activity": [("/activity", "Tasks"), ("/audit", "Audit log")],
+    "/memory": [("/memory", "Memory")],
+    "/agents": [("/agents", "Agents"), ("/integrations", "Connect"), ("/workspaces", "Workspaces")],
+    "/connectors": [("/connectors", "Services"), ("/credentials", "Credentials")],
+    "/settings": [("/settings", "Settings"), ("/users", "Users"), ("/webhooks", "Webhooks")],
+}
+_SECTION_OF = {tab: entry for entry, tabs in _SECTION_TABS.items() for tab, _ in tabs}
+
+
+def _tab_bar(nav_active: str, is_admin: bool) -> str:
+    section = _SECTION_OF.get(nav_active)
+    tabs = [
+        (href, label)
+        for href, label in _SECTION_TABS.get(section, [])
+        if is_admin or href not in {"/users", "/audit", "/webhooks"}
+    ]
+    if len(tabs) < 2:
+        return ""
+    current = ' aria-current="page"'
+    links = "".join(
+        f'<a href="{href}" class="page-tab{" active" if href == nav_active else ""}"'
+        f'{current if href == nav_active else ""}>{label}</a>'
+        for href, label in tabs
+    )
+    return f'<nav class="page-tabs" aria-label="In this section">{links}</nav>'
+
+
+SECRET_SAVED_PLACEHOLDER = "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022 saved; type to replace"
+
+
+def secret_state_html(saved: bool, saved_noun: str, none_text: str, when: str | None = None) -> str:
+    """Show plainly whether a secret is stored, without ever rendering it.
+
+    ``saved_noun`` completes "A ___ is saved" (key, value, secret, password); ``none_text`` is shown when nothing is
+    stored. ``when`` is a stored UTC timestamp, shown as a date in the viewer's own time zone."""
+    if not saved:
+        return f'<div class="secret-state"><span class="badge badge-stale">{escape_html(none_text)}</span></div>'
+    date = f' <span class="form-hint">saved {local_dt(when, style="date")}</span>' if when else ""
+    return f'<div class="secret-state"><span class="badge badge-success">A {escape_html(saved_noun)} is saved</span>{date}</div>'
+
+
+def settings_header(active: str, is_admin: bool, intro: str = "") -> str:
+    """The Settings heading and its one row of tabs. Users and Webhooks keep their own routes but sit in this row,
+    so the page never shows a second level. `active` is a tab key: account, memory, data, security, users, webhooks."""
+    items = [("/settings#account", "Account", "account")]
+    if is_admin:
+        items += [
+            ("/settings#memory", "Memory", "memory"),
+            ("/settings#data", "Data and backup", "data"),
+            ("/settings#security", "Security", "security"),
+            ("/users", "Users", "users"),
+            ("/webhooks", "Webhooks", "webhooks"),
+        ]
+    row = ""
+    if len(items) > 1:
+        links = ""
+        for href, label, key in items:
+            on = key == active
+            cls = "page-tab active" if on else "page-tab"
+            cur = ' aria-current="page"' if on else ""
+            links += f'<a href="{href}" data-tab="{key}" class="{cls}"{cur}>{label}</a>'
+        row = f'<nav class="page-tabs" aria-label="Settings">{links}</nav>'
+    return f'<div class="page-header"><h1>Settings</h1></div>{row}{intro}'
+
+
+def _after_page_header(body: str, tab_bar: str) -> str:
+    """Put the section's one row of tabs directly under the page heading (the first page-header block).
+
+    The row is the same place on every page: heading first, then the row. A body with no page-header gets the
+    row at its top."""
+    if not tab_bar:
+        return body
+    start = body.find('<div class="page-header')
+    if start < 0:
+        return tab_bar + body
+    depth, pos = 0, start
+    while True:
+        nxt_open = body.find("<div", pos)
+        nxt_close = body.find("</div>", pos)
+        if nxt_close < 0:
+            return tab_bar + body  # unbalanced markup: do not guess
+        if 0 <= nxt_open < nxt_close:
+            depth += 1
+            pos = nxt_open + 4
+        else:
+            depth -= 1
+            pos = nxt_close + 6
+            if depth == 0:
+                return body[:pos] + tab_bar + body[pos:]
+
+
 def render_page(
     title: str,
     body: str,
@@ -126,23 +220,17 @@ def render_page(
 ) -> HTMLResponse:
     is_admin = bool(session and session.get("role") == "admin")
     extra_js = extra_js.replace("{{", "{").replace("}}", "}")
-    # (heading, [(route, label)]). Routes keep their old paths when a page is renamed.
+    # Routes keep their old paths when a page is renamed. Six entries in one plain list, no headings or dividers;
+    # the other pages are tabs inside their entry (see _SECTION_TABS).
     nav_groups = [
-        ("", [("/", "Overview")]),
-        ("Work", [("/activity", "Activity"), ("/approvals", "Approvals"), ("/memory", "Memory")]),
-        ("Access", [
-            ("/users", "Users"),
-            ("/agents", "Agents"),
-            ("/workspaces", "Workspaces"),
-            ("/integrations", "Connect"),
-        ]),
-        ("Capabilities", [("/connectors", "Services"), ("/credentials", "Credentials")]),
-        ("System", [("/audit", "Audit"), ("/webhooks", "Webhooks"), ("/settings", "Settings")]),
+        ("", [("/", "Needs you"), ("/activity", "Activity"), ("/memory", "Memory"),
+              ("/agents", "Agents"), ("/connectors", "Services"), ("/settings", "Settings")]),
     ]
     admin_only = {"/users", "/audit", "/webhooks"}
+    section = _SECTION_OF.get(nav_active, nav_active)
 
     def nav_link(href, label):
-        if nav_active == href:
+        if section == href:
             return f'<a href="{href}" class="active" aria-current="page"><span>{label}</span></a>'
         return f'<a href="{href}" class=""><span>{label}</span></a>'
 
@@ -164,7 +252,8 @@ def render_page(
       <img src="/static/img/logo.png" alt="" class="brand-logo">
       <span>{APP_NAME}</span>
     </a>
-    <nav>
+    <button type="button" class="nav-toggle" aria-expanded="false" aria-controls="main-nav">Menu</button>
+    <nav aria-label="Main" id="main-nav">
       {nav_html}
     </nav>
     <div class="sidebar-footer">
@@ -174,6 +263,9 @@ def render_page(
   </div>"""
 
     layout_class = "layout" if show_sidebar else "layout no-sidebar"
+    # Settings pages draw their own heading and single row (settings_header), so no bar above the heading.
+    tab_bar = _tab_bar(nav_active, is_admin) if show_sidebar and section != "/settings" else ""
+    body = _after_page_header(body, tab_bar)
     user_tz_js = json.dumps((session or {}).get("timezone") or "")
     events_js = (
         '<script src="/static/js/events.js?v=20260816a"></script>' if session else ""
@@ -198,7 +290,7 @@ def render_page(
 
     response = HTMLResponse(
         f"""<!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -219,20 +311,21 @@ def render_page(
     <link rel="icon" type="image/png" sizes="16x16" href="/static/img/favicon/favicon-16x16.png">
     <link rel="apple-touch-icon" sizes="180x180" href="/static/img/favicon/apple-touch-icon.png">
     <link rel="manifest" href="/static/img/favicon/site.webmanifest">
-    <link rel="stylesheet" href="/static/css/dashboard.css?v=20260828">
+    <link rel="stylesheet" href="/static/css/dashboard.css?v=20261113b">
     {csrf_js}
 </head>
 <body>
+<a class="skip-link" href="#main-content">Skip to content</a>
 <div class="{layout_class}">
   {sidebar_html}
-  <div class="main">
+  <main class="main" id="main-content">
     {body}
-  </div>
+  </main>
 </div>
 <script>window.AC_USER_TZ = {user_tz_js};</script>
 <script>window.AC_AUTHENTICATED = {json.dumps(bool(session))};</script>
 <script>window.AGENT_CORE_WINDOW_EVENT = {json.dumps(JS_WINDOW_EVENT)};</script>
-<script src="/static/js/dashboard.js?v=20260904"></script>
+<script src="/static/js/dashboard.js?v=20261113b"></script>
 {events_js}
 {extra_js}
 </body>

@@ -34,7 +34,7 @@ def audit_page(request: Request, session: dict = Depends(require_auth)):
     <div class="page-header"><h1>Admin Access Required</h1></div>
     <div class="card">
       <p class="text-muted">The audit log is available to administrators only.</p>
-      <a href="/" class="btn btn-secondary">Back to Overview</a>
+      <a href="/" class="btn btn-secondary">Back to Needs you</a>
     </div>
     """,
             "/",
@@ -160,9 +160,13 @@ def audit_page(request: Request, session: dict = Depends(require_auth)):
 
     rows = "".join(audit_row(e) for e in all_events)
 
+    def plain_label(value):
+        text = str(value).replace("connector_binding", "connection").replace("connector_type", "service")
+        return text.replace("_", " ")
+
     def build_options(items, selected):
         return "".join(
-            f"<option value='{i}' {'selected' if i == selected else ''}>{i}</option>"
+            f"<option value='{i}' {'selected' if i == selected else ''}>{escape_html(plain_label(i))}</option>"
             for i in items
         )
 
@@ -225,7 +229,7 @@ def audit_page(request: Request, session: dict = Depends(require_auth)):
       const resourceType = document.getElementById('prune-resource-type').value;
       const beforeDate = document.getElementById('prune-before-date').value;
       if (!beforeDate) { showToast('Pick a cutoff date', 'warning'); return; }
-      if (!confirm('Permanently prune ' + resourceType + ' data older than ' + beforeDate + '?')) return;
+      if (!await confirmDialog('Permanently prune ' + resourceType + ' data older than ' + beforeDate + '?')) return;
       const j = await apiFetch('/api/dashboard/prune', {
         method: 'POST',
         body: JSON.stringify({ resource_type: resourceType, before_date: beforeDate })
@@ -246,7 +250,7 @@ def audit_page(request: Request, session: dict = Depends(require_auth)):
         f"""
     <div class="page-header"><h1>Audit Log</h1><div class="page-actions">
         <button class="btn btn-secondary" onclick="exportAuditCsv()">Export CSV</button>
-        <button class="btn btn-danger" onclick="openPruneModal('audit','Prune Audit Log')">Prune Log</button>
+        <button class="btn btn-secondary" onclick="openPruneModal('audit','Prune Audit Log')">Prune log</button>
     </div></div>
     <div class="card">
       <h2>Events</h2>

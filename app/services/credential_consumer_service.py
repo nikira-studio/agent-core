@@ -94,11 +94,7 @@ def entry_access(entry_id):
         caps = agent_service.parse_capabilities(a.get("capabilities_json"))
         row = {"id": a["id"], "display_name": names[a["id"]]}
         (candidates if "credentials_resolve" in caps else cannot).append(row)
-        try:
-            readable = json.loads(a.get("read_scopes_json") or "[]")
-        except (TypeError, ValueError):
-            readable = []
-        if entry["scope"] in readable and "credentials" in caps:
+        if can_read_reference(a, entry["scope"]):
             scope_readers.append(names[a["id"]])
     return {
         "entry": {"id": entry["id"], "name": entry["name"], "scope": entry["scope"]},
@@ -111,6 +107,26 @@ def entry_access(entry_id):
         "cannot_receive": cannot,
         "scope_readers": scope_readers,
     }
+
+
+def can_read_reference(agent: dict, scope: str) -> bool:
+    """Whether an agent can be handed this credential's reference (credential_get), by its scopes.
+
+    It needs the credentials capability and read access to the scope: listed outright, its own private
+    scope, or its principal's user scope, which every active agent inherits.
+    """
+    from app.services import agent_service
+
+    if "credentials" not in agent_service.parse_capabilities(agent.get("capabilities_json")):
+        return False
+    try:
+        readable = json.loads(agent.get("read_scopes_json") or "[]")
+    except (TypeError, ValueError):
+        readable = []
+    if scope in readable or scope == f"agent:{agent.get('id')}":
+        return True
+    principals = {agent.get("default_user_id"), agent.get("owner_user_id")} - {None, ""}
+    return scope in {f"user:{u}" for u in principals}
 
 
 def revoke_grant(grant_id, owner_id):

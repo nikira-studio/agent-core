@@ -372,26 +372,30 @@ def status() -> dict:
     }
 
 
-def health_lines() -> list[tuple[str, str, bool]]:
-    """(label, value, is it fine) for the Overview health strip; quiet unless something is open."""
+def health_lines() -> list[tuple[str, str, str, bool]]:
+    """(label, short state, where to change it, is it fine) for the two limits shown on the Overview.
+
+    The value is a state ("blocked unless allowed"), never an instruction; the tile itself links to the setting."""
     state = status()
     lines = []
     internal = state["internal"]
+    where_internal = "/settings#network-limits"
     if internal["mode"] == "report":
         n = internal["would_block"]
-        lines.append(("Private addresses", f"report only; {n} would be blocked" if n else "report only; nothing would be blocked", not n))
+        lines.append(("Private addresses", f"report only: {n} would be blocked" if n else "report only: nothing would be blocked", where_internal, not n))
     elif internal["mode"] == "allow":
-        lines.append(("Private addresses", "allowed everywhere (not blocked)", True))
+        lines.append(("Private addresses", "open to all private addresses", where_internal, True))
     else:
-        lines.append(("Private addresses", "blocked unless allowed", True))
+        lines.append(("Private addresses", "blocked unless allowed", where_internal, True))
     broker = state["broker"]
+    where_broker = "/settings#nl-broker-allowed"
     if not broker["restricted"]:
-        lines.append(("Helper callers", "any caller with its key (no allowed callers set)", True))
+        lines.append(("Helper access", "open to any program with its key", where_broker, True))
     elif broker["mode"] == "audit":
         n = broker["would_refuse"]
-        lines.append(("Helper callers", f"report only; {n} callers would be refused" if n else "report only; nothing would be refused", not n))
+        lines.append(("Helper access", f"report only: {n} programs would be refused" if n else "report only: nothing would be refused", where_broker, not n))
     else:
-        lines.append(("Helper callers", "only the allowed callers", True))
+        lines.append(("Helper access", "limited to the programs you allowed", where_broker, True))
     return lines
 
 

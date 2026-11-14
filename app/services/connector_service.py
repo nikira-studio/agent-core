@@ -167,6 +167,7 @@ def _row_to_binding(row: dict) -> dict:
         "enabled": bool(row["enabled"]),
         "last_tested_at": row.get("last_tested_at"),
         "last_error": row.get("last_error"),
+        "last_test_note": row.get("last_test_note"),
         "created_by": row.get("created_by"),
         "created_at": row.get("created_at"),
         "updated_at": row.get("updated_at"),
@@ -278,11 +279,11 @@ def _expected_mcp_tools(connector_type: dict) -> list[dict]:
         snapshot = json.loads(connector_type.get("tool_snapshot_json") or "")
     except json.JSONDecodeError as exc:
         raise ValueError(
-            "Connector type has no valid MCP capability contract; refresh or register a separate connector type"
+            "This service has no usable stored tool list. Use Update tool list on the service to read it again."
         ) from exc
     if not isinstance(snapshot, dict) or not isinstance(snapshot.get("tools"), list):
         raise ValueError(
-            "Connector type has no MCP capability contract; refresh or register a separate connector type"
+            "This service has no stored tool list. Use Update tool list on the service to read it."
         )
     return snapshot["tools"]
 
@@ -313,6 +314,77 @@ def discover_mcp_binding_tools(
     )
 
 
+TOOLS_CHANGED_MESSAGE = "This service's tool list has changed since it was added."
+
+
+class McpToolsChanged(ValueError):
+    """The tools an MCP server lists no longer match the list stored when the service was added."""
+
+    def __init__(self, changes: dict):
+        super().__init__(TOOLS_CHANGED_MESSAGE)
+        self.changes = changes
+
+
+def _tool_input_fields(tool: dict) -> tuple[set, set]:
+    raw = tool.get("raw") if isinstance(tool.get("raw"), dict) else tool
+    schema = _normalize_schema_with_context(
+        tool.get("inputSchema") or tool.get("input_schema") or raw.get("inputSchema") or {}
+    )
+    properties = schema.get("properties") if isinstance(schema, dict) else None
+    required = schema.get("required") if isinstance(schema, dict) else None
+    return set((properties or {}).keys()), set(required or [])
+
+
+def mcp_tool_changes(expected: list[dict], actual: list[dict]) -> dict:
+    """What differs between the tools stored for a service and the tools its server lists now.
+
+    ``added`` and ``removed`` are tool names. ``changed`` says, per tool, which inputs were added or removed or
+    became required, or that something else about it (for example its read-only or destructive flag) differs.
+    """
+    before = {t["name"]: t for t in expected if t.get("name")}
+    after = {t["name"]: t for t in actual if t.get("name")}
+    changed = []
+    for name in sorted(set(before) & set(after)):
+        if mcp_tool_contract_fingerprint([before[name]]) == mcp_tool_contract_fingerprint([after[name]]):
+            continue
+        old_fields, old_required = _tool_input_fields(before[name])
+        new_fields, new_required = _tool_input_fields(after[name])
+        entry = {
+            "name": name,
+            "inputs_added": sorted(new_fields - old_fields),
+            "inputs_removed": sorted(old_fields - new_fields),
+            "newly_required": sorted(new_required - old_required),
+        }
+        entry["other"] = not (entry["inputs_added"] or entry["inputs_removed"] or entry["newly_required"])
+        changed.append(entry)
+    return {
+        "added": sorted(set(after) - set(before)),
+        "removed": sorted(set(before) - set(after)),
+        "changed": changed,
+    }
+
+
+def describe_tool_changes(changes: dict) -> str:
+    """One plain sentence for a person: what changed in the tool list."""
+    parts = []
+    if changes.get("added"):
+        parts.append("new: " + ", ".join(changes["added"]))
+    if changes.get("removed"):
+        parts.append("gone: " + ", ".join(changes["removed"]))
+    for item in changes.get("changed", []):
+        bits = []
+        if item["inputs_added"]:
+            bits.append("new input " + ", ".join(item["inputs_added"]))
+        if item["inputs_removed"]:
+            bits.append("input removed " + ", ".join(item["inputs_removed"]))
+        if item["newly_required"]:
+            bits.append("now required " + ", ".join(item["newly_required"]))
+        if item["other"]:
+            bits.append("its description of itself changed")
+        parts.append(f"{item['name']} ({'; '.join(bits)})")
+    return "; ".join(parts)
+
+
 def validate_mcp_binding_contract(
     binding: dict, connector_type: dict, credential=None, *, tools=None
 ) -> None:
@@ -327,12 +399,10 @@ def validate_mcp_binding_contract(
         if expected_names == actual_names:
             return
         raise ValueError(
-            "Endpoint tool names do not match this connector type; update the adapter or register a separate connector type"
+            "The tools at this address are not the ones this service was added with. Update the service, or add a separate service for this address."
         )
     if mcp_tool_contract_fingerprint(actual) != mcp_tool_contract_fingerprint(expected):
-        raise ValueError(
-            "Endpoint tool contract does not match this connector type; register a separate connector type"
-        )
+        raise McpToolsChanged(mcp_tool_changes(expected, actual))
 
 
 def _validate_endpoint_override(connector_type, endpoint_url, credential_id, config_json):
@@ -353,9 +423,16 @@ def _validate_endpoint_override(connector_type, endpoint_url, credential_id, con
     discovered = discover_mcp_binding_tools(
         candidate, connector_type, credential_object, timeout_cap_ms=10000
     )
-    validate_mcp_binding_contract(
-        candidate, connector_type, credential_object, tools=discovered
-    )
+    try:
+        validate_mcp_binding_contract(
+            candidate, connector_type, credential_object, tools=discovered
+        )
+    except McpToolsChanged as exc:
+        raise ValueError(
+            "The server at that address lists different tools than this service was added with ("
+            + (describe_tool_changes(exc.changes) or "the tool details differ")
+            + "). Add a separate service for that address, or use Update tool list if this is the same server."
+        ) from exc
     return endpoint_url
 
 
@@ -476,6 +553,7 @@ def update_binding(binding_id: str, **fields) -> bool:
         "enabled",
         "last_tested_at",
         "last_error",
+        "last_test_note",
         "logical_alias",
         "is_preferred",
         "priority",
@@ -486,7 +564,7 @@ def update_binding(binding_id: str, **fields) -> bool:
     # Status fields are nullable and must be clearable: a successful test has to
     # reset last_error to NULL, otherwise a binding that failed once would keep
     # reporting an error forever. Other fields keep the "skip None" semantics.
-    nullable = ("last_tested_at", "last_error", "endpoint_url_override")
+    nullable = ("last_tested_at", "last_error", "last_test_note", "endpoint_url_override")
     updates = []
     params = []
     for key, val in fields.items():
@@ -705,6 +783,10 @@ def _connector_requires_credential(connector_type: dict, config: dict | None = N
         return False
     if isinstance(config, dict) and config.get("auth_mode") == "none":
         return False
+    if (
+        connector_type.get("provider_type") == "generic_http" or connector_type.get("backend_type") == "generic_http"
+    ) and connector_type.get("auth_type") not in (None, "none"):
+        return True  # a web service set up to sign in needs its credential, whatever fields it lists
     required_fields = connector_type.get("required_credential_fields")
     if isinstance(required_fields, list):
         return bool(required_fields)
@@ -907,21 +989,29 @@ def test_binding(binding_id: str) -> dict:
     if not binding:
         return {
             "success": False,
-            "error": "Binding not found",
+            "error": "Connection not found",
             "error_code": "NOT_FOUND",
         }
     if not binding.get("enabled"):
         return {
             "success": False,
-            "error": "Binding is disabled",
+            "error": "This connection is switched off",
             "error_code": "DISABLED",
         }
 
     connector_type = get_connector_type(binding["connector_type_id"])
     if not connector_type:
-        return {"success": False, "error": "Connector type not found"}
+        return {"success": False, "error": "Service not found"}
 
     cred = binding.get("credential")
+    try:
+        test_config = json.loads(binding.get("config_json") or "{}")
+    except (TypeError, ValueError):
+        test_config = {}
+    if cred is None and _connector_requires_credential(connector_type, test_config if isinstance(test_config, dict) else None):
+        message = "No credential is attached to this connection (it was deleted or never added); attach one and test again"
+        update_binding(binding_id, last_tested_at=_utc_now(), last_error=message)
+        return {"success": False, "error": message, "error_code": "NO_CREDENTIAL"}
 
     executor = _resolve_executor(connector_type)
     if not executor:
@@ -933,14 +1023,25 @@ def test_binding(binding_id: str) -> dict:
                 validate_mcp_binding_contract(
                     binding, connector_type, cred, tools=tools
                 )
-                update_binding(binding_id, last_tested_at=_utc_now(), last_error=None)
+                update_binding(binding_id, last_tested_at=_utc_now(), last_error=None, last_test_note=None)
                 return {
                     "success": True,
                     "tools_discovered": len(tools),
                     "transport": binding.get("transport_type") or "streamable_http",
                 }
+            except McpToolsChanged as e:
+                # The server answers; its tool list no longer matches what was stored. Say what and what to do.
+                detail = describe_tool_changes(e.changes)
+                message = TOOLS_CHANGED_MESSAGE + (f" {detail}." if detail else "") + " Use Update tool list on the service to review and accept it."
+                update_binding(binding_id, last_tested_at=_utc_now(), last_error=message, last_test_note=None)
+                return {
+                    "success": False,
+                    "error": message,
+                    "error_code": "TOOLS_CHANGED",
+                    "tool_changes": e.changes,
+                }
             except Exception as e:
-                update_binding(binding_id, last_tested_at=_utc_now(), last_error=str(e))
+                update_binding(binding_id, last_tested_at=_utc_now(), last_error=str(e), last_test_note=None)
                 return {"success": False, "error": str(e), "error_code": "TEST_FAILED"}
         return {
             "success": False,
@@ -955,15 +1056,30 @@ def test_binding(binding_id: str) -> dict:
     try:
         executor_config = _build_executor_config(binding, connector_type)
         result = executor.test_connection(cred, executor_config)
-        if result.get("success"):
-            update_binding(binding_id, last_tested_at=_utc_now(), last_error=None)
-        else:
+        # A passing check proves the service answered; the start of its answer is not handed to whoever ran it
+        # (it can be private: chat names, message ids).
+        result.pop("body_preview", None)
+        if result.get("untestable"):
+            # Neither a pass nor a failure: nothing safe to try. No error is recorded, the note says why.
             update_binding(
-                binding_id, last_tested_at=_utc_now(), last_error=result.get("error")
+                binding_id, last_tested_at=_utc_now(), last_error=None, last_test_note=result.get("note")
+            )
+        elif result.get("success"):
+            update_binding(binding_id, last_tested_at=_utc_now(), last_error=None, last_test_note=None)
+        else:
+            if not result.get("error"):
+                # A failure always says something a person can read.
+                status = result.get("status")
+                result["error"] = (
+                    f"The service answered with an error (HTTP {status})." if status
+                    else "The check did not succeed, and the service gave no reason."
+                )
+            update_binding(
+                binding_id, last_tested_at=_utc_now(), last_error=result.get("error"), last_test_note=None
             )
         return result
     except Exception as e:
-        update_binding(binding_id, last_tested_at=_utc_now(), last_error=str(e))
+        update_binding(binding_id, last_tested_at=_utc_now(), last_error=str(e), last_test_note=None)
         return {"success": False, "error": str(e)}
 
 
@@ -1079,6 +1195,8 @@ def build_capability_summary(
                 test_status = "unknown"
             elif binding.get("last_error"):
                 test_status = "failed"
+            elif binding.get("last_test_note"):
+                test_status = "cannot_test"  # no read-only action to try; not a problem
             else:
                 test_status = "passed"
 
@@ -1101,6 +1219,7 @@ def build_capability_summary(
                         "test_status": test_status,
                         "last_tested_at": binding.get("last_tested_at"),
                         "last_error": binding.get("last_error"),
+                        "last_test_note": binding.get("last_test_note"),
                         "failing_actions": failing_actions,
                     },
                     "usable_by_caller": usable,
@@ -1247,19 +1366,19 @@ def execute_binding_action(
     if not binding:
         return {
             "success": False,
-            "error": "Binding not found",
+            "error": "Connection not found",
             "error_code": "NOT_FOUND",
         }
     if not binding.get("enabled"):
         return {
             "success": False,
-            "error": "Binding is disabled",
+            "error": "This connection is switched off",
             "error_code": "DISABLED",
         }
 
     connector_type = get_connector_type(binding["connector_type_id"])
     if not connector_type:
-        return {"success": False, "error": "Connector type not found"}
+        return {"success": False, "error": "Service not found"}
 
     action_error = _validate_action_for_connector(connector_type, action)
     if action_error:
@@ -1301,7 +1420,7 @@ def execute_binding_action(
     if _connector_requires_credential(connector_type, binding_config) and cred is None:
         return {
             "success": False,
-            "error": "No credential linked to this binding",
+            "error": "No credential is attached to this connection",
             "error_code": "NO_CREDENTIAL",
         }
 
@@ -1542,12 +1661,12 @@ def execute_binding_action_with_logging(
         action=action,
         params_json=json.dumps(params or {}),
         result_status="success" if result.get("success") else "failure",
-        result_body_json=json.dumps(result) if result.get("success") else None,
-        error_message=result.get("error") if not result.get("success") else None,
+        result_body_json=json.dumps(result, default=str),
+        error_message=failure_reason(result)[1] if not result.get("success") else None,
         duration_ms=duration_ms,
-        error_code=result.get("error_code") if not result.get("success") else None,
+        error_code=failure_reason(result)[0] if not result.get("success") else None,
         failure_category=(
-            classify_failure(result.get("error_code"), result.get("error"))
+            classify_failure(*failure_reason(result))
             if not result.get("success") else None
         ),
     )
@@ -1588,6 +1707,23 @@ FAILURE_CATEGORIES = frozenset({
 })
 
 
+def failure_reason(result: dict) -> tuple[Optional[str], str]:
+    """The error code and message the execution log keeps for a failed run.
+
+    A service that answers with a refusal (HTTP 404, 500, a rejected request) returns a result with
+    ``success`` false and a ``status`` but no ``error`` text, so the log used to hold a failure with no
+    reason at all. The status is enough to debug with; the response body stays out of the log.
+    """
+    code = result.get("error_code")
+    message = result.get("error")
+    if message:
+        return code, str(message)
+    status = result.get("status")
+    if isinstance(status, int):
+        return code or f"HTTP_{status}", f"The service answered HTTP {status}"
+    return code or "NO_REASON_GIVEN", "The action failed and the connector gave no reason"
+
+
 def classify_failure(error_code: Optional[str], error_message: Optional[str]) -> str:
     """Classify a connector failure without exposing request or credential data."""
     code = (error_code or "").upper()
@@ -1596,10 +1732,14 @@ def classify_failure(error_code: Optional[str], error_message: Optional[str]) ->
         return "caller_validation"
     if "invalid parameters" in message or "is not of type" in message or "required property" in message:
         return "caller_validation"
-    if code in {"NO_CREDENTIAL", "AUTH_EXPIRED", "UNAUTHORIZED", "FORBIDDEN"}:
+    if code in {"NO_CREDENTIAL", "AUTH_EXPIRED", "UNAUTHORIZED", "FORBIDDEN", "HTTP_401", "HTTP_403"}:
         return "credential"
-    if code == "RATE_LIMITED" or "rate limit" in message:
+    if code in {"RATE_LIMITED", "HTTP_429"} or "rate limit" in message:
         return "rate_limited"
+    if code in {"HTTP_400", "HTTP_404", "HTTP_405", "HTTP_409", "HTTP_410", "HTTP_422"}:
+        return "caller_validation"
+    if code == "HTTP_408" or (code.startswith("HTTP_5") and code[5:].isdigit()):
+        return "remote_service"
     if "timeout" in message or "connection" in message or "network" in message:
         return "network"
     if code in {"EXECUTION_ERROR", "PROVIDER_ERROR"}:

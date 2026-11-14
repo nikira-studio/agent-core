@@ -49,8 +49,8 @@ def test_search_finds_other_agents_work():
     """The whole point: one agent finding what a different agent already did."""
     from app.services.activity_service import search_activities
 
-    _make("claude", "Ship the healthquery ingest endpoint")
-    hits = search_activities("healthquery")
+    _make("claude", "Ship the billing ingest endpoint")
+    hits = search_activities("billing")
     assert len(hits) == 1
     assert hits[0]["agent_id"] == "claude"
 

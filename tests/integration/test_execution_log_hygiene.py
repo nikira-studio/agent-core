@@ -263,7 +263,7 @@ def test_retention_knobs_are_configurable_from_settings(test_client, admin_token
         headers={"Authorization": f"Bearer {admin_token}"},
         json={
             "scratchpad_retention_days": "7",
-            "solo_mode_enabled": "false",
+
             "execution_log_retention_days": "14",
             "webhook_log_retention_days": "0",
         },
@@ -280,7 +280,7 @@ def test_out_of_range_retention_is_rejected(test_client, admin_token):
         headers={"Authorization": f"Bearer {admin_token}"},
         json={
             "scratchpad_retention_days": "7",
-            "solo_mode_enabled": "false",
+
             "execution_log_retention_days": "9999",
         },
     )
@@ -293,3 +293,48 @@ def test_settings_page_renders_the_retention_controls(test_client, admin_token):
     assert r.status_code == 200
     assert "execution-log-retention-days" in r.text
     assert "webhook-log-retention-days" in r.text
+
+
+# --- a failed run keeps its reason ------------------------------------------
+
+
+def _run_with_result(monkeypatch, result):
+    binding = _binding("Reason Binding")
+    monkeypatch.setattr(connector_service, "execute_binding_action", lambda *a, **k: dict(result))
+    connector_service.execute_binding_action_with_logging(binding["id"], "any_action", {})
+    with get_db() as conn:
+        return dict(
+            conn.execute(
+                "SELECT result_status, error_code, error_message, failure_category, result_body_json "
+                "FROM connector_executions WHERE binding_id = ? ORDER BY executed_at DESC LIMIT 1",
+                (binding["id"],),
+            ).fetchone()
+        )
+
+
+def test_a_service_refusal_without_error_text_is_logged_with_its_status(clean_db, monkeypatch):
+    row = _run_with_result(monkeypatch, {"success": False, "status": 404, "body": {"secret": "do not log"}})
+    assert row["result_status"] == "failure"
+    assert row["error_code"] == "HTTP_404" and "404" in row["error_message"]
+    assert row["failure_category"] == "caller_validation"
+    assert "do not log" not in json.dumps(row)  # the body stays out of the log; only its size is kept
+    assert json.loads(row["result_body_json"]).get("response_chars")
+
+
+def test_http_statuses_are_classified(clean_db):
+    classify = connector_service.classify_failure
+    assert classify("HTTP_401", "x") == "credential" and classify("HTTP_403", "x") == "credential"
+    assert classify("HTTP_429", "x") == "rate_limited"
+    assert classify("HTTP_500", "x") == "remote_service" and classify("HTTP_503", "x") == "remote_service"
+    assert classify("HTTP_422", "x") == "caller_validation"
+
+
+def test_a_failure_with_no_status_and_no_error_still_says_so(clean_db, monkeypatch):
+    row = _run_with_result(monkeypatch, {"success": False})
+    assert row["error_code"] == "NO_REASON_GIVEN" and row["error_message"]
+    assert row["failure_category"] == "unknown"
+
+
+def test_an_explicit_error_is_kept_as_it_was(clean_db, monkeypatch):
+    row = _run_with_result(monkeypatch, {"success": False, "error": "Action disabled: x", "error_code": "DISABLED_ACTION"})
+    assert row["error_message"] == "Action disabled: x" and row["failure_category"] == "caller_validation"

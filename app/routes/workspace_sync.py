@@ -78,19 +78,9 @@ def ack(body: AckRequest, ctx: EffectiveAuthority = Depends(get_request_context)
 
 
 @router.post("/end")
-def end(body: EndRequest, ctx: EffectiveAuthority = Depends(get_request_context)):
-    agent_id, error = _agent(ctx)
-    if error:
-        return error
-    try:
-        result = workspace_sync_service.end_execution(
-            agent_id=agent_id, user_id=ctx.user_id or "", execution_id=body.execution_id
-        )
-    except PermissionError:
-        return error_response("EXECUTION_OWNERSHIP", "Execution belongs to another agent", 403)
-    except ValueError as exc:
-        return error_response(str(exc), "Execution not found", 404)
-    audit_service.write_event(actor_type=ctx.actor_type, actor_id=ctx.actor_id,
-        action="execution_ended", resource_type="execution",
-        resource_id=body.execution_id, result="success", details=result)
-    return success_response(result)
+def end(body: EndRequest):
+    return error_response(
+        "REMOVED",
+        "Ending an execution was removed in Agent Core 1.3.0: a session needs no end call. Just stop calling.",
+        410,
+    )

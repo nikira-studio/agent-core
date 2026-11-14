@@ -241,8 +241,10 @@ def move_credential(entry_id: str, target_scope: str, **fields) -> dict | None:
 
 def delete_credential(entry_id: str) -> bool:
     with get_db() as conn:
+        # A connection that loses its credential must say so, not keep showing its last good test.
         conn.execute(
-            "UPDATE connector_bindings SET credential_id = NULL WHERE credential_id = ?",
+            "UPDATE connector_bindings SET credential_id = NULL, last_tested_at = NULL, "
+            "last_error = 'Its credential was deleted; attach another' WHERE credential_id = ?",
             (entry_id,),
         )
         cursor = conn.execute("DELETE FROM credentials WHERE id = ?", (entry_id,))

@@ -95,7 +95,7 @@ async function applyRecommendedAccess() {
   const status = document.getElementById('apply-status');
   const includeUserWrite = document.getElementById('include-user-write')?.checked ? true : false;
   btn.disabled = true;
-  btn.textContent = 'Applying...';
+  btn.textContent = 'Giving access...';
   status.textContent = '';
   status.style.color = '';
 
@@ -108,7 +108,7 @@ async function applyRecommendedAccess() {
     status.textContent = 'Select user, workspace, and agent first.';
     status.style.color = 'var(--warning-text)';
     btn.disabled = false;
-    btn.textContent = 'Apply Recommended Access';
+    btn.textContent = 'Give access';
     return;
   }
 
@@ -127,13 +127,13 @@ async function applyRecommendedAccess() {
       status.textContent = j.error?.message || 'Failed';
       status.style.color = 'var(--danger)';
       btn.disabled = false;
-      btn.textContent = 'Apply Recommended Access';
+      btn.textContent = 'Give access';
     }
   } catch(e) {
     status.textContent = 'Error applying access';
     status.style.color = 'var(--danger)';
     btn.disabled = false;
-    btn.textContent = 'Apply Recommended Access';
+    btn.textContent = 'Give access';
   }
 }
 
@@ -151,7 +151,7 @@ async function generateConnectionConfig(btn) {
     showToast('Select user and agent first', 'warning');
     return;
   }
-  if (!confirm('Generate a new one-time key and config? This rotates the agent key and invalidates any previous key for this agent.')) return;
+  if (!await confirmDialog('Generate a new one-time key and config? This rotates the agent key and invalidates any previous key for this agent.')) return;
 
   btn.disabled = true;
   btn.textContent = 'Generating...';
@@ -207,7 +207,8 @@ async function testConnectionDetails() {
   setConnectionDoctorResult('', '');
 
   try {
-    const endpointResponse = await fetch(mcpUrl, { headers: { Accept: 'application/json' } });
+    // No cookies: the check is whether the endpoint demands a bearer key, and the dashboard's own cookie would sign this request in.
+    const endpointResponse = await fetch(mcpUrl, { credentials: 'omit', headers: { Accept: 'application/json' } });
     if (endpointResponse.status !== 401) {
       setConnectionDoctorResult(
         'The MCP endpoint responded, but it did not require bearer authentication as expected. Check the server authentication settings.',
@@ -226,6 +227,7 @@ async function testConnectionDetails() {
     }
 
     const keyResponse = await fetch(mcpUrl, {
+      credentials: 'omit',
       headers: {
         Accept: 'application/json',
         Authorization: 'Bearer ' + key

@@ -151,184 +151,16 @@ def test_integrations_sorts_context_selectors_for_the_current_user(test_client, 
     assert selector_values("agent_id") == ["", "alpha-agent", "zeta-agent"]
 
 
-def test_integrations_generates_claude_md(integrations_client):
-    r = integrations_client.get(
-        "/integrations?user_id=alex&workspace_id=agent-core&agent_id=claude-code&target=claude_code&output_type=claude_md"
-    )
-    assert r.status_code == 200
-    html = r.text
-    # The page leads with the chosen tool's steps; the requested raw output is under "Other outputs".
-    output_match = re.search(r"<pre class='output-block'>(.*?)</pre>", html.split('id="other-outputs"', 1)[1], re.S)
-    assert output_match is not None
-    output = output_match.group(1)
-    assert "CLAUDE.md" in html
-    assert "open a fresh activity first" in output
-    assert "task_note" in output
-    assert "workspace:agent-core" in output
-    assert "task_result" in output
-    assert "user:alex" not in output
-    assert "Agent ID:" not in output
 
 
-def test_full_instruction_templates_include_memory_discipline_guidance():
-    """Long-form repository instructions must carry the anti-repetition memory
-    rule ("one memory per insight, not per occurrence"). Added after three
-    different live agents each wrote one fact/decision record per monitor
-    tick / watchdog refire / idle heartbeat (140+ near-duplicates), because
-    the generic "no routine progress" line didn't cover findings-shaped
-    repetition."""
-    from app.routes.integrations_page import (
-        MEMORY_DISCIPLINE_GUIDANCE,
-        _build_agents_md,
-        _build_claude_md,
-        _build_instructions,
-        _build_session_prompt,
-    )
-
-    needle = "One memory per insight, not per occurrence"
-    assert needle in MEMORY_DISCIPLINE_GUIDANCE
-
-    outputs = {
-        "instructions": _build_instructions(
-            "claude_code", "http://x", "user:u", "workspace:w", "agent:a",
-            "Agent", "User", "ws",
-        ),
-        "session_prompt": _build_session_prompt(
-            "claude_code", "http://x", "user:u", "workspace:w", "agent:a",
-            "Agent", "User", "ws",
-        ),
-        "claude_md": _build_claude_md(
-            "http://x", "user:u", "workspace:w", "agent:a", "Agent", "ws"
-        ),
-        "agents_md": _build_agents_md(
-            "http://x", "user:u", "workspace:w", "agent:a", "ws"
-        ),
-    }
-    for name, output in outputs.items():
-        assert needle in output, f"{name} is missing the memory-discipline guidance"
-        assert "{MEMORY_DISCIPLINE_GUIDANCE}" not in output, (
-            f"{name} has an unresolved placeholder"
-        )
 
 
-def test_full_instruction_templates_require_activity_scope_continuity():
-    """Long-form repository instructions must keep lifecycle updates in scope."""
-    from app.routes.integrations_page import (
-        _build_agents_md,
-        _build_claude_md,
-        _build_instructions,
-        _build_session_prompt,
-    )
-
-    outputs = {
-        "instructions": _build_instructions(
-            "claude_code", "http://x", "user:u", "workspace:w", "agent:a",
-            "Agent", "User", "ws",
-        ),
-        "session_prompt": _build_session_prompt(
-            "claude_code", "http://x", "user:u", "workspace:w", "agent:a",
-            "Agent", "User", "ws",
-        ),
-        "claude_md": _build_claude_md(
-            "http://x", "user:u", "workspace:w", "agent:a", "Agent", "ws"
-        ),
-        "agents_md": _build_agents_md(
-            "http://x", "user:u", "workspace:w", "agent:a", "ws"
-        ),
-    }
-    for name, output in outputs.items():
-        assert "never moves one across scopes" in output, (
-            f"{name} is missing activity scope-continuity guidance"
-        )
 
 
-def test_full_instruction_templates_require_workspace_sync_lifecycle():
-    """Long-form repository instructions must teach the sync contract."""
-    from app.routes.integrations_page import (
-        _build_agents_md,
-        _build_claude_md,
-        _build_instructions,
-        _build_session_prompt,
-    )
-
-    outputs = {
-        "instructions": _build_instructions(
-            "claude_code", "http://x", "user:u", "workspace:w", "agent:a",
-            "Agent", "User", "ws",
-        ),
-        "session_prompt": _build_session_prompt(
-            "claude_code", "http://x", "user:u", "workspace:w", "agent:a",
-            "Agent", "User", "ws",
-        ),
-        "claude_md": _build_claude_md(
-            "http://x", "user:u", "workspace:w", "agent:a", "Agent", "ws"
-        ),
-        "agents_md": _build_agents_md(
-            "http://x", "user:u", "workspace:w", "agent:a", "ws"
-        ),
-    }
-    for name, output in outputs.items():
-        for required in (
-            "workspace_sync",
-            "workspace_sync_ack",
-            "execution_id",
-            "stable change ID",
-            "other_session_changes",
-            "intentionally skip",
-            "Workspace context is not repository access",
-            "Pass the session's `execution_id` to supported writes",
-            "sync again until `has_more` is false",
-            "If `cursor_reset` is true",
-            "stop and report the sync failure",
-        ):
-            assert required in output, f"{name} is missing {required} guidance"
 
 
-def test_claude_generator_preloads_workspace_sync_schemas():
-    from app.routes.integrations_page import _build_claude_md
-
-    output = _build_claude_md(
-        "http://x", "user:u", "workspace:w", "agent:a", "Agent", "ws"
-    )
-    preload = (
-        'ToolSearch("select:mcp__agent-core__session_context,mcp__agent-core__workspace_sync,'
-        'mcp__agent-core__workspace_sync_ack,'
-        'mcp__agent-core__memory_search,'
-        'mcp__agent-core__activity_update,'
-        'mcp__agent-core__memory_write")'
-    )
-    assert preload in output
 
 
-def test_full_instruction_templates_describe_principal_and_connector_authority():
-    from app.routes.integrations_page import (
-        CONNECTOR_BINDING_GUIDANCE,
-        _build_agents_md,
-        _build_claude_md,
-        _build_instructions,
-        _build_session_prompt,
-    )
-
-    outputs = {
-        "instructions": _build_instructions(
-            "claude_code", "http://x", "user:u", "workspace:w", "agent:a",
-            "Agent", "User", "ws",
-        ),
-        "session_prompt": _build_session_prompt(
-            "claude_code", "http://x", "user:u", "workspace:w", "agent:a",
-            "Agent", "User", "ws",
-        ),
-        "claude_md": _build_claude_md(
-            "http://x", "user:u", "workspace:w", "agent:a", "Agent", "ws"
-        ),
-        "agents_md": _build_agents_md(
-            "http://x", "user:u", "workspace:w", "agent:a", "ws"
-        ),
-    }
-    for name, output in outputs.items():
-        assert "automatically inherit read access" in output, name
-        assert "when you have user-scope read access" not in output, name
-        assert CONNECTOR_BINDING_GUIDANCE in output, name
 
 
 def test_integrations_generates_env_vars(integrations_client):
@@ -345,7 +177,7 @@ def test_integrations_generates_env_vars(integrations_client):
 
 def test_integrations_project_is_optional_for_env(integrations_client):
     r = integrations_client.get(
-        "/integrations?user_id=alex&agent_id=claude-code&target=claude_code&output_type=env"
+        "/integrations?user_id=alex&agent_id=claude-code&target=claude_code&workspace_id=&output_type=env"
     )
     assert r.status_code == 200
     html = r.text
@@ -363,42 +195,33 @@ def test_integrations_generates_verification_prompt(integrations_client):
     html = r.text
     assert "workspace:agent-core" in html
     assert "verification" in html.lower() or "Verify" in html
-    assert "workspace_sync" in html
-    assert "workspace_sync_ack" in html
-    assert "execution_id" in html
+    assert "memory_search" in html
     assert "activity_update" in html
-    assert "memory_get" in html
-    assert "`scope` set to `workspace:agent-core`" in html
-    assert "`view` set to `full`" in html
-    assert "returned records include the captured record ID" in html
-    assert "memory_get` for the record ID" not in html
-    assert "credential_list" in html
-    assert "connectors_list" in html
-    assert "connectors_bindings_list" in html
-    assert "connectors_actions_list" in html
-    assert "connectors_bindings_test" in html
-    assert "connectors_summary" in html
     assert "task_result" in html
+    assert "connectors_bindings_list" not in html  # four steps, not a tour of every tool
 
 
-def test_verification_prompt_uses_the_real_memory_get_schema():
+def test_verification_prompt_is_four_steps_in_one_scope():
+    import re
+
     from app.routes.integrations_page import _build_verification_prompt
     from app.routes.mcp import MANIFEST
 
-    memory_get = next(
-        tool for tool in MANIFEST["tools"] if tool["name"] == "memory_get"
-    )
-    properties = memory_get["inputSchema"]["properties"]
-    prompt = _build_verification_prompt("user:u", "workspace:w")
+    tools = {tool["name"]: tool for tool in MANIFEST["tools"]}
+    prompt = _build_verification_prompt("workspace:w")
+    assert [int(n) for n in re.findall(r"^(\d+)\. ", prompt, re.M)] == [1, 2, 3, 4]
+    assert prompt.count("`workspace:w`") >= 4 and "user:" not in prompt
+    assert "scope" in tools["memory_search"]["inputSchema"]["properties"]
+    assert "task_result" in prompt and "memory_search" in prompt and "activity_update" in prompt
 
-    assert "scope" in properties
-    assert "view" in properties
-    assert "record_id" not in properties
-    assert "`scope` set to `workspace:w`" in prompt
-    assert "`view` set to `full`" in prompt
-    assert "memory_get` for the record ID" not in prompt
-    assert "Call it again with `scope` set to `user:u`" in prompt
-    assert "If you can read `user:u`" not in prompt
+
+def test_with_no_workspace_the_verification_uses_the_agents_private_scope(integrations_client):
+    r = integrations_client.get(
+        "/integrations?user_id=alex&agent_id=claude-code&target=generic_mcp&workspace_id=&output_type=verification"
+    )
+    assert r.status_code == 200
+    prompt = r.text.split("Check that", 1)[1].split("Use the full prefixed scope name", 1)[0]
+    assert "`agent:claude-code`" in prompt and "user:alex" not in prompt
 
 
 def test_integrations_access_checks_show_ok_for_good_agent(integrations_client):
@@ -584,14 +407,14 @@ def test_a_chosen_tool_shows_its_connect_block_its_file_and_the_key_button(integ
     base = "/integrations?user_id=alex&workspace_id=agent-core&agent_id=claude-code"
     claude = integrations_client.get(base + "&target=claude_code").text
     steps = claude.split('id="tool-step"', 1)[1].split('id="check-step"', 1)[0]
-    assert "Connect it" in steps and "Give it instructions" in steps and "Optional: add context" in steps
+    assert "Connect it" in steps and "Give it instructions" in steps and "Add the session start hook" in steps
     assert "# Claude Code" in steps and "# Codex CLI" not in steps
     assert "id='generate-tool-connection-btn'" in steps and "data-output-type='mcp_tool'" in steps
     assert "CLAUDE.md" in steps
 
     codex = integrations_client.get(base + "&target=codex").text.split('id="tool-step"', 1)[1].split('id="check-step"', 1)[0]
     assert "# Codex CLI" in codex and "# Claude Code" not in codex and "AGENTS.md" in codex
-    assert "Optional: add context" not in codex
+    assert "Add the session start hook" not in codex
 
     other = integrations_client.get(base).text.split('id="tool-step"', 1)[1].split('id="check-step"', 1)[0]
     assert "Choose your tool to see exactly what to copy" in other and "Connect it" not in other
@@ -629,39 +452,6 @@ def test_every_listed_output_type_is_accepted(integrations_client):
     assert _generate(integrations_client, output_type="verification").status_code == 200
 
 
-def test_generated_files_name_only_the_tools_that_agent_can_use(integrations_client):
-    create_agent(
-        agent_id="notes-only",
-        display_name="Notes only",
-        owner_user_id="alex",
-        read_scopes=["agent:notes-only", "workspace:agent-core"],
-        write_scopes=["agent:notes-only", "workspace:agent-core"],
-        capabilities=["memory", "coordination"],
-    )
-    narrow = {t: _generate(integrations_client, agent_id="notes-only", output_type=t).json()["data"]["output"]
-              for t in ("claude_md", "agents_md", "session")}
-    def listing(text):
-        # The sentence that lists the tools; other prose may still mention a tool by name.
-        return next(line for line in text.splitlines() if "MCP tools include" in line or "MCP tools you can use" in line)
-
-    for text in narrow.values():
-        line = listing(text)
-        assert "`memory_search`" in line
-        assert "approval_propose" not in line
-        assert "`connectors_run`" not in line
-        assert "`credential_get`" not in line
-    full = _generate(integrations_client, output_type="claude_md").json()["data"]["output"]
-    assert "`connectors_run`" in listing(full) and "approval_propose" not in listing(full)
-    create_agent(
-        agent_id="proposer-x",
-        display_name="Proposer",
-        owner_user_id="alex",
-        read_scopes=["agent:proposer-x", "workspace:agent-core"],
-        write_scopes=["agent:proposer-x"],
-        capabilities=["memory", "admin_propose"],
-    )
-    proposer = _generate(integrations_client, agent_id="proposer-x").json()["data"]["output"]
-    assert "`approval_propose`" in listing(proposer) and "`connectors_run`" not in listing(proposer)
 
 
 def test_agent_update_refuses_a_field_it_does_not_know(integrations_client):
@@ -673,3 +463,28 @@ def test_agent_update_refuses_a_field_it_does_not_know(integrations_client):
     assert integrations_client.put(
         "/api/agents/claude-code", json={"description": "still works"}, headers=csrf_headers(integrations_client)
     ).status_code == 200
+
+
+def test_the_connection_doctor_sends_no_cookies():
+    """With the dashboard cookie it would be signed in and always report that no bearer key is required."""
+    import pathlib
+
+    source = pathlib.Path("app/dashboard/static/js/integrations.js").read_text()
+    body = source.split("async function testConnectionDetails", 1)[1].split("\nfunction ", 1)[0]
+    assert body.count("fetch(mcpUrl") == 2 and body.count("credentials: 'omit'") == 2
+
+
+def test_a_failed_access_check_offers_give_access(integrations_client):
+    create_agent(
+        agent_id="no-access", display_name="No Access", owner_user_id="alex",
+        read_scopes=["agent:no-access"], write_scopes=["agent:no-access"],
+    )
+    html = integrations_client.get(
+        "/integrations?user_id=alex&workspace_id=agent-core&agent_id=no-access&target=claude_code&output_type=instructions"
+    ).text
+    assert "check-blocked" in html or "check-warn" in html
+    assert ">Give access</button>" in html and "applyRecommendedAccess()" in html
+    good = integrations_client.get(
+        "/integrations?user_id=alex&workspace_id=agent-core&agent_id=claude-code&target=claude_code&output_type=instructions"
+    ).text
+    assert ">Give access</button>" not in good

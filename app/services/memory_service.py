@@ -1,3 +1,4 @@
+import difflib
 import logging
 import re
 import secrets
@@ -28,14 +29,14 @@ MEMORY_RECORD_COLUMNS = (
     "source_kind, created_at, record_status, superseded_by_id, "
     "supersedes_id, provenance_json, slot_key, valid_from, valid_to, last_confirmed_at, "
     "expires_at, status_changed_at, subject_anchor, recall_count, last_recalled_at, "
-    "helpful_count, unhelpful_count, last_verify_attempt_at, anchor_checked_at, pinned"
+    "last_verify_attempt_at, anchor_checked_at"
 )
 
 # Ranking never needs claim text or provenance blobs. Load complete records only
 # for the final page so broad searches do not copy every matching claim into RAM.
 MEMORY_RANK_COLUMNS = (
     "id, memory_class, importance, source_kind, created_at, record_status, "
-    "valid_from, valid_to, last_confirmed_at, recall_count, helpful_count, unhelpful_count"
+    "valid_from, valid_to, last_confirmed_at, recall_count"
 )
 
 # What a search result actually needs to be useful to the caller. Everything
@@ -54,7 +55,6 @@ MEMORY_RESULT_FIELDS = (
     "last_confirmed_at",
     "anchor_checked_at",
     "record_status",
-    "pinned",
 )
 
 # How long a record keeps full standing before age starts counting against it.
@@ -227,6 +227,40 @@ def _sanitize_fts_query(query: str) -> str:
     return " AND ".join(safe_tokens)
 
 
+_STEM_SUFFIXES = ("ations", "ation", "ings", "ing", "ers", "ier", "ied", "ies", "ed", "er", "es", "s")
+_STOP_WORDS = frozenset("the and for with that this from into have has are was were not but use used using".split())
+
+
+def _stem(token: str) -> str:
+    """A crude stem for matching 'export' with 'exports', 'delimiter' with 'delimited': enough for a prefix match.
+    Tokens that would shrink below four characters are left alone."""
+    word = token.lower()
+    for suffix in _STEM_SUFFIXES:
+        if word.endswith(suffix) and len(word) - len(suffix) >= 4:
+            return word[: -len(suffix)]
+    return word
+
+
+def _fts_query_variants(query: str) -> list[tuple[str, str]]:
+    """(name, FTS query) to try in order when the exact-word AND query finds nothing: every word as a stem prefix
+    (AND), then any of the stems (OR, still ranked by relevance so records matching more of them come first).
+    Words are quoted, so nothing here can be read as FTS syntax."""
+    cleaned = FTS5_SPECIAL.sub(" ", (query or "").strip()[:500])
+    words = [t for t in re.split(r"[\s_./]+", cleaned) if t]
+    if not words:
+        return []
+    stems = []
+    for word in words:
+        stem = _stem(word)
+        if stem not in stems and (stem not in _STOP_WORDS or len(words) == 1):
+            stems.append(stem)
+    prefixes = [f'"{stem}"*' for stem in stems]
+    variants = [("stem", " AND ".join(prefixes))]
+    if len(prefixes) > 1:
+        variants.append(("any", " OR ".join(prefixes)))
+    return variants
+
+
 def _normalize_scope(scope: str) -> str:
     parts = scope.split(":", 1)
     if len(parts) == 2 and parts[0] in ("user", "agent", "workspace"):
@@ -371,7 +405,7 @@ EPISODIC_ADVISORY_PATTERNS = (
     ),
 )
 
-# Deliberately absent here: a bare ticket closeout ("STA-47 closed done ...").
+# Deliberately absent here: a bare ticket closeout ("PROJ-47 closed done ...").
 # In practice those routinely carry a durable payload in the same record
 # ("...Built reusable Python client package at ..."), so they are worth a
 # warning but must not silently expire.
@@ -396,7 +430,7 @@ EPISODIC_EXPIRY_PATTERNS = (
 )
 
 # A per-occurrence log states when it happened, right at the top. Requiring both
-# a timestamp and a lead-position match is what separates "SAG-638 sweep
+# a timestamp and a lead-position match is what separates "PROJ-638 sweep
 # heartbeat (2026-06-07 15:16 UTC)" from a durable fact that merely discusses
 # heartbeats, e.g. "the scheduler config is read once at startup ... heartbeat
 # recovery runs scanSilentActiveRuns()".
@@ -415,6 +449,91 @@ DEDUPE_SIMILARITY_DEFAULT = 0.92
 # rule. Defined here so both checks share one definition of "near-exact
 # prefix", and renaming one in the future means renaming it everywhere.
 DUPLICATE_PREFIX_CHARS = 90
+# Two records that open alike are duplicates only when the whole text is nearly the same. Records
+# relayed by the same person in the same words ("Alex decided ... Question 2 ...") open alike and
+# differ after the opening, and must never count as one.
+DUPLICATE_TEXT_RATIO = 0.9
+_DUPLICATE_COMPARE_CHARS = 3000
+
+
+def _statement_tokens(text: str) -> list[tuple[str, bool]]:
+    """(comparison form, carries a specific) for each word of ``text``. A word carries a specific when changing it changes
+    what is claimed: a number, an identifier or path, an acronym, CamelCase, or a name (a capital that does not just
+    start a sentence). Punctuation around a word is ignored."""
+    out: list[tuple[str, bool]] = []
+    sentence_start = True
+    for raw in text.split():
+        core = raw.strip(".,;:!?()[]{}\"'`")
+        ends_sentence = raw.endswith((".", "!", "?"))
+        if core:
+            specific = (
+                any(c.isdigit() for c in core)
+                or any(c in core for c in "/\\._-:@#=<>$%")
+                or (len(core) > 1 and core.isupper())
+                or any(c.isupper() for c in core[1:])
+                or (core[0].isupper() and not sentence_start)
+            )
+            out.append((core.lower(), specific))
+        sentence_start = ends_sentence
+    return out
+
+
+def is_duplicate_text(a: str, b: str) -> bool:
+    """True when two texts are the same statement said twice.
+
+    Same words, case and spacing aside; or one is the other plus plain added words. Never when a word was swapped
+    for another, or when what differs carries a specific (a number, identifier, path or name): "limit is 100 in
+    staging" and "limit is 900 in production" are two facts, however alike they read.
+    """
+    na, nb = " ".join(a.split()).lower(), " ".join(b.split()).lower()
+    if na == nb:
+        return True
+    if na[:DUPLICATE_PREFIX_CHARS] != nb[:DUPLICATE_PREFIX_CHARS]:
+        return False
+    sa, sb = na[:_DUPLICATE_COMPARE_CHARS], nb[:_DUPLICATE_COMPARE_CHARS]
+    matcher = difflib.SequenceMatcher(None, sa, sb, autojunk=False)
+    if matcher.real_quick_ratio() < DUPLICATE_TEXT_RATIO or matcher.quick_ratio() < DUPLICATE_TEXT_RATIO:
+        return False
+    if matcher.ratio() < DUPLICATE_TEXT_RATIO:
+        return False
+    ta, tb = _statement_tokens(" ".join(a.split())), _statement_tokens(" ".join(b.split()))
+    words = difflib.SequenceMatcher(None, [t for t, _ in ta], [t for t, _ in tb], autojunk=False)
+    for tag, i1, i2, j1, j2 in words.get_opcodes():
+        if tag == "equal":
+            continue
+        if tag == "replace":
+            return False
+        changed = ta[i1:i2] if tag == "delete" else tb[j1:j2]
+        if any(specific for _, specific in changed):
+            return False
+    return True
+
+
+def touched_by_a_person(record_ids: list[str]) -> set[str]:
+    """Records a person wrote, restored or confirmed. Automation never retracts these: a person's act is final."""
+    if not record_ids:
+        return set()
+    found: set[str] = set()
+    with get_db() as conn:
+        for start in range(0, len(record_ids), 400):
+            chunk = record_ids[start : start + 400]
+            marks = ",".join("?" for _ in chunk)
+            for row in conn.execute(
+                f"SELECT id, source_kind, provenance_json FROM memory_records WHERE id IN ({marks})", chunk
+            ).fetchall():
+                try:
+                    actor_type = (json.loads(row["provenance_json"] or "{}") or {}).get("actor_type")
+                except ValueError:
+                    actor_type = None
+                if row["source_kind"] == "operator_authored" or actor_type == "user":
+                    found.add(row["id"])
+            for row in conn.execute(
+                "SELECT DISTINCT resource_id FROM audit_log WHERE resource_id IN (" + marks + ") AND "
+                "(action = 'memory_restore' OR (action = 'memory_confirmed' AND actor_type = 'user'))",
+                chunk,
+            ).fetchall():
+                found.add(row["resource_id"])
+    return found
 
 
 def detect_episodic_shape(content: str, topic: Optional[str] = None) -> Optional[str]:
@@ -444,9 +563,43 @@ def detect_expiring_episodic_shape(
     if EPISODIC_META.search(head) or not EPISODIC_TIMESTAMP.search(head):
         return None
     for pattern, reason in EPISODIC_EXPIRY_PATTERNS:
-        if pattern.search(head):
+        found = pattern.search(head)
+        if found:
+            # Only a bare status of one occurrence is expiring noise; a log line that goes on to state something
+            # lasting is saved like any other memory.
+            located = pattern.search((content or "")[:EPISODIC_LEAD_CHARS])
+            if _carries_a_lasting_statement(content or "", located.end() if located else 0, skip_first_sentence=True):
+                return None
             return reason
     return None
+
+
+LASTING_STATEMENT_WORDS = 5
+LASTING_STATEMENT_LONG_WORDS = 10
+_LASTING_MARKER = re.compile(
+    r"\b(lasting|permanent(?:ly)?|from now on|going forward|always|never|must|should|because|convention|policy|outcome|decided)\b", re.I
+)
+_DATE_LIKE = re.compile(r"\b20\d\d-\d\d-\d\d(?:[T ]\d\d:\d\d(?::\d\d)?Z?)?\b|\b\d\d:\d\d\s*(?:UTC|Z)?\b")
+
+
+def _carries_a_lasting_statement(content: str, after: int, skip_first_sentence: bool = False) -> bool:
+    """True when what follows the status of one occurrence still says something: ten or more ordinary words once dates
+    are removed, or five with a marker of something lasting (always, must, because, outcome ...). "PROJ-594 closed done 2026-07-21 after the review." is a status; "ABC-124 closed done, and the lasting
+    outcome: exports use semicolon-delimited CSV" is a fact that happens to open with one."""
+    rest = content[after:]
+    if skip_first_sentence:
+        end = re.search(r"[.!?](?:\s|$)|\n", rest)
+        rest = rest[end.end():] if end else ""
+    rest = _DATE_LIKE.sub(" ", rest)
+    words = len(re.findall(r"[A-Za-z][A-Za-z'-]{2,}", rest))
+    return words >= LASTING_STATEMENT_LONG_WORDS or (words >= LASTING_STATEMENT_WORDS and bool(_LASTING_MARKER.search(rest)))
+
+
+def is_bare_ticket_closeout(content: str) -> bool:
+    """Ticket-closeout narration with nothing lasting in it ("PROJ-594 closed done 2026-07-21 after the review.")."""
+    text = " ".join((content or "").split())
+    found = _TICKET_CLOSEOUT_SHAPE.match(text[:200])
+    return bool(found) and not _carries_a_lasting_statement(text, found.end())
 
 
 def _system_setting_int(key: str, default: int) -> int:
@@ -793,6 +946,94 @@ def detect_class_mismatch(content: str, memory_class: str) -> Optional[str]:
     return None
 
 
+# A ticket closeout opens like "PROJ-594 closed done 2026-07-21": narration of finished work, not a fact.
+_TICKET_CLOSEOUT_SHAPE = re.compile(
+    r"^\s*(?:#+\s*)?[A-Z]{2,6}-\d+\b[^.\n]{0,60}\bclosed\s+(?:done|in_review)\b", re.I
+)
+
+
+def write_refusal(
+    content: str, scope: str, memory_class: str, topic: Optional[str] = None
+) -> Optional[dict]:
+    """Why an agent's write is refused, or None. Only plain cases are refused.
+
+    Three, none of them a judgement about usefulness: a bare log of one occurrence, bare ticket-closeout narration (both
+    only when nothing lasting follows the status: a fact that happens to open with a closeout is saved), and text
+    that is the same statement as an active record in the same scope. Everything the broad advisory checks flag stays advice: 61% of what
+    that detector flags is kept, which is no basis for a refusal.
+    """
+    if memory_class not in ("fact", "decision"):
+        return None
+    if detect_expiring_episodic_shape(content, topic) or is_bare_ticket_closeout(content):
+        return {
+            "code": "TOO_SPECIFIC_TO_ONE_OCCURRENCE",
+            "rule": "per_occurrence",
+            "message": (
+                "This reads as a log of one occurrence, so it was not saved. Record it with activity_update "
+                "(task_note or task_result): memory is for decisions and facts that stay true across sessions."
+            ),
+        }
+    normalized = _normalize_for_prefix_match(content)
+    if len(normalized) >= MIN_PREFIX_CHARS:
+        with get_db() as conn:
+            rows = conn.execute(
+                "SELECT id, content FROM memory_records WHERE scope = ? AND record_status = 'active' "
+                "AND memory_class = ? AND length(content) >= ?",
+                (_normalize_scope(scope), memory_class, MIN_PREFIX_CHARS),
+            ).fetchall()
+        for row in rows:
+            existing = _normalize_for_prefix_match(row["content"])
+            if not is_duplicate_text(content, row["content"]):
+                continue
+            if existing == normalized:
+                message = (
+                    f"An active record in this scope already says exactly this: {row['id']}. "
+                    "It was not saved again; there is nothing to do."
+                )
+            else:
+                message = (
+                    f"An active record in this scope says nearly the same: {row['id']}. Read it with memory_get. "
+                    "If yours says the same thing, skip this write. Only if yours corrects or replaces it, "
+                    f"write again with supersedes_id={row['id']}."
+                )
+            return {"code": "DUPLICATE_OF", "rule": "duplicate", "existing_id": row["id"], "message": message}
+    return None
+
+
+SIMILAR_RECORD_RATIO = 0.8
+_SIMILAR_COMPARE_LIMIT = 400
+
+
+def find_similar_active_records(
+    content: str, scope: str, memory_class: str, exclude_ids: tuple = (), limit: int = 2
+) -> list[dict]:
+    """Active records in the same scope and class that read almost the same as ``content`` but are not the same
+    statement (so a duplicate check does not catch them): typically a correction that differs near the start. Lexical,
+    so it works without an embedding backend; compares at most a few hundred candidates of similar length."""
+    normalized = " ".join((content or "").split()).lower()
+    if len(normalized) < MIN_PREFIX_CHARS:
+        return []
+    with get_db() as conn:
+        rows = conn.execute(
+            "SELECT id, topic, content FROM memory_records WHERE scope = ? AND record_status = 'active' AND memory_class = ? "
+            "AND length(content) BETWEEN ? AND ? ORDER BY created_at DESC LIMIT ?",
+            (_normalize_scope(scope), memory_class, int(len(normalized) * 0.7), int(len(normalized) * 1.4) + 1, _SIMILAR_COMPARE_LIMIT),
+        ).fetchall()
+    found: list[tuple[float, dict]] = []
+    for row in rows:
+        if row["id"] in exclude_ids:
+            continue
+        other = " ".join((row["content"] or "").split()).lower()
+        matcher = difflib.SequenceMatcher(None, normalized[:1500], other[:1500], autojunk=False)
+        if matcher.real_quick_ratio() < SIMILAR_RECORD_RATIO or matcher.quick_ratio() < SIMILAR_RECORD_RATIO:
+            continue
+        ratio = matcher.ratio()
+        if ratio >= SIMILAR_RECORD_RATIO and not is_duplicate_text(content, row["content"]):
+            found.append((ratio, {"id": row["id"], "topic": row["topic"], "similarity": round(ratio, 2), "content_preview": (row["content"] or "")[:200]}))
+    found.sort(key=lambda item: item[0], reverse=True)
+    return [item for _, item in found[:limit]]
+
+
 def assess_memory_write(
     content: str,
     scope: str,
@@ -801,6 +1042,7 @@ def assess_memory_write(
     check_duplicates: bool = True,
     exclude_id: Optional[str] = None,
     subject_anchor: Optional[str] = None,
+    supersedes_id: Optional[str] = None,
 ) -> list[dict]:
     """Advisory checks a route can surface on the write response.
 
@@ -849,7 +1091,7 @@ def assess_memory_write(
                     "message": (
                         f"Nothing here can currently check a '{anchor_type}:' anchor, so this "
                         "record will report as unverifiable. That is fine — the anchor still "
-                        "says what would settle it — but a connector binding can be "
+                        "says what would settle it — but a connection to a service can be "
                         "registered to verify this type if you want it checked automatically."
                     ),
                 }
@@ -894,8 +1136,8 @@ def assess_memory_write(
                     "code": "POSSIBLE_DUPLICATE",
                     "message": (
                         "Records in this scope already say something very similar. "
-                        "Prefer superseding one of them (supersedes_id) over adding a "
-                        "near-duplicate."
+                        f"Pass supersedes_id={active_matches[0]['id']} to replace the closest one "
+                        "instead of adding a near-duplicate."
                     ),
                     "candidates": active_matches,
                 }
@@ -924,6 +1166,21 @@ def assess_memory_write(
                     "candidates": warning_candidates,
                 }
             )
+
+        if not active_matches and not supersedes_id:
+            similar = find_similar_active_records(content, scope, memory_class, exclude_ids=(exclude_id or "",))
+            if similar:
+                warnings.append(
+                    {
+                        "code": "SIMILAR_ACTIVE_RECORD",
+                        "message": (
+                            f"An active record in this scope reads almost the same but differs in its details: {similar[0]['id']}. "
+                            f"If this write corrects or replaces it, write it again with supersedes_id={similar[0]['id']} "
+                            "(or retract that record); if both are true, leave them. Nothing was refused."
+                        ),
+                        "candidates": similar,
+                    }
+                )
 
     return warnings
 
@@ -1002,21 +1259,14 @@ def _provenance_penalty(record: dict) -> float:
 
 
 def _usefulness_bonus(record: dict) -> float:
-    """Observed usefulness: how often a record is recalled, and whether it helped.
+    """Observed usefulness: how often a record is recalled.
 
     Deliberately small and saturating. This is a weak signal early on — a corpus
     with no usage history must not rank randomly — so it nudges rather than
     dominates, and a record cannot climb indefinitely by being returned a lot.
-    Explicit feedback counts for more than a recall, because being returned is
-    the retriever's opinion while feedback is the caller's.
     """
     recalls = record.get("recall_count") or 0
-    helpful = record.get("helpful_count") or 0
-    unhelpful = record.get("unhelpful_count") or 0
-    bonus = min(recalls, 10) * 0.004  # up to +0.04
-    bonus += min(helpful, 5) * 0.02  # up to +0.10
-    bonus -= min(unhelpful, 5) * 0.04  # down to -0.20, so a marked-unhelpful
-    return bonus  # record falls below an unrated one
+    return min(recalls, 10) * 0.004  # up to +0.04
 
 
 def _staleness_penalty(record: dict) -> float:
@@ -1054,20 +1304,6 @@ def record_recall(record_ids: list[str]) -> None:
             conn.commit()
     except sqlite3.Error:
         logger.debug("Could not record recall counts", exc_info=True)
-
-
-def record_feedback(record_id: str, helpful: bool) -> Optional[dict]:
-    """Record a caller's verdict on whether a recalled record actually helped."""
-    column = "helpful_count" if helpful else "unhelpful_count"
-    with get_db() as conn:
-        cursor = conn.execute(
-            f"UPDATE memory_records SET {column} = COALESCE({column}, 0) + 1 WHERE id = ?",
-            (record_id,),
-        )
-        conn.commit()
-        if cursor.rowcount == 0:
-            return None
-    return get_memory_record(record_id)
 
 
 def mark_anchor_checked(record_id: str) -> None:
@@ -1109,16 +1345,14 @@ def confirm_memory(
     provenance = record.get("provenance_json") or json.dumps({}, separators=(",", ":"))
     provenance = _annotate_provenance(provenance, verified=verification)
     with get_db() as conn:
+        before = _changes_mark(conn, record["scope"])
         conn.execute(
             "UPDATE memory_records SET last_confirmed_at = ?, provenance_json = ? "
             "WHERE id = ? AND record_status = 'active'",
             (now, provenance, record_id),
         )
+        _attribute(conn, record["scope"], before, verified_by)
         conn.commit()
-    # Checking a memory answers any pending suggestion that asked about it (needs the evidence above).
-    from app.services import memory_proposal_service
-
-    memory_proposal_service.close_answered(record_id, answered_by=verified_by, how="confirmed", evidence=detail)
     return get_memory_record(record_id)
 
 
@@ -1227,6 +1461,7 @@ def write_memory(
 
     with get_db() as conn:
         if effective_supersedes_id:
+            _superseded_mark = _changes_mark(conn, _record_scope(conn, effective_supersedes_id))
             conn.execute(
                 # Close the old record's validity window as well as marking it
                 # superseded. These are two different clocks: status_changed_at
@@ -1243,6 +1478,14 @@ def write_memory(
                 "WHERE id = ? AND record_status = 'active'",
                 (record_id, now, normalized_valid_from or now, effective_supersedes_id),
             )
+            # The old record's "superseded" change belongs to whoever wrote its replacement.
+            _writer = None
+            try:
+                _writer = json.loads(provenance_json or "{}").get("agent_id")
+            except (TypeError, ValueError, AttributeError):
+                pass
+            _old_scope = _record_scope(conn, effective_supersedes_id)
+            _attribute(conn, _old_scope, _superseded_mark, _writer)
 
         conn.execute(
             """
@@ -1312,76 +1555,6 @@ def write_memory(
         }, None
 
 
-# A pinned set is only useful while it stays small enough to read in full. The
-# cap is what keeps it a short list of standing rules rather than a second,
-# unranked copy of the corpus.
-MAX_PINNED_PER_SCOPE = 10
-PINNABLE_CLASSES = ("fact", "decision", "preference")
-
-
-def pinned_limit() -> int:
-    return _system_setting_int("max_pinned_per_scope", MAX_PINNED_PER_SCOPE)
-
-
-def set_pinned(record_id: str, pinned: bool) -> Optional[dict]:
-    """Mark a record as always-shown, or clear it.
-
-    Pinning is the answer to a specific failure: a standing constraint has to
-    win a search to be seen, and if it loses it may as well not exist. A pinned
-    record is loaded rather than retrieved.
-
-    Restricted to the durable classes and capped per scope. A scratchpad is
-    temporary by definition, and an uncapped pin list stops being readable,
-    which is the whole point of it.
-    """
-    record = get_memory_record(record_id)
-    if not record or record["record_status"] != "active":
-        return None
-    if pinned and record["memory_class"] not in PINNABLE_CLASSES:
-        raise ValueError(
-            f"only {', '.join(PINNABLE_CLASSES)} records can be pinned, "
-            f"not {record['memory_class']}"
-        )
-
-    if pinned and not record.get("pinned"):
-        limit = pinned_limit()
-        with get_db() as conn:
-            current = conn.execute(
-                "SELECT COUNT(*) FROM memory_records "
-                "WHERE scope = ? AND pinned = 1 AND record_status = 'active'",
-                (record["scope"],),
-            ).fetchone()[0]
-        if current >= limit:
-            raise ValueError(
-                f"{record['scope']} already has {current} pinned records (limit {limit}). "
-                "Unpin something first — a pinned list only works while it is short "
-                "enough to read in full."
-            )
-
-    with get_db() as conn:
-        conn.execute(
-            "UPDATE memory_records SET pinned = ? WHERE id = ? AND record_status = 'active'",
-            (1 if pinned else 0, record_id),
-        )
-        conn.commit()
-    return get_memory_record(record_id)
-
-
-def pinned_records(authorized_scopes: list[str], limit: int = 50) -> list[dict]:
-    """The standing context for these scopes, newest last so it reads in order."""
-    if not authorized_scopes:
-        return []
-    placeholders = ",".join("?" for _ in authorized_scopes)
-    with get_db() as conn:
-        rows = conn.execute(
-            f"SELECT {MEMORY_RECORD_COLUMNS} FROM memory_records "
-            f"WHERE pinned = 1 AND record_status = 'active' "
-            f"AND scope IN ({placeholders}) ORDER BY scope, created_at LIMIT ?",
-            [*authorized_scopes, max(limit, 0)],
-        ).fetchall()
-    return [dict(row) for row in rows]
-
-
 def records_for_activity(
     activity_id: str,
     authorized_scopes: Optional[list[str]] = None,
@@ -1445,23 +1618,118 @@ def get_memory_records_by_ids(record_ids: list[str]) -> list[dict]:
     return [by_id[i] for i in ids if i in by_id]
 
 
-def retract_memory(record_id: str, reason: Optional[str] = None, retracted_by: Optional[str] = None) -> bool:
-    """Retract an active record. With a ``reason`` (what was checked) and who did it, the pending
-    suggestions about the record are answered too; without one they stay for a person."""
+def note_anchor_missing(record_id: str) -> Optional[str]:
+    """Remember when a record's anchor was first found missing; returns that first time."""
+    record = get_memory_record(record_id)
+    if not record or record["record_status"] != "active":
+        return None
+    try:
+        provenance = json.loads(record.get("provenance_json") or "{}")
+    except (TypeError, ValueError):
+        provenance = {}
+    first = provenance.get("anchor_missing_since")
+    if first:
+        return first
+    first = utc_now_iso()
+    provenance["anchor_missing_since"] = first
     with get_db() as conn:
+        conn.execute(
+            "UPDATE memory_records SET provenance_json = ? WHERE id = ? AND record_status = 'active'",
+            (json.dumps(provenance, separators=(",", ":")), record_id),
+        )
+        conn.commit()
+    return first
+
+
+def clear_anchor_missing(record_id: str) -> None:
+    """The anchor is there again (or was repointed): forget an earlier miss."""
+    record = get_memory_record(record_id)
+    if not record or "anchor_missing_since" not in (record.get("provenance_json") or ""):
+        return
+    try:
+        provenance = json.loads(record.get("provenance_json") or "{}")
+    except (TypeError, ValueError):
+        return
+    provenance.pop("anchor_missing_since", None)
+    with get_db() as conn:
+        conn.execute(
+            "UPDATE memory_records SET provenance_json = ? WHERE id = ?",
+            (json.dumps(provenance, separators=(",", ":")), record_id),
+        )
+        conn.commit()
+
+
+def _record_scope(conn, record_id: str) -> Optional[str]:
+    row = conn.execute("SELECT scope FROM memory_records WHERE id = ?", (record_id,)).fetchone()
+    return row["scope"] if row else None
+
+
+def _changes_mark(conn, scope: Optional[str]) -> int:
+    from app.services.workspace_sync_service import latest_sequence
+
+    return latest_sequence(conn, scope) if scope else 0
+
+
+def _attribute(conn, scope: Optional[str], mark: int, actor: Optional[str]) -> None:
+    from app.services.workspace_sync_service import attribute_changes_since
+
+    if scope:
+        attribute_changes_since(conn, scope, mark, actor)
+
+
+RULE_LABELS = {
+    "rule:episodic_log": "an automatic clean-up (a log of one occurrence)",
+    "rule:ticket_closeout": "an automatic clean-up (a ticket closeout note)",
+    "rule:duplicate_cluster": "an automatic clean-up (a duplicate of another memory)",
+    "rule:anchor_missing": "an automatic clean-up (the thing it described is gone)",
+    "maintenance": "an automatic clean-up (its expiry date passed)",
+}
+
+
+def retraction_traces(record_ids: list[str]) -> dict[str, dict]:
+    """For each retracted record, its latest retraction in the audit log: who (a rule, an agent or a
+    person), when, and the reason when one was given."""
+    if not record_ids:
+        return {}
+    found: dict[str, dict] = {}
+    with get_db() as conn:
+        for start in range(0, len(record_ids), 400):
+            chunk = record_ids[start : start + 400]
+            rows = conn.execute(
+                "SELECT resource_id, actor_id, timestamp, details_json FROM audit_log "
+                "WHERE action IN ('memory_retract', 'memory_auto_retracted') "
+                f"AND resource_id IN ({','.join('?' for _ in chunk)}) ORDER BY id",
+                chunk,
+            ).fetchall()
+            for row in rows:
+                try:
+                    details = json.loads(row["details_json"] or "{}")
+                except ValueError:
+                    details = {}
+                found[row["resource_id"]] = {
+                    "by": row["actor_id"],
+                    "by_label": RULE_LABELS.get(row["actor_id"], row["actor_id"]),
+                    "when": row["timestamp"],
+                    "reason": details.get("reason") if isinstance(details.get("reason"), str) else None,
+                    "duplicate_of": details.get("duplicate_of") if isinstance(details.get("duplicate_of"), str) else None,
+                }
+    return found
+
+
+def retract_memory(record_id: str, reason: Optional[str] = None, retracted_by: Optional[str] = None) -> bool:
+    """Soft-retract an active record (restorable for the retention period). ``retracted_by`` names who did it
+    in the workspace change feed; ``reason`` is accepted for callers that give one."""
+    with get_db() as conn:
+        scope = _record_scope(conn, record_id)
+        before = _changes_mark(conn, scope)
         cursor = conn.execute(
             "UPDATE memory_records SET record_status = 'retracted', status_changed_at = ? "
             "WHERE id = ? AND record_status = 'active'",
             (utc_now_iso(), record_id),
         )
+        _attribute(conn, scope, before, retracted_by)
         conn.commit()
         retracted = cursor.rowcount > 0
-    if retracted and (reason or "").strip() and retracted_by:
-        from app.services import memory_proposal_service
-
-        memory_proposal_service.close_answered(
-            record_id, answered_by=retracted_by, how="retracted", evidence=reason or ""
-        )
     return retracted
 
 
@@ -1585,13 +1853,17 @@ def move_memory(
     return get_memory_record(new_id), None
 
 
-def restore_memory(record_id: str) -> bool:
+def restore_memory(record_id: str, restored_by: Optional[str] = None) -> bool:
     with get_db() as conn:
+        scope = _record_scope(conn, record_id)
+        before = _changes_mark(conn, scope)
         cursor = conn.execute(
-            "UPDATE memory_records SET record_status = 'active', status_changed_at = NULL "
+            "UPDATE memory_records SET record_status = 'active', status_changed_at = NULL, "
+            "expires_at = CASE WHEN expires_at IS NOT NULL AND datetime(expires_at) < datetime('now') THEN NULL ELSE expires_at END "
             "WHERE id = ? AND record_status = 'retracted'",
             (record_id,),
         )
+        _attribute(conn, scope, before, restored_by)
         conn.commit()
         return cursor.rowcount > 0
 
@@ -1607,7 +1879,24 @@ def delete_memory_hard(record_id: str) -> bool:
         return cursor.rowcount > 0
 
 
-def search_memory(
+def search_memory(*args, diagnostics: Optional[dict] = None, **kwargs) -> tuple[list[dict], str]:
+    """Search memory. Returns ``(records, retrieval_mode)``.
+
+    ``retrieval_mode`` is ``hybrid`` (meaning and keywords), ``fts_only`` (keywords only: the embedding
+    backend was off, failed, or had nothing to score) or ``no_candidates`` (no record in the scopes
+    searched passed the filters, so there was nothing to search; this is not a fault of the search).
+    Pass a dict as ``diagnostics`` to learn why: it is filled with ``candidates`` (records eligible),
+    ``embedding`` (``ok``, ``not_used``, ``unavailable`` or the failure) and ``scored`` (records the
+    vector search scored).
+    """
+    diag = diagnostics if diagnostics is not None else {}
+    records, mode = _search_memory(*args, diagnostics=diag, **kwargs)
+    if diag.get("candidates") == 0:
+        mode = "no_candidates"
+    return records, mode
+
+
+def _search_memory(
     query: str,
     authorized_scopes: list[str],
     topic: Optional[str] = None,
@@ -1620,7 +1909,9 @@ def search_memory(
     subject_anchor: Optional[str] = None,
     activity_id: Optional[str] = None,
     as_of: Optional[str] = None,
+    diagnostics: Optional[dict] = None,
 ) -> tuple[list[dict], str]:
+    diag = diagnostics if diagnostics is not None else {}
     sanitized = _sanitize_fts_query(query)
 
     status_filter = (
@@ -1666,14 +1957,13 @@ def search_memory(
         # about this area of the code?").
         extra.append("(mr.subject_anchor = ? OR mr.subject_anchor LIKE ?)")
         extra_vals.extend([subject_anchor, f"{subject_anchor}%"])
-    if min_confidence > 0:
-        extra.append("mr.confidence >= ?")
-        extra_vals.append(min_confidence)
+    # min_confidence is accepted and ignored (1.3.0): confidence is whatever the writer typed.
 
     extra_sql = " AND " + " AND ".join(extra) if extra else ""
 
     retrieval_mode = "fts_only"
     semantic_candidates: list[dict] = []
+    diag["embedding"] = "not_used"
     if limit == 0:
         return [], retrieval_mode
 
@@ -1684,6 +1974,7 @@ def search_memory(
     ):
         try:
             vector_bytes, embed_status = embedding_service.generate_embedding(query, query=True)
+            diag["embedding"] = embed_status
             if vector_bytes is not None:
                 with get_db() as conn:
                     candidate_rows = conn.execute(
@@ -1695,6 +1986,7 @@ def search_memory(
                         authorized_scopes + status_params + extra_vals,
                     ).fetchall()
                 candidate_ids = [r["id"] for r in candidate_rows]
+                diag["candidates"] = len(candidate_ids)
                 if candidate_ids:
                     # Cosine already scores this entire authorized set. Keep it
                     # until evidence and current-record priority are applied;
@@ -1702,6 +1994,7 @@ def search_memory(
                     scored = vector_service.cosine_search_top_k(
                         vector_bytes, len(candidate_ids), candidate_ids
                     )
+                    diag["scored"] = len(scored)
                     scored_map = {rec_id: score for rec_id, score in scored}
                     semantic_candidates = [
                         dict(r) for r in candidate_rows if r["id"] in scored_map
@@ -1717,6 +2010,14 @@ def search_memory(
                 e,
             )
             retrieval_mode = "fts_only"
+            diag["embedding"] = f"exception:{type(e).__name__}"
+
+    if "candidates" not in diag:
+        with get_db() as conn:
+            diag["candidates"] = conn.execute(
+                f"SELECT COUNT(*) FROM memory_records mr WHERE mr.scope IN ({scope_placeholders}){status_filter}{extra_sql}",
+                authorized_scopes + status_params + extra_vals,
+            ).fetchone()[0]
 
     fts_results: list[dict] = []
     if sanitized:
@@ -1739,6 +2040,14 @@ def search_memory(
         fts_params = params + extra_vals
         with get_db() as conn:
             fts_rows = conn.execute(sql, fts_params).fetchall()
+            if not fts_rows:
+                # Nothing matched the exact words: try the same words as stems (invoice export finds "Invoice
+                # exports ..."), then any of them. Default installs have no embeddings, so this is all they have.
+                for name, variant in _fts_query_variants(query):
+                    fts_rows = conn.execute(sql, [variant, *fts_params[1:]]).fetchall()
+                    if fts_rows:
+                        diag["fts_variant"] = name
+                        break
             fts_results = [dict(row) for row in fts_rows]
             best_lexical = fts_results[0]["_lexical_score"] if fts_results else 0.0
             for r in fts_results:

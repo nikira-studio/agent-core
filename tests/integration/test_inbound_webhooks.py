@@ -164,43 +164,20 @@ class TestInboundActivityCreate:
 
 
 # ---------------------------------------------------------------------------
-# activity.assign
+# activity.assign (removed in 1.3.0)
 # ---------------------------------------------------------------------------
 
-class TestInboundActivityAssign:
-    def _make_activity(self):
-        from app.services import activity_service
-        return activity_service.create_activity(
-            agent_id="codex", user_id="admin", task_description="initial", memory_scope=None
-        )
-
-    def test_assign_missing_activity_id_is_400(self, admin_client, inbound_key):
+class TestInboundActivityAssignRemoved:
+    def test_assign_says_it_was_removed(self, admin_client, inbound_key):
         r = admin_client.post(
             "/api/webhooks/inbound",
-            json={"event_type": "activity.assign", "assigned_agent_id": "opus"},
+            json={"event_type": "activity.assign", "activity_id": "x", "assigned_agent_id": "opus"},
             headers={**csrf_headers(admin_client), "X-Agent-Core-Inbound-Key": inbound_key},
         )
-        assert r.status_code == 400
+        assert r.status_code == 400 and "removed in Agent Core 1.3.0" in r.text
 
-    def test_assign_missing_agent_id_is_400(self, admin_client, inbound_key):
-        act = self._make_activity()
-        r = admin_client.post(
-            "/api/webhooks/inbound",
-            json={"event_type": "activity.assign", "activity_id": act["id"]},
-            headers={**csrf_headers(admin_client), "X-Agent-Core-Inbound-Key": inbound_key},
-        )
-        assert r.status_code == 400
 
-    def test_assign_updates_agent(self, admin_client, inbound_key):
-        act = self._make_activity()
-        r = admin_client.post(
-            "/api/webhooks/inbound",
-            json={"event_type": "activity.assign", "activity_id": act["id"], "assigned_agent_id": "opus"},
-            headers={**csrf_headers(admin_client), "X-Agent-Core-Inbound-Key": inbound_key},
-        )
-        assert r.status_code == 200
-        assert r.json()["data"]["assigned_agent_id"] == "opus"
-
+# ---------------------------------------------------------------------------
 
 # ---------------------------------------------------------------------------
 # activity.cancel

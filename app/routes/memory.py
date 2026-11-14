@@ -41,7 +41,7 @@ class WriteMemoryRequest(BaseModel):
     topic: Optional[str] = None
     confidence: float = 0.5
     importance: float = 0.5
-    source_kind: str = "agent_inference"
+    source_kind: Optional[str] = None
     subject_anchor: Optional[str] = None
     supersedes_id: Optional[str] = None
     slot_key: Optional[str] = None
@@ -149,7 +149,7 @@ async def search_memory(
                 data = budget_search_response(
                     {
                         "records": [],
-                        "retrieval_mode": "fts_only",
+                        "retrieval_mode": "no_candidates",
                         "embedding_backend_status": embedding_service.backend_label(
                             embedding_status
                         ),
@@ -161,9 +161,11 @@ async def search_memory(
                 return error_response(exc.code, exc.message, exc.status_code)
             return success_response_with_headers(data, rate_headers)
 
+        diag: dict = {}
         try:
             records, retrieval_mode = await asyncio.to_thread(
                 memory_service.search_memory,
+                diagnostics=diag,
                 query=body.query,
                 authorized_scopes=allowed_scopes,
                 topic=body.topic,
@@ -220,6 +222,11 @@ async def search_memory(
                 "embedding_backend_status": embedding_service.backend_label(
                     embedding_status
                 ),
+                "scope": body.scope or None,
+                "scopes": allowed_scopes[:20],
+                "candidates": diag.get("candidates"),
+                "embedding": diag.get("embedding"),
+                "scored": diag.get("scored"),
             },
         )
 
@@ -304,7 +311,7 @@ async def restore_memory(
     if not ctx.can("memory", "write", scope=record["scope"]):
         return error_response("SCOPE_DENIED", "Access denied to this scope", 403)
 
-    success = memory_service.restore_memory(record_id)
+    success = memory_service.restore_memory(record_id, restored_by=ctx.actor_id)
     if not success:
         return error_response("NOT_RETRACTED", "Record is not retracted", 400)
 
@@ -360,6 +367,7 @@ async def retract_memory(
         resource_type="memory_record",
         resource_id=record_id,
         result="success",
+        details={"reason": reason[:300]} if isinstance(reason, str) and reason.strip() else None,
     )
 
     return success_response({"message": "Memory record retracted"})
@@ -539,6 +547,8 @@ def get_memory_record(
     if not ctx.can("memory", "read", scope=record["scope"]):
         return error_response("SCOPE_DENIED", "Access denied to this scope", 403)
 
+    if record.get("record_status") == "retracted":
+        record = {**record, "retraction": memory_service.retraction_traces([record_id]).get(record_id)}
     return success_response({"record": record})
 
 

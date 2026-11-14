@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
 from pydantic import BaseModel
 from typing import Optional
 
@@ -63,6 +63,15 @@ def _enforcer(ctx: EffectiveAuthority, agent_id: Optional[str] = None) -> ScopeE
     )
 
 
+def _merge_followups(followups: dict, more: dict) -> None:
+    """Add response fields to followups, joining their warning lists."""
+    for key, value in more.items():
+        if key == "warnings":
+            followups["warnings"] = [*followups.get("warnings", []), *value]
+        else:
+            followups[key] = value
+
+
 def _metadata_with_task_ref(metadata_json: Optional[str], task_ref: Optional[str]) -> Optional[str]:
     """Raises ValueError for a task_ref that breaks the '<system>:<id>' convention."""
     metadata_json = activity_service.validate_metadata_json(metadata_json)
@@ -79,8 +88,13 @@ def create_activity(
 ):
     if ctx.agent_id:
         effective_agent_id = ctx.agent_id
-    elif ctx.is_admin and body.assigned_agent_id:
-        effective_agent_id = body.assigned_agent_id
+    elif body.assigned_agent_id:
+        return error_response(
+            "REMOVED",
+            "Assigning a task to an agent was removed in Agent Core 1.3.0. An agent opens its own tasks with "
+            "activity_update; a person leaves it a request through a handoff or by messaging the agent.",
+            410,
+        )
     else:
         return error_response(
             "AGENT_REQUIRED", "Activity requires an agent context", 400
@@ -96,17 +110,14 @@ def create_activity(
         return error_response(
             "SCOPE_DENIED", f"Access denied to memory_scope: {memory_scope}", 403
         )
+    execution_id, execution_warning = body.execution_id, None
     if body.execution_id and ctx.agent_id:
         from app.services import workspace_sync_service
-        try:
-            workspace_sync_service.validate_execution(
-                execution_id=body.execution_id, agent_id=ctx.agent_id,
-                user_id=ctx.user_id or "", memory_scope=memory_scope,
-            )
-        except PermissionError:
-            return error_response("EXECUTION_OWNERSHIP", "Execution belongs to another agent", 403)
-        except ValueError as exc:
-            return error_response(str(exc), workspace_sync_service.execution_message(str(exc)), 400)
+
+        execution_id, execution_warning = workspace_sync_service.usable_execution(
+            execution_id=body.execution_id, agent_id=ctx.agent_id,
+            user_id=ctx.user_id or "", memory_scope=memory_scope,
+        )
 
     activity = activity_service.create_activity(
         agent_id=effective_agent_id,
@@ -114,7 +125,7 @@ def create_activity(
         task_description=body.task_description,
         memory_scope=memory_scope,
         metadata_json=metadata_json,
-        source_execution_id=body.execution_id,
+        source_execution_id=execution_id,
     )
 
     audit_service.write_event(
@@ -132,43 +143,19 @@ def create_activity(
     )
     activity_service.notify("activity_created", activity)
 
-    return success_response({"activity": activity}, status_code=201)
+    data = {"activity": activity}
+    if execution_warning:
+        data["warnings"] = [execution_warning]
+    return success_response(data, status_code=201)
 
 
 @router.post("/pickup")
-def pickup_activity(
-    ctx: EffectiveAuthority = Depends(get_request_context),
-):
-    if not ctx.agent_id:
-        return error_response("AGENT_REQUIRED", "Pickup requires an agent context", 400)
-
-    enforcer = ScopeEnforcer(
-        ctx.read_scopes,
-        ctx.write_scopes,
-        ctx.agent_id,
-        is_admin=ctx.is_admin,
-        active_workspace_ids=ctx.active_workspace_ids,
-    )
-    authorized_scopes = enforcer.filter_readable_scopes(ctx.read_scopes)
-
-    activity = activity_service.claim_next_activity(ctx.agent_id, authorized_scopes)
-
-    if activity:
-        audit_service.write_event(
-            actor_type=ctx.actor_type,
-            actor_id=ctx.actor_id,
-            action="activity_pickup",
-            resource_type="activity",
-            resource_id=activity["id"],
-            result="success",
-            details=activity_service.audit_details(activity, action="pickup"),
-        )
-
-    return success_response(
-        {
-            "activity": activity,
-            "message": None if activity else "No assigned work found for this agent in authorized scopes",
-        }
+def pickup_activity():
+    return error_response(
+        "REMOVED",
+        "activity_pickup was removed in Agent Core 1.3.0. The session context lists the work that is open for "
+        "you; call session_context (or let the SessionStart hook inject it).",
+        410,
     )
 
 
@@ -250,7 +237,6 @@ def attention_list(
             "count": len(items),
             "approvals": waiting["approvals"],
             "credential_requests": waiting["credential_requests"],
-            "memory_suggestions": waiting["memory_suggestions"],
         }
     )
 
@@ -298,17 +284,14 @@ def update_activity(
 
     if not _can_activity(ctx, activity, "update"):
         return error_response("FORBIDDEN", "Access denied", 403)
+    execution_id, execution_warning = body.execution_id, None
     if body.execution_id and ctx.agent_id:
         from app.services import workspace_sync_service
-        try:
-            workspace_sync_service.validate_execution(
-                execution_id=body.execution_id, agent_id=ctx.agent_id,
-                user_id=ctx.user_id or "", memory_scope=activity.get("memory_scope") or f"agent:{ctx.agent_id}",
-            )
-        except PermissionError:
-            return error_response("EXECUTION_OWNERSHIP", "Execution belongs to another agent", 403)
-        except ValueError as exc:
-            return error_response(str(exc), workspace_sync_service.execution_message(str(exc)), 400)
+
+        execution_id, execution_warning = workspace_sync_service.usable_execution(
+            execution_id=body.execution_id, agent_id=ctx.agent_id,
+            user_id=ctx.user_id or "", memory_scope=activity.get("memory_scope") or f"agent:{ctx.agent_id}",
+        )
 
     if body.status and body.status not in ACTIVITY_STATUSES:
         return error_response("INVALID_STATUS", f"Invalid status: {body.status}", 400)
@@ -347,6 +330,15 @@ def update_activity(
                 400,
             )
 
+    if body.status == "completed" and activity["status"] in ("active", "stale") and not (
+        (body.task_result or activity.get("task_result") or "").strip()
+    ):
+        return error_response(
+            "TASK_RESULT_REQUIRED",
+            "Completing a task needs a task_result: what was done and where (a commit, file or record)",
+            400,
+        )
+
     # A closed task's handoff is amended, not replaced: its asks to a person
     # leave only through a resolution (see activity_service.merge_handoff).
     amend = activity["status"] in ("completed", "blocked")
@@ -366,10 +358,17 @@ def update_activity(
         task_note=body.task_note,
         task_result=body.task_result,
         metadata_json=metadata_json,
-        source_execution_id=body.execution_id,
+        source_execution_id=execution_id,
+        # The agent that owns the task reporting on it is proof of life; an admin editing it is not.
+        alive=ctx.actor_type == "agent" and activity.get("assigned_agent_id") == ctx.agent_id,
+        actor=ctx.actor_id,
     )
     if not success and not handoff:  # a handoff alone is an update too
         return error_response("UPDATE_FAILED", "Activity update failed", 500)
+    closed_ask = activity_service.resolve_ask_on_close(
+        activity, body.status, new_handoff=handoff, actor_type=ctx.actor_type, actor_id=ctx.actor_id,
+        task_result=body.task_result,
+    )
     if handoff:
         activity_service.set_handoff(activity_id, handoff, amend=amend)
 
@@ -389,7 +388,9 @@ def update_activity(
         ),
     )
     activity_service.notify(
-        "activity_updated", updated, previous_status=activity["status"]
+        "activity_recovered" if activity["status"] == "stale" and updated.get("status") == "active" else "activity_updated",
+        updated,
+        previous_status=activity["status"],
     )
 
     followups = activity_service.handoff_followups(
@@ -399,12 +400,15 @@ def update_activity(
         actor_type=ctx.actor_type,
         actor_id=ctx.actor_id,
     )
+    _merge_followups(followups, activity_service.closed_ask_followup(closed_ask))
+    if execution_warning:
+        _merge_followups(followups, {"warnings": [execution_warning]})
     return success_response({"activity": updated, **followups})
 
 
 @router.post("/{activity_id}/handoff/resolve")
-def resolve_handoff(activity_id: str, ctx: EffectiveAuthority = Depends(get_request_context)):
-    """A person marks a handoff's needs_human request as dealt with.
+async def resolve_handoff(activity_id: str, request: Request, ctx: EffectiveAuthority = Depends(get_request_context)):
+    """A person marks a handoff's needs_human request as dealt with, optionally with their answer (JSON `answer`).
 
     Person only. The agent that made the request resolves it through the MCP
     activity_handoff_resolve tool instead, which records its reason.
@@ -417,8 +421,15 @@ def resolve_handoff(activity_id: str, ctx: EffectiveAuthority = Depends(get_requ
     scope = activity.get("memory_scope") or ""
     if not (ctx.is_admin or ctx.can("activity", "update", scope=scope)):
         return error_response("FORBIDDEN", "Access denied", 403)
+    answer = None
+    try:
+        body = await request.json()
+        if isinstance(body, dict) and isinstance(body.get("answer"), str):
+            answer = " ".join(body["answer"].split())[:1000] or None
+    except Exception:
+        answer = None
     resolution = activity_service.resolve_handoff(
-        activity_id, kind="person", resolved_by=ctx.actor_id
+        activity_id, kind="person", resolved_by=ctx.actor_id, reason=answer
     )
     if not resolution:
         return error_response("NOT_PENDING", "No unresolved handoff request on this activity", 409)
@@ -470,9 +481,14 @@ def heartbeat_activity(
             current_status=activity["status"],
         ),
     )
-    activity_service.notify("activity_heartbeat", activity)
+    refreshed = activity_service.get_activity(activity_id) or activity
+    activity_service.notify(
+        "activity_recovered" if activity["status"] == "stale" else "activity_heartbeat",
+        refreshed,
+        previous_status=activity["status"],
+    )
 
-    return success_response({"activity": activity_service.get_activity(activity_id)})
+    return success_response({"activity": refreshed})
 
 
 @router.get("")
@@ -536,7 +552,7 @@ def cancel_activity(
             "INVALID_STATUS", "Cannot cancel a non-active activity", 400
         )
 
-    success = activity_service.cancel_activity(activity_id)
+    success = activity_service.cancel_activity(activity_id, actor=ctx.actor_id)
     if not success:
         return error_response("CANCEL_FAILED", "Cancel failed", 500)
 
@@ -578,7 +594,6 @@ async def recover_activity(
         "mark_completed",
         "mark_cancelled",
         "resume_with_same_agent",
-        "reassign_to_agent",
     )
     if body.action not in valid_actions:
         return error_response(
@@ -592,13 +607,14 @@ async def recover_activity(
             activity_id,
             status="completed",
             task_result=body.task_result,
+            actor=ctx.actor_id,
         )
         result_data["status"] = "completed"
         if body.task_result is not None:
             result_data["task_result"] = body.task_result
 
     elif body.action == "mark_cancelled":
-        activity_service.cancel_activity(activity_id)
+        activity_service.cancel_activity(activity_id, actor=ctx.actor_id)
         result_data["status"] = "cancelled"
 
     elif body.action == "resume_with_same_agent":
@@ -606,25 +622,9 @@ async def recover_activity(
             return error_response(
                 "INVALID_STATUS", "Can only resume stale activities", 400
             )
-        activity_service.update_activity(activity_id, status="active")
+        activity_service.update_activity(activity_id, status="active", actor=ctx.actor_id)
         activity_service.heartbeat_activity(activity_id)
         result_data["status"] = "active"
-
-    elif body.action == "reassign_to_agent":
-        if not body.new_agent_id:
-            return error_response(
-                "NEW_AGENT_REQUIRED",
-                "new_agent_id is required for reassign_to_agent",
-                400,
-            )
-
-        updated = activity_service.reassign_activity(activity_id, body.new_agent_id)
-        if not updated:
-            return error_response("REASSIGN_FAILED", "Could not reassign activity", 500)
-
-        result_data["status"] = "reassigned"
-        result_data["assigned_agent_id"] = body.new_agent_id
-        result_data["reassigned_from"] = updated.get("reassigned_from_agent_id")
 
     audit_service.write_event(
         actor_type=ctx.actor_type,

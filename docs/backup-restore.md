@@ -25,7 +25,7 @@ The exported archive contains the same backup contents as before, but encrypted 
 
 The underlying backup archive contains:
 
-- `agent-core.db`: the full database (memory, agents, credentials metadata, activity, services, bindings, and execution history)
+- `agent-core.db`: the full database (memory, agents, credentials metadata, activity, services, connections, and execution history)
 - `credential.key`: the current encryption key
 - `credential.keyring`: all historical keys (needed to decrypt entries from before a key rotation)
 - `manifest.json`: version, timestamp, and SHA-256 checksums for everything in the archive
@@ -137,6 +137,6 @@ What it does:
 - Hard-deletes any memory record whose `expires_at` TTL has passed
 - Hard-deletes retracted and superseded memory records `retracted_retention_days` after they stopped being active (default: 30 days), measured from retraction/supersession time, not creation time, so a fresh retraction always gets its full grace window to be restored first
 - Verifies anchored facts when verification is enabled
-- Generates bounded clean-up proposals when `consolidation_scan_enabled` is on
+- Retracts plain noise (per-occurrence logs, ticket-closeout narration, duplicates), at most 20 records per run
 
 Deleted records can't be recovered. Active `fact`, `preference`, and `decision` records without an `expires_at` are never deleted by maintenance; consolidation only queues proposals for human review. The last run's time, trigger, and per-step counts—including proposals generated and skipped at cap—are shown on the Settings page and at `GET /api/backup/maintenance/status`.

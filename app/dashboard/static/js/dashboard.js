@@ -81,6 +81,7 @@ function showToast(message, type) {
   toast.setAttribute('role', type === 'danger' || type === 'error' ? 'alert' : 'status');
   toast.setAttribute('aria-atomic', 'true');
   toast.textContent = message;
+  toast.dataset.shown = String(Date.now());
   container.appendChild(toast);
 
   setTimeout(function() {
@@ -159,12 +160,85 @@ function associateFormLabels(root) {
   });
 }
 
+// One dialog pattern for every pop-up: a fixed header (title and a close X), a body that scrolls, and a fixed
+// footer with the actions. Existing markup (a heading, content, a .modal-footer or a trailing row of buttons) is
+// reshaped once, the first time a dialog is prepared, so each pop-up does not need its own layout.
+function buildModalParts(dialog, overlay) {
+  if (dialog.dataset.modalReady) return;
+  dialog.dataset.modalReady = '1';
+  var heading = Array.from(dialog.children).find(function(c) { return /^H[1-4]$/.test(c.tagName); }) ||
+    dialog.querySelector('h1, h2, h3, h4');
+  var header = document.createElement('div');
+  header.className = 'modal-header';
+  var title = document.createElement('div');
+  title.className = 'modal-title';
+  if (heading) {
+    ensureElementId(heading, 'modal-title');
+    title.appendChild(heading);
+  }
+  header.appendChild(title);
+  var x = document.createElement('button');
+  x.type = 'button';
+  x.className = 'modal-x';
+  x.setAttribute('aria-label', 'Close');
+  x.setAttribute('data-modal-close', '');
+  x.innerHTML = '&times;';
+  header.appendChild(x);
+
+  // A trailing run of plain buttons (a lone Close, or a form's Create and Cancel) becomes the footer.
+  function wrapTrailingButtons(container) {
+    var kids = Array.from(container.children);
+    var trailing = [];
+    for (var k = kids.length - 1; k >= 0; k--) {
+      var kid = kids[k];
+      if (kid.tagName === 'BUTTON') trailing.unshift(kid); else break;
+    }
+    if (!trailing.length) return;
+    var foot = document.createElement('div');
+    foot.className = 'modal-footer';
+    trailing[0].before(foot);
+    trailing.forEach(function(b) { foot.appendChild(b); });
+  }
+  // A last row that holds only buttons (a hand-styled div) is the footer too.
+  function markButtonRow(container) {
+    var last = container.lastElementChild;
+    if (last && last.tagName === 'DIV' && !last.classList.contains('modal-footer') && last.children.length &&
+        Array.from(last.children).every(function(c) { return c.tagName === 'BUTTON' || c.tagName === 'A'; })) {
+      last.className = 'modal-footer';
+      last.removeAttribute('style');
+    }
+  }
+  markButtonRow(dialog);
+  dialog.querySelectorAll('form').forEach(markButtonRow);
+  wrapTrailingButtons(dialog);
+  dialog.querySelectorAll('form').forEach(wrapTrailingButtons);
+  dialog.querySelectorAll('.modal-actions').forEach(function(a) { a.classList.add('modal-footer'); });
+  // The main action sits on the right: secondary buttons (Cancel, Close) first, the rest after, in their own order.
+  dialog.querySelectorAll('.modal-footer').forEach(function(foot) {
+    var buttons = Array.from(foot.children).filter(function(c) { return c.tagName === 'BUTTON' || c.tagName === 'A'; });
+    var secondary = buttons.filter(function(b) { return b.classList.contains('btn-secondary'); });
+    var rest = buttons.filter(function(b) { return !b.classList.contains('btn-secondary'); });
+    secondary.concat(rest).forEach(function(b) { foot.appendChild(b); });
+  });
+
+  var scroller = document.createElement('div');
+  scroller.className = 'modal-scroll';
+  while (dialog.firstChild) scroller.appendChild(dialog.firstChild);
+  dialog.appendChild(header);
+  dialog.appendChild(scroller);
+}
+
+function modalScroller(overlay) {
+  return overlay.querySelector('.modal-scroll');
+}
+
 function prepareModal(overlay) {
   var dialog = overlay.querySelector('.modal') || overlay;
+  buildModalParts(dialog, overlay);
   dialog.setAttribute('role', 'dialog');
   dialog.setAttribute('aria-modal', 'true');
   if (!dialog.hasAttribute('aria-label') && !dialog.hasAttribute('aria-labelledby')) {
-    var heading = dialog.querySelector('h1, h2, h3, h4');
+    var heading = dialog.querySelector('.modal-title h1, .modal-title h2, .modal-title h3, .modal-title h4, h1, h2, h3, h4');
     if (heading) {
       dialog.setAttribute('aria-labelledby', ensureElementId(heading, 'modal-title'));
     }
@@ -174,18 +248,35 @@ function prepareModal(overlay) {
   return dialog;
 }
 
+// Set a dialog's title (for a pop-up whose title is the thing it shows, such as a memory's topic).
+function setModalTitle(id, text) {
+  var overlay = document.getElementById(id);
+  if (!overlay) return;
+  prepareModal(overlay);
+  var heading = overlay.querySelector('.modal-title h1, .modal-title h2, .modal-title h3, .modal-title h4');
+  if (heading) heading.textContent = text;
+}
+
 function openModal(id) {
   var overlay = document.getElementById(id);
   if (overlay) {
     if (!activeModalOverlay) modalReturnFocus = document.activeElement;
     activeModalOverlay = overlay;
     var dialog = prepareModal(overlay);
+    overlay.dataset.dirty = '';
     overlay.style.display = 'flex';
     overlay.classList.add('open');
     overlay.setAttribute('aria-hidden', 'false');
     document.body.style.overflow = 'hidden';
-    var focusable = visibleFocusableElements(overlay);
-    (focusable[0] || dialog).focus();
+    // Always open at the top of the content, with focus inside: the first field of a form, otherwise the dialog
+    // itself (so nothing scrolls it part-way down to reach a button).
+    var scroller = modalScroller(overlay);
+    if (scroller) scroller.scrollTop = 0;
+    overlay.scrollTop = 0;
+    var field = scroller && scroller.querySelector('input:not([type="hidden"]):not([disabled]), select:not([disabled]), textarea:not([disabled])');
+    var target = field && field.getClientRects().length ? field : dialog;
+    target.focus({ preventScroll: true });
+    if (scroller) scroller.scrollTop = 0;
   }
 }
 
@@ -195,9 +286,10 @@ function closeModal(id) {
     overlay.classList.remove('open');
     overlay.style.display = 'none';
     overlay.setAttribute('aria-hidden', 'true');
-    document.body.style.overflow = '';
+    overlay.dataset.dirty = '';
     if (activeModalOverlay === overlay) {
       activeModalOverlay = null;
+      document.body.style.overflow = '';
       if (modalReturnFocus && document.contains(modalReturnFocus)) modalReturnFocus.focus();
       modalReturnFocus = null;
     }
@@ -210,6 +302,7 @@ function closeAllModals() {
     m.classList.remove('open');
     m.style.display = 'none';
     m.setAttribute('aria-hidden', 'true');
+    m.dataset.dirty = '';
   });
   document.body.style.overflow = '';
   activeModalOverlay = null;
@@ -217,17 +310,42 @@ function closeAllModals() {
   modalReturnFocus = null;
 }
 
-// Close modal when clicking overlay
+// Typing into a form marks its dialog as having unsaved input; closing it by accident (a click outside, Escape)
+// then asks first instead of discarding silently.
+document.addEventListener('input', function(e) {
+  var overlay = e.target.closest && e.target.closest('.modal-overlay');
+  if (overlay && !overlay.hasAttribute('data-confirm-dialog')) overlay.dataset.dirty = '1';
+});
+
+// Close a dialog the way a person would by accident (backdrop, Escape): ask first when there is unsaved input.
+async function requestCloseModal(overlay) {
+  if (overlay.dataset.dirty === '1') {
+    var ok = await confirmDialog('Discard what you typed?', { confirmLabel: 'Discard', cancelLabel: 'Keep editing', title: 'Discard what you typed?', plain: true });
+    if (!ok) return;
+  }
+  closeModal(overlay.id);
+}
+
+// Close a dialog from its X, or by clicking the dimmed area around it.
 document.addEventListener('click', function(e) {
-  if (e.target.classList.contains('modal-overlay')) {
-    closeModal(e.target.id);
+  var x = e.target.closest && e.target.closest('[data-modal-close]');
+  if (x) {
+    var overlay = x.closest('.modal-overlay');
+    if (overlay) { closeModal(overlay.id); return; }
+  }
+  if (e.target.classList.contains('modal-overlay') && !e.target.hasAttribute('data-confirm-dialog')) {
+    requestCloseModal(e.target);
   }
 });
 
 // Keep keyboard focus inside the visible dialog and close it on Escape.
 document.addEventListener('keydown', function(e) {
   if (e.key === 'Escape') {
-    closeAllModals();
+    if (activeModalOverlay && !activeModalOverlay.hasAttribute('data-confirm-dialog')) {
+      requestCloseModal(activeModalOverlay);
+    } else if (!activeModalOverlay) {
+      closeAllModals();
+    }
     return;
   }
   if (e.key !== 'Tab' || !activeModalOverlay) return;
@@ -412,9 +530,122 @@ function handleFormResponse(form, data) {
 // Confirmation Dialogs
 // ============================================================
 
+// A confirmation in the same dialog as everything else, one step. Resolves true or false. The question is the text
+// up to the first "?" and becomes the title (it names what will be changed); the rest is the explanation. A
+// destructive question gets a red button labelled with its verb.
+var CONFIRM_VERBS = ['Delete', 'Remove', 'Retract', 'Restore', 'Decline', 'Cancel', 'Deactivate', 'Reactivate', 'Reset',
+  'Rotate', 'Generate', 'Permanently', 'Prune', 'Re-embed', 'Turn', 'Discard'];
+var CONFIRM_DANGER = /^(delete|remove|retract|decline|cancel|deactivate|reset|rotate|permanently|prune|turn|discard)/i;
+var confirmDialogQueue = Promise.resolve();
+
+function confirmDialog(message, options) {
+  options = options || {};
+  var run = function() {
+    return new Promise(function(resolve) {
+      message = String(message || 'Are you sure?');
+      var q = message.indexOf('?');
+      var title = options.title || (q >= 0 ? message.slice(0, q + 1) : message);
+      var detail = options.title ? message : (q >= 0 ? message.slice(q + 1).trim() : '');
+      var first = (title.split(/\s+/)[0] || '').replace(/[^A-Za-z-]/g, '');
+      var verb = options.confirmLabel || (CONFIRM_VERBS.indexOf(first.charAt(0).toUpperCase() + first.slice(1).toLowerCase()) >= 0
+        ? (first === 'Permanently' ? 'Delete' : (first === 'Turn' ? 'Turn off' : first.charAt(0).toUpperCase() + first.slice(1).toLowerCase()))
+        : 'Confirm');
+      var danger = options.danger !== undefined ? options.danger : (!options.plain && CONFIRM_DANGER.test(first));
+      var overlay = document.createElement('div');
+      overlay.className = 'modal-overlay';
+      overlay.id = 'confirm-dialog';
+      overlay.setAttribute('data-confirm-dialog', '');
+      overlay.style.display = 'none';
+      var dialog = document.createElement('div');
+      dialog.className = 'modal modal-confirm';
+      var h = document.createElement('h2');
+      h.textContent = title;
+      dialog.appendChild(h);
+      if (detail) {
+        var p = document.createElement('p');
+        p.className = 'confirm-detail';
+        p.textContent = detail;
+        dialog.appendChild(p);
+      }
+      var cancel = document.createElement('button');
+      cancel.type = 'button';
+      cancel.className = 'btn btn-secondary';
+      cancel.textContent = options.cancelLabel || 'Cancel';
+      var ok = document.createElement('button');
+      ok.type = 'button';
+      ok.className = 'btn ' + (danger ? 'btn-danger' : '');
+      ok.textContent = verb;
+      var field = null;
+      if (options.input) {
+        field = document.createElement('input');
+        field.type = 'text';
+        field.className = 'confirm-input';
+        field.autocomplete = 'off';
+        field.value = options.input.value || '';
+        if (options.input.label) field.setAttribute('aria-label', options.input.label);
+        if (options.input.placeholder) field.placeholder = options.input.placeholder;
+        if (options.input.label) {
+          var lab = document.createElement('label');
+          lab.className = 'form-hint';
+          lab.style.display = 'block';
+          lab.textContent = options.input.label;
+          dialog.appendChild(lab);
+        }
+        dialog.appendChild(field);
+      }
+      dialog.appendChild(cancel);
+      dialog.appendChild(ok);
+      overlay.appendChild(dialog);
+      document.body.appendChild(overlay);
+      var below = activeModalOverlay;       // a dialog this one is stacked on stays open underneath
+      var opener = document.activeElement;
+      var done = false;
+      function finish(result) {
+        if (done) return;
+        done = true;
+        document.removeEventListener('keydown', onKey, true);
+        overlay.remove();
+        activeModalOverlay = below;
+        if (!below) document.body.style.overflow = '';
+        if (opener && document.contains(opener)) opener.focus({ preventScroll: true });
+        resolve(field ? (result ? field.value : null) : result);
+      }
+      function onKey(e) {
+        if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); finish(false); }
+        else if (e.key === 'Tab') {
+          var items = field ? [field, cancel, ok] : [cancel, ok];
+          var i = items.indexOf(document.activeElement);
+          e.preventDefault();
+          items[(i + (e.shiftKey ? -1 : 1) + items.length) % items.length].focus();
+        }
+      }
+      document.addEventListener('keydown', onKey, true);
+      cancel.addEventListener('click', function() { finish(false); });
+      if (field) field.addEventListener('keydown', function(e) { if (e.key === 'Enter') { e.preventDefault(); finish(true); } });
+      ok.addEventListener('click', function() { finish(true); });
+      overlay.addEventListener('click', function(e) { if (e.target === overlay) finish(false); });
+      prepareModal(overlay);
+      activeModalOverlay = overlay;
+      overlay.style.display = 'flex';
+      overlay.classList.add('open');
+      document.body.style.overflow = 'hidden';
+      // Focus the safe choice when the action is destructive, so a stray Enter does not delete.
+      (field ? field : (danger ? cancel : ok)).focus({ preventScroll: true });
+      if (field) field.select();
+    });
+  };
+  confirmDialogQueue = confirmDialogQueue.then(run, run);
+  return confirmDialogQueue;
+}
+
+// Ask for a line of text in the same dialog. Resolves the text, or null when cancelled.
+function promptDialog(message, options) {
+  options = options || {};
+  return confirmDialog(message, Object.assign({ input: {}, plain: true }, options));
+}
+
 function confirmDelete(message) {
-  message = message || 'Are you sure you want to delete this? This action cannot be undone.';
-  return confirm(message);
+  return confirmDialog(message || 'Delete this? This cannot be undone.');
 }
 
 
@@ -676,3 +907,148 @@ document.addEventListener('DOMContentLoaded', function() {
     observer.observe(document.body, { childList: true, subtree: true });
   }
 });
+
+
+// Phone menu button: shows and hides the navigation.
+document.addEventListener('click', function (ev) {
+  var button = ev.target.closest && ev.target.closest('.nav-toggle');
+  if (!button) return;
+  var sidebar = button.closest('.sidebar');
+  var open = sidebar.classList.toggle('nav-open');
+  button.setAttribute('aria-expanded', open ? 'true' : 'false');
+});
+
+
+// A toast shown just before a page reload or navigation is shown again on the next page, so feedback is not lost.
+window.addEventListener('beforeunload', function() {
+  try {
+    // Only toasts shown a moment ago, and not ones already carried over once.
+    var shown = Array.prototype.filter.call(document.querySelectorAll('.toast-container .toast'), function(t) {
+      return !t.dataset.replayed && Date.now() - Number(t.dataset.shown || 0) < 2500;
+    }).map(function(t) {
+      return { message: t.textContent, type: (t.className.replace('toast', '').trim() || 'success') };
+    });
+    if (shown.length) sessionStorage.setItem('ac-pending-toasts', JSON.stringify({ at: Date.now(), toasts: shown }));
+  } catch (e) {}
+});
+document.addEventListener('DOMContentLoaded', function() {
+  try {
+    var raw = sessionStorage.getItem('ac-pending-toasts');
+    if (!raw) return;
+    sessionStorage.removeItem('ac-pending-toasts');
+    var pending = JSON.parse(raw);
+    if (!pending || Date.now() - pending.at > 5000) return;
+    pending.toasts.forEach(function(t) {
+      showToast(t.message, t.type);
+      var all = document.querySelectorAll('.toast-container .toast');
+      if (all.length) all[all.length - 1].dataset.replayed = '1';
+    });
+  } catch (e) {}
+});
+
+// "More" menus on rows: a floating menu anchored to its button. It leaves the row's layout alone, follows its button when the page scrolls and closes on an outside click,
+// Escape, a choice or a resize, and the arrow keys move between its items.
+(function() {
+  function open() { return document.querySelector('details.row-more[open]'); }
+  function place(details) {
+    var summary = details.querySelector('summary'), list = details.querySelector('.row-more-list');
+    if (!summary || !list) return;
+    var s = summary.getBoundingClientRect();
+    list.style.visibility = 'hidden';
+    var w = list.offsetWidth, h = list.offsetHeight, gap = 4;
+    var left = Math.min(Math.max(8, s.right - w), window.innerWidth - w - 8);
+    var top = s.bottom + gap;
+    if (top + h > window.innerHeight - 8 && s.top - gap - h >= 8) top = s.top - gap - h;
+    list.style.left = left + 'px';
+    list.style.top = top + 'px';
+    list.style.visibility = '';
+  }
+  function close(details, refocus) {
+    if (!details) return;
+    details.removeAttribute('open');
+    if (refocus) { var s = details.querySelector('summary'); if (s) s.focus(); }
+  }
+  document.addEventListener('toggle', function(e) {
+    var d = e.target;
+    if (!d.classList || !d.classList.contains('row-more') || !d.open) return;
+    document.querySelectorAll('details.row-more[open]').forEach(function(o) { if (o !== d) close(o); });
+    place(d);
+  }, true);
+  document.addEventListener('click', function(e) {
+    var d = open();
+    if (!d) return;
+    if (!d.contains(e.target)) { close(d); return; }
+    if (e.target.closest('.row-more-list a, .row-more-list button')) setTimeout(function() { close(d); }, 0);
+  });
+  document.addEventListener('keydown', function(e) {
+    var d = open();
+    if (!d) return;
+    if (e.key === 'Escape') { e.preventDefault(); close(d, true); return; }
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      var items = Array.prototype.slice.call(d.querySelectorAll('.row-more-list a, .row-more-list button')).filter(function(x) { return !x.disabled; });
+      if (!items.length) return;
+      e.preventDefault();
+      var i = items.indexOf(document.activeElement);
+      i = e.key === 'ArrowDown' ? (i + 1) % items.length : (i <= 0 ? items.length - 1 : i - 1);
+      items[i].focus();
+    }
+  });
+  window.addEventListener('resize', function() { close(open()); });
+  window.addEventListener('scroll', function() {
+    var d = open();
+    if (!d) return;
+    var r = d.querySelector('summary').getBoundingClientRect();
+    if (r.bottom < 0 || r.top > window.innerHeight) close(d); else place(d);
+  }, true);
+})();
+
+// A tab row too wide for a phone scrolls sideways: bring the current tab into view and fade the edge while more is hidden.
+(function () {
+  function setup(row) {
+    function update() {
+      var more = row.scrollWidth > row.clientWidth + 1;
+      row.classList.toggle('scrolls', more);
+      row.classList.toggle('at-end', !more || row.scrollLeft + row.clientWidth >= row.scrollWidth - 2);
+    }
+    var on = row.querySelector('a.active');
+    if (on && row.scrollWidth > row.clientWidth) {
+      row.scrollLeft = Math.max(0, on.offsetLeft - (row.clientWidth - on.offsetWidth) / 2);
+    }
+    row.addEventListener('scroll', update, { passive: true });
+    window.addEventListener('resize', update);
+    update();
+  }
+  document.querySelectorAll('.page-tabs').forEach(setup);
+})();
+
+// ============================================================
+// Saved secrets: show that one exists (never its value)
+// ============================================================
+
+var SECRET_SAVED_PLACEHOLDER = '\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022 saved; type to replace';
+
+// Put a plain "A key is saved" (or "No key saved") line above a secret field and set its placeholder.
+// `savedNoun` completes "A ___ is saved". `when` is an optional timestamp; only its date is shown.
+function setSecretState(inputId, saved, savedNoun, noneText, when, noneHint) {
+  var input = typeof inputId === 'string' ? document.getElementById(inputId) : inputId;
+  if (!input) return;
+  var state = input.parentNode.querySelector(':scope > .secret-state');
+  if (!state) {
+    state = document.createElement('div');
+    state.className = 'secret-state';
+    input.parentNode.insertBefore(state, input);
+  }
+  state.textContent = '';
+  var badge = document.createElement('span');
+  badge.className = 'badge ' + (saved ? 'badge-success' : 'badge-stale');
+  badge.textContent = saved ? 'A ' + savedNoun + ' is saved' : noneText;
+  state.appendChild(badge);
+  if (saved && when) {
+    var note = document.createElement('span');
+    note.className = 'form-hint';
+    note.innerHTML = ' saved ' + localDt(when, 'date');
+    state.appendChild(note);
+    if (typeof applyLocalTimes === 'function') applyLocalTimes(note);
+  }
+  input.placeholder = saved ? SECRET_SAVED_PLACEHOLDER : (noneHint || '');
+}

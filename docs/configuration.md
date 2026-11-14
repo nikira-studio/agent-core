@@ -44,7 +44,7 @@ Session tokens are signed with their own random key, `session.key` in the data d
 | `AGENT_CORE_INTERNAL_HOSTS_MODE` | *(unset)* | `allow`, `report` or `block` for services, webhooks and imports that point at private addresses. Unset, the dashboard decides (Settings → Security → Network limits): a fresh install starts on `block`, an install that already had data on `allow`. `report` lets everything through and lists what `block` would have refused |
 | `AGENT_CORE_BROKER_ALLOWED_HOSTS` | *(empty)* | Addresses or ranges (comma-separated) that may call the local credential helper; this server itself always may. Empty: any caller holding the helper key. Also editable in Settings → Security |
 | `AGENT_CORE_BROKER_ALLOWLIST_MODE` | *(unset)* | `audit` (record callers outside the list, refuse nobody) or `enforce`. Unset, the dashboard decides; the default is `audit` |
-| `AGENT_CORE_BLOCK_INTERNAL_HOSTS` | `false` | Set to `true` to block service bindings/imports from reaching private, loopback, or link-local hosts. Use this if you want to disable local probing by default |
+| `AGENT_CORE_BLOCK_INTERNAL_HOSTS` | *(unset)* | The older switch. `true` blocks service connections and imports that reach private, loopback or link-local hosts; `false` allows them. Setting it at all overrides the Network limits page; leave it unset to use the page (a fresh install blocks, an existing one allows) |
 | `AGENT_CORE_CONNECTOR_APPROVAL_EXPIRY_HOURS` | `24` | How long a service action that waits for a person's approval stays open before it expires (1 to 168) |
 | `AGENT_CORE_ALLOWED_INTERNAL_HOSTS` | *(empty)* | Comma-separated hostnames that are always allowed even when `AGENT_CORE_BLOCK_INTERNAL_HOSTS=true`. Useful for operator-managed internal services such as `firecrawl` or `searxng` |
 
@@ -56,7 +56,10 @@ Session tokens are signed with their own random key, `session.key` in the data d
 | --- | --- | --- |
 | `AGENT_CORE_SHARED_SCOPE_AGENTS` | *(empty)* | Comma-separated agent IDs that can write to the `shared` memory scope, in addition to any agent that has `shared` explicitly in its `write_scopes`. This does not grant credential access |
 | `AGENT_CORE_STALE_THRESHOLD_MINUTES` | `5` | How long an agent can go without sending a heartbeat before its active task is automatically marked stale |
-| `AGENT_CORE_ATTENTION_LOOKBACK_DAYS` | `3` | How many days a stale or blocked activity stays on the Overview page's attention list; the Activity page keeps full history |
+| `AGENT_CORE_ABANDONED_AFTER_HOURS` | `48` | Hours with no update after which an open task is closed as cancelled ("Ended without report") at the hourly maintenance run; `0` turns it off. |
+| `AGENT_CORE_SESSION_CONTEXT_IDLE_MINUTES` | `60` | Minutes an agent must have made no MCP call for its next call, of any tool, to carry the session context; `0` turns it off. |
+| `AGENT_CORE_ASK_EXPIRES_AFTER_DAYS` | `7` | Days with no change after which an ask to a person stops waiting on the Needs you page and a blocked task with nothing waiting ends as cancelled "Ended without report" (the task and its text stay in Activity). `0` turns both off |
+| `AGENT_CORE_ATTENTION_LOOKBACK_DAYS` | `3` | How many days a blocked task that asks a person something stays on the Needs you page; the Activity page keeps full history |
 | `AGENT_CORE_WORKSPACE_SYNC_BOOTSTRAP_HOURS` | `24` | How much recent workspace change history a new execution receives on its first sync |
 | `AGENT_CORE_WORKSPACE_CHANGE_RETENTION_DAYS` | `30` | How long maintenance keeps durable workspace change rows |
 | `AGENT_CORE_EXECUTION_STALE_MINUTES` | `30` | How long an execution can go without a sync before maintenance marks it stale. This status is informational |
@@ -76,15 +79,10 @@ The scratchpad and retracted/superseded retention windows themselves (7 and 30 d
 
 The maintenance sweep also prunes the service execution and webhook delivery logs (30 days by default, `0` keeps them forever), runs the memory verification pass, and can generate capped memory-review proposals. These controls are set from **Settings → Data and backup** and **Settings → Memory**.
 
-### Memory consolidation and workspace awareness
+### Workspace awareness
 
 | Setting (in `system_settings`) | Default | What it does |
 | --- | --- | --- |
-| `unconfirmed_inference_days` | `7` | Minimum age before a never-confirmed, non-human fact can become an `unconfirmed_inference` proposal; bounds 1–90 |
-| `proposal_pending_cap_per_rule` | `20` | Maximum pending proposals for one `(rule, scope)` pair |
-| `proposal_pending_cap_total` | `50` | Installation-wide maximum pending proposals, even when generation targets one scope |
-| `proposal_generation_budget_per_run` | `20` | Maximum proposals created by one manual or scheduled generation pass |
-| `consolidation_scan_enabled` | `1` | Run mechanical proposal generation during scheduled maintenance. Turning it off does not disable the manual **Check for more** action |
 | `workspace_awareness_digest_enabled` | `1` | Allow a fresh MCP `activity_update` to return a best-effort `since_last_active` digest |
 | `workspace_awareness_digest_limit` | `10` | Maximum digest change entries; runtime bounds are 1–50 |
 
@@ -122,7 +120,7 @@ To make `repo:` anchors resolvable, map each workspace scope to a directory on t
 
 **Anchor paths are relative to that root, never absolute.** The same directory has a different absolute path inside every agent's container, so an absolute anchor is resolvable only by whoever wrote it. Agent Core resolves the relative path against this installation's root, which is what lets agents with different mounts share the same memory.
 
-A scope with no configured root reports `unverifiable` rather than guessing. It never treats "I could not check this" as "this is wrong". `host:` anchors are verified through a service binding that already targets that host, so credentials stay in the service layer.
+A scope with no configured root reports `unverifiable` rather than guessing. It never treats "I could not check this" as "this is wrong". `host:` anchors are verified through a service connection that already targets that host, so credentials stay in the service layer.
 
 | Setting (in `system_settings`) | Default | What it does |
 | --- | --- | --- |
@@ -134,7 +132,7 @@ A scope with no configured root reports `unverifiable` rather than guessing. It 
 
 ## Verification beyond code
 
-`repo:`, `host:` and `service:` are what Agent Core can check on its own. What actually settles a record depends on what the record is about: a web page, a policy document, a contact, a ticket. So **anchor types are open**, and an installation teaches the system to check its own by mapping a type to a service binding it already has:
+`repo:`, `host:` and `service:` are what Agent Core can check on its own. What actually settles a record depends on what the record is about: a web page, a policy document, a contact, a ticket. So **anchor types are open**, and an installation teaches the system to check its own by mapping a type to a service connection it already has:
 
 ```json
 {
@@ -147,7 +145,7 @@ Stored in `system_settings` under `verification_bindings`. The anchor's value is
 
 **This is JSON configuration by design, and there is no dashboard editor planned.** Custom anchor types are an advanced capability for installations that already run their own services; an operator reaching for one is comfortable writing the mapping. A settings form would have to guess at a shape nobody has needed yet, and the built-in `repo:`, `host:` and `service:` types cover what the dashboard is for.
 
-A binding that answers verifies the anchor. One that reports 404/not-found is evidence the subject is gone, and becomes a review proposal. **A timeout, an error, or an unconfigured type leaves the record unverifiable rather than condemning it.** An outage is not a false memory, and a system that forgets that will delete true records the first time the network hiccups.
+A connection that answers verifies the anchor. One that reports 404/not-found is evidence the subject is gone, and becomes a review proposal. **A timeout, an error, or an unconfigured type leaves the record unverifiable rather than condemning it.** An outage is not a false memory, and a system that forgets that will delete true records the first time the network hiccups.
 
 Writing a record with an anchor type nothing can check is allowed and warned about, not refused: the anchor still records what *would* settle it, which is useful to a human even when no automation can follow it.
 

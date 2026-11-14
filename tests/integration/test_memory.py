@@ -213,7 +213,7 @@ def test_memory_search_scope_filter_limits_results(test_client, admin_token):
     assert all(record["scope"] == "agent:testagent" for record in records)
 
 
-def test_memory_search_filters_by_topic_and_confidence(test_client, admin_token):
+def test_memory_search_filters_by_topic_and_ignores_min_confidence(test_client, admin_token):
     records_to_write = [
         {
             "content": "Memory field behavior ranking token",
@@ -265,8 +265,8 @@ def test_memory_search_filters_by_topic_and_confidence(test_client, admin_token)
     # Search results are a lean projection, so the filters are checked by which
     # record comes back rather than by echoing the filter fields.
     filtered_records = filtered.json()["data"]["records"]
-    assert len(filtered_records) == 1
-    assert filtered_records[0]["id"] == low_importance
+    # min_confidence is accepted and ignored (removed in 1.3.0): both "docker" records come back.
+    assert {r["id"] for r in filtered_records} == {high_importance, low_importance}
     assert other_scope_record not in [r["id"] for r in filtered_records]
 
     ranked = test_client.post(

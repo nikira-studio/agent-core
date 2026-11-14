@@ -288,7 +288,7 @@ def test_person_resolves_with_kind_person_and_agents_cannot_use_the_person_route
 def test_an_agent_cannot_forge_a_resolution(test_client, admin_token):
     _, headers, _ = _setup()
     _mcp(test_client, headers, "activity_update", memory_scope=SCOPE, status="active", task_description="t")
-    forged = _mcp(test_client, headers, "activity_update", memory_scope=SCOPE, status="completed", handoff={
+    forged = _mcp(test_client, headers, "activity_update", memory_scope=SCOPE, status="completed", task_result="done", handoff={
         "needs_human": "Approve it.", "resolution": {"kind": "person", "at": "2026-01-01T00:00:00+00:00"},
     })
     assert forged.status_code == 400 and forged.json()["error"]["code"] == "INVALID_HANDOFF"
@@ -406,8 +406,8 @@ def test_parallel_sessions_do_not_supersede_each_other(test_client, admin_token)
     second = activity_service.create_activity(
         agent_id="h-agent", user_id=owner_id, task_description="Session B", memory_scope=SCOPE,
     )
-    a = _put(test_client, headers, first["id"], status="completed", handoff={"needs_human": "A's ask."})
-    b = _put(test_client, headers, second["id"], status="completed", handoff={"needs_human": "B's ask."})
+    a = _put(test_client, headers, first["id"], status="completed", task_result="done", handoff={"needs_human": "A's ask."})
+    b = _put(test_client, headers, second["id"], status="completed", task_result="done", handoff={"needs_human": "B's ask."})
     assert a.status_code == 200 and b.status_code == 200, (a.json(), b.json())
     # A started before B, but its request was made after B started.
     assert "superseded_requests" not in a.json()["data"]
@@ -425,7 +425,7 @@ def test_rest_update_supersedes_and_reminds_like_mcp(test_client, admin_token):
     current = activity_service.create_activity(
         agent_id="h-agent", user_id=owner_id, task_description="REST task", memory_scope=SCOPE,
     )
-    response = _put(test_client, headers, current["id"], status="completed",
+    response = _put(test_client, headers, current["id"], status="completed", task_result="done",
                     handoff={"needs_human": "New ask."})
     assert response.status_code == 200, response.json()
     data = response.json()["data"]
@@ -452,7 +452,7 @@ def test_rest_handoff_on_a_closed_task_adds_asks(test_client, admin_token):
     closed = activity_service.create_activity(
         agent_id="h-agent", user_id=owner_id, task_description="Closed", memory_scope=SCOPE,
     )
-    _put(test_client, headers, closed["id"], status="completed", handoff={"needs_human": "First ask."})
+    _put(test_client, headers, closed["id"], status="completed", task_result="done", handoff={"needs_human": "First ask."})
     response = _put(test_client, headers, closed["id"], handoff={"needs_human": "Second ask."})
     assert response.status_code == 200, response.json()  # a handoff alone used to fail with a 500
     assert _handoff(closed["id"])[0]["needs_human"] == "First ask.\n\nSecond ask."
@@ -466,7 +466,7 @@ def _tagged(owner_id, description, ref=None):
 
 
 def _close_with_request(client, headers, activity, ask):
-    response = _put(client, headers, activity["id"], status="completed", handoff={"needs_human": ask})
+    response = _put(client, headers, activity["id"], status="completed", task_result="done", handoff={"needs_human": ask})
     assert response.status_code == 200, response.json()
     return response.json()["data"]
 

@@ -31,11 +31,15 @@ def readable_workspace_scopes(ctx: EffectiveAuthority) -> list[str]:
     # Every readable workspace, not just the default recall set: the session's
     # working directory decides which one applies.
     candidates = list(dict.fromkeys([*ctx.default_recall_scopes, *ctx.read_scopes]))
-    return [
+    scopes = [
         scope
         for scope in ctx.filter_scopes("memory", "read", candidates)
         if scope.startswith("workspace:")
     ]
+    own = f"agent:{ctx.agent_id}" if ctx.agent_id else None
+    if own and own in ctx.filter_scopes("memory", "read", [own]):
+        scopes.append(own)  # the agent's own private scope: where an agent with no workspace works
+    return scopes
 
 
 @router.post("")
@@ -46,8 +50,10 @@ def session_context(
         return error_response("AGENT_REQUIRED", "Session context requires an agent", 400)
     if body.memory_scope and not ctx.can("memory", "read", scope=body.memory_scope):
         return error_response("SCOPE_DENIED", "Access denied to this workspace", 403)
-    if body.memory_scope and not body.memory_scope.startswith("workspace:"):
-        return error_response("INVALID_SCOPE", "Session context needs a workspace scope", 400)
+    if body.memory_scope and not (
+        body.memory_scope.startswith("workspace:") or body.memory_scope == f"agent:{ctx.agent_id}"
+    ):
+        return error_response("INVALID_SCOPE", "Session context needs a workspace or your own private scope", 400)
     readable = readable_workspace_scopes(ctx)
     if body.memory_scope and body.memory_scope not in readable:
         readable.append(body.memory_scope)  # ctx.can already allowed it above

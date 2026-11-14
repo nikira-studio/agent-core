@@ -16,7 +16,10 @@ services:
     container_name: agent-core
     build: .
     ports:
-      - "3500:3500"
+      # Reachable from this machine only. The first person to open the dashboard becomes its admin, so register
+      # before exposing it. To reach it from other machines, put a TLS reverse proxy in front of it, or change
+      # this to "3500:3500" on a network you trust.
+      - "127.0.0.1:3500:3500"
     volumes:
       # A named volume works out of the box. To keep the data in a folder of
       # your own instead, create it first so the container's user (1001) can

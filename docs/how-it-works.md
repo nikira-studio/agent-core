@@ -113,7 +113,7 @@ service:<binding_id>                     something reachable through a connector
 
 **Repo paths are relative to the workspace root, never absolute.** The same directory has a different absolute path inside every agent's container, so an absolute anchor is resolvable only by whoever wrote it. Agent Core resolves the relative path against this installation's configured root, which is exactly what lets agents with different mounts share one corpus.
 
-The vocabulary is open. `repo:`, `host:` and `service:` are what Agent Core can check by itself; an installation teaches it to check others (`url:`, `doc:`, `ticket:`) by mapping the type to a service binding it already has (see [Configuration](configuration.md#verification-beyond-code)). Writing an anchor type nothing can check is allowed and warned about, not refused: the anchor still tells a human what would settle the record.
+The vocabulary is open. `repo:`, `host:` and `service:` are what Agent Core can check by itself; an installation teaches it to check others (`url:`, `doc:`, `ticket:`) by mapping the type to a service connection it already has (see [Configuration](configuration.md#verification-beyond-code)). Writing an anchor type nothing can check is allowed and warned about, not refused: the anchor still tells a human what would settle the record.
 
 Anchors also work as a filter. `subject_anchor: "repo:app/services"` matches everything anchored under that prefix, which answers "what have we recorded about this part of the code".
 
@@ -140,8 +140,8 @@ memory_search("where does the user live", as_of="2025-06") → Seattle
 A record is `active`, `superseded`, or `retracted`.
 
 - **Superseding** links new to old (`supersedes_id`) and preserves the chain, readable through `GET /api/memory/{id}/chain`. The old record is not deleted; it is the answer to a point-in-time question.
-- **Retracting** is a soft delete and is **reversible** (`POST /api/memory/restore`). Reversibility is what makes the clean-up flow safe to use: accepting a proposal can never be the last word.
-- **Expiry** (`expires_at`) is for records that stop being true on their own. They drop out of search immediately and are swept on the next maintenance run.
+- **Retracting** is a soft delete and is **reversible** (`POST /api/memory/restore`). Reversibility is what makes automatic clean-up safe: a retraction by a rule or by a person is never the last word.
+- **Expiry** (`expires_at`) is for records that stop being true on their own. They drop out of search immediately and the next maintenance run retracts them (every class, including decisions): restorable for the retention period like any retraction, and restoring one clears the passed expiry.
 - **Retention** eventually purges retracted and superseded records, and scratchpad notes, on windows set in **Settings → Data and backup → How long things are kept**.
 
 ### Retrieval
@@ -152,22 +152,12 @@ Ranking is adjusted by **what the system observed**, never by what the record cl
 
 - whether a never-confirmed fact has human-authenticated provenance; other source kinds receive a small penalty until evidence-based confirmation
 - how often the record has actually been recalled (small, saturating)
-- whether callers said it helped, via `memory_feedback` (worth more than a recall; being returned is the retriever's opinion, feedback is the caller's)
 - how long since anyone confirmed it, for facts only
 - whether it is inside its validity window
 
 `confidence` and `importance` still exist and are caller-assigned, but ranking barely uses them. A record's author is the party least able to judge whether it will be useful later, which is why the signals that matter are collected after the fact.
 
 Search results are a **lean projection** by default: content and the few fields needed to decide relevance, plus a derived `days_since_confirmed`. The lifecycle columns are omitted because on a full page of results they cost more context than they inform. Pass `view: "full"` or fetch one record when you need everything.
-
-### Pinned standing context
-
-A few records per scope can be **pinned**: the rules that apply whatever the task is. Pinned records are returned by `memory_pinned` at the start of a session rather than having to win a search, are included in every session context, and are skipped by the clean-up rules.
-
-Two constraints make this safe:
-
-- **The list is capped** (10 per scope by default). Standing context that nobody reads in full is not standing context.
-- **Agents request pinning; operators grant it.** `memory_pin` queues a request for review rather than pinning. Standing context reaches every session in the scope, including other agents' sessions, which makes it the single most influential thing an agent could write, so it is granted, not taken.
 
 ### Keeping the corpus honest
 
@@ -177,29 +167,26 @@ A shared memory corpus decays in two different ways, and they need different tre
 
 | Result | Meaning | What happens |
 | --- | --- | --- |
-| `verified` | The subject is there | `anchor_checked_at` is set. The record is **not** confirmed: a file that still exists does not make the sentence about it true, so staleness still counts from the last evidence-based confirmation |
-| `missing` | The subject is definitively gone (404, no such path) | Becomes a review proposal |
-| `unverifiable` | Could not check: timeout, error, no configured root | **Nothing** |
+| `verified` | The subject is there | `anchor_checked_at` is set (returned with the record; nothing ranks on it or shows it on a page). The record is **not** confirmed: a file that still exists does not make the sentence about it true, so staleness still counts from the last evidence-based confirmation |
+| `missing` | The subject is definitively gone (404, no such path) | The time is noted; a second `missing` at least an hour later retracts the record (soft, restorable, audited as the `anchor_missing` rule) |
+| `unverifiable` | Could not check: timeout, error, no configured root, or no service connection for the host | **Nothing** |
+
+What can be checked depends on the setup: a `repo:` anchor needs the workspace mapped to a directory on the Core host (`workspace_repo_roots`, see the configuration guide; empty on a new install, so repo anchors are unverifiable until it is set), a `host:` anchor is checked only through a service connection that targets that host, and a `service:` anchor through its connection.
 
 Only `missing` is evidence. An outage is not a false memory, and a system that forgets that will delete true records the first time the network hiccups. Records that cannot be checked are left alone rather than condemned, and the sweep orders by least-recently-attempted so never-verifiable records cannot starve the ones that can be checked.
 
-**Records lose their value.** Rules look for records that no longer earn their place and propose them for review:
+**Records lose their value, and plain noise retracts itself.** Four kinds of record are retracted without asking anyone, because a person answering for them was right every time it was measured:
 
-| Rule | Looks for | Runs when |
+| Rule | Retracts | Runs when |
 | --- | --- | --- |
-| `episodic_log` | A task log written as durable memory | You generate proposals |
-| `ticket_closeout` | A record about work that has since closed | You generate proposals |
-| `duplicate_cluster` | Near-identical records | You generate proposals |
-| `stale_volatile` | Facts nobody has confirmed in a long time | You generate proposals |
-| `unconfirmed_inference` | Never-confirmed, non-human facts older than the configured cutoff | Maintenance or you generate proposals |
-| `anchor_missing` | The file or service it describes is gone | The verification pass finds it missing |
-| `pin_request` | An agent asked for standing context | An agent calls `memory_pin` |
+| `episodic_log` | A per-occurrence log written as durable memory (a heartbeat, a tick, an idle run) | Maintenance, hourly |
+| `ticket_closeout` | Ticket-closeout narration ("PROJ-594 closed done ...") | Maintenance, hourly |
+| `duplicate_cluster` | The same text written twice in one workspace (records that merely open alike are not duplicates); the newest is kept. Never a decision, and never a record written in the last 24 hours | Maintenance, hourly |
+| `anchor_missing` | A fact whose anchor was definitively gone in two checks an hour apart | The verification pass |
 
-The first five share one capped generation pass. The maintenance schedule runs it when `consolidation_scan_enabled` is on, and the review page or `POST /api/memory/proposals/generate` runs the same pass on demand. Per-rule-and-scope, installation-wide, and per-run caps keep unattended generation bounded; fair rotation prevents one noisy scope from owning every run. The last two rules are queued as their triggering events happen.
+A retraction is **soft**: the record is restorable for the retention period (`POST /api/memory/restore`, or Restore in the Retracted view of the Memory page, which is the same table as the active memories and says when it was retracted and by whom or which rule), it is audited as `memory_auto_retracted` with the rule as the actor, and a run retracts at most 20 records. There is no review queue and nothing for a person to answer. Whether a memory is *useful* is not something a rule decides: Core does not retract on age, on lack of confirmation, or on judgement. The other automatic removals leave a trace too: a memory removed because its `expires_at` passed, and a retracted memory deleted after the retention period, are named (id, topic, workspace, class) in the audit entry of that maintenance run.
 
-Every one of them **proposes; none of them act**. Nothing is applied until an operator answers, and each rule keeps a record of how often its suggestions were accepted, so a rule that keeps being wrong is visible as a number instead of as a vague sense that the queue is noisy.
-
-Confirming a record requires **evidence** naming what was checked. Reading a record is not checking it, and choosing `still_current` on a proposal does not set `last_confirmed_at`. Use the separate **Confirm with evidence** action when the record was actually verified.
+Confirming a record requires **evidence** naming what was checked. Reading a record is not checking it. Use the separate **Confirm with evidence** action when the record was actually verified.
 
 ---
 
@@ -209,22 +196,21 @@ Memory holds what stays true. The activity trail holds what happened: one record
 
 ```
 session_context   one session-start block: rules, waiting and unfinished work, recent results, changes
-activity_update   open a task, heartbeat every minute or two, close with a result
-workspace_sync    receive pinned context, assignments, and changes since this execution's cursor
+activity_update   open a task, report progress every few minutes, close with a result
+workspace_sync    receive assignments and changes since this execution's cursor
 workspace_sync_ack acknowledge a delivered page after processing it
 activity_search   "what did we do on X last month"
 activity_list     what is stale or pending
 activity_get      one task, plus the memory records written during it
-activity_pickup   claim work a human assigned to this agent
 activity_handoff_resolve  settle a request to a person that the agent itself made
-attention_list    everything waiting on a person (handoffs, approvals, credential requests, memory suggestions) in the scopes the caller reads (coordinators)
+attention_list    everything waiting on a person (handoffs, approvals, credential requests) in the scopes the caller reads (coordinators)
 ```
 
 It is **self-reported on purpose**. There is no detection of agent work: an agent that does not call `activity_update` does not appear, and no handoff is recorded for it. The alternative, inferring activity, would produce a trail that looks authoritative and is quietly incomplete.
 
 Because every memory write cites the activity that was open at the time, the trail links both ways: `activity_get` returns what a task concluded, not only what it was attempting. Picking up someone else's work shows both.
 
-Work assigned from the dashboard is **pulled, not pushed**: `activity_pickup` returns the next assigned task or `null`. Agents check when they start or when idle. Nothing arrives unbidden, which is what keeps the handoff trail auditable.
+Agents open and close their own tasks, and learn of each other's work at session start (the session context) or when they ask (`activity_list`, `workspace_sync`). Nothing is pushed to a running agent, and nothing is assigned to one.
 
 Workspace changes use the same pull model. `workspace_sync` creates an execution ID for one host session and returns changes after that execution's acknowledged cursor. The response separates memory and activity changes. `other_session_changes` lists the IDs of changes written by another execution; the changes themselves are in their resource groups. After processing a page, the client advances its cursor with `workspace_sync_ack`.
 
@@ -246,10 +232,11 @@ Agents never receive the secret. They receive a reference:
 credential_get → AC_SECRET_GITHUB_TOKEN_1A2B3C4D
 ```
 
-From there, two paths:
+From there, three paths:
 
-- **Local credential helper**: a local tool needs the secret in its own config or environment. The [Local credential helper](credential-broker.md) resolves the reference at runtime, on the machine, so the raw value never passes through a prompt, a log, or a generated config file.
 - **Service**: Agent Core makes the call itself, server-side, using the stored credential. The secret never leaves the service at all.
+- **Credential consumer**: a container or service fetches its own granted secrets at startup ([Credential consumers](credential-consumers.md)). Use it for the software you run yourself.
+- **Local credential helper**: a tool you run yourself needs the secret in its own config or environment. The [Local credential helper](credential-broker.md) resolves the reference at runtime, on the machine, so the raw value never passes through a prompt, a log, or a generated config file.
 
 Prefer the service path when both are available. The reference is what agents see, and a reference in a transcript is worth nothing to anyone who reads it.
 
@@ -268,7 +255,7 @@ A **service** describes a service and its actions. Four ways to add one:
 | **Adapter** | You want a shareable, data-only integration: OAuth, session handshakes, CLI wrappers ([docs/adapters.md](adapters.md)) |
 | **Generic HTTP** | Everything else; the escape hatch |
 
-A **binding** joins one service to one stored credential, inside a scope. That is what agents actually use:
+A **connection** joins one service to one stored credential, inside a scope. That is what agents actually use:
 
 ```
 connectors_summary        what can I reach from here?
@@ -277,9 +264,9 @@ connectors_bindings_test  is this binding still good?
 connectors_run            do it, server-side
 ```
 
-Adapters declare their requirements, and a binding only exposes actions whose requirements are met, so a half-configured integration presents as unavailable rather than failing at the moment an agent depends on it. Every execution is logged, and the log is pruned on the same retention sweep as everything else.
+Adapters declare their requirements, and a connection only exposes actions whose requirements are met, so a half-configured integration presents as unavailable rather than failing at the moment an agent depends on it. Every execution is logged, and the log is pruned on the same retention sweep as everything else.
 
-Binding visibility grants access to every action enabled on the service. Services define which actions exist and which are disabled; bindings decide which users, agents, or workspaces can use the connection.
+Connection visibility grants access to every action enabled on the service. Services define which actions exist and which are disabled; connections decide which users, agents, or workspaces can use the connection.
 
 ---
 
@@ -290,7 +277,7 @@ Two things make Agent Core better and neither of them are required. Each has a d
 | Capability | Enables | Without it |
 | --- | --- | --- |
 | **Embedding backend** | Semantic and hybrid search | Full-text search; exact keywords matter more |
-| **Verification bindings** | Checking anchor types beyond `repo:`/`host:`/`service:` | Those anchors report `unverifiable`, which changes nothing about the record |
+| **Verification connections** | Checking anchor types beyond `repo:`/`host:`/`service:` | Those anchors report `unverifiable`, which changes nothing about the record |
 
 The rule they both follow: **a capability is never a dependency.** Configuring one turns on features, including for records written long before it existed. Removing one turns those features off and leaves everything else untouched. Nothing degrades into guessing.
 
@@ -300,7 +287,7 @@ The rule they both follow: **a capability is never a dependency.** Configuring o
 
 One in-process sweep, hourly by default, does all of it (`AGENT_CORE_MAINTENANCE_INTERVAL_MINUTES`, `0` to disable; the manual **Run Maintenance** button still works):
 
-- marks activities stale when their heartbeat stops
+- marks activities stale once they have had no update for 5 minutes, at the next hourly sweep or when a dashboard page or API call that lists tasks loads (any update from the agent brings one back)
 - sweeps records past `expires_at`
 - prunes scratchpad memory past its retention window
 - purges retracted and superseded records past theirs
@@ -334,7 +321,7 @@ Every design decision above comes from one of these. When something in Agent Cor
 
 **Only definite absence is evidence.** "I could not check" and "it is not there" are different findings, and collapsing them deletes true records during outages.
 
-**Evidence over self-assessment.** Ranking uses what was observed (recalls, feedback, confirmations), not what a record's author claimed about its own importance.
+**Evidence over self-assessment.** Ranking uses what was observed (recalls, confirmations), not what a record's author claimed about its own importance.
 
 **A capability is never a dependency.** Optional services add features. Their absence never breaks the core, and never degrades into guessing.
 
@@ -358,3 +345,32 @@ Every design decision above comes from one of these. When something in Agent Cor
 | [Adapters](adapters.md) | Building and sharing service integrations |
 | [Backup & Restore](backup-restore.md) | Export, restore, maintenance |
 | [Troubleshooting](troubleshooting.md) | Common issues and fixes |
+
+---
+
+## What to expect (and what not to)
+
+- **Agents learn of each other's work at session start, or when they ask.** The session context (injected by the Claude Code hook, fetched with `session_context`, or attached by Core to an agent's first call of any tool after a quiet hour) lists open work, recent results and key records of the workspace; `activity_list` and `workspace_sync` answer later questions. Nothing is pushed to an agent that is already running.
+- **Two agents in one workspace see each other's finished work and shared memories** at their next session start. A workspace does not see another workspace unless an agent is told to look there and is allowed to.
+- **Memory holds decisions and checkable facts, not general knowledge, and it is only as good as what was written.** Core refuses plain logs of one occurrence and identical repeats and retracts leftovers, but it cannot make a vague memory useful: that depends on what agents write, which the generated instructions try to steer.
+- **History lives in two places.** Core keeps who is doing what now, lasting decisions and facts, and one outcome sentence per finished task; the repositories keep the detail (their changelogs and status files), and a task's result points at them.
+- **What is automatic and what is not.** Done by Core: closing abandoned tasks (48 hours), ending an ask when its task closes, letting an unanswered ask lapse and a blocked task with nothing waiting end after 7 days, retracting plain noise, answering a blocked task when its credential arrives. Done by the host hook: Claude Code injects the session context at the start and, if a session ends with a task still open, asks for a one-or-two-sentence result. Enforced at the tool call: completing a task needs a result; plain logs and identical repeats are refused. Left to the agent's habit, and therefore only a request: keeping a task's note fresh, searching before deciding, writing a memory at all. Claude Code records the outcome automatically; other hosts rely on their instructions.
+
+## Names
+
+The dashboard and the API use different words for some things. Tool and field names never change; this is how they line up. A "scope" is the word the API and the tool documentation use for the workspace, personal area or agent-private area a memory, task or credential lives in; the dashboard says Workspace, Personal and Private to an agent.
+
+| In the dashboard | In the API and tools |
+| --- | --- |
+| Workspace, Personal, Private to an agent | scope (`workspace:<id>`, `user:<id>`, `agent:<id>`) |
+| Owner | `owner_user_id` (the agent's default user is the same person) |
+| Task | activity (`activity_update`, `/api/activity`) |
+| Service | connector type |
+| Connection (a service set up for a workspace or an agent) | binding (`connector_bindings`) |
+| Retract (hidden from search, restorable for the retention period) | `memory_retract`, `POST /api/memory/retract`; `POST /api/memory/restore` undoes it |
+| Delete (gone for good) | agents, credentials, connections, and a retracted memory you delete |
+| Two-step sign-in | TOTP, `otp_*` routes and audit events |
+| Agent API key | the `ac_sk_…` key one agent presents (shown once; generated on Connect) |
+| Operator token | `ac_op_…`, short-lived admin access, never called a key |
+| Helper key | the key of the local credential helper (the "broker": program, environment variables and API paths keep that name) |
+| Encryption key | the key that encrypts stored credentials at rest |

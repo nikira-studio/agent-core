@@ -59,19 +59,8 @@ def test_an_anchored_record_says_so(test_client, admin_token):
     assert "anchored" in _page(test_client, admin_token)
 
 
-def test_a_fact_nobody_has_checked_is_visible_as_such(test_client, admin_token):
-    _write("The build server is 192.0.2.10.")
-    assert "never confirmed" in _page(test_client, admin_token)
 
 
-def test_a_confirmed_fact_shows_how_long_ago(test_client, admin_token):
-    record = _write("The build server is 192.0.2.10.")
-    memory_service.confirm_memory(
-        record["id"], evidence="checked the host responds on port 22"
-    )
-    page = _page(test_client, admin_token)
-    assert "confirmed today" in page
-    assert "never confirmed" not in page
 
 
 def _age(record_id, *, created_at, last_confirmed_at=None):
@@ -85,41 +74,10 @@ def _age(record_id, *, created_at, last_confirmed_at=None):
         conn.commit()
 
 
-def test_a_fact_confirmed_long_ago_is_flagged(test_client, admin_token):
-    """Age only matters for facts, and only past the point of usefulness."""
-    record = _write("The build server is 192.0.2.10.")
-    _age(
-        record["id"],
-        created_at="2024-01-01T00:00:00+00:00",
-        last_confirmed_at="2025-01-01T00:00:00+00:00",
-    )
-
-    page = _page(test_client, admin_token)
-    assert "badge-warning" in page, "a fact unchecked for a year should stand out"
-    assert "confirmed " in page
 
 
-def test_a_fact_never_confirmed_is_flagged_once_it_is_old(test_client, admin_token):
-    """The case the previous test claimed to cover but did not.
-
-    Setting last_confirmed_at makes a record an *old confirmed* fact. A fact
-    nobody has ever checked was staying muted forever, even though ranking
-    ages it from created_at exactly like any other.
-    """
-    record = _write("The build server is 192.0.2.10.")
-    _age(record["id"], created_at="2024-01-01T00:00:00+00:00")
-
-    page = _page(test_client, admin_token)
-    assert "never confirmed," in page, "an old unverified fact should show its age"
-    assert "badge-warning" in page
 
 
-def test_a_recent_unconfirmed_fact_is_not_alarming(test_client, admin_token):
-    """Written yesterday and unchecked is normal, not a problem."""
-    _write("The build server is 192.0.2.10.")
-    page = _page(test_client, admin_token)
-    assert "never confirmed" in page
-    assert "badge-warning" not in page
 
 
 def test_the_anchor_badge_does_not_claim_a_check_happened(test_client, admin_token):
@@ -140,19 +98,8 @@ def test_a_decision_is_not_nagged_about_confirmation(test_client, admin_token):
     assert "never confirmed" not in page
 
 
-def test_pinned_records_are_marked(test_client, admin_token):
-    record = _write("Always run the migration before deploying.", memory_class="decision")
-    memory_service.set_pinned(record["id"], True)
-    assert "pinned" in _page(test_client, admin_token)
 
 
-def test_the_detail_pane_shows_the_anchor_and_pin_state(test_client, admin_token):
-    page = _page(test_client, admin_token)
-    assert 'id="mem-detail-anchor"' in page
-    assert 'id="mem-detail-pinned"' in page
-    assert "nothing can verify this" in page, (
-        "an unanchored fact should say so rather than showing an empty field"
-    )
 
 
 def test_version_history_dates_are_not_printed_as_markup(test_client, admin_token):
@@ -166,3 +113,20 @@ def test_version_history_dates_are_not_printed_as_markup(test_client, admin_toke
     assert "metadataParts.map(escapeHtml)" not in page
     assert "escapeHtml(r.topic)" in page
     assert "escapeHtml(r.record_status)" in page
+
+
+def test_the_list_never_nags_about_confirmation(test_client, admin_token):
+    """Nobody is asked to confirm memories, so the list shows no "never confirmed" warning and no pin state."""
+    _write("An unchecked agent fact")
+    html = _page(test_client, admin_token)
+    assert "An unchecked agent fact" in html
+    assert "never confirmed" not in html and "badge-info'>pinned" not in html
+
+
+def test_the_list_and_the_detail_use_the_same_words(test_client, admin_token):
+    _write("The weekly report goes out on Fridays.")
+    page = _page(test_client, admin_token)
+    assert "<th>Kind</th>" in page and "<th>Class</th>" not in page
+    assert "personal (the owner only)" in page and ">user:" not in page.split("mem-results-body", 1)[1].split("</tbody>", 1)[0]
+    # "Written by" says it once: no "(written by the owner)" after "the owner through the API"
+    assert "(' + kind + ')'" not in page and "written by the owner" not in page.split("function viewMemory", 1)[1].split("async function _loadChain", 1)[0]

@@ -29,8 +29,8 @@ def test_integrations_nav_has_single_setup_entry(admin_client):
     r = admin_client.get("/")
     assert r.status_code == 200
     html = r.text
-    assert 'href="/integrations"' in html
-    assert "<span>Connect</span>" in html
+    assert 'href="/integrations"' not in html.split('id="main-nav"', 1)[1].split("</nav>", 1)[0]  # a tab now, not an entry
+    assert '>Connect</a>' in admin_client.get("/agents").text
 
 
 def test_integrations_page_is_current_workflow(admin_client):

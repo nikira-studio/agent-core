@@ -30,4 +30,4 @@ USER 1001:1001
 # configured limits and leaves a browser connected to one process unable to see
 # events published by another. Raising AGENT_CORE_WORKERS is possible and is the
 # operator's call, but it is not a supported configuration today.
-CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${AGENT_CORE_PORT:-3500} --workers ${AGENT_CORE_WORKERS:-1}"]
+CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${AGENT_CORE_PORT:-3500} --workers ${AGENT_CORE_WORKERS:-1} --timeout-graceful-shutdown ${AGENT_CORE_SHUTDOWN_GRACE_SECONDS:-5}"]

@@ -376,11 +376,16 @@ def test_mcp_tool_memory_search_empty_scopes_returns_embedding_status(
     assert r.status_code == 200
     data = r.json()["data"]
     assert data["records"] == []
-    assert data["retrieval_mode"] == "fts_only"
+    assert data["retrieval_mode"] == "no_candidates"
     assert data["embedding_backend_status"] == "unavailable"
 
 
 def test_memory_search_audit_logs_retrieval_mode(test_client, agent_token, clean_db):
+    test_client.post(
+        "/api/memory/write",
+        headers={"Authorization": f"Bearer {agent_token}"},
+        json={"content": "Audit test query material", "memory_class": "fact", "scope": "agent:testagent"},
+    )
     with patch(
         "app.services.embedding_service.get_embedding_backend_status"
     ) as mock_status:
@@ -403,3 +408,38 @@ def test_memory_search_audit_logs_retrieval_mode(test_client, agent_token, clean
 
     degraded_events = audit_service.query_events(action="retrieval_degraded")
     assert len(degraded_events) >= 1
+
+
+def test_a_search_of_an_empty_scope_says_no_candidates_and_the_audit_says_why(test_client, agent_token, clean_db):
+    from app.services import audit_service
+
+    r = test_client.post(
+        "/api/memory/search",
+        headers={"Authorization": f"Bearer {agent_token}"},
+        json={"query": "nothing is stored here", "limit": 5},
+    )
+    assert r.status_code == 200 and r.json()["data"]["retrieval_mode"] == "no_candidates"
+    details = json.loads(audit_service.query_events(action="memory_search")[0]["details_json"])
+    assert details["retrieval_mode"] == "no_candidates" and details["candidates"] == 0
+    assert details["scopes"] and details["scope"] is None and details["embedding"] in ("not_used", "ok", "unavailable")
+
+
+def test_the_audit_of_a_search_records_candidates_and_the_embedding_outcome(test_client, agent_token, clean_db):
+    from app.services import audit_service
+
+    test_client.post(
+        "/api/memory/write",
+        headers={"Authorization": f"Bearer {agent_token}"},
+        json={"content": "Deploys go out on Thursdays", "memory_class": "fact", "scope": "agent:testagent"},
+    )
+    with patch("app.services.embedding_service.get_embedding_backend_status") as mock_status:
+        mock_status.return_value = {"backend": "unavailable", "model_configured": False}
+        r = test_client.post(
+            "/api/memory/search",
+            headers={"Authorization": f"Bearer {agent_token}"},
+            json={"query": "Thursdays", "scope": "agent:testagent", "limit": 5},
+        )
+    assert r.status_code == 200 and r.json()["data"]["retrieval_mode"] == "fts_only"
+    details = json.loads(audit_service.query_events(action="memory_search")[0]["details_json"])
+    assert details["scope"] == "agent:testagent" and details["candidates"] == 1
+    assert details["embedding"] in ("unavailable", "not_used") and details["results"] == 1

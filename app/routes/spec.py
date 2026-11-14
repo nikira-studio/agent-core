@@ -101,7 +101,6 @@ def spec(
                 "scope": "string?",
                 "topic": "string?",
                 "memory_class": list(MEMORY_CLASSES),
-                "min_confidence": "number?",
                 "subject_anchor": "string?",
                 "activity_id": "string?",
                 "as_of": "string?",
@@ -201,21 +200,6 @@ def spec(
             },
         },
         {
-            "name": "memory_pinned",
-            "description": (
-                "Standing context for your authorized scopes. workspace_sync already returns "
-                "pinned records for its workspace. Call memory_pinned at session start only "
-                "when you also need standing rules from other authorized scopes or no "
-                "workspace sync applies. Pinned records are loaded, not searched for."
-            ),
-            "inputSchema": {},
-        },
-        {
-            "name": "memory_pin",
-            "description": "Pin a record as standing context, or unpin it (capped per scope)",
-            "inputSchema": {"record_id": "string", "pinned": "boolean?"},
-        },
-        {
             "name": "memory_confirm",
             "description": "Mark a record as still current as of now, clearing its staleness",
             "inputSchema": {"record_id": "string"},
@@ -229,11 +213,6 @@ def spec(
             "name": "memory_verify",
             "description": "Check anchored facts against the repo path or connector binding they describe; queues review for anchors that have vanished",
             "inputSchema": {"scope": "string?", "limit": "integer?"},
-        },
-        {
-            "name": "memory_feedback",
-            "description": "Say whether a recalled record actually helped; feeds observed usefulness into ranking",
-            "inputSchema": {"record_id": "string", "helpful": "boolean"},
         },
         {
             "name": "activity_search",
@@ -253,11 +232,6 @@ def spec(
             "name": "attention_list",
             "description": "Unresolved needs_human handoffs across readable scopes, newest first; read-only, for coordinators",
             "inputSchema": {"scopes": "string[]?", "without_task_ref": "boolean?", "limit": "integer?"},
-        },
-        {
-            "name": "activity_pickup",
-            "description": "Claim the next active work item assigned to this agent in authorized scopes",
-            "inputSchema": {},
         },
         {
             "name": "approval_propose",

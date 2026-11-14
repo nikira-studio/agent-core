@@ -57,35 +57,21 @@ def test_record_without_expires_at_appears_normally(clean_db):
     assert any("no expiry set" in r["content"] for r in results)
 
 
-def test_ttl_sweep_deletes_expired_records_and_embeddings(clean_db):
-    record, _ = write_memory(
-        content="sweep target record",
-        memory_class="scratchpad",
-        scope="agent:testagent",
-        expires_at=_past_iso(),
-    )
-    record_id = record["id"]
+def test_an_expired_record_is_retracted_not_deleted_and_can_be_restored(clean_db):
+    from app.services import audit_service, memory_service
 
-    with get_db() as conn:
-        row = conn.execute(
-            "SELECT id FROM memory_records WHERE id = ?", (record_id,)
-        ).fetchone()
-    assert row is not None, "Record should exist before sweep"
-
-    result = run_scheduled_maintenance()
-    assert result["ttl_swept"] >= 1
-
-    with get_db() as conn:
-        row = conn.execute(
-            "SELECT id FROM memory_records WHERE id = ?", (record_id,)
-        ).fetchone()
-    assert row is None, "Record should be deleted after sweep"
-
-    with get_db() as conn:
-        embedding = conn.execute(
-            "SELECT record_id FROM memory_embeddings WHERE record_id = ?", (record_id,)
-        ).fetchone()
-    assert embedding is None, "Embedding should be deleted after sweep"
+    record, _ = write_memory(content="sweep target decision", memory_class="decision", scope="workspace:ttl", topic="Expiring decision", expires_at=_past_iso())
+    run_scheduled_maintenance()
+    kept = memory_service.get_memory_record(record["id"])
+    assert kept is not None and kept["record_status"] == "retracted", "an expiry retracts (restorable), it does not delete"
+    trace = memory_service.retraction_traces([record["id"]])[record["id"]]
+    assert trace["by"] == "maintenance" and "expiry" in trace["by_label"]
+    # Restoring it clears the passed expiry, so the next run does not take it back.
+    assert memory_service.restore_memory(record["id"], restored_by="owner")
+    restored = memory_service.get_memory_record(record["id"])
+    assert restored["record_status"] == "active" and not restored["expires_at"]
+    run_scheduled_maintenance()
+    assert memory_service.get_memory_record(record["id"])["record_status"] == "active"
 
 
 def test_ttl_sweep_does_not_delete_non_expired_records(clean_db):
@@ -340,3 +326,33 @@ def test_maintenance_keeps_superseded_history_but_purges_old_retractions(clean_d
 
     assert memory_service.get_memory_record(old["id"])["record_status"] == "superseded"
     assert memory_service.get_memory_record(wrong["id"]) is None
+
+
+def _d(v):
+    import json
+    return json.loads(v) if isinstance(v, str) else v
+
+
+def test_an_expiry_and_a_purge_name_the_records_they_removed(clean_db):
+    from app.services import audit_service, memory_service
+
+    expired, _ = write_memory(
+        content="a decision the writer gave an expiry date",
+        memory_class="decision",
+        scope="workspace:trace",
+        topic="Trace expiry topic",
+        expires_at=_past_iso(),
+    )
+    gone, _ = write_memory(content="a fact that was retracted long ago", memory_class="fact", scope="workspace:trace", topic="Trace purge topic")
+    memory_service.retract_memory(gone["id"], retracted_by="rule:duplicate_cluster")
+    with get_db() as conn:
+        conn.execute("UPDATE memory_records SET status_changed_at = '2020-01-01T00:00:00+00:00' WHERE id = ?", (gone["id"],))
+        conn.commit()
+    run_scheduled_maintenance()
+    swept = _d(audit_service.query_events(action="memory_ttl_swept", limit=5)[0]["details_json"])
+    assert {"id": expired["id"], "topic": "Trace expiry topic", "scope": "workspace:trace", "memory_class": "decision"} in swept["records"]
+    entry = [e for e in audit_service.query_events(action="memory_auto_retracted", limit=10) if e["resource_id"] == expired["id"]]
+    assert entry and _d(entry[0]["details_json"])["rule"] == "expired"
+    purged = _d(audit_service.query_events(action="retracted_records_purged", limit=5)[0]["details_json"])
+    assert {"id": gone["id"], "topic": "Trace purge topic", "scope": "workspace:trace", "memory_class": "fact"} in purged["records"]
+    assert "a decision the writer gave" not in str(swept) and "retracted long ago" not in str(purged)

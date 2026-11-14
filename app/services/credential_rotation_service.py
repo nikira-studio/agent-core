@@ -104,6 +104,19 @@ def key_id(key: str) -> str:
     return hashlib.sha256(key.encode()).hexdigest()[:12]
 
 
+def last_key_change_at():
+    """When the current key was put in place (the last rotation or key restore), or None."""
+    try:
+        with get_db() as conn:
+            row = conn.execute(
+                "SELECT MAX(timestamp) AS t FROM audit_log WHERE result = 'success' "
+                "AND action IN ('credential_key_rotated', 'credential_key_restored')"
+            ).fetchone()
+        return row["t"] if row and row["t"] else None
+    except Exception:
+        return None
+
+
 def get_key_status() -> dict:
     keyring_path = settings.data_dir / "credential.keyring"
     if not os.path.exists(keyring_path):
@@ -117,6 +130,8 @@ def get_key_status() -> dict:
             "mode": "keyring",
             "keyring_size": len(keys),
             "primary_key_id": key_id(keys[0]) if keys else "none",
+            "earlier_keys": max(len(keys) - 1, 0),
+            "changed_at": last_key_change_at(),
         }
     except Exception:
         return {"mode": "error", "keyring_size": 0}

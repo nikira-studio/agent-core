@@ -4,7 +4,7 @@ In the dashboard, installable adapters are listed under **Ready-made services**;
 
 One manifest file adds any external service to Agent Core. It describes what the service is, what credentials it needs, what actions it exposes, and how Agent Core should call it. The built-in engines handle the rest. No Python is added to your installation. Adapters survive upgrades, and the same file works on any other Agent Core instance when you share it.
 
-- **[Part 1: Using adapters](#part-1-using-adapters)**: installing, binding credentials, calling actions
+- **[Part 1: Using adapters](#part-1-using-adapters)**: installing, connection credentials, calling actions
 - **[Part 2: Building adapters](#part-2-building-adapters)**: the manifest spec, the three backends, templating, auth/refresh/sessions, testing, sharing
 
 ---
@@ -35,7 +35,7 @@ Agent Core has a **two-tier adapter library**:
 | **System** | `app/adapter_templates/<id>/adapter.json` | shipped with Agent Core, maintained by the project | replaced on each upgrade; it *is* the product |
 | **User** | `data/adapters/<id>/adapter.json` | adapters you installed or wrote yourself | **yes**, lives in the data dir alongside the DB |
 
-The Browse Adapters page at **`/connectors/adapters`** lists adapters from both libraries. Installing a system adapter copies it into the user library, so any local edits you make persist across upgrades and you keep the version you tested. If the shipped template later changes, the same page shows **Update** for the installed copy; updating replaces the installed adapter files in place and keeps bindings attached to the same connector type id. Updates are version-driven, so bump the adapter's `version` whenever you change its manifest. The `adapter_installations` DB table is the source of truth for *which* adapters are active in the connector catalog; a restart re-seeds them from there.
+The Browse Adapters page at **`/connectors/adapters`** lists adapters from both libraries. Installing a system adapter copies it into the user library, so any local edits you make persist across upgrades and you keep the version you tested. If the shipped template later changes, the same page shows **Update** for the installed copy; updating replaces the installed adapter files in place and keeps connections attached to the same connector type id. Updates are version-driven, so bump the adapter's `version` whenever you change its manifest. The `adapter_installations` DB table is the source of truth for *which* adapters are active in the connector catalog; a restart re-seeds them from there.
 
 ## Install an adapter (3 ways)
 
@@ -43,7 +43,7 @@ The Browse Adapters page at **`/connectors/adapters`** lists adapters from both 
 
 1. Go to **`/connectors`** → click the **adapters** link in the Service Catalog note (or visit `/connectors/adapters` directly).
 2. Pick an adapter from the list. Each entry shows its description, version, backend (`http`/`mcp`/`cli`), and whether its `requires` (binaries, env vars) are satisfied.
-3. Click **Install**. If it's a system adapter, Agent Core copies it from `app/adapter_templates/` into `data/adapters/`, seeds the connector type, and records the installation. If it's already in `data/adapters/`, the install just seeds and records. If the page later shows **Update**, clicking it refreshes the installed copy in place without changing bindings. The Update button appears when the available template version differs from the installed version.
+3. Click **Install**. If it's a system adapter, Agent Core copies it from `app/adapter_templates/` into `data/adapters/`, seeds the connector type, and records the installation. If it's already in `data/adapters/`, the install just seeds and records. If the page later shows **Update**, clicking it refreshes the installed copy in place without changing connections. The Update button appears when the available template version differs from the installed version.
 4. The new connector type now shows in your `/connectors` catalog.
 
 For `mcp` and `cli` adapters, a **dangerous-pattern scan** runs first and surfaces anything suspicious in the manifest before enabling. `http` adapters are pure data and don't need scanning.
@@ -59,10 +59,10 @@ Invalid manifests are logged and skipped; they never crash startup. The list of 
 
 ## Bind a credential and call actions
 
-Adapters use the same binding model as every other connector type:
+Adapters use the same connection model as every other connector type:
 
 1. **Store the credential.** From `/credentials`, store the secret(s) the adapter needs. For multi-field credentials (OAuth, basic auth with username+password), paste the value as a JSON object; see the adapter's `credential_schema` for the required fields.
-2. **Create a binding.** From `/connectors`, find the adapter's connector type, create a binding scoped to your workspace, and link your stored credential. Add any per-binding config the adapter requires (`requires.config` lists what's needed).
+2. **Create a connection.** From `/connectors`, find the adapter's connector type, create a connection scoped to your workspace, and link your stored credential. Add any per-binding config the adapter requires (`requires.config` lists what's needed).
 3. **Call actions from an agent** using `connectors_run`:
 
    ```
@@ -75,13 +75,13 @@ Adapters use the same binding model as every other connector type:
 
 `connectors_actions_list` exposes per-action input schemas so the agent can introspect what each action accepts. Agent Core resolves the raw credential server-side and never surfaces it to the agent.
 
-Bindings can carry non-secret defaults in `config_json.default_params`. Agent Core merges those defaults before validating and executing an action, with explicit caller params winning over defaults. Use this for stable context such as a repo, workspace, tenant, or company ID that almost every call needs.
+Connections can carry non-secret defaults in `config_json.default_params`. Agent Core merges those defaults before validating and executing an action, with explicit caller params winning over defaults. Use this for stable context such as a repo, workspace, tenant, or company ID that almost every call needs.
 
 ## Uninstall an adapter
 
 From the Browse Adapters page, click **Uninstall** on an installed adapter. This:
 
-- Removes the adapter's connector type from the catalog (its bindings become orphaned).
+- Removes the adapter's connector type from the catalog (its connections become orphaned).
 - Clears the install record.
 - If the installed adapter came from the system library, removes the installed copy from `data/adapters/` so the system template remains the reinstall source.
 - If the adapter already lived in `data/adapters/`, leaves the file there so you can reinstall later with one click; uninstall is non-destructive of user-authored adapter files.
@@ -96,9 +96,9 @@ Manifests can declare what they need to function via the `requires` block:
 |---|---|---|
 | `requires.bins` | local binaries (e.g. `gh`, `rclone`) | adapter shown as *unavailable*, install blocked |
 | `requires.env` | environment variables | adapter shown as *unavailable*, install blocked |
-| `requires.config` | per-binding config fields | adapter is installable; the binding itself fails at execution if the field is missing |
+| `requires.config` | per-binding config fields | adapter is installable; the connection itself fails at execution if the field is missing |
 
-`bins` and `env` are **operator-level gates** (something the operator must provision before Agent Core can run the adapter at all). `config` is **per-binding** (the adapter is fine; each binding just needs the right config). This is why an adapter that says `requires: { config: ["base_url"] }` still appears available; you configure it when you create the binding.
+`bins` and `env` are **operator-level gates** (something the operator must provision before Agent Core can run the adapter at all). `config` is **per-binding** (the adapter is fine; each connection just needs the right config). This is why an adapter that says `requires: { config: ["base_url"] }` still appears available; you configure it when you create the connection.
 
 ---
 
@@ -163,7 +163,7 @@ Action params are prepared in this order:
 
 1. Start with caller `params`.
 2. Apply `param_aliases` and inferred camelCase-to-snake_case aliases without overwriting a canonical key the caller already sent.
-3. Merge binding `config_json.default_params` underneath the normalized caller params, so explicit caller values win.
+3. Merge connection `config_json.default_params` underneath the normalized caller params, so explicit caller values win.
 4. Validate the result against `input_schema`.
 5. Render the request, command, or MCP call.
 
@@ -186,7 +186,7 @@ Example:
 
 **`credential_schema.fields[]`**: each field declares `name`, `type`, `secret` (true = redacted in UI/logs), `required`. The UI uses this to build the credential entry form. For single-secret connectors (one `api_key` field), the stored value is the secret string. For multi-field credentials, the stored value is a JSON object with those field names as keys.
 
-**`setup`**: optional human-readable binding guidance. `instructions` appears in the New Binding modal, and `documentation_url` must be an HTTPS link. Use it for provider-console steps, OAuth scopes, redirect URIs, and an explanation of which credential fields are optional.
+**`setup`**: optional human-readable connection guidance. `instructions` appears in the New Connection modal, and `documentation_url` must be an HTTPS link. Use it for provider-console steps, OAuth scopes, redirect URIs, and an explanation of which credential fields are optional.
 
 ## The three backends
 
@@ -236,17 +236,17 @@ The biggest and most-used backend. Describes HTTP requests declaratively with te
 
 ### `base_url`
 
-Either a hard-coded string (`"https://api.stripe.com"`) or a config-driven object so each binding can supply it:
+Either a hard-coded string (`"https://api.stripe.com"`) or a config-driven object so each connection can supply it:
 
 ```json
 "base_url": { "from": "config", "field": "base_url" }
 ```
 
-If you use the config form, list the field in `requires.config` so each binding remembers to provide it.
+If you use the config form, list the field in `requires.config` so each connection remembers to provide it.
 
-### Binding defaults
+### Connection defaults
 
-For fixed non-secret context, put defaults on the binding rather than making agents repeat them every call:
+For fixed non-secret context, put defaults on the connection rather than making agents repeat them every call:
 
 ```json
 {
@@ -424,7 +424,7 @@ All templates use the same locked-down resolver: no `eval`, no raw Jinja, no she
 |---|---|
 | `{{ params.X }}` | the value the caller passed for action param `X` |
 | `{{ cred.X }}` | the credential's field `X` (or `cred.raw` for single-secret credentials) |
-| `{{ config.X }}` | the binding's `config_json` field `X` |
+| `{{ config.X }}` | the connection's `config_json` field `X` |
 
 Bareword namespace access (`{{ params | filter }}`) returns the whole object, useful for filters that consume the full param dict.
 
@@ -451,7 +451,7 @@ After rendering, `active` is a JSON boolean, not the string `"true"`.
 
 For an HTTP adapter, set `backend.test_action` to an enabled health or read action. Connection tests also recognize `get_session_stats`, `healthcheck`, `test_connection`, and `ping`. They never fall back to the first request in the manifest.
 
-Declare `side_effect: "read"` or `"none"` for a POST-based read probe such as an RPC status call. Write and destructive actions cannot serve as connection tests. GET, HEAD, and OPTIONS probes can omit `side_effect`. Required inputs must be supplied through the binding's `config_json.default_params`; otherwise the test fails before sending a request.
+Declare `side_effect: "read"` or `"none"` for a POST-based read probe such as an RPC status call. Write and destructive actions cannot serve as connection tests. GET, HEAD, and OPTIONS probes can omit `side_effect`. Required inputs must be supplied through the connection's `config_json.default_params`; otherwise the test fails before sending a request.
 
 Write wire-level tests that mock the transport layer (HTTP or subprocess) and assert the rendered request matches what the service expects. These catch template errors that unit tests miss because they verify the actual bytes leaving the adapter.
 
@@ -537,7 +537,7 @@ For Transmission specifically, keep `base_url` at the server root, such as `http
 
 **Adapter shows up in Browse Adapters as "unavailable":** check its `requires.bins` and `requires.env`. The adapter declared a binary or env var that's missing on this host. Install the binary or set the env var, then restart.
 
-**Adapter installs but binding fails at execute:** check the adapter's `requires.config`. The binding's `config_json` is missing a required field.
+**Adapter installs but connection fails at execute:** check the adapter's `requires.config`. The connection's `config_json` is missing a required field.
 
 **"Adapter manifest invalid":** check your `spec_version`, `id` (`[a-z0-9_]+`), `version` (semver), and the `backend.type`. The full schema is in `app/connectors/manifest.py`.
 

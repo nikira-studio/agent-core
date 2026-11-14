@@ -78,14 +78,14 @@ class TestPaperclipGetIssueWireLevel:
     def test_get_issue_with_canonical_issue_id(self):
         engine = make_engine()
         calls: list = []
-        mock_response(engine, {"id": "STA-559", "title": "Example"}, calls)
+        mock_response(engine, {"id": "PROJ-559", "title": "Example"}, calls)
 
         result = engine.execute(
-            "get_issue", {"issue_id": "STA-559"}, cred(), CONFIG_JSON, session=None
+            "get_issue", {"issue_id": "PROJ-559"}, cred(), CONFIG_JSON, session=None
         )
 
         assert result["success"] is True
-        assert calls[0]["url"] == "https://paperclip.example.com/api/issues/STA-559"
+        assert calls[0]["url"] == "https://paperclip.example.com/api/issues/PROJ-559"
 
 
 class TestPaperclipListIssuesWireLevel:
@@ -120,7 +120,7 @@ class TestPaperclipListIssuesWireLevel:
     def test_get_issue_with_aliased_issue_id(self):
         engine = make_engine()
         calls: list = []
-        mock_response(engine, {"id": "STA-559", "title": "Example"}, calls)
+        mock_response(engine, {"id": "PROJ-559", "title": "Example"}, calls)
 
         # HttpEngine itself doesn't apply param_aliases (that's
         # connector_service._prepare_action_params, exercised at the
@@ -128,11 +128,11 @@ class TestPaperclipListIssuesWireLevel:
         # This confirms the render path works once the canonical key is present,
         # regardless of which name the caller originally used.
         result = engine.execute(
-            "get_issue", {"issue_id": "STA-559"}, cred(), CONFIG_JSON, session=None
+            "get_issue", {"issue_id": "PROJ-559"}, cred(), CONFIG_JSON, session=None
         )
 
         assert result["success"] is True
-        assert calls[0]["url"] == "https://paperclip.example.com/api/issues/STA-559"
+        assert calls[0]["url"] == "https://paperclip.example.com/api/issues/PROJ-559"
 
 
 class TestPaperclipGetRunWireLevel:

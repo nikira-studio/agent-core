@@ -9,11 +9,12 @@ person's browser to the vault.
 
 import secrets
 import sqlite3
+from datetime import timedelta
 from typing import Optional
 
 from app.database import get_db
 from app.services import credential_service
-from app.time_utils import utc_now_iso
+from app.time_utils import utc_now, utc_now_iso
 
 MAX_PENDING_PER_AGENT = 20
 
@@ -51,6 +52,7 @@ def request_credential(
                 (existing["id"], utc_now_iso(), scope, name),
             )
             conn.commit()
+        _resolve_linked_handoffs()
         return {"status": "fulfilled", "scope": scope, "name": name,
                 "reference_name": existing["reference_name"]}
     with get_db() as conn:
@@ -99,12 +101,18 @@ def request_credential(
                 "wait for those to be filled or cancelled"
             )
         request_id = secrets.token_urlsafe(12)
+        # The task this agent is on, so the person answers one thing, not a request and its blocked task.
+        task = conn.execute(
+            "SELECT id FROM agent_activity WHERE assigned_agent_id = ? AND status IN ('active', 'stale', 'blocked') "
+            "ORDER BY updated_at DESC LIMIT 1",
+            (agent_id,),
+        ).fetchone()
         try:
             conn.execute(
                 """INSERT INTO credential_requests
-                (id, scope, name, purpose, requested_by_agent_id, requested_by_user_id, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?)""",
-                (request_id, scope, name, purpose, agent_id, user_id, utc_now_iso()),
+                (id, scope, name, purpose, requested_by_agent_id, requested_by_user_id, created_at, activity_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (request_id, scope, name, purpose, agent_id, user_id, utc_now_iso(), task["id"] if task else None),
             )
             conn.commit()
         except sqlite3.IntegrityError:
@@ -145,6 +153,27 @@ def _close_answered(conn) -> None:
     conn.commit()
 
 
+def _resolve_linked_handoffs() -> None:
+    """Providing a credential answers the task that was waiting for it.
+
+    The agent's "needs a person" ask on the task it was blocked on is marked resolved by the person who
+    supplied the credential; the task itself is the agent's to continue or close. Safe to repeat: a
+    handoff already resolved, or a task without one, is left alone.
+    """
+    from app.services import activity_service
+
+    with get_db() as conn:
+        rows = conn.execute(
+            "SELECT activity_id, resolved_by FROM credential_requests WHERE status = 'fulfilled' "
+            "AND activity_id IS NOT NULL AND resolved_at >= ?",
+            ((utc_now() - timedelta(days=2)).isoformat(),),
+        ).fetchall()
+    for row in rows:
+        activity_service.resolve_handoff(
+            row["activity_id"], kind="person", resolved_by=row["resolved_by"] or "credential-provided"
+        )
+
+
 def public_view(request: dict) -> dict:
     """A request as an agent or a coordinator may see it (no secret is ever part of one)."""
     return _public(request)
@@ -174,6 +203,7 @@ def list_pending() -> list[dict]:
         rows = conn.execute(
             "SELECT * FROM credential_requests WHERE status = 'pending' ORDER BY created_at"
         ).fetchall()
+    _resolve_linked_handoffs()
     return [dict(r) for r in rows]
 
 
@@ -208,6 +238,7 @@ def fulfill(
             (entry["id"], utc_now_iso(), user_id, request_id),
         )
         conn.commit()
+    _resolve_linked_handoffs()
     return entry
 
 

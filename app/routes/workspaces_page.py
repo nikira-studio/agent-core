@@ -97,7 +97,7 @@ def workspaces_page(request: Request, session: dict = Depends(require_auth)):
             f"<td><div class='actions-cell'>"
             f"<button type='button' class='btn btn-sm btn-secondary' data-workspace-action='edit' data-workspace-id='{p['id']}'>Edit</button>"
             f"{toggle_btn}"
-            f"<button type='button' class='btn btn-sm btn-danger icon-delete-btn' data-workspace-action='purge' data-workspace-id='{p['id']}' data-memories='{memory_counts.get('workspace:' + p['id'], 0)}' data-tasks='{task_counts.get('workspace:' + p['id'], 0)}' data-credentials='{credential_counts.get('workspace:' + p['id'], 0)}' data-bindings='{binding_counts.get('workspace:' + p['id'], 0)}' title='Permanently delete' aria-label='Permanently delete'>{get_icon('delete')}</button>"
+            f"<button type='button' class='btn btn-sm btn-danger icon-delete-btn' data-workspace-action='purge' data-workspace-id='{p['id']}' data-memories='{memory_counts.get('workspace:' + p['id'], 0)}' data-tasks='{task_counts.get('workspace:' + p['id'], 0)}' data-credentials='{credential_counts.get('workspace:' + p['id'], 0)}' data-bindings='{binding_counts.get('workspace:' + p['id'], 0)}' title='Permanently delete' aria-label='Permanently delete'>{get_icon('delete')} Delete</button>"
             f"</div></td></tr>"
         )
 
@@ -112,19 +112,19 @@ def workspaces_page(request: Request, session: dict = Depends(require_auth)):
 
     async function refreshProjects() { location.reload(); }
     async function deactivateProject(id) {
-      if (!confirm('Deactivate this workspace?')) return;
+      if (!await confirmDialog('Deactivate this workspace?')) return;
       const j = await apiFetch('/api/workspaces/' + id, { method: 'DELETE' });
       if (j.ok) { showToast('Workspace deactivated'); refreshProjects(); }
       else { showToast(j.error.message || 'Failed', 'danger'); }
     }
     async function reactivateProject(id) {
-      if (!confirm('Reactivate this workspace?')) return;
+      if (!await confirmDialog('Reactivate this workspace?')) return;
       const j = await apiFetch('/api/workspaces/' + id + '/activate', { method: 'POST' });
       if (j.ok) { showToast('Workspace reactivated'); refreshProjects(); }
       else { showToast(j.error.message || 'Failed', 'danger'); }
     }
     async function purgeProject(id, counts) {
-      const typed = prompt('PERMANENTLY DELETE the workspace "' + id + '"? This also deletes its ' + (counts.memories || 0) + ' memories (retracted ones included), ' + (counts.credentials || 0) + ' stored credentials and ' + (counts.bindings || 0) + ' service bindings. Its ' + (counts.tasks || 0) + ' tasks are kept but no longer belong to a workspace. This cannot be undone.\\n\\nType the workspace ID to confirm:');
+      const typed = await promptDialog('This also deletes its ' + (counts.memories || 0) + ' memories (retracted ones included), ' + (counts.credentials || 0) + ' stored credentials and ' + (counts.bindings || 0) + ' service bindings. Its ' + (counts.tasks || 0) + ' tasks are kept but no longer belong to a workspace. This cannot be undone.', { title: 'Permanently delete the workspace "' + id + '"?', input: { label: 'Type the workspace ID to confirm', placeholder: id }, confirmLabel: 'Delete', danger: true });
       if (typed === null) return;
       if (typed.trim() !== id) { showToast('That is not the workspace ID. Nothing was deleted.', 'warning'); return; }
       const j = await apiFetch('/api/workspaces/' + id + '/purge', { method: 'POST' });
@@ -264,7 +264,7 @@ def workspaces_page(request: Request, session: dict = Depends(require_auth)):
     }
 
     async function removeWorkspaceCollaborator(workspaceId, userId) {
-      if (!confirm('Remove this collaborator?')) return;
+      if (!await confirmDialog('Remove this collaborator?')) return;
       const j = await apiFetch('/api/workspaces/' + workspaceId + '/collaborators/' + encodeURIComponent(userId), {
         method: 'DELETE',
       });

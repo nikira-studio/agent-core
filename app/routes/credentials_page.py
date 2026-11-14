@@ -93,18 +93,18 @@ def credentials_page(request: Request, session: dict = Depends(require_auth)):
 
     user_scope = f"user:{session['user_id']}"
     workspace_scope_opts = "".join(
-        f'<option value="workspace:{p["id"]}">workspace:{p["id"]}</option>'
+        f'<option value="workspace:{p["id"]}">{escape_html(p.get("name") or p["id"])}</option>'
         for p in workspaces
     )
     agent_scope_opts = "".join(
-        f'<option value="agent:{a["id"]}">agent:{a["id"]}</option>'
+        f'<option value="agent:{a["id"]}">{escape_html(a.get("display_name") or a["id"])}</option>'
         for a in agents
         if a.get("is_active")
     )
     scope_options = (
-        f'<option value="{user_scope}">{user_scope}</option>\n'
-        f"{workspace_scope_opts}\n"
-        f"{agent_scope_opts}"
+        f'<optgroup label="You"><option value="{user_scope}">Just me (personal)</option></optgroup>\n'
+        f'<optgroup label="Workspaces">{workspace_scope_opts}</optgroup>\n'
+        f'<optgroup label="Agents (private to one agent)">{agent_scope_opts}</optgroup>\n'
     )
 
     # Who can use each credential, for admins: the grants are theirs to manage.
@@ -125,6 +125,11 @@ def credentials_page(request: Request, session: dict = Depends(require_auth)):
             ).fetchall():
                 service_counts[r["credential_id"]] = r["n"]
 
+    from app.services.credential_consumer_service import can_read_reference
+
+    active_agents = [a for a in agents if a.get("is_active")] if ctx.is_admin else []
+    scope_by_entry = {e["id"]: e.get("scope", "") for e in credential_entries}
+
     def used_by_cell(entry_id: str) -> str:
         names = holders.get(entry_id, [])
         chips = "".join(
@@ -133,7 +138,15 @@ def credentials_page(request: Request, session: dict = Depends(require_auth)):
         more = f"<span class='text-muted'>+{len(names) - 4} more</span> " if len(names) > 4 else ""
         n_services = service_counts.get(entry_id, 0)
         services = f"<div class='text-muted' style='font-size:0.8rem'>{n_services} service{'s' if n_services != 1 else ''}</div>" if n_services else ""
-        return f"{chips}{more}{services}" if (names or services) else "<span class='text-muted'>no one yet</span>"
+        if names or services:
+            return f"{chips}{more}{services}"
+        readers = sum(1 for a in active_agents if can_read_reference(a, scope_by_entry.get(entry_id, "")))
+        if readers:
+            return (
+                f"<span class='text-muted' title='These agents can ask for the reference with credential_get; "
+                f"only the secret itself stays hidden from them'>{readers} agent{'s' if readers != 1 else ''} can get its reference</span>"
+            )
+        return "<span class='text-muted'>no one</span>"
 
     credential_rows = ""
     for e in credential_entries:
@@ -165,7 +178,7 @@ def credentials_page(request: Request, session: dict = Depends(require_auth)):
           <td class='actions-cell'>
             {access_button}
             <button type='button' class='btn btn-sm btn-secondary' data-credential-edit="{escape_html(e["id"])}">Edit</button>
-            <button type='button' class='btn btn-sm btn-danger icon-delete-btn' data-credential-delete="{escape_html(e["id"])}" title='Delete credential' aria-label='Delete credential'>{get_icon("delete")}</button>
+            <button type='button' class='btn btn-sm btn-danger icon-delete-btn' data-credential-delete="{escape_html(e["id"])}" title='Delete credential' aria-label='Delete credential'>{get_icon("delete")} Delete</button>
           </td>
         </tr>"""
 
@@ -310,9 +323,9 @@ def credentials_page(request: Request, session: dict = Depends(require_auth)):
             <input type="text" id="credential-label" placeholder="e.g. Service token" autocomplete="off">
           </div>
           <div class="form-group">
-            <label>Scope *</label>
+            <label>Where it lives *</label>
             <select id="credential-scope" required>
-              <option value="">Select scope...</option>
+              <option value="">Select where it lives...</option>
               {scope_options}
             </select>
           </div>
@@ -346,15 +359,16 @@ def credentials_page(request: Request, session: dict = Depends(require_auth)):
             <input type="text" id="edit-credential-label" autocomplete="off">
           </div>
           <div class="form-group">
-            <label>Scope</label>
+            <label>Where it lives</label>
             <select id="edit-credential-scope" required>
               {scope_options}
             </select>
-            <p class="form-hint">Moving a credential changes who can access the stored secret. Linked bindings stay in their current scope.</p>
+            <p class="form-hint">Moving a credential changes who can access the stored secret. Linked connections stay where they are.</p>
           </div>
           <div class="form-group">
-            <label>Replace Secret Value</label>
+            <label>Secret value</label>
             <input type="password" id="edit-credential-value" autocomplete="new-password" placeholder="Leave blank to keep current value">
+            <p class="form-hint">Leave it empty to keep the saved value.</p>
           </div>
           <div class="form-group">
             <label>Expires</label>

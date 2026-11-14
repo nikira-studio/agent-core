@@ -1,5 +1,7 @@
 # Local credential helper
 
+> **When to use it.** Only for a tool you run yourself that needs a secret in its own environment and cannot go through a service connection. Prefer a [service connection](how-it-works.md) (Agent Core makes the call) or, for a container or service of your own, a [credential consumer](credential-consumers.md).
+
 > **Names.** This page, the dashboard (Settings → Security) and the Health strip all say *local credential helper*. The program is `runner/agent_core_broker.py`, and the environment variables, API paths and audit action names keep the word "broker" (for example `AGENT_CORE_BROKER_TOKEN_FILE` and `/api/dashboard/broker/rotate`), so searching for them still works.
 
 Agent Core stores secrets encrypted on disk. When an agent needs one, it doesn't get the actual value; it gets a placeholder reference like `AC_SECRET_SERVICE_TOKEN_1A2B3C4D`. The **Local credential helper** turns that placeholder into the real thing at runtime, injecting it directly into a tool or script without the model ever seeing it.
@@ -27,7 +29,7 @@ Here's the full flow from storage to execution:
 
 > **Important:** The `agent_id` the helper uses for permission checks comes from your integration configuration, not from the model. The model should never be able to specify which agent identity resolves a secret.
 
-This helper path is for local tools and scripts that need a secret in their own environment. If you want Agent Core itself to run the external action, use the **Services** page and a service binding instead of the helper.
+This helper path is for local tools and scripts that need a secret in their own environment. If you want Agent Core itself to run the external action, use the **Services** page and a service connection instead of the helper.
 
 You can edit credentials from the Credentials page. Metadata changes do not alter the encrypted secret. The secret is replaced only when you enter a new replacement value.
 

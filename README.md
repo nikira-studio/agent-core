@@ -12,8 +12,8 @@ Most installations need only shared memory at first. Add the next layer when a r
 
 1. [Install Agent Core](#get-running-in-minutes), create an agent, and connect it with MCP.
 2. [Write and recall shared memory](#memory-that-persists-across-sessions). This is the default reason to use Agent Core.
-3. Add [encrypted credentials and the local credential helper](docs/credential-broker.md) when a local tool needs a secret without putting it in a prompt.
-4. Add [service bindings](docs/integrations.md#services-agent-core-runs-actions-directly) when Agent Core should call an external service itself.
+3. Add encrypted credentials, used through service connections, [credential consumers](docs/credential-consumers.md) or, for a local tool, the [local credential helper](docs/credential-broker.md).
+4. Add [service connections](docs/integrations.md#services-agent-core-runs-actions-directly) when Agent Core should call an external service itself.
 5. Use activities, workspaces, webhooks, backups, and administration when your work needs them.
 
 You do not need to configure every capability before your first agent can use memory.
@@ -65,7 +65,7 @@ A fresh install gives you a local control layer that agents can actually use:
 
 Agent Core is a local HTTP server. It speaks REST and MCP (Model Context Protocol), so anything that can make an HTTP request can talk to it. Agents authenticate with an API key and use tools like `memory_search`, `memory_write`, `credential_get`, and the service discovery/execution tools.
 
-Memory, credentials, and configuration all live on your disk. Outbound traffic happens when an agent runs a service action, when scheduled maintenance tests a service binding to verify a memory anchored to it, when you browse the public service directory for service imports, and when you register outbound webhooks. Nothing else leaves the host.
+Memory, credentials, and configuration all live on your disk. Outbound traffic happens when an agent runs a service action, when scheduled maintenance tests a service connection to verify a memory anchored to it, when you browse the public service directory for service imports, and when you register outbound webhooks. Nothing else leaves the host.
 
 For the full picture, read **[How it works](docs/how-it-works.md)**: how memory is modelled, what keeps the corpus honest, how services and credentials fit together, and the reasoning behind each.
 
@@ -90,7 +90,7 @@ For the full picture, read **[How it works](docs/how-it-works.md)**: how memory 
 
 ## What it looks like
 
-The dashboard gives you a central view of your connected agents, active memory, stored credentials, and service bindings. After setup, it's the quickest way to confirm the service is running and your agents have what they need.
+The dashboard gives you a central view of your connected agents, active memory, stored credentials, and service connections. After setup, it's the quickest way to confirm the service is running and your agents have what they need.
 
 ![Agent Core overview](docs/images/agent-overview.png)
 
@@ -112,11 +112,9 @@ Memory is scoped. Agents only see what they're allowed to: their own private age
 
 Memory records are one of two kinds, and the difference decides what the system can do with them. A **fact** is settled by checking: someone could verify it against the code, a host, or a service. A **decision** is settled by someone deciding, and nothing can verify it. That split is what lets Agent Core re-check facts on a schedule while leaving your decisions alone.
 
-Facts can name what would confirm them (`repo:<path>`, `host:<name>`, `service:<binding>`), and the maintenance sweep checks them, recording what it found. Search results say how long it has been since anyone confirmed a record, so an agent can tell a fact verified today from one nobody has checked in months. Unconfirmed, non-human facts receive a small ranking penalty until someone confirms them with evidence. Ranking follows the same principle: observed provenance, recall, and usefulness rather than a score the author gave itself.
+Facts can name what would confirm them (`repo:<path>` or `service:<binding>`; a `host:<name>` is a label that only a binding an operator mapped can check), and the maintenance sweep checks the ones it can, recording what it found. Search results say how long it has been since anyone confirmed a record, so an agent can tell a fact verified today from one nobody has checked in months. Unconfirmed, non-human facts receive a small ranking penalty until someone confirms them with evidence. Ranking follows the same principle: observed provenance, recall, and usefulness rather than a score the author gave itself.
 
-A few records can be **pinned** as standing context, the rules that apply whatever the task is. Those are loaded at the start of a session rather than retrieved, because a constraint that has to win a search can be missed. The list is capped so it stays short enough to actually read.
-
-There is also a **clean-up review** in the dashboard. Rules look for records that no longer earn their place and propose them: one-off job logs, repeats, unconfirmed inferred facts, and claims whose subject has vanished. The configured maintenance run fills the queue within operator-set caps, and **Check for more** runs the same scan on demand. Nothing is applied until you answer, retracting is reversible, and each kind of suggestion keeps a record of how often you agreed with it.
+Plain noise retracts itself: per-occurrence logs, ticket-closeout narration, duplicates, and facts whose anchor has been gone for two checks an hour apart. A retraction is soft (restorable for the retention period) and audited, and nothing is left for a person to review.
 
 > Without semantic search configured, exact keywords matter more than fuzzy phrasing. `memory_search("authentication")` won't match a record that says "login logic", so use terms that match what was actually written. See [Requirements](#requirements) for how to enable semantic search.
 
@@ -126,18 +124,19 @@ Keyword search ranks matches by text relevance alongside confirmation and useful
 
 ### Credentials and services
 
-The **Credentials** page holds stored credentials and the **Services** page holds service bindings. This is the capability layer: agents do not route through a scheduler or OS. They connect to a service catalog and call the capabilities they need, whether that capability came from an imported OpenAPI spec, a native MCP server, an installed adapter, or the built-in Generic HTTP fallback.
+The **Credentials** page holds stored credentials and the **Services** page holds service connections. This is the capability layer: agents do not route through a scheduler or OS. They connect to a service catalog and call the capabilities they need, whether that capability came from an imported OpenAPI spec, a native MCP server, an installed adapter, or the built-in Generic HTTP fallback.
 
-A credential is the encrypted secret itself: a GitHub PAT, API key, URL, password, or other value. A service binding is how Agent Core uses one stored credential with a service such as an imported OpenAPI API, a native MCP server registration, an installed adapter, or the built-in Generic HTTP escape hatch.
+A credential is the encrypted secret itself: a GitHub PAT, API key, URL, password, or other value. A service connection is how Agent Core uses one stored credential with a service such as an imported OpenAPI API, a native MCP server registration, an installed adapter, or the built-in Generic HTTP escape hatch.
 
-Agent Core can also connect to trusted internal services on your own network without weakening global URL checks. See [Configuration](docs/configuration.md) for details on `AGENT_CORE_ALLOWED_INTERNAL_HOSTS` and binding overrides.
+Agent Core can also connect to trusted internal services on your own network without weakening global URL checks. See [Configuration](docs/configuration.md) for details on `AGENT_CORE_ALLOWED_INTERNAL_HOSTS` and connection overrides.
 
 You store a credential entry in Agent Core once. You can edit its name, label, and type later. If you leave the replacement secret field blank while editing, Agent Core keeps the existing encrypted value; if you enter a new value, it overwrites the stored secret.
 
-From there, there are two common paths:
+From there, there are three paths, most used first:
 
-- If a local tool needs a secret in its own config, Agent Core returns a reference like `AC_SECRET_GITHUB_TOKEN_1A2B3C4D`, and the local credential helper resolves it at runtime.
-- If you run an action through a service binding, Agent Core uses the stored credential server-side to call the external service and returns the result.
+- If you run an action through a service connection, Agent Core uses the stored credential server-side to call the external service and returns the result. The agent never sees the secret.
+- If a service or container needs its own secrets at startup, give it a [credential consumer](docs/credential-consumers.md): an identity that can fetch only the entries granted to it.
+- If a local tool needs a secret in its own config, Agent Core returns a reference like `AC_SECRET_GITHUB_TOKEN_1A2B3C4D`, and the local credential helper resolves it at runtime. It only matters for a tool you run yourself that cannot go through a service connection.
 
 In both cases, the raw secret never appears in prompts, logs, or generated configs.
 
@@ -152,7 +151,7 @@ At runtime:  The local credential helper injects the token locally, or the conne
 
 ### Shared context across tools and people
 
-Working with a team, or switching between Claude Code and Cursor on the same project? Create a workspace and grant each agent access to it. At session startup, an agent calls `workspace_sync` to receive pinned context, assigned activities, and workspace changes since that execution's last acknowledged cursor. Targeted `memory_search` calls still fill gaps when the agent needs older context.
+Working with a team, or switching between Claude Code and Cursor on the same project? Create a workspace and grant each agent access to it. At session startup, an agent gets its session context (or calls `workspace_sync`) to receive the open work, recent results and workspace changes since that execution's last acknowledged cursor. Targeted `memory_search` calls still fill gaps when the agent needs older context.
 
 Sync is an explicit pull, not a background process. Each session has its own execution ID, even when two sessions use the same agent identity. That lets one Codex session see work recorded by another Codex session without confusing the two sessions. As a fallback, starting a new workspace activity can return a bounded `since_last_active` digest. Agent Core omits that digest when the supplied execution is already caught up through `workspace_sync`.
 
@@ -162,26 +161,25 @@ Sync is an explicit pull, not a background process. Each session has its own exe
 
 ## Activity and handoffs
 
-The activity dashboard lists active agent tasks, flags sessions that have gone stale (no heartbeat for more than the configured threshold), and surfaces pending handoffs with options to reassign. It also reports what share of workspace activities were linked to a workspace-sync execution, for both the installation lifetime and the last 30 days. When an agent finishes or stops a task, it records a structured handoff on the activity (`completed`, `next_steps`, `open_questions`, `needs_human`), and the next session's context shows it. A `needs_human` request waits on a person until someone marks it resolved, the agent that asked resolves it with `activity_handoff_resolve`, or a request that agent makes in a later session in the same workspace replaces it.
+The activity page lists what your agents are doing and have done, and what is waiting on you. A task nobody has updated for 48 hours closes itself as "ended without report".
 
 Activity tracking is self-reported. There is no automatic detection of agent work: a working agent must call `activity_update` at the start of a task and periodically as a heartbeat. Without that, nothing appears in the dashboard and no handoff is recorded.
 
 The trail is searchable, and it is the right home for "what did we do on X last month". Durable memory is for what stays true; the activity trail is for what happened. Agents that record per-task progress in memory instead get told so on write.
 
-You can assign work to an agent directly from the dashboard (**Activity → Assign Work**). The agent session discovers that work on the next pickup check:
+The session-start tools are:
 
 ```
 session_context   → one session-start block: rules, waiting work, recent results, changes
 workspace_sync    → receive new workspace context and changes for this execution
 workspace_sync_ack → acknowledge a delivered page after processing it
-activity_pickup  → check for work a human assigned to this agent in this workspace
 activity_search  → search what agents have already worked on ("what did we do on X")
 activity_list    → find what's stale or pending (for reviews and handoffs)
 attention_list   → what is waiting on a person, across the scopes you read (for coordinators)
 memory_search    → fill in any gaps with a targeted query
 ```
 
-`workspace_sync` reports what changed. `activity_pickup` claims the next task assigned to the agent, or returns `null` if nothing is waiting. Both are explicit pulls. Agents call them at session boundaries and task boundaries, not on a background schedule.
+`workspace_sync` reports what changed. It is an explicit pull: agents call it at session boundaries and task boundaries, not on a background schedule.
 
 ![Agent Core activity](docs/images/agent-activity.png)
 
@@ -199,7 +197,7 @@ cp docker-compose.example.yml docker-compose.yml
 docker compose up -d
 ```
 
-Open `http://localhost:3500`. The setup screen will walk you through creating an admin account.
+Open `http://localhost:3500`. The setup screen walks you through creating an admin account. Whoever opens the dashboard first becomes the admin, which is why the example compose file listens on this machine only (`127.0.0.1`).
 
 > `docker-compose.yml` is gitignored so your local settings (data paths, ports, custom networks) stay private. Edit it before starting if you need to change anything.
 
@@ -208,18 +206,20 @@ Open `http://localhost:3500`. The setup screen will walk you through creating an
 ```bash
 git clone https://github.com/nikira-studio/agent-core agent-core
 cd agent-core
-python3.11 -m venv .venv
+python3 -m venv .venv      # 3.11 or 3.12
 source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 cp .env.example .env
-uvicorn app.main:app --reload --port 3500
+uvicorn app.main:app --reload --port 3500   # run from the project folder, the one containing app/
 ```
 
 ---
 
 ## Connect your first agent
 
-Go to **Agents → New Agent** in the dashboard, give it a name, and copy the API key. It's shown once. Then head to the **Connect** page to get a ready-to-paste config for your specific tool.
+1. **Create a workspace.** Open **Agents → Workspaces** and create one, for example `my-project`. A workspace is the shared place where your agents keep memory and tasks.
+2. **Create an agent.** On **Agents**, click **+ Create Agent** and give it a name. Its access to your workspace is ticked for you (read and write); the defaults suit a coding assistant.
+3. **Connect it.** The dialog after you save links to the **Connect** page: pick the tool, click **Generate One-Time Key + …**, and copy the key (shown once) and the ready-to-paste config into your tool.
 
 For MCP-compatible clients (Claude Code, Cursor, Claude Desktop):
 
@@ -282,7 +282,7 @@ data/
 
 ## Requirements
 
-- Docker with Compose, **or** Python 3.11 for local development
+- Docker with Compose, **or** Python 3.11 or 3.12 for local development
 - SQLite with FTS5 (standard in the Docker image and most Python 3.11 builds)
 - Optional: [Ollama](https://ollama.com) for semantic (AI-powered) memory search. Without it, Agent Core falls back to full-text search. Configure the endpoint and model from **Settings → Memory → Search by meaning** in the dashboard after setup
 

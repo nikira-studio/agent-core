@@ -76,30 +76,9 @@ class HttpEngine(BaseConnector):
             self.spec = raw
         self.needs_session = "session" in self.spec or "refresh" in self.spec
 
-    def test_connection(
-        self, credential: Credential, config_json: Optional[str]
-    ) -> dict:
-        requests = self.spec.get("requests") or {}
-        if not isinstance(requests, dict) or not requests:
-            return {"success": False, "error": "No requests defined for this adapter"}
+    UNTESTABLE_NOTE = "This service has no read-only action to try. It is checked when it is next used."
 
-        preferred_actions = (
-            self.spec.get("test_action"),
-            "get_session_stats",
-            "healthcheck",
-            "test_connection",
-            "ping",
-        )
-        action = next((name for name in preferred_actions if name in requests), None)
-        if not action:
-            return {"success": False, "error": "No safe connection test action defined"}
-
-        if action in (self.ct.get("disabled_actions") or []):
-            return {
-                "success": False,
-                "error": "Connection test action is disabled",
-                "error_code": "DISABLED_ACTION",
-            }
+    def _is_read_only(self, action: str, requests: dict) -> bool:
         meta = next(
             (
                 item
@@ -109,22 +88,66 @@ class HttpEngine(BaseConnector):
             {},
         )
         side_effect = meta.get("side_effect")
-        method = requests[action].get("method", "GET").upper()
-        if side_effect not in ("none", "read") and not (
-            side_effect is None and method in ("GET", "HEAD", "OPTIONS")
-        ):
-            return {
-                "success": False,
-                "error": "Connection test action must be read-only",
-            }
+        method = str(requests[action].get("method", "GET")).upper()
+        if side_effect in ("none", "read"):
+            return True
+        return side_effect is None and method in ("GET", "HEAD", "OPTIONS")
+
+    def pick_test_action(self, defaults: dict) -> Optional[str]:
+        """The action a connection test may run, or None when there is none that is safe to try.
+
+        In order: the adapter's own ``test_action``, then the conventional names (get_session_stats, healthcheck,
+        test_connection, ping), then any other action. Whichever comes up must be read-only, enabled, and need
+        no input the connection cannot supply (its default_params); one that needs a value we do not have is
+        skipped rather than called with nothing.
+        """
+        requests = self.spec.get("requests") or {}
+        disabled = set(self.ct.get("disabled_actions") or [])
+        declared = [
+            item.get("name")
+            for item in self.ct.get("supported_actions") or []
+            if isinstance(item, dict) and item.get("name")
+        ]
+        ordered = [
+            self.spec.get("test_action"),
+            "get_session_stats",
+            "healthcheck",
+            "test_connection",
+            "ping",
+            *declared,
+            *requests,
+        ]
+        seen = set()
+        for name in ordered:
+            if not name or name in seen:
+                continue
+            seen.add(name)
+            if name not in requests or name in disabled or not self._is_read_only(name, requests):
+                continue
+            if validate_action_params(self.ct, name, defaults):
+                continue  # needs input this connection does not have
+            return name
+        return None
+
+    def test_connection(
+        self, credential: Credential, config_json: Optional[str]
+    ) -> dict:
+        requests = self.spec.get("requests") or {}
+        if not isinstance(requests, dict) or not requests:
+            return {"success": False, "error": "No requests defined for this adapter"}
 
         config = parse_json_object(config_json)
         defaults = config.get("default_params", {})
-        param_error = validate_action_params(
-            self.ct, action, defaults if isinstance(defaults, dict) else {}
-        )
-        if param_error:
-            return param_error
+        defaults = defaults if isinstance(defaults, dict) else {}
+        action = self.pick_test_action(defaults)
+        if not action:
+            # Not a failure: nothing safe to try. The connection is checked when it is next used.
+            return {
+                "success": False,
+                "untestable": True,
+                "error_code": "NOT_TESTABLE",
+                "note": self.UNTESTABLE_NOTE,
+            }
 
         try:
             session = None

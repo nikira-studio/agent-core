@@ -10,6 +10,15 @@ from tests.conftest import csrf_headers
 SCOPE = "workspace:ctx-test"
 
 
+
+def _hand_to(activity_id, agent_id):
+    """Make a task another agent's, as a handoff leaves it (reassigning through the product was removed)."""
+    from app.database import get_db
+
+    with get_db() as conn:
+        conn.execute("UPDATE agent_activity SET assigned_agent_id = ? WHERE id = ?", (agent_id, activity_id))
+        conn.commit()
+
 def _setup(admin_token, roots=None):
     with get_db() as conn:
         owner_id = conn.execute("SELECT id FROM users LIMIT 1").fetchone()["id"]
@@ -37,7 +46,6 @@ def _context(client, headers, **body):
 def test_context_carries_rules_work_changes_and_index(test_client, admin_token):
     headers = _setup(admin_token)
     rule, _ = memory_service.write_memory("Never edit vendored code.", "decision", SCOPE, topic="rules")
-    memory_service.set_pinned(rule["id"], True)
     decision, _ = memory_service.write_memory("Prefer SQLite for local state.", "decision", SCOPE, topic="storage")
     fact, _ = memory_service.write_memory("The API listens on 3500.", "fact", SCOPE, topic="ports")
     done = activity_service.create_activity(
@@ -49,14 +57,14 @@ def test_context_carries_rules_work_changes_and_index(test_client, admin_token):
         agent_id="other-agent", user_id="u", task_description="Review the migration",
         memory_scope=SCOPE,
     )
-    activity_service.reassign_activity(handed["id"], "ctx-agent")
+    _hand_to(handed["id"], "ctx-agent")
 
     data = _context(test_client, headers, memory_scope=SCOPE, host_session_ref="s-1")
     text = data["context"]
 
     assert data["memory_scope"] == SCOPE and data["resolved_by"] == "requested"
     assert f"execution_id: {data['execution_id']}" in text
-    assert "Never edit vendored code." in text  # pinned, in full
+    assert rule["id"] in text  # a decision is in the index of key records
     assert handed["id"] in text and "(from other-agent)" in text
     assert "Ship the importer" in text and "Importer shipped; next: docs." in text
     assert decision["id"] in text and fact["id"] in text
@@ -142,16 +150,13 @@ def test_scope_the_agent_cannot_read_is_denied(test_client, admin_token):
     assert response.status_code == 403
 
 
-def test_budget_drops_whole_items_and_keeps_pinned_rules(test_client, admin_token):
+def test_budget_drops_whole_items_and_stays_within_it(test_client, admin_token):
     headers = _setup(admin_token)
-    rule, _ = memory_service.write_memory("Pinned rule survives.", "decision", SCOPE, topic="rule")
-    memory_service.set_pinned(rule["id"], True)
     for index in range(40):
         memory_service.write_memory(f"Decision {index}: " + "detail " * 40, "decision", SCOPE, topic=f"d{index}")
     data = _context(test_client, headers, memory_scope=SCOPE, max_chars=2500)
     assert len(data["context"]) <= 2500
     assert data["reductions"] > 0
-    assert "Pinned rule survives." in data["context"]
     shown = [line for line in data["context"].splitlines() if line.startswith("- ") and " · d" in line]
     assert 0 < len(shown) < 40
     assert all(not line.endswith("detail") for line in shown)  # lines end whole or with an ellipsis
@@ -327,7 +332,8 @@ def test_handoff_is_recorded_and_shown_to_the_next_session(test_client, admin_to
     assert "Waiting on you" not in test_client.get("/activity").text
     test_client.cookies.clear()
     text = _context(test_client, headers, memory_scope=SCOPE, host_session_ref="s-3")["context"]
-    assert "Approve the vendor contract." not in text
+    assert "## Waiting on a person" not in text  # no longer waiting ...
+    assert "asked: Approve the vendor contract." in text and "resolved" in text  # ... and the agent is told how it ended
 
 
 def test_closing_without_handoff_warns_and_bad_handoff_is_rejected(test_client, admin_token):
@@ -400,15 +406,14 @@ def test_activity_and_audit_pagination_escape_query_values(test_client, admin_to
     assert "<img src=x" not in activity and "<img src=x" not in audit
 
 
-def test_many_pinned_rules_cannot_push_out_waiting_work(test_client, admin_token):
+def test_many_long_records_cannot_push_out_waiting_work(test_client, admin_token):
     headers = _setup(admin_token)
-    for index in range(10):  # the default pinned limit
-        rule, _ = memory_service.write_memory(f"Rule {index}: " + "always " * 300, "decision", SCOPE, topic=f"r{index}")
-        memory_service.set_pinned(rule["id"], True)
+    for index in range(10):
+        memory_service.write_memory(f"Rule {index}: " + "always " * 300, "decision", SCOPE, topic=f"r{index}")
     handed = activity_service.create_activity(
         agent_id="other-agent", user_id="u", task_description="Finish the migration", memory_scope=SCOPE,
     )
-    activity_service.reassign_activity(handed["id"], "ctx-agent")
+    _hand_to(handed["id"], "ctx-agent")
     text = _context(test_client, headers, memory_scope=SCOPE, max_chars=2000)["context"]
     assert len(text) <= 2000
     assert "Finish the migration" in text

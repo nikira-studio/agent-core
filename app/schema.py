@@ -169,7 +169,8 @@ CREATE TABLE IF NOT EXISTS credential_requests (
     credential_id TEXT,
     created_at TEXT NOT NULL,
     resolved_at TEXT,
-    resolved_by TEXT
+    resolved_by TEXT,
+    activity_id TEXT
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_credential_requests_pending
 ON credential_requests(scope, name) WHERE status = 'pending';
@@ -311,8 +312,6 @@ CREATE TABLE IF NOT EXISTS system_settings (
 
 -- Insert initial system settings
 INSERT OR IGNORE INTO system_settings (key, value) VALUES ('scratchpad_retention_days', '7');
-INSERT OR IGNORE INTO system_settings (key, value) VALUES ('solo_mode_enabled', 'true');
-INSERT OR IGNORE INTO system_settings (key, value) VALUES ('installed_version', '1.2.1');
 INSERT OR IGNORE INTO system_settings (key, value) VALUES ('vector_search_enabled', 'false');
 INSERT OR IGNORE INTO system_settings (key, value) VALUES ('vector_provider', 'ollama');
 INSERT OR IGNORE INTO system_settings (key, value) VALUES ('vector_model', 'nomic-embed-text');
@@ -571,6 +570,10 @@ def _apply_schema_migrations(conn) -> None:
         (21, "agent-inherit-user-bindings", _migrate_021_inherit_user_bindings),
         (22, "private-address-policy", _migrate_022_private_address_policy),
         (23, "builtin-service-description", _migrate_023_builtin_service_description),
+        (24, "credential-request-activity", _migrate_024_credential_request_activity),
+        (25, "memory-cleanup-queue-removed", _migrate_025_memory_cleanup_queue_removed),
+        (26, "drop-unused-settings-and-column", _migrate_026_drop_unused_settings_and_column),
+        (27, "binding-test-note", _migrate_027_binding_test_note),
     )
     applied = {
         row["revision"]
@@ -1633,6 +1636,54 @@ def _migrate_019_trusted_device_sessions(conn) -> None:
     )
     conn.execute("DROP TABLE sessions")
     conn.execute("ALTER TABLE sessions_rebuilt RENAME TO sessions")
+
+
+def _migrate_027_binding_test_note(conn) -> None:
+    """A connection check can end "can't be tested" (the service has no read-only action to try).
+
+    That is neither a pass nor a failure, so it gets its own note next to last_tested_at / last_error.
+    """
+    columns = {row["name"] for row in conn.execute("PRAGMA table_info(connector_bindings)").fetchall()}
+    if "last_test_note" not in columns:
+        conn.execute("ALTER TABLE connector_bindings ADD COLUMN last_test_note TEXT")
+
+
+def _migrate_026_drop_unused_settings_and_column(conn) -> None:
+    """Remove two settings rows and one column that nothing reads (1.3.0).
+
+    ``solo_mode_enabled`` and ``installed_version`` were seeded and never read; ``agents.can_delegate`` was
+    left behind when delegation was removed. A column that cannot be dropped (an old SQLite) is left in place.
+    """
+    conn.execute("DELETE FROM system_settings WHERE key IN ('solo_mode_enabled', 'installed_version')")
+    columns = {row["name"] for row in conn.execute("PRAGMA table_info(agents)").fetchall()}
+    if "can_delegate" in columns:
+        try:
+            conn.execute("ALTER TABLE agents DROP COLUMN can_delegate")
+        except Exception:  # pragma: no cover - SQLite older than 3.35, or the column is referenced
+            pass
+
+
+def _migrate_025_memory_cleanup_queue_removed(conn) -> None:
+    """The Memory Clean-up queue is gone (1.3.0): close what was waiting in it.
+
+    Suggestions that were still pending are marked rejected by the migration so nothing stays open;
+    the table and its history are kept. Records are not touched here: the rules that used to suggest
+    retractions now act on their own at the next maintenance run.
+    """
+    exists = conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='memory_proposals'").fetchone()
+    if exists:
+        conn.execute(
+            "UPDATE memory_proposals SET status = 'rejected', decided_at = CURRENT_TIMESTAMP, "
+            "decided_by = 'queue-removed-1.3.0' WHERE status = 'pending'"
+        )
+
+
+def _migrate_024_credential_request_activity(conn) -> None:
+    """A credential request remembers the task its agent was working on, so one request is one thing
+    for a person to answer instead of a request row plus a blocked-task row."""
+    columns = {row["name"] for row in conn.execute("PRAGMA table_info(credential_requests)").fetchall()}
+    if "activity_id" not in columns:
+        conn.execute("ALTER TABLE credential_requests ADD COLUMN activity_id TEXT")
 
 
 def _migrate_023_builtin_service_description(conn) -> None:

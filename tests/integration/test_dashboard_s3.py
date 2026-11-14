@@ -43,7 +43,7 @@ class TestMemoryPage:
     def test_memory_supersession_chain_section(self, admin_client):
         r = admin_client.get("/memory")
         assert "mem-chain-content" in r.text
-        assert "Version history" in r.text
+        assert "Earlier versions" in r.text
 
 
 class TestAgentsPage:
@@ -103,7 +103,7 @@ class TestAgentsPage:
 
         create_agent("defaultagent", "Default Agent", "admin")
         r = admin_client.get("/agents")
-        assert "Default user:" in r.text
+        assert "Owner:" in r.text and "Default user" not in r.text
 
     def test_agents_table_shows_access_summary_not_dead_scope_field(self, admin_client):
         r = admin_client.get("/agents")
@@ -117,7 +117,7 @@ class TestAgentsPage:
         assert "Agent Access" in r.text
         assert "Can Read From" in r.text
         assert "Can Write To" in r.text
-        assert "Other users can use this scope" in r.text
+        assert "Shared memory: visible across all users and workspaces" in r.text
         assert "User <code>user:admin</code> (owner context)" in r.text
         assert "can read its owner's" in r.text
 
@@ -173,7 +173,7 @@ class TestAgentsPage:
         r = admin_client.get("/agents")
         assert r.status_code == 200
         assert "can-delegate" not in r.text
-        assert "Personal User Scopes" in r.text
+        assert "<h3 class='sub-heading'>Personal</h3>" in r.text and "Personal User Scopes" not in r.text
 
     def test_non_admin_can_see_shared_agents_read_only(self, user_client):
         from app.services.agent_service import create_agent
@@ -215,7 +215,7 @@ class TestUsersPage:
         r = user_client.get("/users")
         assert r.status_code == 403
         assert "Admin Access Required" in r.text
-        assert "Back to Overview" in r.text
+        assert "Back to Needs you" in r.text
         assert 'href="/users"' not in r.text
 
 
@@ -261,18 +261,6 @@ class TestActivityPage:
         assert "filter-bar" in r.text
         assert "status=" in r.text
 
-    def test_activity_reassign_modal_present(self, admin_client):
-        r = admin_client.get("/activity")
-        assert 'id="reassign-modal"' in r.text
-        assert "reassignActivity" in r.text
-
-    def test_activity_reassign_button_in_table(self, admin_client):
-        r = admin_client.get("/activity")
-        assert "Reassign" in r.text
-        assert "Handoff From" in r.text
-        assert "Coordination Snapshot" not in r.text
-        assert "Execution-linked" not in r.text
-
     def test_activity_page_uses_compact_task_first_layout(self, admin_client):
         r = admin_client.get("/activity")
         assert r.status_code == 200
@@ -280,12 +268,6 @@ class TestActivityPage:
         assert '<th class="activity-id-cell">ID</th>' not in r.text
         assert "activity-updated-cell" in r.text
         assert 'No tasks yet.' in r.text
-
-    def test_activity_create_sends_assigned_agent_id(self, admin_client):
-        r = admin_client.get("/activity")
-        assert "assigned_agent_id: agentId" in r.text
-        assert "<label>Workspace</label>" in r.text
-        assert "Agent private scope" in r.text
 
     def test_activity_page_has_no_coordination_snapshot(self, admin_client):
         r = admin_client.get("/activity")
@@ -299,17 +281,25 @@ class TestActivityPage:
         assert "Save Memory" in r.text
         assert "Search uses scope permissions first" not in r.text
 
+    def test_retracted_memory_view_has_no_header_actions(self, admin_client):
+        import re
+
+        def actions(html):
+            return re.search(r'<div class="page-actions">(.*?)</div>', html, re.S).group(1)
+
+        active = actions(admin_client.get("/memory").text)
+        assert "+ Save Memory" in active and "Search" in active
+        assert actions(admin_client.get("/memory?show=retracted").text).strip() == ""
+
     def test_memory_page_clarifies_scope_and_confidence(self, admin_client):
         r = admin_client.get("/memory")
-        assert "Personal user memory" in r.text
-        assert "Personal user memory (user:admin)" in r.text
+        assert "Just me (personal)" in r.text
+        assert "Personal user memory (user:admin)" not in r.text  # names, not raw scope strings
         assert "{user_scope" not in r.text
         assert "{user_scope_label" not in r.text
         assert "mem-search-topic" in r.text
-        assert "mem-min-confidence" in r.text
+        assert "mem-min-confidence" not in r.text and "mem-confidence" not in r.text  # confidence is gone from the UI
         assert "Use these only when you want to narrow the result set" in r.text
-        # The list shows operational state now; confidence is caller-assigned
-        # and ignored by ranking, so it stays a search filter, not a column.
         assert "<th>State</th>" in r.text
 
     def test_memory_page_only_offers_workflow_backed_classes(self, admin_client):
@@ -323,10 +313,9 @@ class TestActivityPage:
         assert 'value="belief"' not in r.text
         assert "Fact is the safe default" in r.text
 
-    def test_activity_reassign_uses_recovery_endpoint(self, admin_client):
+    def test_activity_page_has_no_assign_or_reassign_controls(self, admin_client):
         r = admin_client.get("/activity")
-        assert "/api/activity/' + id + '/recovery" in r.text
-        assert "action: 'reassign_to_agent'" in r.text
+        assert "Reassign" not in r.text and "Assign a task" not in r.text and "reassign_to_agent" not in r.text
 
 
 class TestAuditPage:
@@ -441,9 +430,9 @@ class TestMemoryDetailModal:
         r = admin_client.get("/memory")
         assert "mem-detail-scope" in r.text
 
-    def test_memory_detail_shows_confidence(self, admin_client):
+    def test_memory_detail_no_longer_shows_confidence(self, admin_client):
         r = admin_client.get("/memory")
-        assert "mem-detail-confidence" in r.text
+        assert "mem-detail-confidence" not in r.text
 
     def test_memory_detail_shows_supersession_info(self, admin_client):
         r = admin_client.get("/memory")

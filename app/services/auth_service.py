@@ -679,6 +679,49 @@ def list_operator_tokens(user_id: str) -> list[dict]:
     return [dict(r) for r in rows if parse_utc_datetime(r["expires_at"]) > now]
 
 
+OPERATOR_TOKEN_KEEP_DAYS = 395  # the audit window (13 months): an old token row is only history after that
+
+
+def prune_sign_ins(*, inactivity_minutes: Optional[int] = None) -> dict:
+    """Housekeeping for rows that only pile up: dead sessions and spent operator tokens.
+
+    A session past its expiry, or idle longer than the inactivity limit, can never authenticate again (it
+    would be deleted on its next use), so it is deleted now; so is a half-finished sign-in past its expiry.
+    An operator token past its expiry is marked revoked, dated at its expiry, so every list shows it the same
+    way as one a person revoked; a row older than the audit window is deleted. Returns counts.
+    """
+    from app.config import settings
+
+    idle = settings.INACTIVITY_TIMEOUT_MINUTES if inactivity_minutes is None else inactivity_minutes
+    now = utc_now()
+    idle_cutoff = now - timedelta(minutes=idle)
+    with get_db() as conn:
+        dead = []
+        for row in conn.execute("SELECT id, expires_at, last_activity, channel FROM sessions").fetchall():
+            try:
+                expired = parse_utc_datetime(row["expires_at"]) < now
+                idle_out = row["channel"] == "dashboard" and parse_utc_datetime(row["last_activity"]) < idle_cutoff
+            except (TypeError, ValueError):
+                expired, idle_out = True, False  # an unreadable date can never authenticate
+            if expired or idle_out:
+                dead.append(row["id"])
+        for offset in range(0, len(dead), 500):
+            chunk = dead[offset : offset + 500]
+            conn.execute(f"DELETE FROM sessions WHERE id IN ({','.join('?' for _ in chunk)})", chunk)
+
+        closed = 0
+        for row in conn.execute("SELECT id, expires_at FROM operator_tokens WHERE revoked_at IS NULL").fetchall():
+            if parse_utc_datetime(row["expires_at"]) < now:
+                conn.execute("UPDATE operator_tokens SET revoked_at = ? WHERE id = ?", (row["expires_at"], row["id"]))
+                closed += 1
+        old_cutoff = (now - timedelta(days=OPERATOR_TOKEN_KEEP_DAYS)).isoformat()
+        removed = conn.execute(
+            "DELETE FROM operator_tokens WHERE expires_at < ? AND revoked_at IS NOT NULL", (old_cutoff,)
+        ).rowcount
+        conn.commit()
+    return {"sessions_pruned": len(dead), "operator_tokens_closed": closed, "operator_tokens_pruned": removed or 0}
+
+
 def revoke_operator_token(user_id: str, token_id: str) -> bool:
     with get_db() as conn:
         cursor = conn.execute(

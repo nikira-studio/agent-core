@@ -168,27 +168,27 @@ async def dashboard_search(
             break
 
     binding_hits: list[dict] = []
-    for binding in visible_bindings:
+    for connection in visible_bindings:
         if not _query_in_values(
             query,
-            binding.get("name", ""),
-            binding.get("scope", ""),
-            binding.get("connector_display_name", ""),
-            binding.get("connector_type_id", ""),
-            binding.get("last_error", ""),
-            binding.get("config_json", ""),
+            connection.get("name", ""),
+            connection.get("scope", ""),
+            connection.get("connector_display_name", ""),
+            connection.get("connector_type_id", ""),
+            connection.get("last_error", ""),
+            connection.get("config_json", ""),
         ):
             continue
         binding_hits.append(
             _search_result(
                 "binding",
-                binding.get("name", "")[:120],
+                connection.get("name", "")[:120],
                 " · ".join(
                     part
                     for part in [
-                        binding.get("connector_display_name", ""),
-                        binding.get("scope", ""),
-                        "enabled" if binding.get("enabled") else "disabled",
+                        connection.get("connector_display_name", ""),
+                        connection.get("scope", ""),
+                        "enabled" if connection.get("enabled") else "disabled",
                     ]
                     if part
                 ),
@@ -216,73 +216,184 @@ async def dashboard_search(
     )
 
 
-def _waiting_rows(session: dict, is_admin: bool) -> list[tuple[str, str, str]]:
-    """What is waiting on this person: (what it is, the text, where to deal with it).
+def _ago(value) -> str:
+    """How long ago, in words a person reads: "just now", "3 hours ago", "2 days ago"."""
+    from app.time_utils import parse_utc_datetime, utc_now
+
+    try:
+        seconds = (utc_now() - parse_utc_datetime(value)).total_seconds()
+    except Exception:
+        return ""
+    if seconds < 90:
+        return "just now"
+    for size, unit in ((86400, "day"), (3600, "hour"), (60, "minute")):
+        if seconds >= size:
+            n = int(seconds // size)
+            return f"{n} {unit}{'' if n == 1 else 's'} ago"
+    return ""
+
+
+GETTING_STARTED_HIDDEN_KEY = "getting_started_hidden:{user_id}"
+
+
+def getting_started_hidden(user_id: str) -> bool:
+    from app.services import system_settings_service
+
+    return system_settings_service.read_string(GETTING_STARTED_HIDDEN_KEY.format(user_id=user_id), "") == "1"
+
+
+def _getting_started_html(session, is_admin, agent_count, recent_activity, otp_item) -> tuple[str, str]:
+    """The getting-started list as (open card, quiet line).
+
+    While a required step (workspace, agent, connect its tool, watch it work) is undone it is an open card, below
+    anything waiting on a person. Once those are done it shrinks to one quiet line at the bottom that opens the list
+    (a person can hide it for good; Settings > Account brings it back). When every step is done it is gone."""
+    if not is_admin:
+        return "", ""
+    from app.services import connector_service, workspace_service
+
+    has_workspace = bool(workspace_service.list_workspaces())
+    has_activity = bool(recent_activity)
+    has_service = bool(connector_service.list_bindings(enabled=True))  # at least one enabled connection exists
+    required = [
+        ("Create a workspace", "/workspaces", has_workspace, "The shared place where your agents keep memory and tasks."),
+        ("Add an agent", "/agents", agent_count > 0, "An agent is one AI tool's identity; it is set up to work in your workspace."),
+        ("Connect its tool", "/integrations", has_activity, "Copy the key and settings into the tool."),
+        ("Watch it work", "/activity", has_activity, "Its tasks and handoffs appear here."),
+    ]
+    optional = [
+        ("Give it a service", "/connectors", has_service, "Optional: let it act in an outside system, such as GitHub."),
+    ]
+    two_step_done = not otp_item
+    optional_left = len([1 for _, _, done, _ in optional if not done]) + (0 if two_step_done else 1)
+    required_left = [1 for _, _, done, _ in required if not done]
+
+    def items(rows):
+        out = []
+        for label, href, done, note in rows:
+            style = " style='opacity:.6'" if done else ""
+            out.append(f"<li{style}><a href='{href}'>{label}</a> <span class='text-muted'>{note}</span></li>")
+        return "".join(out)
+
+    if required_left:
+        return (
+            '<div class="card" id="overview-getting-started"><h2>Getting started</h2><ol>'
+            + items(required) + items(optional) + otp_item + "</ol></div>",
+            "",
+        )
+    if not optional_left or getting_started_hidden(session["user_id"]):
+        return "", ""
+    label = f"Getting started: set up \u00b7 {optional_left} optional step{'' if optional_left == 1 else 's'} left"
+    return (
+        "",
+        '<details class="getting-started-fold" id="overview-getting-started"><summary>' + label + "</summary>"
+        "<ol>" + items(required) + items(optional) + otp_item + "</ol>"
+        "<p><button type='button' class='btn btn-sm btn-secondary' data-hide-getting-started>Hide this</button> "
+        "<span class='form-hint'>You can bring it back in Settings, under Account.</span></p></details>",
+    )
+
+
+def _waiting_rows(session: dict, is_admin: bool) -> list[dict]:
+    """What is waiting on this person, each as a dict the page renders: what it is about, where, from whom, how long.
 
     Read from the one source Overview, Activity and `attention_list` share. An admin sees every group;
-    anyone else sees the handoffs addressed to them and their stalled tasks.
+    anyone else sees the handoffs addressed to them. A task that stopped is not listed: it closes itself.
     """
-    from app.services import waiting_service
+    from app.services import waiting_service, workspace_service
+    from app.services.agent_service import list_agents
 
-    groups = ("approvals", "handoffs", "credential_requests", "stalled_tasks") if is_admin else ("handoffs", "stalled_tasks")
+    groups = ("approvals", "handoffs", "credential_requests") if is_admin else ("handoffs",)
     waiting = waiting_service.waiting_on_person(
         scopes=None, user_id=None if is_admin else session["user_id"], include=groups, limit=5
     )
-    rows: list[tuple[str, str, str]] = []
+    agent_names = {a["id"]: (a.get("display_name") or a["id"]) for a in list_agents()}
+    workspace_names = {f"workspace:{w['id']}": (w.get("name") or w["id"]) for w in workspace_service.list_workspaces()}
+    rows: list[dict] = []
     for a in waiting["approvals"]:
-        rows.append(("Approval", f"{a['title']} (proposed by {a['proposed_by']})", f"/approvals/{a['id']}"))
+        rows.append({"kind": "Approval", "title": a["title"], "sub": f"Approval proposed by {a['proposed_by']}", "text": "", "href": f"/approvals/{a['id']}"})
     for h in waiting["handoffs"]:
-        rows.append(("Handoff", f"{h['agent_id']} asks: {(h.get('needs_human') or '')[:140]}", "/activity"))
-    for a in waiting["stalled_tasks"][:5]:
-        rows.append((str(a.get("status", "")).capitalize(), (a.get("task_description") or "")[:140], "/activity"))
+        agent = agent_names.get(h["agent_id"], h["agent_id"])
+        scope = h.get("memory_scope") or ""
+        workspace = workspace_names.get(scope) or (
+            f"{agent}'s own memory" if scope.startswith("agent:")
+            else "your own memory" if scope.startswith("user:")
+            else "its own memory" if not scope else scope.replace("workspace:", "")
+        )
+        age = _ago(h.get("asked_at") or h.get("updated_at"))
+        rows.append(
+            {
+                "kind": "Question",
+                "title": (h.get("task_description") or "A task")[:160],
+                "sub": " · ".join(p for p in (workspace, agent, f"asked {age}" if age else "") if p),
+                "text": (h.get("needs_human") or "")[:400],
+                "href": f"/activity?task={h['id']}",
+                "activity_id": h["id"],
+                "agent": agent,
+                "workspace": workspace,
+                "url": h.get("needs_human_url"),
+            }
+        )
     for r in waiting["credential_requests"]:
-        rows.append(("Credential", f"{r.get('requested_by') or 'An agent'} needs {r['name']} in {r['scope']}", "/credentials"))
-    # Memory Clean-up suggestions are optional housekeeping, not something a person is blocked on, so they
-    # are a quiet line under the list (see _memory_cleanup_line), not a row in it.
+        rows.append(
+            {
+                "kind": "Credential",
+                "title": f"{r.get('requested_by') or 'An agent'} needs {r['name']}",
+                "sub": f"Credential request · {workspace_names.get(r['scope'], r['scope'])}",
+                "text": r.get("purpose") or "",
+                "href": "/credentials",
+                "request_id": r["request_id"],
+            }
+        )
     return rows
 
 
-def _memory_cleanup_line(is_admin: bool) -> str:
-    """One quiet line about Memory Clean-up suggestions, for an admin when there are any."""
-    if not is_admin:
-        return ""
-    from app.services import memory_proposal_service
-
-    count = memory_proposal_service.pending_summary(None, 0)["count"]
-    if not count:
-        return ""
-    return (
-        '<p class="text-muted" id="overview-memory-cleanup" style="margin:12px 0 0;font-size:0.85rem">'
-        f'Memory clean-up: {count} suggestion{"s" if count != 1 else ""}. '
-        '<a href="/memory#proposal-list">Look when you have a minute</a>; nothing waits on them.</p>'
-    )
-
-
 def _health_items(is_admin: bool) -> list[tuple[str, str, str, bool]]:
-    """(label, value, where to look, is it fine) for the admin's health strip."""
+    """(label, short state, where to look, is it fine) for the live tiles of the admin's health strip."""
     from datetime import datetime, timedelta, timezone
 
     from app.branding import APP_VERSION
     from app.database import get_db
-    from app.services import broker_service, network_policy_service
+    from app.services import broker_service
 
     cutoff = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
     with get_db() as conn:
         failing = conn.execute(
             "SELECT COUNT(*) FROM connector_bindings WHERE enabled = 1 AND COALESCE(last_error, '') != ''"
         ).fetchone()[0]
+        total_bindings = conn.execute("SELECT COUNT(*) FROM connector_bindings WHERE enabled = 1").fetchone()[0]
+        checked = conn.execute(
+            "SELECT COUNT(*) FROM connector_bindings WHERE enabled = 1 AND last_tested_at IS NOT NULL"
+        ).fetchone()[0]
         dead = conn.execute(
             "SELECT COUNT(*) FROM webhook_delivery_log WHERE status = 'dead' AND COALESCE(last_attempt_at, created_at) >= ?",
             (cutoff,),
         ).fetchone()[0]
     broker = broker_service.get_broker_credential_hash() is not None
+    # "All working" is a claim about checks: every enabled connection's last check passed (or could not be run), and
+    # at least one has been checked. A connection whose check failed is "failing".
+    if not total_bindings:
+        services_value = "none set up"
+    elif failing:
+        services_value = f"{failing} failing"
+    elif not checked:
+        services_value = "not checked yet"
+    elif checked < total_bindings:
+        services_value = f"{checked} of {total_bindings} checked, none failing"
+    else:
+        services_value = "all working"
     return [
         ("Agent Core", f"version {APP_VERSION}, running", "", True),
-        ("Services", "all working" if not failing else f"{failing} failing", "/connectors", not failing),
+        ("Services", services_value, "/connectors", not failing),
         ("Webhooks", "no failures in 24 hours" if not dead else f"{dead} failed in 24 hours", "/webhooks", not dead),
-        ("Local credential helper", "ready" if broker else "not set up", "/settings", broker),
-        *[(label, value, "/settings#security", fine) for label, value, fine in network_policy_service.health_lines()],
+        ("Local credential helper", "ready" if broker else "not set up", "/settings#security", broker),
     ]
+
+
+def _limit_items() -> list[tuple[str, str, str, bool]]:
+    """The two limits the owner has chosen, shown quieter than the live tiles."""
+    from app.services import network_policy_service
+
+    return network_policy_service.health_lines()
 
 
 @router.get("/")
@@ -306,51 +417,93 @@ def dashboard_home(request: Request, session: dict = Depends(require_auth)):
 
     waiting = _waiting_rows(session, is_admin)
     if waiting:
+        from urllib.parse import urlparse
+
+        def action_cell(row):
+            if row.get("request_id"):  # a credential request is answered right here: type the value, Save
+                rid = escape_html(row["request_id"])
+                return (
+                    f"<form class='inline-answer' data-credential-request='{rid}'>"
+                    "<input type='password' autocomplete='new-password' required placeholder='Value' aria-label='Credential value'> "
+                    "<button class='btn btn-sm' type='submit'>Save</button></form>"
+                )
+            if row["kind"] == "Approval":
+                return f"<a class='btn btn-sm' href='{escape_html(row['href'])}'>Review</a>"
+            aid = escape_html(row["activity_id"])
+            agent, workspace = escape_html(row["agent"]), escape_html(row["workspace"])
+            url = row.get("url")
+            form = (
+                f"<form class='inline-answer' data-handoff-answer='{aid}'>"
+                "<input type='text' maxlength='1000' placeholder='Your answer (optional)' aria-label='Your answer'> "
+                "<button class='btn btn-sm btn-secondary' type='submit' data-empty-label='Mark as dealt with' data-typed-label='Send answer'>Mark as dealt with</button></form>"
+            )
+            if url:
+                host = escape_html(urlparse(url).hostname or url)
+                return (
+                    f"<a class='btn' href='{escape_html(url)}' target='_blank' rel='noopener noreferrer'>Open in {host}</a>"
+                    f"<div class='form-hint' style='margin:8px 0 4px'>Or tell {agent} here:</div>{form}"
+                    f"<p class='form-hint' style='margin:4px 0 0'>This tells {agent}; it does not carry it out over there. "
+                    f"{agent} sees it the next time it works in {workspace}, and this closes.</p>"
+                )
+            return (
+                form
+                + f"<p class='form-hint' style='margin:4px 0 0'>Your answer goes to {agent} the next time it works in {workspace}, and this closes.</p>"
+            )
+
         waiting_body = "<table><tbody>" + "".join(
-            f"<tr><td><span class='badge'>{escape_html(kind)}</span></td><td>{escape_html(text)}</td>"
-            f"<td><a href='{escape_html(href)}'>Open</a></td></tr>"
-            for kind, text, href in waiting
+            "<tr><td class='waiting-what'>"
+            f"<strong>{escape_html(row['title'])}</strong>"
+            f"<div class='text-muted' style='font-size:0.85rem'>{escape_html(row['sub'])}</div>"
+            + (f"<div style='margin-top:4px'>{escape_html(row['text'])}</div>" if row.get("text") else "")
+            + (
+                f"<div style='margin-top:4px'><a href='{escape_html(row['href'])}'>See the task and its notes</a></div>"
+                if row["kind"] == "Question"
+                else ""
+            )
+            + f"</td><td class='waiting-act'>{action_cell(row)}</td></tr>"
+            for row in waiting
         ) + "</tbody></table>"
     else:
-        waiting_body = '<p class="text-muted" style="margin:0">Nothing is waiting on you.</p>'
+        waiting_body = (
+            '<p class="text-muted" style="margin:0">Nothing needs you right now. Nothing is waiting on a person.</p>'
+            if agent_count
+            else '<p class="text-muted" style="margin:0">Nothing needs you yet. <a href="/agents">Add an agent</a> to get started.</p>'
+        )
     attention_html = f"""
     <div class="card attention-card" id="overview-waiting">
       <h2>Waiting on you</h2>
-      <p class="text-muted" style="margin-top:-6px">Decisions and requests that need a person. Each row links to where you deal with it.</p>
+      <p class="text-muted" style="margin-top:-6px">Decisions and requests that need a person. An empty list means there is nothing to do.</p>
       {waiting_body}
-      {_memory_cleanup_line(is_admin)}
     </div>"""
 
     health_html = ""
     if is_admin:
+        def tile(label, value, href, ok, quiet=False):
+            classes = "stat-card stat-tile" + (" stat-limit" if quiet else "")
+            open_tag = f"<a class='{classes} stat-link' href='{escape_html(href)}'>" if href else f"<div class='{classes}'>"
+            return (
+                open_tag
+                + f"<div class='label'>{escape_html(label)}</div>"
+                + f"<div class='tile-value{'' if ok else ' text-danger'}'>{escape_html(value)}</div>"
+                + ("</a>" if href else "</div>")
+            )
+
         health_html = (
             '<div class="card" id="overview-health"><h2>Health</h2><div class="stat-grid">'
-            + "".join(
-                (f"<a class='stat-card stat-link' href='{escape_html(href)}'>" if href else "<div class='stat-card'>")
-                + f"<div class='label'>{escape_html(label)}</div>"
-                + f"<div class='{'' if ok else 'text-danger'}'>{escape_html(value)}</div>"
-                + ("</a>" if href else "</div>")
-                for label, value, href, ok in _health_items(is_admin)
-            )
+            + "".join(tile(*item) for item in _health_items(is_admin))
+            + "</div>"
+            + '<div class="stat-group-label">Limits you set</div><div class="stat-grid stat-grid-limits">'
+            + "".join(tile(*item, quiet=True) for item in _limit_items())
             + "</div></div>"
         )
 
-    started_html = ""
-    if is_admin and (agent_count == 0 or not recent_activity):
-        steps = [
-            ("Add an agent", "/agents", agent_count > 0, "An agent is one AI tool's identity in Agent Core."),
-            ("Connect its tool", "/integrations", bool(recent_activity), "Copy the key and settings into the tool."),
-            ("Give it a service", "/connectors", False, "Optional: let it act in an outside system, such as GitHub."),
-            ("Watch it work", "/activity", bool(recent_activity), "Its tasks and handoffs appear here."),
-        ]
-        step_items = []
-        for label, href, done, note in steps:
-            style = " style='opacity:.6'" if done else ""
-            step_items.append(f"<li{style}><a href='{href}'>{label}</a> <span class='text-muted'>{note}</span></li>")
-        started_html = (
-            '<div class="card" id="overview-getting-started"><h2>Getting started</h2><ol>'
-            + "".join(step_items) + "</ol></div>"
-        )
+    from app.services.auth_service import is_otp_enrolled
+
+    otp_item = "" if (not is_admin or is_otp_enrolled(session["user_id"])) else (
+        "<li><a href='/settings/otp'>Turn on two-step sign-in</a> "
+        "<span class='text-muted'>Optional, recommended once you are set up: a code from your phone at sign-in.</span></li>"
+    )
+    started_html, started_quiet_html = _getting_started_html(session, is_admin, agent_count, recent_activity, otp_item)
 
     search_html = """
     <div class="card">
@@ -387,16 +540,16 @@ def dashboard_home(request: Request, session: dict = Depends(require_auth)):
     )
 
     return render_page(
-        "Overview",
+        "Needs you",
         f"""
     <div class="page-header">
-      <h1>Overview</h1>
+      <h1>Needs you</h1>
       <p class="text-muted" style="max-width:760px;margin-top:8px">
         {APP_NAME} gives your AI agents shared memory, a record of their work, and safe access to your services and credentials. Start with what is waiting on you.
       </p>
     </div>
-    {started_html}
     {attention_html}
+    {started_html}
     {health_html}
     {search_html}
     <div class="card">
@@ -409,7 +562,44 @@ def dashboard_home(request: Request, session: dict = Depends(require_auth)):
       </div>
       <table class="stack-phone"><thead><tr><th>Task</th><th>Status</th><th>Agent</th><th>Updated</th></tr></thead><tbody id="overview-activity-tbody">{activity_rows}</tbody></table>
     </div>
+    {started_quiet_html}
     <script>
+    document.addEventListener('click', async function(event) {{
+      var hide = event.target.closest && event.target.closest('[data-hide-getting-started]');
+      if (!hide) return;
+      var r = await apiFetch('/api/dashboard/user-settings', {{ method: 'POST', body: JSON.stringify({{ getting_started_hidden: true }}) }});
+      if (r.ok) {{ var el = document.getElementById('overview-getting-started'); if (el) el.remove(); showToast('Hidden. Settings > Account brings it back.', 'success'); }}
+    }});
+    document.addEventListener('input', function(event) {{
+      var box = event.target.closest && event.target.closest('form[data-handoff-answer] input');
+      if (!box) return;
+      var button = box.form.querySelector('button');
+      button.textContent = box.value.trim() ? button.dataset.typedLabel : button.dataset.emptyLabel;
+    }});
+    document.addEventListener('submit', async function(event) {{
+      var ask = event.target.closest && event.target.closest('form[data-handoff-answer]');
+      if (ask) {{
+        event.preventDefault();
+        var answer = ask.querySelector('input').value.trim();
+        var r = await apiFetch('/api/activity/' + encodeURIComponent(ask.dataset.handoffAnswer) + '/handoff/resolve', {{
+          method: 'POST', body: JSON.stringify(answer ? {{ answer: answer }} : {{}})
+        }});
+        if (r.ok) {{ showToast('Sent. The agent sees your answer at its next session.', 'success'); location.reload(); }}
+        else {{ showToast((r.error && r.error.message) || 'Could not send it', 'danger'); }}
+        return;
+      }}
+      var form = event.target.closest && event.target.closest('form[data-credential-request]');
+      if (!form) return;
+      event.preventDefault();
+      var requestId = form.dataset.credentialRequest;
+      var input = form.querySelector('input');
+      var j = await apiFetch('/api/credentials/requests/' + encodeURIComponent(requestId) + '/fulfill', {{
+        method: 'POST', body: JSON.stringify({{ value: input.value }})
+      }});
+      input.value = '';
+      if (j.ok) {{ showToast('Saved. The agent can use it now.', 'success'); location.reload(); }}
+      else {{ showToast((j.error && j.error.message) || 'Could not save it', 'danger'); }}
+    }});
     window.{JS_WINDOW_EVENT} = async function(event) {{
       if (!(event.type || '').startsWith('activity_')) return;
       var j = await apiFetch('/api/dashboard/activity/summary');

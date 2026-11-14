@@ -83,3 +83,19 @@ def test_prompt_is_concise_and_does_not_name_external_connector_providers():
     assert "connectors_actions_list" not in md
     assert "mcp_servers.agent_core" in md
     assert "~/.hermes/config.yaml" in md
+
+
+def test_generated_instructions_do_not_send_every_session_to_activity_pickup():
+    """Nobody assigns work to agents on most installs, so pickup returns the agent's own task at best."""
+    from app.routes.integrations_page import _build_agents_md, _build_claude_md, _build_instructions
+
+    outputs = [
+        _build_claude_md(BASE, USER, WORKSPACE, AGENT, "Assistant", "agent-core"),
+        _build_agents_md(BASE, USER, WORKSPACE, AGENT, "agent-core"),
+        _build_instructions("claude-code", BASE, USER, WORKSPACE, AGENT, "Assistant", "Alex", "agent-core"),
+    ]
+    for text in outputs:
+        for line in text.splitlines():
+            if "activity_pickup" in line:
+                assert "`memory_search`" in line, line  # only the plain list of available tools names it
+        assert "work a human assigned" not in text

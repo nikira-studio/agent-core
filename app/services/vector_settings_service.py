@@ -107,6 +107,18 @@ def save_vector_setting(key: str, value: str) -> bool:
     return True
 
 
+def api_key_saved_at() -> Optional[str]:
+    """When the stored embedding key was last saved (UTC text from the settings row), or None."""
+    from app.database import get_db
+
+    try:
+        with get_db() as conn:
+            row = conn.execute("SELECT updated_at FROM system_settings WHERE key = 'vector_api_key'").fetchone()
+    except Exception:
+        return None
+    return row["updated_at"] if row and row["updated_at"] else None
+
+
 def save_vector_api_key(api_key: str) -> bool:
     if not api_key.strip():
         return clear_vector_api_key()

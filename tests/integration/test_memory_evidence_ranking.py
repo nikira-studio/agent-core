@@ -130,33 +130,8 @@ def test_records_outside_the_returned_page_are_not_counted(test_client, agent_to
     assert counted == [shown[0]["id"]]
 
 
-def test_feedback_is_recorded(test_client, agent_token):
-    record_id = _write(test_client, agent_token, "the build server resolves at 192.0.2.10.")
-    r = test_client.post(
-        "/mcp",
-        headers={"Authorization": f"Bearer {agent_token}"},
-        json={"tool": "memory_feedback", "params": {"record_id": record_id, "helpful": True}},
-    )
-    assert r.status_code == 200, r.json()
-    assert r.json()["data"]["helpful_count"] == 1
-    assert _counts(record_id)["helpful_count"] == 1
 
 
-def test_unhelpful_records_rank_below_unrated_ones(test_client, agent_token):
-    rated = _write(test_client, agent_token, "Sorting token: the first candidate.")
-    unrated = _write(test_client, agent_token, "Sorting token: the second candidate.")
-    for _ in range(3):
-        test_client.post(
-            "/mcp",
-            headers={"Authorization": f"Bearer {agent_token}"},
-            json={
-                "tool": "memory_feedback",
-                "params": {"record_id": rated, "helpful": False},
-            },
-        )
-
-    order = [r["id"] for r in _search(test_client, agent_token, "sorting token")]
-    assert order.index(unrated) < order.index(rated)
 
 
 def test_helpful_records_rank_above_unrated_ones(test_client, agent_token):
@@ -176,30 +151,6 @@ def test_helpful_records_rank_above_unrated_ones(test_client, agent_token):
     assert order.index(helpful) < order.index(unrated)
 
 
-def test_feedback_needs_only_read_access(test_client, agent_token, admin_token):
-    """A reader who cannot rate what it was given never reaches the ranking."""
-    from app.services.memory_service import write_memory
-
-    record, _ = write_memory(
-        content="A record in a scope the agent can read but not write.",
-        memory_class="fact",
-        scope="user:admin",
-    )
-    test_client.put(
-        "/api/agents/testagent",
-        headers={"Authorization": f"Bearer {admin_token}"},
-        json={"read_scopes": ["user:admin"], "write_scopes": []},
-    )
-
-    r = test_client.post(
-        "/mcp",
-        headers={"Authorization": f"Bearer {agent_token}"},
-        json={
-            "tool": "memory_feedback",
-            "params": {"record_id": record["id"], "helpful": True},
-        },
-    )
-    assert r.status_code == 200, r.json()
 
 
 def test_confirm_requires_write_access(test_client, agent_token, admin_token):
@@ -227,7 +178,7 @@ def test_confirm_requires_write_access(test_client, agent_token, admin_token):
     assert r.status_code == 403
 
 
-def test_confirm_and_feedback_are_audited(test_client, agent_token):
+def test_confirm_is_audited(test_client, agent_token):
     record_id = _write(test_client, agent_token, "the build server resolves at 192.0.2.10.")
     test_client.post(
         "/mcp",
@@ -237,11 +188,6 @@ def test_confirm_and_feedback_are_audited(test_client, agent_token):
             "params": {"record_id": record_id, "evidence": "checked the host"},
         },
     )
-    test_client.post(
-        "/mcp",
-        headers={"Authorization": f"Bearer {agent_token}"},
-        json={"tool": "memory_feedback", "params": {"record_id": record_id, "helpful": False}},
-    )
     with get_db() as conn:
         actions = {
             row["action"]
@@ -249,4 +195,4 @@ def test_confirm_and_feedback_are_audited(test_client, agent_token):
                 "SELECT action FROM audit_log WHERE resource_id = ?", (record_id,)
             ).fetchall()
         }
-    assert {"memory_confirmed", "memory_feedback"} <= actions
+    assert "memory_confirmed" in actions

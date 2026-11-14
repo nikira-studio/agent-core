@@ -2,7 +2,7 @@
   "spec_version": "1.0",
   "id": "transmission",
   "display_name": "Transmission",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "author": "agent-core team",
   "description": "Transmission BitTorrent RPC — manage torrents and session stats. Supports session-handshake retry, per-action schemas, and destructive flags.",
   "credential_schema": {

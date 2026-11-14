@@ -51,8 +51,8 @@ def agents_page(request: Request, session: dict = Depends(require_auth)):
 
     def build_scope_list(prefix):
         h = f'<div class="scope-selectors" id="{prefix}-scopes">'
-        h += '<label class="checkbox-label" data-scope-row="shared"><input type="checkbox" data-scope="shared"> <span>Other users can use this scope</span></label>'
-        h += "<h3 class='sub-heading'>Personal User Scopes</h3>"
+        h += '<label class="checkbox-label" data-scope-row="shared"><input type="checkbox" data-scope="shared"> <span>Shared memory: visible across all users and workspaces</span></label>'
+        h += "<h3 class='sub-heading'>Personal</h3>"
         for user in selectable_users:
             user_id = user["id"]
             checked = " checked" if prefix == "ca-read" and user_id == session["user_id"] else ""
@@ -74,7 +74,7 @@ def agents_page(request: Request, session: dict = Depends(require_auth)):
             for p in all_workspaces:
                 h += f'<label class="checkbox-label" data-scope-row="workspace:{escape_html(p["id"])}"><input type="checkbox" data-scope="workspace:{escape_html(p["id"])}"> <span>{escape_html(p["name"])} <code>workspace:{escape_html(p["id"])}</code></span></label>'
         if agents:
-            h += "<h3 class='sub-heading'>Other Agent Private Scopes</h3>"
+            h += "<h3 class='sub-heading'>Private to other agents</h3>"
             for a in agents:
                 h += f'<label class="checkbox-label" data-scope-row="agent:{escape_html(a["id"])}"><input type="checkbox" data-scope="agent:{escape_html(a["id"])}"> <span>{escape_html(a["display_name"])} ({escape_html(a["id"])})</span></label>'
         h += "</div>"
@@ -116,10 +116,10 @@ def agents_page(request: Request, session: dict = Depends(require_auth)):
             ]),
             ("Services", [
                 ("connectors_read", "See services", "See which external services and actions are set up. Always on when Run service actions is on.", True),
-                ("connectors_execute", "Run service actions", "Have Agent Core perform actions in external services for it, using the credentials in your bindings.", True),
+                ("connectors_execute", "Run service actions", "Have Agent Core perform actions in external services for it, using the credentials in your connections.", True),
             ]),
             ("Administration", [
-                ("admin_propose", "Propose admin changes", "Ask for changes such as new agents, grants or bindings. Nothing happens until a person approves it on the Approvals page.", False),
+                ("admin_propose", "Propose admin changes", "Ask for changes such as new agents, grants or connections. Nothing happens until a person approves it on the Approvals page.", False),
             ]),
         ]
         controls = ""
@@ -139,12 +139,35 @@ def agents_page(request: Request, session: dict = Depends(require_auth)):
             '<span><strong>Run its person\'s own services</strong><br><small class="form-hint">Lets this agent also run the services '
             'bound in its person\'s personal scope, not only those in workspaces it is given. Off by default; turn it on for an agent '
             'that acts as that person.</small></span></label>'
-            '<p class="form-hint">Scopes decide which data an agent can reach; this decides which kinds of action it may attempt. '
+            '<p class="form-hint">Workspace access decides which data an agent can reach; this decides which kinds of action it may attempt. '
             'Changes apply to the next request; reconnect an MCP client to refresh its tool list.</p></div>'
         )
 
     capability_create_html = capability_controls("ca")
     capability_edit_html = capability_controls("edit")
+
+    def simple_workspace_choice():
+        """One tick per workspace, read and write together: the way in for the common case. The separate read/write
+        ticks stay under Advanced access. With exactly one workspace it is ticked for you."""
+        if not all_workspaces:
+            return (
+                '<div class="form-section"><h3 class="sub-heading form-section-title">Which workspace will it work in?</h3>'
+                '<p class="form-hint">You have no workspace yet. A workspace is where agents share memory and tasks: '
+                '<a href="/workspaces">create one</a> first, then agents you add can work in it. '
+                'Without one this agent keeps only its own private memory.</p></div>'
+            )
+        only = len(all_workspaces) == 1
+        boxes = "".join(
+            f'<label class="checkbox-label"><input type="checkbox" data-simple-workspace="workspace:{escape_html(p["id"])}"'
+            f'{" checked" if only else ""}> <span>{escape_html(p["name"])} <small class="form-hint">read and write</small></span></label>'
+            for p in all_workspaces
+        )
+        return (
+            '<div class="form-section"><h3 class="sub-heading form-section-title">Which workspace will it work in?</h3>'
+            f'{boxes}'
+            '<p class="form-hint">Agents in the same workspace share its memory and tasks. Leave all unticked for an agent '
+            'that keeps only its own private memory.</p></div>'
+        )
 
     def access_section(prefix, read_html, write_html, recall_html, create):
         recall_checked = " checked" if create else ""
@@ -154,18 +177,20 @@ def agents_page(request: Request, session: dict = Depends(require_auth)):
             if create else
             "Its private scope and its owner's personal scope are automatic. Tick extra places it may read from."
         )
+        simple = simple_workspace_choice() if create else ""
         return (
-            '<div class="form-section"><h3 class="sub-heading form-section-title">What can it reach?</h3>'
-            f'<details class="access-details"><summary>Memory access <span class="text-muted" id="{prefix}-access-summary"></span></summary>'
-            '<p class="form-hint">An agent always has its own private scope. Add workspaces to share memory with other agents and people.</p>'
+            simple
+            + '<div class="form-section"><h3 class="sub-heading form-section-title">What else can it reach?</h3>'
+            f'<details class="access-details"><summary>Advanced access <span class="text-muted" id="{prefix}-access-summary"></span></summary>'
+            '<p class="form-hint">An agent always has its own private memory. Add workspaces to share memory with other agents and people.</p>'
             f'<div class="form-group"><label>Can Read From</label>{read_html}<p class="form-hint">{read_hint}</p></div>'
             f'<div class="form-group"><label>Can Write To</label>{write_html}'
-            '<p class="form-hint">Only where the agent may save new memory or credentials. Use workspaces for sharing; writing to a personal scope is an advanced choice.</p></div>'
+            '<p class="form-hint">Only where the agent may save new memory or credentials. Use workspaces for sharing; writing to personal memory is an advanced choice.</p></div>'
             '<div class="form-group"><label>Default recall</label>'
             f'<label class="checkbox-label"><input type="checkbox" id="{prefix}-recall-all"{recall_checked}> '
             '<span>Search everything this agent can read</span></label>'
             f'<div id="{prefix}-recall-wrap"{recall_hidden}>{recall_html}'
-            '<p class="form-hint">Unticked, searches cover only the scopes ticked here (plus its own). Any other readable scope can still be searched by name.</p></div></div>'
+            '<p class="form-hint">Unticked, searches cover only the workspaces ticked here (plus its own private memory). Any other workspace it can read can still be searched by name.</p></div></div>'
             '</details></div>'
         )
 
@@ -187,7 +212,7 @@ def agents_page(request: Request, session: dict = Depends(require_auth)):
             else ""
         )
         personal_badge = (
-            "<span class='badge badge-info' title='May run the services bound in its person&#39;s own scope'>runs personal services</span>"
+            "<span class='badge badge-info' title='May run the services set up in its owner&#39;s personal space'>runs personal services</span>"
             if a.get("inherit_user_bindings")
             else ""
         )
@@ -230,7 +255,7 @@ def agents_page(request: Request, session: dict = Depends(require_auth)):
                 "<div class='row-more-list'>"
                 f"{credentials_link}"
                 f"{toggle_btn}"
-                f"<button type='button' class='btn btn-sm btn-danger icon-delete-btn' data-agent-purge='{escape_html(a['id'])}' title='Permanently delete' aria-label='Permanently delete'>{get_icon('delete')}</button>"
+                f"<button type='button' class='btn btn-sm btn-danger icon-delete-btn' data-agent-purge='{escape_html(a['id'])}' title='Permanently delete' aria-label='Permanently delete'>{get_icon('delete')} Delete</button>"
                 "</div></details>"
             )
         else:
@@ -240,7 +265,7 @@ def agents_page(request: Request, session: dict = Depends(require_auth)):
         return (
             f"<tr>"
             f"<td><strong>{escape_html(a.get('display_name', ''))}</strong> {role_badge}<br><code>{escape_html(a['id'])}</code>"
-            f"<div class='text-muted'>Owner: {escape_html(owner_id)} · Default user: {escape_html(default_user_id)}</div></td>"
+            f"<div class='text-muted'>Owner: {escape_html(owner_id)}</div></td>"
             f"<td data-label='Status'>{status_badge}</td>"
             f"<td data-label='Access'>{access_summary}{no_effect_html}</td>"
             f"<td class='hide-phone'>{local_dt(a.get('created_at'), style='date')}</td>"
@@ -309,19 +334,19 @@ def agents_page(request: Request, session: dict = Depends(require_auth)):
     });
 
     async function deactivateAgent(id) {
-      if (!confirm('Deactivate this agent? It will no longer be able to authenticate.')) return;
+      if (!await confirmDialog('Deactivate this agent? It will no longer be able to authenticate.')) return;
       const j = await apiFetch('/api/agents/' + id, { method: 'DELETE' });
       if (j.ok) { showToast('Agent deactivated'); refreshAgents(); }
       else { showToast(j.error.message || 'Failed', 'danger'); }
     }
     async function reactivateAgent(id) {
-      if (!confirm('Reactivate this agent?')) return;
+      if (!await confirmDialog('Reactivate this agent?')) return;
       const j = await apiFetch('/api/agents/' + id + '/activate', { method: 'POST' });
       if (j.ok) { showToast('Agent reactivated'); refreshAgents(); }
       else { showToast(j.error.message || 'Failed', 'danger'); }
     }
     async function purgeAgent(id) {
-      const typed = prompt('PERMANENTLY DELETE the agent "' + id + '"? Its key stops working, and its private memory, anything stored in its private workspace (credentials, service bindings) and its tasks are deleted. This cannot be undone.\\n\\nType the agent ID to confirm:');
+      const typed = prompt('PERMANENTLY DELETE the agent "' + id + '"? Its agent API key stops working, and its private memory, anything stored in its private workspace (credentials, service connections) and its tasks are deleted. This cannot be undone.\\n\\nType the agent ID to confirm:');
       if (typed === null) return;
       if (typed.trim() !== id) { showToast('That is not the agent ID. Nothing was deleted.', 'warning'); return; }
       const j = await apiFetch('/api/agents/' + id + '/purge', { method: 'POST' });
@@ -335,8 +360,9 @@ def agents_page(request: Request, session: dict = Depends(require_auth)):
     async function rotateAgentKey(id) {
       const j = await apiFetch('/api/agents/' + id + '/rotate_key', { method: 'POST' });
       if (j.ok) {
+        document.getElementById('rotate-modal-title').textContent = 'New agent API key';
         document.getElementById('rotate-modal-body').innerHTML =
-          '<div class="alert alert-danger"><strong>Save this key now - it will not be shown again!</strong></div>' +
+          '<div class="alert alert-danger"><strong>Save this agent API key now - it will not be shown again!</strong></div>' +
           '<div class="api-key-display"><code>' + escapeHtml(j.data.api_key) + '</code></div>' +
           '<button class="copy-btn" data-copy-value="' + escapeHtml(j.data.api_key) + '">Copy</button>';
         openModal('rotate-modal');
@@ -541,6 +567,11 @@ def agents_page(request: Request, session: dict = Depends(require_auth)):
           capabilities: getSelectedCapabilities('ca'),
           inherit_user_bindings: document.getElementById('ca-inherit-user-bindings').checked,
         };
+        document.querySelectorAll('#create-agent-form [data-simple-workspace]:checked').forEach(function(box) {
+          const scope = box.dataset.simpleWorkspace;
+          if (!body.read_scopes.includes(scope)) body.read_scopes.push(scope);
+          if (!body.write_scopes.includes(scope)) body.write_scopes.push(scope);
+        });
         // Ensure private scope is added if not present (it's implicit in backend but good to show)
         const privateScope = 'agent:' + agentId;
         if (!body.read_scopes.includes(privateScope)) body.read_scopes.push(privateScope);
@@ -557,6 +588,7 @@ def agents_page(request: Request, session: dict = Depends(require_auth)):
           if (j.ok) {
             showToast('Agent created');
             closeModal('create-agent-modal');
+            document.getElementById('rotate-modal-title').textContent = 'Agent created';
             document.getElementById('rotate-modal-body').innerHTML =
               '<div class="alert alert-success">Agent created successfully.</div>' +
               '<p class="text-muted">Generate a one-time connection key and tool config from the Connect page when you are ready to connect this agent.</p>' +
@@ -634,7 +666,7 @@ def agents_page(request: Request, session: dict = Depends(require_auth)):
           {create_access_html}
           <div class="form-group">
             <button type="button" class="btn btn-sm btn-secondary" onclick="applyLeastPrivilegedPreset()">Reset to private access only</button>
-            <span class="form-hint">Clears every extra scope; the agent keeps its private scope and its owner's read access.</span>
+            <span class="form-hint">Clears every extra workspace; the agent keeps its private memory and its owner's read access.</span>
           </div>
           <div id="ca-authority-preview" class="form-hint" style="white-space:normal"></div>
           <div id="create-agent-error" class="alert alert-danger" style="display:none"></div>
@@ -665,7 +697,7 @@ def agents_page(request: Request, session: dict = Depends(require_auth)):
                 <p class="form-hint">A reminder of what this agent is for.</p>
               </div>
             </div>
-            <p class="form-hint">Owner: <span id="edit-owner"></span> · Default user: <span id="edit-default-user"></span></p>
+            <p class="form-hint">Owner: <span id="edit-owner"></span><span id="edit-default-user" hidden></span></p>
           </div>
           <div id="edit-capability-controls">{capability_edit_html}</div>
           {edit_access_html}
@@ -680,7 +712,7 @@ def agents_page(request: Request, session: dict = Depends(require_auth)):
     <!-- Rotate Key Modal -->
     <div class="modal-overlay" id="rotate-modal" style="display:none">
       <div class="modal">
-        <h2>New API Key</h2>
+        <h2 id="rotate-modal-title">Agent</h2>
         <div id="rotate-modal-body"></div>
         <div class="modal-footer">
           <button class="btn btn-secondary" onclick="closeModal('rotate-modal'); refreshAgents();">Done</button>

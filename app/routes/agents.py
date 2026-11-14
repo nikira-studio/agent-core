@@ -170,6 +170,16 @@ def create_agent(
         return error_response("FORBIDDEN", "Cannot assign another user's context", 403)
 
     owner_user_id = session["user_id"]
+    if body.read_scopes is None and body.write_scopes is None:
+        # An install with exactly one workspace: an agent created with defaults works in it, so two such agents
+        # share something without anyone ticking boxes. With more than one, the person chooses.
+        from app.services import workspace_service
+
+        only = [w for w in workspace_service.list_workspaces(user_id=owner_user_id) if w.get("is_active")]
+        if len(only) == 1:
+            ws_scope = f"workspace:{only[0]['id']}"
+            body.read_scopes = [f"agent:{normalized_id}", f"user:{owner_user_id}", "shared", ws_scope]
+            body.write_scopes = [f"agent:{normalized_id}", ws_scope]
     scope_error = _validate_agent_scopes(body.read_scopes, session, agent_id=normalized_id, owner_user_id=owner_user_id)
     if scope_error:
         return scope_error

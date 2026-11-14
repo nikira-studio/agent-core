@@ -376,7 +376,7 @@ def test_a_refusal_is_reported_as_a_retryable_503(test_client, admin_token):
     assert holding.wait(timeout=5)
     try:
         r = test_client.get(
-            "/api/memory/proposals", headers=_headers(admin_token)
+            "/api/agents", headers=_headers(admin_token)
         )
     finally:
         release.set()

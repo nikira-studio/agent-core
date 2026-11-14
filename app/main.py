@@ -74,6 +74,28 @@ if _ip_list:
 MAX_REQUEST_SIZE = 1024 * 1024
 
 
+def _end_event_streams_on_shutdown_signal() -> None:
+    """A browser tab holds an event stream open for hours, and the server waits for open connections before it
+    exits, so `docker stop` ran into its 10 second limit every time. Chain a handler in front of the server's own
+    SIGTERM/SIGINT handling that tells the streams to end."""
+    import signal
+
+    from app.services.event_stream_service import event_hub
+
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        previous = signal.getsignal(sig)
+
+        def handler(signum, frame, previous=previous):
+            event_hub.closing = True
+            if callable(previous):
+                previous(signum, frame)
+
+        try:
+            signal.signal(sig, handler)
+        except ValueError:  # not the main thread (a test client): nothing to chain
+            pass
+
+
 @asynccontextmanager
 async def _lifespan(app: FastAPI):
     from app.services.scheduler_service import (
@@ -82,6 +104,7 @@ async def _lifespan(app: FastAPI):
     )
     from app.services.webhook_service import start_delivery_worker, stop_delivery_worker
 
+    _end_event_streams_on_shutdown_signal()
     app.state.maintenance_task = start_maintenance_scheduler()
     start_delivery_worker()
     try:

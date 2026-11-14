@@ -53,11 +53,19 @@ def propose_for(ctx: EffectiveAuthority, body: ProposalRequest) -> dict:
         raise APIError("CAPABILITY_DENIED", "This operation requires the admin_propose capability", 403)
     if not _enforcer(ctx).can_write(body.scope):
         raise APIError("SCOPE_DENIED", f"Access denied to scope: {body.scope}", 403)
-    return approval_service.propose(
+    from app.services import workspace_sync_service
+
+    execution_id, execution_warning = workspace_sync_service.usable_execution(
+        execution_id=body.execution_id, agent_id=ctx.agent_id, user_id=ctx.user_id or "", memory_scope=body.scope,
+    )
+    result = approval_service.propose(
         agent_id=ctx.agent_id, scope=body.scope, title=body.title, note=body.note,
         operations=[o.model_dump() for o in body.operations],
-        execution_id=body.execution_id, expiry_hours=body.expiry_hours,
+        execution_id=execution_id, expiry_hours=body.expiry_hours,
     )
+    if execution_warning and isinstance(result, dict):
+        result = {**result, "warnings": [*(result.get("warnings") or []), execution_warning]}
+    return result
 
 
 def view_for(ctx: EffectiveAuthority, approval_id: str) -> dict:

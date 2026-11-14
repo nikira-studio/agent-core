@@ -673,7 +673,7 @@ def run_startup_checks() -> list[dict]:
                 {
                     "check": "sqlite_fts5",
                     "status": "FAIL",
-                    "message": "FTS5 not compiled in",
+                    "message": "This build of SQLite has no text search, so memory search will not work",
                 }
             )
         else:
@@ -685,13 +685,13 @@ def run_startup_checks() -> list[dict]:
                 {
                     "check": "sqlite_fts5",
                     "status": "OK",
-                    "message": "FTS5 available and healthy",
+                    "message": "Text search is working",
                 }
             )
         con.close()
     except Exception:
         issues.append(
-            {"check": "sqlite_fts5", "status": "FAIL", "message": "FTS5 check failed"}
+            {"check": "sqlite_fts5", "status": "FAIL", "message": "Could not check text search"}
         )
 
     if os.path.exists(settings.credential_key_path):
@@ -699,7 +699,7 @@ def run_startup_checks() -> list[dict]:
             {
                 "check": "encryption_key",
                 "status": "OK",
-                "message": "credential.key present",
+                "message": "The encryption key file is in place",
             }
         )
     else:
@@ -707,7 +707,7 @@ def run_startup_checks() -> list[dict]:
             {
                 "check": "encryption_key",
                 "status": "FAIL",
-                "message": "credential.key not found",
+                "message": "The encryption key file is missing",
             }
         )
 
@@ -734,6 +734,15 @@ def run_startup_checks() -> list[dict]:
 
 
 _MAINTENANCE_LOCK_KEY = "maintenance_lock_until"
+
+
+def _removed_trace(rows, limit: int = 500) -> dict:
+    """What a sweep removed, for its audit entry: id, topic, scope and class (never the content)."""
+    records = [
+        {"id": r["id"], "topic": r["topic"], "scope": r["scope"], "memory_class": r["memory_class"]}
+        for r in list(rows)[:limit]
+    ]
+    return {"records": records, "records_not_listed": max(0, len(list(rows)) - limit)}
 
 
 def try_acquire_maintenance_lock(lease_seconds: int = 120) -> bool:
@@ -803,7 +812,7 @@ def run_scheduled_maintenance(triggered_by: str = "manual") -> dict:
         conn.commit()
         pruned = cursor.rowcount if cursor else 0
 
-    from app.services import audit_service
+    from app.services import audit_service, memory_service
 
     if pruned > 0:
         audit_service.write_event(
@@ -814,33 +823,36 @@ def run_scheduled_maintenance(triggered_by: str = "manual") -> dict:
             details={"deleted_count": pruned, "retention_days": retention_days},
         )
 
-    # Sweep expired memory records (opt-in via expires_at field)
-    ttl_deleted = 0
+    # Expired memory records (opt-in via the expires_at field) are retracted, not deleted: like any retraction they stay
+    # restorable for the retention period, and the audit entry names each one. This holds for every class.
+    ttl_retracted = 0
     with get_db() as conn:
         expired_rows = conn.execute(
-            "SELECT id FROM memory_records WHERE expires_at IS NOT NULL AND datetime(expires_at) < datetime('now')"
+            "SELECT id, topic, scope, memory_class FROM memory_records "
+            "WHERE expires_at IS NOT NULL AND datetime(expires_at) < datetime('now') AND record_status = 'active'"
         ).fetchall()
-        expired_ids = [row["id"] for row in expired_rows]
-        if expired_ids:
-            placeholders = ",".join("?" for _ in expired_ids)
-            conn.execute(
-                f"DELETE FROM memory_embeddings WHERE record_id IN ({placeholders})",
-                expired_ids,
+    expired_done = []
+    for row in expired_rows:
+        if memory_service.retract_memory(row["id"], retracted_by="maintenance"):
+            ttl_retracted += 1
+            expired_done.append(row)
+            audit_service.write_event(
+                actor_type="system",
+                actor_id="maintenance",
+                action="memory_auto_retracted",
+                resource_type="memory_record",
+                resource_id=row["id"],
+                result="success",
+                details={"rule": "expired", "scope": row["scope"], "restorable": True},
             )
-            cursor = conn.execute(
-                f"DELETE FROM memory_records WHERE id IN ({placeholders})",
-                expired_ids,
-            )
-            ttl_deleted = cursor.rowcount
-        conn.commit()
-
-    if ttl_deleted > 0:
+    ttl_deleted = ttl_retracted
+    if ttl_retracted > 0:
         audit_service.write_event(
             actor_type="system",
             actor_id="maintenance",
             action="memory_ttl_swept",
             result="success",
-            details={"deleted_count": ttl_deleted},
+            details={"deleted_count": ttl_retracted, **_removed_trace(expired_done)},
         )
 
     # Hard-delete retracted records past their grace period. A retraction says
@@ -855,7 +867,7 @@ def run_scheduled_maintenance(triggered_by: str = "manual") -> dict:
     retracted_cutoff = utc_now() - timedelta(days=retracted_retention_days)
     with get_db() as conn:
         rows = conn.execute(
-            "SELECT id, status_changed_at FROM memory_records "
+            "SELECT id, topic, scope, memory_class, status_changed_at FROM memory_records "
             "WHERE record_status = 'retracted'"
         ).fetchall()
         purge_ids = [
@@ -864,6 +876,7 @@ def run_scheduled_maintenance(triggered_by: str = "manual") -> dict:
             if row["status_changed_at"]
             and parse_utc_datetime(row["status_changed_at"]) < retracted_cutoff
         ]
+        purged_trace = _removed_trace([row for row in rows if row["id"] in set(purge_ids)])
         if purge_ids:
             placeholders = ",".join("?" for _ in purge_ids)
             conn.execute(
@@ -888,6 +901,7 @@ def run_scheduled_maintenance(triggered_by: str = "manual") -> dict:
             details={
                 "deleted_count": purged,
                 "retention_days": retracted_retention_days,
+                **purged_trace,
             },
         )
 
@@ -951,12 +965,11 @@ def run_scheduled_maintenance(triggered_by: str = "manual") -> dict:
             "error_type": type(exc).__name__,
         }
 
-    # Verification runs unattended because it can: it only writes evidence on a
-    # clean pass, and anything it cannot confirm becomes a proposal for a human
-    # rather than an action. Capped per run so a large corpus is worked through
-    # over several nights instead of hammering repos and services in one go —
-    # oldest-confirmation-first, so attention goes where it is most overdue.
-    verification = {"checked": 0, "verified": 0, "missing": 0}
+    # Verification runs unattended because it can: it only writes evidence on a clean pass. A fact whose
+    # anchor is definitively gone in two checks at least an hour apart retracts itself (restorable). Capped
+    # per run so a large corpus is worked through over several runs rather than hammering repos and
+    # services in one go, least-recently-checked first.
+    verification = {"checked": 0, "verified": 0, "missing": 0, "retracted": 0}
     if _system_setting_int("verification_pass_enabled", 1):
         try:
             from app.services import verification_service
@@ -968,55 +981,51 @@ def run_scheduled_maintenance(triggered_by: str = "manual") -> dict:
                 "checked": outcome["checked"],
                 "verified": outcome["verified"],
                 "missing": outcome["missing"],
+                "retracted": outcome["auto_retracted"],
             }
-            if outcome["proposals_queued"]:
+            if verification["missing"] or verification["retracted"]:
+                # An uneventful pass is not an event: the hourly summary already records that it ran.
                 audit_service.write_event(
                     actor_type="system",
                     actor_id="maintenance",
                     action="memory_verified",
                     result="success",
-                    details={
-                        **verification,
-                        "proposals_queued": outcome["proposals_queued"],
-                    },
+                    details=verification,
                 )
         except Exception:
             logger.exception("Verification pass failed; continuing with maintenance")
 
-    # Consolidation: scan the active corpus and queue pending proposals for a
-    # human reviewer, capped by the rules in Workstream 5 so unattended
-    # generation cannot flood the queue. Independently toggleable so an
-    # operator who wants verification alone can leave this off. Manual
-    # generation through `/api/memory/proposals/generate` shares the same
-    # transactional, capped, rotated path — neither caller is special-cased.
-    proposals_generated = 0
-    proposals_skipped_at_cap = 0
-    if _system_setting_int("consolidation_scan_enabled", 1):
-        try:
-            from app.services import memory_proposal_service
+    # Memory hygiene: per-occurrence logs, ticket-closeout narration and duplicates retract themselves
+    # (soft, restorable, audited by rule name, capped per run).
+    hygiene = {"retracted": {}, "total": 0, "left_for_next_run": 0}
+    try:
+        from app.services import memory_hygiene_service
 
-            proposal_outcome = memory_proposal_service.generate_proposals()
-            proposals_generated = int(proposal_outcome.get("created", 0))
-            proposals_skipped_at_cap = int(proposal_outcome.get("skipped_at_cap", 0))
-            if proposals_generated > 0:
-                audit_service.write_event(
-                    actor_type="system",
-                    actor_id="maintenance",
-                    action="memory_proposals_generated",
-                    result="success",
-                    details={
-                        "created": proposals_generated,
-                        "skipped_already_known": int(
-                            proposal_outcome.get("skipped_already_known", 0)
-                        ),
-                        "skipped_at_cap": proposals_skipped_at_cap,
-                    },
-                )
-        except Exception:
-            logger.exception("Consolidation scan failed; continuing with maintenance")
+        hygiene = memory_hygiene_service.run()
+    except Exception:
+        logger.exception("Memory hygiene failed; continuing with maintenance")
+
+    # Dead sessions and spent operator tokens would otherwise pile up (a session only goes when someone uses it again).
+    sign_ins = {"sessions_pruned": 0, "operator_tokens_closed": 0, "operator_tokens_pruned": 0}
+    try:
+        from app.services import auth_service
+
+        sign_ins = auth_service.prune_sign_ins()
+    except Exception:
+        logger.exception("Pruning old sessions and operator tokens failed; continuing with maintenance")
+
+    adapter_backups_pruned = 0
+    try:
+        from app.services import adapter_loader
+
+        adapter_backups_pruned = adapter_loader.prune_adapter_backups()
+    except Exception:
+        logger.exception("Pruning old adapter backups failed; continuing with maintenance")
 
     result = {
         "stale_activities_marked": stale_count,
+        "adapter_backups_pruned": adapter_backups_pruned,
+        **sign_ins,
         **sync_maintenance,
         "scratchpad_pruned": pruned,
         "ttl_swept": ttl_deleted,
@@ -1027,8 +1036,9 @@ def run_scheduled_maintenance(triggered_by: str = "manual") -> dict:
         "records_verified": verification["verified"],
         "records_unverifiable": verification["checked"] - verification["verified"],
         "anchors_missing": verification["missing"],
-        "proposals_generated": proposals_generated,
-        "proposals_skipped_at_cap": proposals_skipped_at_cap,
+        "anchors_auto_retracted": verification["retracted"],
+        "hygiene_retracted": hygiene["total"],
+        "hygiene_left_for_next_run": hygiene["left_for_next_run"],
     }
 
     # Record last-run status so it's visible (Settings page, status endpoint)

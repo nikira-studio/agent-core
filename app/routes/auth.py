@@ -348,10 +348,10 @@ def otp_enroll(
     if is_otp_enrolled(session["user_id"]):
         if not body.otp_code:
             return error_response(
-                "OTP_REQUIRED", "Current OTP code is required to reset OTP", 400
+                "OTP_REQUIRED", "Enter the current code from your authenticator app to replace it", 400
             )
         if not verify_otp(session["user_id"], body.otp_code):
-            return error_response("INVALID_OTP", "Invalid OTP code", 403)
+            return error_response("INVALID_OTP", "That code did not work. Use the current code from your authenticator app; each code works once.", 403)
 
     otp_data = enroll_otp(session["user_id"])
 
@@ -375,7 +375,7 @@ def otp_confirm(
         return error_response("UNAUTHORIZED", "Invalid or expired session", 401)
 
     if not confirm_otp_enrollment(session["user_id"], body.otp_code):
-        return error_response("INVALID_OTP", "Invalid OTP code", 401)
+        return error_response("INVALID_OTP", "That code did not work. Use the current code from your authenticator app; each code works once.", 401)
 
     audit_service.write_event(
         actor_type="user",
@@ -418,7 +418,7 @@ def otp_verify(body: OtpVerifyRequest, request: Request):
         allowed, info = RL.check("user", session["user_id"], "otp_failed")
         if not allowed:
             return rate_limited_response(
-                "RATE_LIMITED", "Too many failed OTP attempts", **info
+                "RATE_LIMITED", "Too many wrong codes. Wait a few minutes and try again.", **info
             )
 
         is_valid = verify_otp(session["user_id"], body.otp_code)
@@ -432,7 +432,7 @@ def otp_verify(body: OtpVerifyRequest, request: Request):
                 details={"reason": "bad_otp"},
                 ip_address=get_client_ip(request),
             )
-            return error_response("INVALID_OTP", "Invalid OTP code", 401)
+            return error_response("INVALID_OTP", "That code did not work. Use the current code from your authenticator app; each code works once.", 401)
 
     audit_service.write_event(
         actor_type="user",
@@ -490,7 +490,7 @@ def otp_disable(
         return error_response("NOT_ENROLLED", "OTP is not enrolled", 400)
 
     if not verify_otp(session["user_id"], body.otp_code):
-        return error_response("INVALID_OTP", "Invalid OTP code", 401)
+        return error_response("INVALID_OTP", "That code did not work. Use the current code from your authenticator app; each code works once.", 401)
 
     if not disable_otp(session["user_id"]):
         return error_response("DISABLE_FAILED", "OTP could not be disabled", 500)

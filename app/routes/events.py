@@ -61,7 +61,7 @@ async def stream_events(
         last_heartbeat = time.monotonic()
         try:
             while True:
-                if await request.is_disconnected():
+                if event_hub.closing or await request.is_disconnected():
                     break
                 try:
                     payload = q.get_nowait()

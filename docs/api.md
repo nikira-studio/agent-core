@@ -190,7 +190,7 @@ Agent or session authentication accepted, with scope enforcement on every operat
 | `POST` | `/api/memory/search` | Search memory (FTS5 + optional semantic hybrid search) |
 | `POST` | `/api/memory/get` | List records by scope |
 | `POST` | `/api/memory/confirm` | Confirm a record with evidence |
-| `POST` | `/api/memory/retract` | Soft-delete a record. An optional `reason` (what you checked) also answers any pending Memory Clean-up suggestion about it |
+| `POST` | `/api/memory/retract` | Soft-delete a record (restorable for the retention period). An optional `reason` (what you checked) is kept with the audit entry |
 | `POST` | `/api/memory/move` | Atomically relocate an active record to a new scope (write access to both scopes required) |
 | `POST` | `/api/memory/restore` | Restore a retracted record (retraction is reversible) |
 | `GET` | `/api/memory/{record_id}` | Get one record |
@@ -221,11 +221,11 @@ Choosing `memory_class`: a **fact** is settled by checking (someone could verify
 Optional memory metadata:
 
 - `subject_anchor` names what would confirm a fact: `repo:<path>`, `host:<name-or-ip>`, or `service:<binding_id>`. Repo paths are **relative to the workspace root**, never absolute: the same directory has a different absolute path in every agent's container. Omit it when nothing could verify the record, which is normal for a decision.
-- `pinned` marks a record as standing context: returned by `memory_pinned` at session start rather than having to win a search, included in every session context, and skipped by the clean-up rules. **Agents request pinning rather than performing it.** `memory_pin` queues the request for operator review, because standing context reaches every session in the scope including other agents', which makes it the most influential thing an agent could write. Capped per scope (10 by default, `max_pinned_per_scope`) so the list stays short enough to read in full. Only `fact`, `decision` and `preference` records can be pinned.
+- A write from an agent is refused with `422` in three plain cases: `TOO_SPECIFIC_TO_ONE_OCCURRENCE` (a log of one occurrence or ticket-closeout narration with nothing lasting in it, that is, no more than a few ordinary words beyond the status; a fact that happens to open with a closeout, or a log line that goes on to state something lasting, is saved; record the bare status with `activity_update`) and `DUPLICATE_OF` (the text is nearly identical to an active record of the same class in the same workspace, not merely alike at the start; the message names the record, says to read it first, and offers `supersedes_id` only for a write that corrects or replaces it). Anything else the checks notice is returned as `warnings` on a successful write.
 - `slot_key` is for preference records when you want one active value per slot. A new preference with the same `scope + slot_key` supersedes the previous active one.
 - `last_confirmed_at` means the record was checked **against the world**. It is set by `memory_confirm` (which requires evidence naming what was checked) or by the verification pass, not by writing the record. Search results report `days_since_confirmed` so a caller can tell a fact verified today from one nobody has checked in months.
 - `valid_from` and `valid_to` bound **when the content was true in the world**, which is not the same question as when the system learned it (`created_at`, `status_changed_at`). Keeping the two apart is what lets the corpus answer "what was true in March" rather than only "what do we believe now". Left unset, a record is taken to start when it was written, so nothing silently claims to have always been true. Supersession closes the old record's `valid_to` automatically, at the successor's `valid_from` when one is given, otherwise at the moment of supersession, and never overwrites an end date the writer set deliberately.
-- `expires_at` is an ISO datetime after which the record is excluded from search results and swept on the next maintenance run. Useful for time-bounded facts or temporary scratchpad context.
+- `expires_at` is an ISO datetime after which the record is excluded from search results and retracted by the next maintenance run (restorable for the retention period; restoring it clears the passed expiry). Useful for time-bounded facts or temporary scratchpad context.
 - `confidence` and `importance` are caller-assigned. Ranking uses observed evidence: how often a record is recalled, whether callers said it helped, and how long since it was confirmed. So there is no need to tune them.
 - `provenance` is server-generated on write and records who wrote the memory, from which channel, and which activity was open at the time; clients do not supply it directly.
 
@@ -281,51 +281,15 @@ Get (list by scope):
 
 `last_confirmed_at` is read-only on ordinary writes. Confirm after writing by calling `memory_confirm` or `POST /api/memory/confirm` with `{"record_id": "...", "evidence": "what was checked"}`. Agent-authenticated callers cannot claim `operator_authored` or `human_direct`, and `external_import` cannot be written; it only labels records brought in by import paths that have since been removed.
 
-A successful write can include advisory `warnings`. `POSSIBLE_DUPLICATE` identifies similar active records, while `PREVIOUSLY_RETRACTED` identifies similar retracted records so the caller can decide whether the new assertion is intentional. These warnings never block the write. Semantic candidates are evaluated independently for active and retracted records; when embeddings are unavailable, normalized prefix matching still supplies retraction awareness.
+A successful write can include advisory `warnings`. `SIMILAR_ACTIVE_RECORD` names an active record in the same workspace and class that reads almost the same but differs in its details (typically a correction that differs near the start; no embedding backend needed) so the agent can write again with `supersedes_id`; nothing is refused. `POSSIBLE_DUPLICATE` identifies similar active records, while `PREVIOUSLY_RETRACTED` identifies similar retracted records so the caller can decide whether the new assertion is intentional. These warnings never block the write. Semantic candidates are evaluated independently for active and retracted records; when embeddings are unavailable, normalized prefix matching still supplies retraction awareness.
 
 Writes to `shared` are rejected if the content looks like PII or credentials. Very short, noisy, or credential-like search queries are also rejected.
 
 ---
 
-## Memory review queue
+## Memory clean-up (removed in 1.3.0)
 
-Admin only. These endpoints suggest and record decisions about what to retract or pin. **Rules propose; they never apply.** Agents write memory; they do not prune or elevate each other's, which is why nothing here is reachable with an agent key.
-
-| Method | Path | Description |
-| --- | --- | --- |
-| `GET` | `/api/memory/proposals` | List proposals (`status`, `scope`, `rule`, `limit`, `offset`; defaults to `status=pending`) |
-| `POST` | `/api/memory/proposals/generate` | Run the mechanical rules and queue what they find |
-| `POST` | `/api/memory/proposals/{id}/decide` | Record a verdict, applying the action on accept |
-| `POST` | `/api/memory/proposals/{id}/reanchor` | Repoint a record at what actually describes it |
-| `GET` | `/api/memory/proposals/stats` | Per-rule verdict history: how often each rule has been right |
-
-Proposals come from two places. **Generation rules** are mechanical. They run during the configured maintenance interval when `consolidation_scan_enabled` is on, and on demand from the dashboard's review page or `POST /api/memory/proposals/generate`:
-
-| Rule | Finds |
-| --- | --- |
-| `episodic_log` | A task log written as durable memory |
-| `ticket_closeout` | A record about work that has since closed |
-| `duplicate_cluster` | Near-identical records |
-| `stale_volatile` | Facts nobody has confirmed in a long time (facts only, a decision does not go stale because time passed) |
-| `unconfirmed_inference` | Non-human facts that have never been confirmed and are older than `unconfirmed_inference_days` |
-
-**Event-driven proposals** are queued as things happen: `anchor_missing` when verification finds the subject gone and `pin_request` when an agent calls `memory_pin`.
-
-Generate:
-```json
-{ "scope": "workspace:example", "rules": ["duplicate_cluster"] }
-```
-`rules` is optional; omitting it runs all of them. An unknown rule name is rejected with `UNKNOWN_RULE`. Proposals already pending or decided for the same rule and targets are skipped rather than duplicated, so the queue converges instead of re-asking. Generation respects a per-rule-and-scope pending cap, an installation-wide pending cap, and a per-run creation budget. Groups are rotated fairly so a busy scope cannot consume every run.
-
-Decide:
-```json
-{ "verdict": "accepted", "outcome": "no_longer_current" }
-```
-`verdict` is `accepted` or `rejected`. `outcome` applies to confirm-style proposals, where both answers are accepts because the rule was right to ask either way: `still_current` resolves the question without claiming the record was independently verified, while `no_longer_current` retracts it. Use **Confirm with evidence** in the dashboard, `memory_confirm`, or `POST /api/memory/confirm` to set `last_confirmed_at`. Confirming from a proposal card confirms the record first and then resolves that proposal as `still_current`.
-
-Accepting a retraction is reversible with `POST /api/memory/restore`. That is deliberate, a review that cannot be wrong cheaply is a review nobody will run.
-
-Every decision is written to the audit log with the rule, verdict, outcome, and the records affected.
+The review queue and its `/api/memory/proposals` routes are gone; every method on them answers `410` with error code `REMOVED`. Per-occurrence logs, ticket-closeout records, duplicates (the same text written twice, never a decision, never a record under a day old) and facts whose anchor has been gone for two checks an hour apart retract themselves at the hourly maintenance run: soft, restorable with `POST /api/memory/restore`, audited as `memory_auto_retracted` with the rule (`episodic_log`, `ticket_closeout`, `duplicate_cluster`, `anchor_missing`) as the actor, at most 20 records per run. Nothing is left for a person to review.
 
 ---
 
@@ -439,8 +403,8 @@ The connector type row stores provider metadata such as `endpoint_url`, `transpo
 | Method | Path | Auth | Description |
 | --- | --- | --- | --- |
 | `GET` | `/api/connector-types` | Agent/session | List installed connector types |
-| `GET` | `/api/connector-types/summary` | Agent/session | Summarize connector types, visible bindings, and action health |
-| `POST` | `/api/connector-types/health-check` | Agent/session | Check enabled binding health for a connector type and/or scope |
+| `GET` | `/api/connector-types/summary` | Agent/session | Summarize connector types, visible connections, and action health |
+| `POST` | `/api/connector-types/health-check` | Agent/session | Check enabled connection health for a connector type and/or scope |
 | `GET` | `/api/connector-types/{connector_type_id}/tools` | Agent/session | List actions for a connector type |
 | `PUT` | `/api/connector-types/{connector_type_id}/actions` | Admin | Update the disabled actions list for a connector type |
 | `GET` | `/api/connector-types/adapters` | Agent/session | List available system and user adapters |
@@ -463,7 +427,7 @@ Import:
 }
 ```
 
-If you import a spec, the resulting connector type is what you bind to a credential. That keeps the workflow predictable: spec first, credential second, binding last.
+If you import a spec, the resulting connector type is what you bind to a credential. That keeps the workflow predictable: spec first, credential second, connection last.
 
 Import an MCP server:
 
@@ -479,19 +443,19 @@ Import an MCP server:
 
 The MCP import stores the server URL and transport alongside the discovered tool snapshot. Use `streamable_http` for HTTP-native MCP servers. If your MCP server only speaks stdio, run it behind a small HTTP bridge/proxy and point Agent Core at that bridge instead. Refreshing an MCP connector type re-discovers the tool list and updates the snapshot in place.
 
-For OpenAPI-backed connector bindings, `config_json` can override the target base URL with `base_url` and can suppress auth injection with `auth_mode: "none"` when the imported spec expects auth but the actual deployment does not. Internal hosts are allowed by default; if you want to block local probing, set `AGENT_CORE_BLOCK_INTERNAL_HOSTS=true` and add trusted names to `AGENT_CORE_ALLOWED_INTERNAL_HOSTS` as exceptions.
+For OpenAPI-backed service connections, `config_json` can override the target base URL with `base_url` and can suppress auth injection with `auth_mode: "none"` when the imported spec expects auth but the actual deployment does not. Private addresses are blocked on a fresh install and allowed on an install that already had data (Settings → Security → Network limits); list trusted hosts under *Allowed private addresses* or in `AGENT_CORE_ALLOWED_INTERNAL_HOSTS`.
 
 ---
 
-## Connector bindings
+## Service connections
 
-Connector bindings link a stored credential to an external service so Agent Core can run actions against that service on behalf of an agent. The credential never leaves Agent Core, the connector executor uses it server-side.
+Service connections link a stored credential to an external service so Agent Core can run actions against that service on behalf of an agent. The credential never leaves Agent Core, the connector executor uses it server-side.
 
-Credential scope controls access to the stored secret. Binding scope controls where the connector is available. A binding currently points to one credential; non-secret connector settings belong in `config_json`.
+Credential scope controls access to the stored secret. Connection scope controls where the connector is available. A connection currently points to one credential; non-secret connector settings belong in `config_json`.
 
-Use `config_json` for fixed, non-secret defaults that should travel with the binding. Common examples:
+Use `config_json` for fixed, non-secret defaults that should travel with the connection. Common examples:
 
-- `base_url` or `test_url` for a generic HTTP binding
+- `base_url` or `test_url` for a generic HTTP connection
 - `default_params` for imported APIs or adapters that always need the same repo, owner, workspace, tenant, company, or other context
 - `auth_header`, `auth_scheme`, `auth_scheme_name`, `auth_location`, or `query_param` when the connector needs a specific non-secret auth layout
 - `auth_mode: "none"` to suppress spec-driven auth injection for a trusted local deployment that does not actually require auth
@@ -503,28 +467,28 @@ When running a connector action, Agent Core prepares params before validation an
 3. Merge `config_json.default_params` underneath the caller params.
 4. Validate the merged params against the action schema.
 
-Explicit caller params always override defaults. This lets a binding provide stable context like `{"default_params":{"company_id":"..."}}` while still allowing a caller to override `company_id` for a specific action. Keep `default_params` non-secret; use credentials for secrets.
+Explicit caller params always override defaults. This lets a connection provide stable context like `{"default_params":{"company_id":"..."}}` while still allowing a caller to override `company_id` for a specific action. Keep `default_params` non-secret; use credentials for secrets.
 
 If the connector and credential are enough on their own, leave `config_json` empty.
 
 | Method | Path | Auth | Description |
 | --- | --- | --- | --- |
-| `GET` | `/api/connector-bindings` | Agent/session | List visible connector bindings |
-| `POST` | `/api/connector-bindings` | Agent/session | Create a binding |
-| `GET` | `/api/connector-bindings/{binding_id}` | Agent/session | Get a binding |
-| `PUT` | `/api/connector-bindings/{binding_id}` | Agent/session | Update a binding |
-| `DELETE` | `/api/connector-bindings/{binding_id}` | Agent/session | Delete a binding |
-| `POST` | `/api/connector-bindings/{binding_id}/test` | Agent/session | Test the binding using the stored credential |
-| `POST` | `/api/connector-bindings/{binding_id}/run` | Agent/session | Run a binding action directly through the REST API |
+| `GET` | `/api/connector-bindings` | Agent/session | List visible service connections |
+| `POST` | `/api/connector-bindings` | Agent/session | Create a connection |
+| `GET` | `/api/connector-bindings/{binding_id}` | Agent/session | Get a connection |
+| `PUT` | `/api/connector-bindings/{binding_id}` | Agent/session | Update a connection |
+| `DELETE` | `/api/connector-bindings/{binding_id}` | Agent/session | Delete a connection |
+| `POST` | `/api/connector-bindings/{binding_id}/test` | Agent/session | Test the connection using the stored credential |
+| `POST` | `/api/connector-bindings/{binding_id}/run` | Agent/session | Run a connection action directly through the REST API |
 | `POST` | `/api/connectors/{binding_id}/run` | Agent/session | Alias of the line above (intuitive path for plug-in scripts) |
-| `GET` | `/api/connector-bindings/{binding_id}/tools` | Agent/session | List the actions exposed by this binding |
-| `GET` | `/api/connector-bindings/{binding_id}/executions` | Agent/session | List execution history for a binding |
-| `POST` | `/api/connector-bindings/{binding_id}/oauth/start` | Agent/session (write scope) | Begin the browser OAuth authorization flow for an oauth2 adapter binding; returns the provider authorization URL |
-| `GET` | `/api/connector-bindings/oauth/callback` | Session | OAuth redirect target; exchanges the authorization code and stores tokens on the binding's credential |
+| `GET` | `/api/connector-bindings/{binding_id}/tools` | Agent/session | List the actions exposed by this connection |
+| `GET` | `/api/connector-bindings/{binding_id}/executions` | Agent/session | List execution history for a connection |
+| `POST` | `/api/connector-bindings/{binding_id}/oauth/start` | Agent/session (write scope) | Begin the browser OAuth authorization flow for an oauth2 adapter connection; returns the provider authorization URL |
+| `GET` | `/api/connector-bindings/oauth/callback` | Session | OAuth redirect target; exchanges the authorization code and stores tokens on the connection's credential |
 
 ### Running a connector action directly over REST
 
-Plug-in scripts (e.g. a `no_agent` cron) that don't go through MCP call the binding's `run` endpoint themselves:
+Plug-in scripts (e.g. a `no_agent` cron) that don't go through MCP call the connection's `run` endpoint themselves:
 
 ```bash
 curl -sS -X POST \
@@ -548,11 +512,11 @@ Create:
 }
 ```
 
-In that example, the credential provides the secret token, while `config_json` tells Agent Core which repo context and auth scheme to apply when it turns the binding into a real request. For MCP bindings, `config_json` can also carry per-binding timeout and header overrides used during tool execution.
+In that example, the credential provides the secret token, while `config_json` tells Agent Core which repo context and auth scheme to apply when it turns the connection into a real request. For MCP connections, `config_json` can also carry per-binding timeout and header overrides used during tool execution.
 
 #### Actions that wait for a person
 
-A person can set an action to **ask a person first** (Services → View Actions). Running it then does not run it: both `connectors_run` and `POST /api/connector-bindings/{id}/run` answer with `{"success": false, "pending_approval": true, "approval_id": "...", "status": "pending", "expires_at": "...", "path": "/approvals/<id>"}`. A caller that sees this should wait, not retry. The request is shown on the Approvals page; a signed-in person with write access to the binding's workspace approves or rejects it there. Read the outcome with `approval_get` (or `GET /api/approvals/{id}`): `status` is `pending`, `done`, `failed`, `rejected` or `expired`, with `decision_note`, `error` and, when it ran, `result`. A rejected, expired or failed request carries a `message` telling the agent to stop and report. Every key, operator token and script is held; the one exception is a person pressing Run in their own dashboard. See [docs/design/approval-gate.md](design/approval-gate.md).
+A person can set an action to **ask a person first** (Services → View Actions). Running it then does not run it: both `connectors_run` and `POST /api/connector-bindings/{id}/run` answer with `{"success": false, "pending_approval": true, "approval_id": "...", "status": "pending", "expires_at": "...", "path": "/approvals/<id>"}`. A caller that sees this should wait, not retry. The request is shown on the Approvals page; a signed-in person with write access to the connection's workspace approves or rejects it there. Read the outcome with `approval_get` (or `GET /api/approvals/{id}`): `status` is `pending`, `done`, `failed`, `rejected` or `expired`, with `decision_note`, `error` and, when it ran, `result`. A rejected, expired or failed request carries a `message` telling the agent to stop and report. Every key, operator token and script is held; the one exception is a person pressing Run in their own dashboard. See [docs/design/approval-gate.md](design/approval-gate.md).
 
 The dashboard's `/connectors` page provides a UI for all of these operations.
 
@@ -591,9 +555,8 @@ These routes require agent authentication and workspace memory read access.
 | --- | --- | --- |
 | `POST` | `/api/workspace-sync` | Start or continue an execution and return workspace changes after its cursor |
 | `POST` | `/api/workspace-sync/ack` | Advance the acknowledged cursor after processing a delivered page |
-| `POST` | `/api/workspace-sync/end` | Mark an execution as ended |
 
-The first sync omits `execution_id`. The response returns a new execution ID, pinned records, assigned activities, and changes grouped into `memory_changes` and `activity_changes`. `other_session_changes` lists the IDs of changes whose `source_execution_id` belongs to another execution. The changes themselves appear once, in their resource groups.
+The first sync omits `execution_id`. The response returns a new execution ID, assigned activities, and changes grouped into `memory_changes` and `activity_changes`. `other_session_changes` lists the IDs of changes whose `source_execution_id` belongs to another execution. The changes themselves appear once, in their resource groups.
 
 Keep the execution ID for one host session. Pass it to later sync calls and supported write operations for source attribution. Acknowledge `next_cursor` only after processing or intentionally skipping the page. An acknowledgement cannot move past the highest cursor that the server delivered to that execution.
 
@@ -607,12 +570,11 @@ If retention removes changes before an execution reads them, the next response s
 | --- | --- | --- | --- |
 | `POST` | `/api/activity` | Agent/session | Create an activity record |
 | `GET` | `/api/activity` | Agent/session | List visible activities |
-| `POST` | `/api/activity/pickup` | Agent | Claim the next active work item assigned to this agent in authorized scopes |
 | `GET` | `/api/activity/{activity_id}` | Agent/session | Get activity |
 | `PUT` | `/api/activity/{activity_id}` | Agent/session | Update status, metadata, or task result |
 | `POST` | `/api/activity/{activity_id}/heartbeat` | Agent/session | Refresh heartbeat timestamp |
 | `DELETE` | `/api/activity/{activity_id}` | Agent/session | Cancel activity |
-| `POST` | `/api/activity/{activity_id}/recovery` | Admin | Recover a stale activity: complete, cancel, resume, or reassign it |
+| `POST` | `/api/activity/{activity_id}/recovery` | Admin | Recover a stale activity: complete, cancel or resume it |
 
 Create:
 ```json
@@ -623,9 +585,9 @@ Create:
 }
 ```
 
-**Valid statuses:** `active`, `stale`, `completed`, `blocked`, `cancelled`, `reassigned` (set by recovery when work moves to another agent)
+**Valid statuses:** `active`, `stale`, `completed`, `blocked`, `cancelled`, `reassigned` (kept for old records; nothing sets it any more)
 
-Only the owning agent or an admin can update, heartbeat, cancel, or reassign an activity. Reading is wider: `GET /api/activity/{id}` and MCP `activity_get` open any activity in a scope the caller reads, the same activities `activity_list` and `activity_search` show it.
+Only the owning agent or an admin can update, heartbeat or cancel an activity. Reading is wider: `GET /api/activity/{id}` and MCP `activity_get` open any activity in a scope the caller reads, the same activities `activity_list` and `activity_search` show it.
 
 For the MCP `activity_update` tool, creating a fresh activity in a readable `workspace:*` scope can add a best-effort `since_last_active` object beside `activity`. It summarizes changes since that agent's prior activity using workspace change-sequence boundaries. A first activity uses `baseline: "retained_tail"`; the response also reports `total_available`, `truncated`, and `oldest_available_at` so clients do not infer completeness beyond retained history. The key is omitted when the feature is disabled, the caller cannot read the scope, digest computation fails, or the supplied `execution_id` is already caught up. REST activity creation is unchanged.
 
@@ -633,10 +595,16 @@ For the MCP `activity_update` tool, creating a fresh activity in a readable `wor
 
 `PUT /api/activity/{id}` and the MCP `activity_update` tool accept `handoff` with `completed` (string), `next_steps` and `open_questions` (lists of strings) and `needs_human` (string), up to 4,000 characters. Any other field, including `resolution`, is rejected with `INVALID_HANDOFF`. The next session context shows them.
 
+**Where the person acts.** Add `needs_human_url` (an `http` or `https` link, up to 500 characters) to the handoff when the thing to do is in another system: a review to accept in a tracker, a pull request to merge, a deploy to approve. On **Needs you** the row then offers **Open in <that site>** as its main action, and typing an answer is secondary and says plainly that it only tells the agent. Integrators whose asks mean "go and decide this over there" should always set it. Each row on Needs you also shows the task, the workspace, the agent and how long ago it was asked, and says what an answer does: it goes to the agent the next time it works in that workspace, and closes the ask (`attention_list` items carry `asked_at` and `needs_human_url`).
+
 A `needs_human` request waits on a person: it is listed under "Waiting on a person" in session context and under **Waiting on you** on the Activity page until one of these resolves it:
 
 - **A person** calls `POST /api/activity/{id}/handoff/resolve` (the **Mark resolved** button). The route is for people only; an agent key gets `403`. It returns `{activity, resolution}`, and `409 NOT_PENDING` when the activity has no open request.
 - **The agent that asked** calls the MCP `activity_handoff_resolve` tool with `activity_id` and a `reason` (required, up to 500 characters). Only the agent the activity is assigned to can call it, and only in a scope it can write; any other agent gets `403`.
+- **Closing the task ends its ask.** `completed` or `cancelled` on a task that still has an open `needs_human` (the agent closing its own blocked record, an admin finishing it off, a cancel from the dashboard) resolves the ask: an `agent` resolution when the assigned agent closed it, a `person` resolution otherwise. The response lists it in `resolved_requests` with a `HANDOFF_ASK_CLOSED` warning so the closer can restate it. A handoff in the same call that carries its own `needs_human` is a new ask and stays. A task closed as abandoned (48 hours) ends its ask as `expired`.
+- **Nobody answers.** An ask on a blocked, completed or cancelled task that nothing has changed for `AGENT_CORE_ASK_EXPIRES_AFTER_DAYS` days (default 7, 0 turns it off) is resolved as `expired` by the hourly maintenance. The task and its text stay in Activity; only the waiting flag goes.
+- **A blocked task with nothing waiting** (its ask resolved, expired or absent) that nothing has changed for the same number of days ends as `cancelled` with "Ended without report", at its last sign of life.
+- **A `needs_human` that says nothing is needed** ("No action needed...", "None", "N/A", "Nothing to do", "Nothing now") is not raised to a person: the text is kept as an open question and the response carries a `NEEDS_HUMAN_STATES_NO_ACTION` warning. An older open ask that says the same is closed by the hourly maintenance run (resolution `expired`, "The ask says nothing is needed.").
 - **A request from a later session of the same agent** supersedes it. When `activity_update` or `PUT /api/activity/{id}` records a handoff with a non-empty `needs_human`, every other open request of activities with the same assigned agent, the same user and the same `memory_scope` that was made before this activity started is resolved as superseded. A request a parallel session made after this activity started is left open, as are requests in other scopes, of other users or of other agents. Superseding is per task: only activities with the same `metadata.task_ref` (for example `jira:PROJ-123`) supersede each other, activities without a `task_ref` (ordinary terminal sessions) supersede each other, and a tagged and an untagged activity never do; `open_requests` follows the same rule. Superseded requests leave the queue and session context but stay listed, collapsed, under **Superseded by a later handoff** on the Activity page.
 
 For example, one agent working in `workspace:app` without a `task_ref`:
@@ -675,7 +643,7 @@ The MCP `activity_update` response and the `PUT /api/activity/{id}` response can
 
 Recording or resolving a handoff in a `workspace:*` scope adds a `handoff_recorded` or `handoff_resolved` change to that workspace's change feed (`workspace_sync`), with the task, status, `needs_human` and `task_ref` in its summary. Activity webhook payloads carry the `handoff`, `handoff_resolved_at` and `task_ref`, and resolving sends `activity_handoff_resolved`.
 
-`GET /api/activity/attention` lists what is waiting on a person in the scopes the caller reads. `items` are unresolved `needs_human` requests, newest first: `id`, `agent_id`, `user_id`, `memory_scope`, `status`, `task_description`, `needs_human`, `task_ref`, `updated_at`. It is for a coordinator, such as an attention reader or a chief-of-staff agent, that tells a person what is waiting on them; it needs the `coordination` capability, not admin. The same response also carries `approvals` (pending approval requests), `credential_requests` (secrets an agent asked a person to supply: `request_id`, `scope`, `name`, `purpose`, `requested_by`, `created_at`) and `memory_suggestions` (`count` and a list of `id`, `rule`, `scope`, `created_at` and `target_ids`, the memories each is about, for Memory Clean-up suggestions; never the memory text; answer one by reading the memory and calling `memory_confirm` with evidence or `memory_retract` with a reason). Repeat `scope` to narrow it (each must be readable, or the call returns `403`), pass `without_task_ref=true` to skip requests that point at another system's task, and `limit` (default 50, at most 200). The MCP equivalent is `attention_list`. Listing never resolves anything; that stays with a person.
+`GET /api/activity/attention` lists what is waiting on a person in the scopes the caller reads. `items` are unresolved `needs_human` requests, newest first: `id`, `agent_id`, `user_id`, `memory_scope`, `status`, `task_description`, `needs_human`, `task_ref`, `updated_at`. It is for a coordinator, such as an attention reader or a chief-of-staff agent, that tells a person what is waiting on them; it needs the `coordination` capability, not admin. The same response also carries `approvals` (pending approval requests) and `credential_requests` (secrets an agent asked a person to supply: `request_id`, `scope`, `name`, `purpose`, `requested_by`, `created_at`). Repeat `scope` to narrow it (each must be readable, or the call returns `403`), pass `without_task_ref=true` to skip requests that point at another system's task, and `limit` (default 50, at most 200). The MCP equivalent is `attention_list`. Listing never resolves anything; that stays with a person.
 
 ### Compact activity lists
 
@@ -685,33 +653,9 @@ Over MCP, `activity_list` and `activity_search` return compact rows unless `view
 
 When work belongs to a task that lives in another system, record it as `metadata.task_ref = "<system>:<id>"`, for example `jira:PROJ-123` or `github:owner/repo#42`. MCP `activity_update` and REST `POST /api/activity` and `PUT /api/activity/{id}` take it as `task_ref` (REST also accepts it inside `metadata_json`); it must be a lowercase system name, a colon, and an id without spaces. Core stores it and does not interpret the id. A reader that already lists that system's queue uses it to skip the handoff (`without_task_ref`), so one item is not shown twice. Work started from another system's task should always set it; a terminal session started by a person leaves it empty.
 
-### Activity pickup
+### Removed in 1.3.0
 
-`POST /api/activity/pickup` requires agent authentication. It finds the oldest `active` activity where `assigned_agent_id` matches the calling agent and `memory_scope` is within the agent's authorized read scopes, then heartbeats it to signal the claim.
-
-Response when work is found:
-```json
-{
-  "ok": true,
-  "data": {
-    "activity": { "id": "...", "task_description": "...", "assigned_agent_id": "...", ... },
-    "message": null
-  }
-}
-```
-
-Response when nothing is waiting:
-```json
-{
-  "ok": true,
-  "data": {
-    "activity": null,
-    "message": "No assigned work found for this agent in authorized scopes"
-  }
-}
-```
-
-The pickup is workspace-aware: an agent configured with `workspace:proj-a` in its read scopes will only claim activities whose `memory_scope` is `workspace:proj-a`. It will never see activities assigned to a different agent or scoped to a workspace it cannot read. Activity records are a mailroom-style handoff board, not orchestration: they store work, status, and ownership, but the agent runtime still has to explicitly check for and claim work.
+`POST /api/activity/pickup`, `POST /api/workspace-sync/end`, the `reassign_to_agent` recovery action, creating an activity for another agent with `assigned_agent_id` on `POST /api/activity`, and the inbound `activity.assign` command are gone. The first two and the `assigned_agent_id` create answer `410` with error code `REMOVED`; the others answer a clear error.
 
 ---
 
@@ -742,35 +686,31 @@ Dispatch:
 | `memory_search` | Search memory by query. No `scope` = your default recall scopes; pass `scope` to target one specific readable scope on demand |
 | `memory_get` | List records in an authorized scope. `view='compact'` surveys a scope (metadata + content preview, no full bodies); defaults to compact for large pages, full for small. Supports `limit`/`offset` |
 | `memory_write` | Write a memory record |
-| `memory_retract` | Soft-delete a memory record; with a `reason` (what you checked) it also answers pending Memory Clean-up suggestions about it |
+| `memory_retract` | Soft-delete a memory record (restorable); a `reason` (what you checked) is kept with the audit entry |
 | `memory_move` | Atomically relocate an active record to a new scope (preserves content/class/topic + lineage; write access to both scopes required) |
 | `memory_confirm` | Mark a record verified against the world as of now. Requires `evidence` naming what was checked; reading a record is not checking it |
-| `memory_feedback` | Say whether a recalled record actually helped; feeds observed usefulness into ranking |
-| `memory_verify` | Check anchored facts against the repo path, host or connector binding they describe. Records evidence on passes; queues review for anchors that have vanished |
+| `memory_verify` | Check anchored facts against the repo path, host or connector connection they describe. Records evidence on passes; queues review for anchors that have vanished |
 | `memory_reanchor` | Repoint a record at what actually describes it, when the file moved or the anchor was wrong |
-| `memory_pinned` | The standing context for the caller's scopes; loaded at session start rather than searched for |
-| `memory_pin` | Request that a record become (or stop being) standing context; queues the request for operator review |
 | `credential_get` | Get an `AC_SECRET_*` reference for a credential entry |
 | `credential_list` | List credential metadata and references in authorized scopes |
 | `credential_request` | Ask a person for a missing secret; returns the reference once they fill it on the Credentials page |
-| `session_context` | One budgeted session-start block (rules, waiting and unfinished work, recent results with next steps, changes, key-record index) plus the session's `execution_id` |
+| `session_context` | One budgeted session-start block (waiting and unfinished work, recent results with next steps, changes, key-record index) plus the session's `execution_id`; for a workspace, or for the agent's own private scope (`agent:<id>`) when it has no workspace |
 | `workspace_sync` | Start or continue an execution and return current context plus workspace changes after its cursor |
 | `workspace_sync_ack` | Advance an execution's acknowledged cursor after processing a delivered page |
 | `activity_update` | Create or update an activity record in the supplied `memory_scope`, including progress notes, completion result and a structured `handoff` (`completed`, `next_steps`, `open_questions`, `needs_human`); it never moves an activity across scopes. A `needs_human` request supersedes the agent's open requests in the scope from earlier sessions and lists them in `superseded_requests` (see [Handoffs](#handoffs)); with `activity_id` it closes one of your own tasks that ended blocked (status completed or cancelled, with a `task_result`) |
 | `activity_handoff_resolve` | Resolve one of the caller's own `needs_human` requests once it has been dealt with. `activity_id` and `reason` (up to 500 characters) are required; only the agent the activity is assigned to may call it |
 | `activity_get` | Get an activity record in a readable scope, with the memory records written during it |
 | `activity_list` | List activities visible to the current caller. Compact by default (see below); `view=full` returns every field |
-| `attention_list` | What is waiting on a person across readable scopes: unresolved `needs_human` handoffs (`items`, newest first, each with its `task_ref`), pending `approvals`, `credential_requests` and `memory_suggestions`; read-only, for coordinators |
-| `activity_pickup` | Claim the next active work item assigned to this agent in authorized scopes |
+| `attention_list` | What is waiting on a person across readable scopes: unresolved `needs_human` handoffs (`items`, newest first, each with its `task_ref`), pending `approvals` and `credential_requests`; read-only, for coordinators |
 | `activity_search` | Full-text search the activity trail: what agents worked on, per task, with results. Use for "what did we do on X"; use `memory_search` for durable facts and decisions. Compact by default, like `activity_list` |
 | `effective_authority` | Report the caller's current effective authority: identity, read and write scopes, workspaces, and capabilities |
 | `connectors_list` | List installed connector types as lean summaries (id, name, auth/backend type, action_count; no full specs). Supports `limit`/`offset`; use `connectors_actions_list` for a type's actions |
-| `connectors_bindings_list` | List connector bindings in authorized scopes |
-| `connectors_bindings_test` | Test a binding using its stored credential |
+| `connectors_bindings_list` | List service connections in authorized scopes |
+| `connectors_bindings_test` | Test a connection using its stored credential |
 | `connectors_actions_list` | List actions supported by a connector type |
-| `connectors_summary` | Summarize visible connector capability, binding, credential-presence, action, and health state |
-| `connectors_run` | Run one connector action server-side using a binding |
-| `connectors_resolve` | Deterministically resolve a connector type (plus optional alias, scope, and action) to a single authorized binding |
+| `connectors_summary` | Summarize visible connector capability, connection, credential-presence, action, and health state |
+| `connectors_run` | Run one connector action server-side using a connection |
+| `connectors_resolve` | Deterministically resolve a connector type (plus optional alias, scope, and action) to a single authorized connection |
 | `result_fetch` | Retrieve a slice of a previously offloaded large tool result by handle |
 
 ### Large tool results (offloading)
@@ -845,8 +785,8 @@ data: {"type": "activity_created", "timestamp": "2026-05-18T12:34:56.789Z", "dat
 | `activity_updated` | An activity status, metadata, progress note, or task result is updated |
 | `activity_heartbeat` | An agent sends a heartbeat for an activity |
 | `activity_cancelled` | An activity is cancelled |
-| `activity_recovered` | A stale activity is reassigned or recovered |
-| `connector_executed` | A connector binding action completes |
+| `activity_recovered` | A stale activity came back: the agent updated it, or it was resumed, reassigned or recovered from the dashboard |
+| `connector_executed` | A connector connection action completes |
 
 The `connector_executed` payload includes `binding_id`, `binding_name`, `scope`, `connector_type_id`, `connector_type_name`, `action`, `success`, `duration_ms`, `status`, and `error_message`.
 
@@ -982,7 +922,6 @@ Commands use dot notation and imperative form to distinguish them from outbound 
 | Event type | Required fields | Optional fields |
 | --- | --- | --- |
 | `activity.create` | `assigned_agent_id` | `task_description`, `memory_scope`, `workspace` |
-| `activity.assign` | `activity_id`, `assigned_agent_id` | `memory_scope` |
 | `activity.update` | `activity_id` + at least one of: `status`, `task_description`, `task_note`, `task_result`, `memory_scope` | |
 | `activity.cancel` | `activity_id` | `reason` |
 | `activity.note` | `activity_id`, `note` | |
@@ -1004,18 +943,6 @@ Response:
 
 ```json
 {"ok": true, "data": {"activity_id": "abc123", "status": "active"}}
-```
-
-#### activity.assign
-
-Reassigns an existing activity to a different agent.
-
-```json
-{
-  "event_type": "activity.assign",
-  "activity_id": "abc123",
-  "assigned_agent_id": "opus"
-}
 ```
 
 #### activity.update

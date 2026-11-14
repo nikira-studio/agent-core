@@ -63,8 +63,16 @@ def test_key_status_shows_a_digest_not_the_key(clean_db):
     assert status["primary_key_id"] not in primary
 
 
-def test_failed_login_limit_is_kept_in_the_database(clean_db):
+def test_failed_login_limit_is_kept_in_the_database(clean_db, monkeypatch):
+    import time as real_time
+
     from app.database import get_db
+    from app.security import rate_limiter
+
+    # A bucket nobody has touched reports its "reset" as the current second, so comparing two peeks taken
+    # across a second boundary failed now and then under load. Freeze the clock so the comparison is exact.
+    frozen = real_time.time()
+    monkeypatch.setattr(rate_limiter.time, "time", lambda: frozen)
 
     for _ in range(10):
         assert RL.check("user", "198.51.100.7", "login_failed")[0] is True
@@ -75,7 +83,8 @@ def test_failed_login_limit_is_kept_in_the_database(clean_db):
                            ("login_failed:user:198.51.100.7",)).fetchone()
     assert row is not None and row["tokens"] < 1
     # Another address has its own bucket, and peeking takes nothing.
-    assert RL.peek("user", "198.51.100.8", "login_failed") == (True, RL.peek("user", "198.51.100.8", "login_failed")[1])
+    untouched = RL.peek("user", "198.51.100.8", "login_failed")
+    assert untouched[0] is True and untouched == RL.peek("user", "198.51.100.8", "login_failed")
     with get_db() as conn:
         assert conn.execute("SELECT COUNT(*) FROM rate_limit_buckets WHERE bucket_key LIKE '%198.51.100.8'").fetchone()[0] == 0
 
@@ -120,3 +129,18 @@ def test_client_ip_reads_forwarded_for_right_to_left(monkeypatch):
     assert get_client_ip(req("203.0.113.5", "1.2.3.4")) == "203.0.113.5"
     # A trusted proxy with no header is the caller.
     assert get_client_ip(req("10.0.0.2")) == "10.0.0.2"
+
+
+def test_peek_of_an_untouched_bucket_reports_the_current_second_as_its_reset(clean_db, monkeypatch):
+    """Pins why the comparison above needs a frozen clock: the answer moves with the wall clock, by design."""
+    import time as real_time
+
+    from app.security import rate_limiter
+
+    now = real_time.time()
+    monkeypatch.setattr(rate_limiter.time, "time", lambda: now)
+    first = RL.peek("user", "198.51.100.9", "login_failed")
+    monkeypatch.setattr(rate_limiter.time, "time", lambda: now + 1)
+    second = RL.peek("user", "198.51.100.9", "login_failed")
+    assert first[0] is True and second[0] is True
+    assert second[1]["reset"] == first[1]["reset"] + 1 and second[1]["remaining"] == first[1]["remaining"]

@@ -31,7 +31,18 @@ async function createCredential(e) {
 }
 
 async function deleteCredential(id) {
-  if (!confirm('Delete this credential? Connector bindings using it will stop working.')) return;
+  // Say which connections and agents use it before it goes (the list is admin-only; without it, a general warning).
+  let used = '';
+  const access = await apiFetch('/api/credential-consumers/entries/' + id + '/access');
+  if (access.ok && access.data) {
+    const names = (access.data.services || []).map(function(s) { return s.name; });
+    const agents = (access.data.grants || []).map(function(g) { return g.display_name || g.agent_id; });
+    if (names.length) used += '\n\nThese connections use it and will stop working until you attach another credential: ' + names.join(', ') + '.';
+    if (agents.length) used += '\n\nThese agents are granted it and will lose it: ' + agents.join(', ') + '.';
+  } else {
+    used = '\n\nConnections that use it will stop working until you attach another credential.';
+  }
+  if (!await confirmDialog('Delete this credential?' + used)) return;
   const j = await apiFetch('/api/credentials/entries/' + id, { method: 'DELETE' });
   if (j.ok) { showToast('Credential deleted', 'success'); location.reload(); }
   else { showToast(j.error?.message || 'Failed to delete credential', 'danger'); }
@@ -47,6 +58,8 @@ async function editCredential(id) {
   document.getElementById('edit-credential-scope').value = c.scope || '';
   document.getElementById('edit-credential-scope').dataset.originalScope = c.scope || '';
   document.getElementById('edit-credential-value').value = '';
+  // Every credential has a value; say so, with when the entry last changed, and never show it.
+  setSecretState('edit-credential-value', true, 'value', '', c.updated_at || c.created_at);
   // Back to a date in the viewer's timezone, so what they saved is what they see.
   document.getElementById('edit-credential-expires').value = c.expires_at
     ? new Date(c.expires_at).toLocaleDateString('en-CA')
@@ -67,8 +80,8 @@ async function submitEditCredential(e) {
   // Sent even when empty: clearing the field is how an expiry is removed.
   body.expires_at = endOfDayUtc(document.getElementById('edit-credential-expires').value);
   const originalScope = document.getElementById('edit-credential-scope').dataset.originalScope;
-  if (body.scope !== originalScope && !confirm(
-    'Move this credential from ' + originalScope + ' to ' + body.scope + '? Linked connector bindings will stay in their current scope.'
+  if (body.scope !== originalScope && !await confirmDialog(
+    'Move this credential from ' + originalScope + ' to ' + body.scope + '? Connections that use it keep their current workspace.'
   )) return;
   const j = await apiFetch('/api/credentials/entries/' + id, { method: 'PUT', body: JSON.stringify(body) });
   if (j.ok) {
@@ -117,7 +130,7 @@ document.addEventListener('click', async (event) => {
   }
   const cancel = event.target.closest('[data-request-cancel]');
   if (cancel) {
-    if (!confirm('Decline this request? The agent will see it was not filled.')) return;
+    if (!await confirmDialog('Decline this request? The agent will see it was not filled.')) return;
     const j = await apiFetch('/api/credentials/requests/' + encodeURIComponent(cancel.dataset.requestCancel) + '/cancel', { method: 'POST' });
     if (j.ok) location.reload(); else showToast(j.error?.message || 'Failed', 'danger');
   }
@@ -158,7 +171,7 @@ async function renderAccess() {
 
   const grants = document.getElementById('access-grants');
   grants.replaceChildren();
-  if (!d.grants.length) grants.append(accessEl('p', 'No one yet. Add an agent so it can use this.', 'text-muted'));
+  if (!d.grants.length) grants.append(accessEl('p', 'No service or container has been granted it. Add one so it can fetch this at startup.', 'text-muted'));
   d.grants.forEach(g => {
     const row = accessEl('div', null, 'access-row');
     row.append(accessEl('strong', g.display_name));
@@ -179,7 +192,7 @@ async function renderAccess() {
   pick.replaceChildren();
   d.candidates.forEach(a => { const o = accessEl('option', a.display_name); o.value = a.id; pick.append(o); });
   document.getElementById('access-add').disabled = !d.candidates.length;
-  if (!d.candidates.length) { const o = accessEl('option', 'No agent can receive it yet'); o.value = ''; pick.append(o); }
+  if (!d.candidates.length) { const o = accessEl('option', 'No agent has the Service agent role'); o.value = ''; pick.append(o); }
 
   const cannot = document.getElementById('access-cannot');
   const list = document.getElementById('access-cannot-list');
@@ -197,7 +210,7 @@ async function renderAccess() {
 
   const services = document.getElementById('access-services');
   services.replaceChildren();
-  if (!d.services.length) services.append(accessEl('p', 'None. A service uses a credential through a binding.', 'text-muted'));
+  if (!d.services.length) services.append(accessEl('p', 'None. A service uses a credential through a connection.', 'text-muted'));
   d.services.forEach(sv => {
     const row = accessEl('div', null, 'access-row');
     const link = accessEl('a', sv.name + (sv.service ? ' (' + sv.service + ')' : ''));

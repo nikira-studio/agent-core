@@ -1,6 +1,8 @@
 """Adapter library scanning, installation, and restore helpers."""
 
 import json
+import re
+import time
 import logging
 import shutil
 import tempfile
@@ -117,6 +119,52 @@ def _restore_tree(target: Path, staging: Path | None, backup: Path | None) -> No
             shutil.rmtree(staging, ignore_errors=True)
         if backup and backup.exists() and target.exists():
             shutil.rmtree(backup, ignore_errors=True)
+
+
+_BACKUP_NAME = re.compile(r"^\.(?P<id>.+)\.backup-[0-9a-f]+$")
+_STAGING_NAME = re.compile(r"^\..+\.staging-.+$")
+STALE_STAGING_SECONDS = 24 * 3600
+
+
+def prune_adapter_backups(adapter_id: str | None = None) -> int:
+    """Keep the newest update backup of an installed adapter and delete the older ones.
+
+    Every update leaves the previous tree beside the new one (``.<id>.backup-<hex>``) so a failed swap can roll
+    back; once it has succeeded only the latest is worth keeping. A backup of an adapter that is no longer
+    installed is deleted with it, and so is a half-made staging folder more than a day old. ``adapter_id`` limits
+    the pass to one adapter. Returns how many folders were deleted.
+    """
+    root = get_user_adapter_dir()
+    if not root.is_dir():
+        return 0
+    installed = {record["adapter_id"] for record in _get_all_install_records()}
+    by_adapter: dict[str, list[Path]] = {}
+    removed = 0
+    now = time.time()
+    for entry in root.iterdir():
+        if not entry.is_dir():
+            continue
+        match = _BACKUP_NAME.match(entry.name)
+        if match:
+            by_adapter.setdefault(match.group("id"), []).append(entry)
+        elif adapter_id is None and _STAGING_NAME.match(entry.name):
+            try:
+                if now - entry.stat().st_mtime > STALE_STAGING_SECONDS:
+                    shutil.rmtree(entry, ignore_errors=True)
+                    removed += 1
+            except OSError:
+                continue
+    for name, folders in by_adapter.items():
+        if adapter_id is not None and name != adapter_id:
+            continue
+        folders.sort(key=lambda f: f.stat().st_mtime, reverse=True)
+        doomed = folders if name not in installed else folders[1:]
+        for folder in doomed:
+            shutil.rmtree(folder, ignore_errors=True)
+            removed += 1
+    if removed:
+        logger.info("Pruned %s old adapter backup folder(s)", removed)
+    return removed
 
 
 def _scan_root(adapter_root: Path, source_kind: str) -> list[dict]:
@@ -376,6 +424,8 @@ def list_available_adapters() -> list[dict]:
             continue
 
         chosen = dict(chosen)
+        # True when an adapter with this id ships inside the app; false for one an installer added to the data folder.
+        chosen["shipped"] = system_entry is not None
         install_record = install_records.get(adapter_id)
         connector_type = connector_service.get_connector_type(adapter_id)
         chosen["installed"] = bool(install_record or connector_type)
@@ -495,6 +545,7 @@ def install_adapter(adapter_id: str, source_kind: str | None = None) -> dict:
             clear_adapter_source_cache()
         raise
     clear_adapter_source_cache()
+    prune_adapter_backups(adapter_id)
     logger.info("Installed adapter %s from %s", adapter_id, source_kind)
     return {
         "adapter_id": adapter_id,
@@ -558,6 +609,7 @@ def update_adapter(adapter_id: str) -> dict:
             clear_adapter_source_cache()
         raise
     clear_adapter_source_cache()
+    prune_adapter_backups(adapter_id)
     logger.info(
         "Updated adapter %s from %s to %s",
         adapter_id,
@@ -583,15 +635,20 @@ def uninstall_adapter(adapter_id: str) -> bool:
         # System adapters are installed as a user-local copy under data/adapters.
         # Remove that installed copy on uninstall so the browse page falls back to
         # the shipped template and the adapter can be installed again cleanly.
+        # But only when a shipped template still exists to fall back to: for an adapter whose shipped template was
+        # removed in a later release, the installed copy is the only one, so it is kept and stays installable.
         if source_kind == "system" and source_path:
             installed_path = Path(source_path)
-            if installed_path.exists():
+            system_entries, _ = _source_entries()
+            still_shipped = adapter_id in {entry["id"] for entry in system_entries}
+            if installed_path.exists() and still_shipped:
                 shutil.rmtree(installed_path)
         removed_any = True
 
     _clear_install_record(adapter_id)
     removed_any = connector_service.delete_connector_type(adapter_id) or removed_any
     clear_adapter_source_cache()
+    prune_adapter_backups(adapter_id)  # no longer installed: its update backups go with it
     return removed_any
 
 

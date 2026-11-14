@@ -197,7 +197,7 @@ async def write_memory(
 ) -> dict[str, Any]:
     scope = values["scope"]
     memory_class = values["memory_class"]
-    source_kind = values.get("source_kind", "agent_inference")
+    source_kind = values.get("source_kind") or ("operator_authored" if authority.actor_type == "user" else "agent_inference")
     confidence = values.get("confidence", 0.5)
     importance = values.get("importance", 0.5)
     if not authority.can("memory", "write", scope=scope):
@@ -252,21 +252,28 @@ async def write_memory(
                 "SCOPE_DENIED", "Access denied to scope of record being superseded", 403
             )
 
-    execution_id = values.get("execution_id")
-    if execution_id:
-        try:
-            workspace_sync_service.validate_execution(
-                execution_id=execution_id,
-                agent_id=authority.agent_id or "",
-                user_id=authority.user_id or "",
-                memory_scope=scope,
+    execution_id, execution_warning = workspace_sync_service.usable_execution(
+        execution_id=values.get("execution_id"),
+        agent_id=authority.agent_id or "",
+        user_id=authority.user_id or "",
+        memory_scope=scope,
+    )
+
+    if authority.actor_type == "agent" and not supersedes_id:
+        refusal = await asyncio.to_thread(
+            memory_service.write_refusal, values["content"], scope, memory_class, values.get("topic")
+        )
+        if refusal:
+            audit_service.write_event(
+                actor_type=authority.actor_type,
+                actor_id=authority.actor_id,
+                action="memory_write_refused",
+                resource_type="memory_record",
+                resource_id=refusal.get("existing_id"),
+                result="blocked",
+                details={"rule": refusal["rule"], "scope": scope, "memory_class": memory_class},
             )
-        except PermissionError as exc:
-            raise MemoryOperationError(
-                "EXECUTION_OWNERSHIP", "Execution belongs to another agent", 403
-            ) from exc
-        except ValueError as exc:
-            raise MemoryOperationError(str(exc), workspace_sync_service.execution_message(str(exc)), 400) from exc
+            raise MemoryOperationError(refusal["code"], refusal["message"], 422)
 
     provenance = memory_service.provenance_for_write(
         actor_type=authority.actor_type,
@@ -336,7 +343,10 @@ async def write_memory(
         topic=values.get("topic"),
         exclude_id=record["id"],
         subject_anchor=values.get("subject_anchor"),
+        supersedes_id=values.get("supersedes_id"),
     )
+    if execution_warning:
+        warnings = [*(warnings or []), execution_warning]
     if warnings:
         payload["warnings"] = warnings
     return payload

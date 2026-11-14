@@ -1,4 +1,4 @@
-"""Closing a record that ended blocked, and closing a suggestion that someone has already answered."""
+"""Closing a record that ended blocked."""
 
 import json
 
@@ -80,94 +80,6 @@ def test_nothing_else_changes_state_after_a_record_has_ended(test_client, admin_
 
 
 # ---- suggestions answered by a check -----------------------------------------------------------------
-
-def _memory(scope=WS, content="The build server is 192.0.2.10"):
-    record, _ = memory_service.write_memory(content=content, memory_class="fact", scope=scope)
-    return record["id"]
-
-
-def _suggest(record_id, rule="unconfirmed_inference", action="confirm", suggestion_id=None, targets=None):
-    suggestion_id = suggestion_id or f"sug-{record_id}-{rule}"
-    with get_db() as conn:
-        conn.execute(
-            "INSERT INTO memory_proposals (id, rule, action, scope, target_ids_json, rationale, evidence_json, status, created_at) "
-            "VALUES (?, ?, ?, ?, ?, 'r', '{}', 'pending', '2026-11-08T00:00:00+00:00')",
-            (suggestion_id, rule, action, WS, json.dumps(targets or [record_id])),
-        )
-        conn.commit()
-    return suggestion_id
-
-
-def _status(suggestion_id):
-    with get_db() as conn:
-        row = conn.execute(
-            "SELECT status, decided_by FROM memory_proposals WHERE id = ?", (suggestion_id,)
-        ).fetchone()
-    return row["status"], row["decided_by"]
-
-
-def test_confirming_a_memory_with_evidence_answers_its_pending_suggestions(test_client, admin_token):
-    owner, _ = _setup()
-    record_id = _memory()
-    first = _suggest(record_id, "unconfirmed_inference")
-    second = _suggest(record_id, "stale_volatile")
-    r = test_client.post("/mcp", headers=owner, json={"tool": "memory_confirm", "params": {
-        "record_id": record_id, "evidence": "ssh buildhost: ip a shows 192.0.2.10"}})
-    assert r.status_code == 200 and r.json()["ok"], r.text
-    assert _status(first) == ("accepted", "close-owner") and _status(second) == ("accepted", "close-owner")
-    from app.services import audit_service
-
-    answered = audit_service.query_events(action="memory_proposal_answered", limit=10)
-    assert len(answered) == 2 and "ssh buildhost" in str(answered[0]) and answered[0]["actor_id"] == "close-owner"
-    # They left the person's list but stay in the history.
-    from app.services import memory_proposal_service
-
-    assert memory_proposal_service.pending_summary([WS])["count"] == 0
-    assert any(p["id"] == first for p in memory_proposal_service.list_proposals(status="accepted"))
-
-
-def test_confirming_without_evidence_closes_nothing(test_client, admin_token):
-    owner, _ = _setup()
-    record_id = _memory()
-    suggestion = _suggest(record_id)
-    for evidence in ("", "   "):
-        r = test_client.post("/mcp", headers=owner, json={"tool": "memory_confirm", "params": {
-            "record_id": record_id, "evidence": evidence}})
-        assert not r.json().get("ok", False)
-    assert _status(suggestion) == ("pending", None)
-    assert memory_service.get_memory_record(record_id)["last_confirmed_at"] is None
-
-
-def test_retracting_with_a_reason_answers_suggestions_and_without_one_does_not(test_client, admin_token):
-    owner, _ = _setup()
-    kept, gone = _memory(content="Kept fact"), _memory(content="Gone fact")
-    s_kept, s_gone = _suggest(kept), _suggest(gone)
-    r = test_client.post("/mcp", headers=owner, json={"tool": "memory_retract", "params": {"record_id": kept}})
-    assert r.json()["ok"] and _status(s_kept) == ("pending", None)
-    r = test_client.post("/mcp", headers=owner, json={"tool": "memory_retract", "params": {
-        "record_id": gone, "reason": "the host was decommissioned"}})
-    assert r.json()["ok"] and _status(s_gone) == ("accepted", "close-owner")
-
-
-def test_a_suggestion_to_retract_is_a_miss_when_the_memory_is_checked_and_kept(test_client, admin_token):
-    owner, _ = _setup()
-    record_id = _memory()
-    suggestion = _suggest(record_id, rule="episodic_log", action="retract")
-    test_client.post("/mcp", headers=owner, json={"tool": "memory_confirm", "params": {
-        "record_id": record_id, "evidence": "still describes the live service"}})
-    assert _status(suggestion) == ("rejected", "close-owner")
-
-
-def test_clusters_and_pin_requests_are_left_for_a_person(test_client, admin_token):
-    owner, _ = _setup()
-    a, b = _memory(content="dup one"), _memory(content="dup two")
-    cluster = _suggest(a, rule="duplicate_cluster", action="retract", targets=[a, b])
-    pin = _suggest(b, rule="pin_request", action="pin")
-    for rid in (a, b):
-        test_client.post("/mcp", headers=owner, json={"tool": "memory_confirm", "params": {
-            "record_id": rid, "evidence": "checked"}})
-    assert _status(cluster) == ("pending", None) and _status(pin) == ("pending", None)
-
 
 def _mcp_update(client, headers, **params):
     return client.post("/mcp", headers=headers, json={"tool": "activity_update", "params": params})

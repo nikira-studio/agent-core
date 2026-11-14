@@ -24,7 +24,7 @@ def test_non_admin_cannot_access_audit(test_client, clean_db):
     r = test_client.get("/audit")
     assert r.status_code == 403
     assert "Admin Access Required" in r.text
-    assert "Back to Overview" in r.text
+    assert "Back to Needs you" in r.text
     assert 'href="/audit"' not in r.text
 
 

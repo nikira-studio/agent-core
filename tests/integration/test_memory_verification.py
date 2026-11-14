@@ -99,8 +99,10 @@ def test_every_builtin_type_has_a_verifier(clean_db):
     """The types this system claims to check itself, it must actually check."""
     from app.services.memory_service import BUILTIN_ANCHOR_TYPES
 
-    assert set(BUILTIN_ANCHOR_TYPES) == set(verification_service.BUILTIN_VERIFIERS)
-    assert verification_service.available_anchor_types() >= set(BUILTIN_ANCHOR_TYPES)
+    # host: stays an accepted anchor (a label) but has no verifier; every type that has one is a known type
+    assert set(verification_service.BUILTIN_VERIFIERS) == {"repo", "service"}
+    assert "host" in BUILTIN_ANCHOR_TYPES
+    assert verification_service.available_anchor_types() >= {"repo", "service"}
 
 
 # --- service anchors -------------------------------------------------------
@@ -132,35 +134,8 @@ def test_a_failing_service_is_unverifiable_not_missing(clean_db):
 # --- the pass --------------------------------------------------------------
 
 
-def test_a_pass_verifies_and_queues_review_for_what_vanished(clean_db, tmp_path):
-    (tmp_path / "here.py").write_text("# code")
-    _set_root(tmp_path)
-    present = _write(content="Ranking lives here.", subject_anchor="repo:here.py")
-    gone = _write(content="Ranking used to live there.", subject_anchor="repo:gone.py")
-
-    result = verification_service.verify_scope("workspace:proj")
-    assert result["verified"] == 1
-    assert result["missing"] == 1
-    assert result["proposals_queued"] == 1
-
-    from app.services import memory_proposal_service
-
-    proposals = memory_proposal_service.list_proposals(rule="anchor_missing")
-    assert proposals[0]["target_ids"] == [gone["id"]]
-    assert "gone.py" in proposals[0]["evidence"]["detail"]
-    # The rationale is written for whoever reviews it, not for the machine.
-    assert "out of date" in proposals[0]["rationale"]
-    assert memory_service.get_memory_record(present["id"])["anchor_checked_at"]
 
 
-def test_a_repeated_pass_does_not_re_ask(clean_db, tmp_path):
-    _set_root(tmp_path)
-    _write(subject_anchor="repo:gone.py")
-
-    first = verification_service.verify_scope("workspace:proj")
-    second = verification_service.verify_scope("workspace:proj")
-    assert first["proposals_queued"] == 1
-    assert second["proposals_queued"] == 0
 
 
 def test_maintenance_runs_the_pass(clean_db, tmp_path):
@@ -240,77 +215,13 @@ def test_mcp_confirm_requires_evidence(test_client, agent_token):
     assert with_evidence.status_code == 200, with_evidence.json()
 
 
-def test_looking_at_a_record_does_not_confirm_it(test_client, admin_token):
-    """The review queue's 'looks right' must not claim anyone checked."""
-    from app.services import memory_proposal_service
-
-    record = _write(
-        content="the assistant is currently served from 127.0.0.1:19119 on the build server.",
-        scope="workspace:proj",
-    )
-    with get_db() as conn:
-        conn.execute(
-            "UPDATE memory_records SET created_at = '2026-01-01T00:00:00+00:00', "
-            "last_confirmed_at = NULL WHERE id = ?",
-            (record["id"],),
-        )
-        conn.commit()
-
-    memory_proposal_service.generate_proposals(scope="workspace:proj")
-    proposal = memory_proposal_service.list_proposals(rule="stale_volatile")[0]
-    memory_proposal_service.decide_proposal(
-        proposal["id"], "accepted", decided_by="alex", outcome="still_current"
-    )
-
-    stored = memory_service.get_memory_record(record["id"])
-    assert stored["last_confirmed_at"] is None, "an opinion must not become evidence"
-    assert stored["record_status"] == "active"
-    # And the queue stops asking, without anyone having claimed a check.
-    again = memory_proposal_service.generate_proposals(scope="workspace:proj")
-    assert again["created"] == 0
 
 
 # --- fixing a wrong pointer ------------------------------------------------
 
 
-def test_a_wrong_pointer_can_be_fixed_instead_of_retracted(clean_db, tmp_path):
-    """The middle answer: the memory is good, the pointer was wrong."""
-    from app.services import memory_proposal_service
-
-    (tmp_path / "real.py").write_text("# code")
-    _set_root(tmp_path)
-    record = _write(subject_anchor="repo:app/data/data.db")
-
-    verification_service.verify_scope("workspace:proj")
-    proposal = memory_proposal_service.list_proposals(rule="anchor_missing")[0]
-
-    result = memory_proposal_service.reanchor_proposal(
-        proposal["id"], "repo:real.py", decided_by="alex"
-    )
-    assert result["applied_count"] == 1
-    assert result["recheck"][0]["status"] == verification_service.VERIFIED
-
-    stored = memory_service.get_memory_record(record["id"])
-    assert stored["subject_anchor"] == "repo:real.py"
-    assert stored["record_status"] == "active"
-    assert stored["anchor_checked_at"], "a fixed pointer that resolves is checked"
-
-    provenance = json.loads(stored["provenance_json"])
-    assert provenance["anchor_corrected"]["from"] == "repo:app/data/data.db"
 
 
-def test_fixing_to_another_bad_pointer_says_so(clean_db, tmp_path):
-    from app.services import memory_proposal_service
-
-    _set_root(tmp_path)
-    _write(subject_anchor="repo:gone.py")
-    verification_service.verify_scope("workspace:proj")
-    proposal = memory_proposal_service.list_proposals(rule="anchor_missing")[0]
-
-    result = memory_proposal_service.reanchor_proposal(
-        proposal["id"], "repo:also-gone.py", decided_by="alex"
-    )
-    assert result["recheck"][0]["status"] == verification_service.MISSING
 
 
 def test_reanchor_is_exposed_over_rest_and_mcp(test_client, admin_token, agent_token):
@@ -354,16 +265,6 @@ def test_reanchor_is_exposed_over_rest_and_mcp(test_client, admin_token, agent_t
     assert bad.status_code == 400
 
 
-def test_the_review_card_offers_the_fix(test_client, admin_token, tmp_path):
-    _set_root(tmp_path, scope="workspace:proj")
-    _write(subject_anchor="repo:gone.py")
-    verification_service.verify_scope("workspace:proj")
-
-    html = test_client.get(
-        "/memory", headers={"Authorization": f"Bearer {admin_token}"}
-    ).text
-    assert "Fix the pointer" in html
-    assert "reanchorProposal(" in html
 
 
 # --- runtime-looking anchors ------------------------------------------------
@@ -387,60 +288,15 @@ def test_a_runtime_path_anchor_is_warned_about_on_write(test_client, agent_token
     assert "ANCHOR_LOOKS_RUNTIME" in [w["code"] for w in r.json()["data"].get("warnings", [])]
 
 
-def test_a_runtime_anchor_gets_a_different_explanation(clean_db, tmp_path):
-    from app.services import memory_proposal_service
-
-    _set_root(tmp_path)
-    _write(subject_anchor="repo:app/data/data.db")
-    verification_service.verify_scope("workspace:proj")
-
-    proposal = memory_proposal_service.list_proposals(rule="anchor_missing")[0]
-    assert "probably never the right thing to point at" in proposal["rationale"]
 
 
 # --- host anchors via connectors -------------------------------------------
 
 
-def test_a_host_with_no_binding_stays_unverifiable(clean_db):
-    record = _write(subject_anchor="host:192.0.2.99")
-    result = verification_service.verify_record(record)
-    assert result["status"] == verification_service.UNVERIFIABLE
-    assert "no connector binding targets" in result["detail"]
 
 
-def test_an_ambiguous_host_is_not_guessed_at(clean_db):
-    from app.services import connector_service
-
-    connector_type = connector_service.list_connector_types()[0]
-    for name in ("One", "Two"):
-        connector_service.create_binding(
-            connector_type_id=connector_type["id"],
-            scope="workspace:proj",
-            name=name,
-            config_json=json.dumps({"base_url": "http://192.0.2.10:8080"}),
-        )
-
-    record = _write(subject_anchor="host:192.0.2.10")
-    result = verification_service.verify_record(record)
-    assert result["status"] == verification_service.UNVERIFIABLE
-    assert "ambiguous" in result["detail"]
 
 
-def test_an_unreachable_host_is_never_reported_as_missing(clean_db):
-    """An outage must not manufacture evidence that memories are false."""
-    from app.services import connector_service
-
-    connector_type = connector_service.list_connector_types()[0]
-    connector_service.create_binding(
-        connector_type_id=connector_type["id"],
-        scope="workspace:proj",
-        name="Unreachable",
-        config_json=json.dumps({"base_url": "http://192.0.2.1:9/"}),
-    )
-    record = _write(subject_anchor="host:192.0.2.1")
-
-    result = verification_service.verify_record(record)
-    assert result["status"] == verification_service.UNVERIFIABLE
 
 
 def test_a_capped_sweep_rotates_instead_of_starving(clean_db, tmp_path):
@@ -454,26 +310,26 @@ def test_a_capped_sweep_rotates_instead_of_starving(clean_db, tmp_path):
     _set_root(tmp_path)
 
     unverifiable = {
-        _write(content=f"Host note {i}.", subject_anchor=f"host:10.0.0.{i}")["id"]
+        _write(content=f"Unmapped note {i}.", subject_anchor=f"repo:x{i}.py", scope="workspace:unmapped")["id"]
         for i in range(3)
     }
     checkable = _write(content="Checkable note.", subject_anchor="repo:here.py")["id"]
 
     # A budget smaller than the corpus: the unverifiable ones come first.
-    first = verification_service.verify_scope("workspace:proj", limit=3)
+    first = verification_service.verify_scope(limit=3)
     assert first["verified"] == 0
     assert {r["record_id"] for r in first["results"]} == unverifiable
 
     # Next run must move on rather than re-checking the same three.
-    second = verification_service.verify_scope("workspace:proj", limit=3)
+    second = verification_service.verify_scope(limit=3)
     assert checkable in {r["record_id"] for r in second["results"]}
     assert second["verified"] == 1
 
 
 def test_every_attempt_is_recorded_whatever_the_answer(clean_db, tmp_path):
     _set_root(tmp_path)
-    record = _write(subject_anchor="host:10.0.0.9")
-    verification_service.verify_scope("workspace:proj")
+    record = _write(subject_anchor="repo:anything.py", scope="workspace:unmapped")
+    verification_service.verify_scope("workspace:unmapped")
 
     with get_db() as conn:
         row = conn.execute(
@@ -507,23 +363,6 @@ def test_absolute_repo_anchors_are_rejected(clean_db):
     )
 
 
-def test_an_anchor_missing_card_asks_the_right_question(clean_db, tmp_path):
-    """It is a confirm proposal mechanically, but "is this still current?" is
-    the wrong question to put to someone about a file that has vanished."""
-    from app.services import memory_proposal_service
-
-    _set_root(tmp_path)
-    _write(subject_anchor="repo:gone.py")
-    verification_service.verify_scope("workspace:proj")
-
-    proposal = memory_proposal_service.list_proposals(rule="anchor_missing")[0]
-    assert proposal["prompt"] == (
-        "This points at something that is no longer there — is the memory still worth keeping?"
-    )
-
-    stale = memory_proposal_service.list_proposals(rule="stale_volatile")
-    for other in stale:
-        assert other["prompt"] == "Is this still current?"
 
 
 # --- verification as a capability, not a fixed set of domains ---------------
@@ -639,3 +478,80 @@ def test_an_incomplete_verifier_registration_is_reported(clean_db):
     result = verification_service.verify_record(_write(subject_anchor="url:https://example.com/x"))
     assert result["status"] == verification_service.UNVERIFIABLE
     assert "incompletely configured" in result["detail"]
+
+
+# --- a missing anchor retracts the record, after two misses ------------------
+
+
+def _age_miss(record_id, hours):
+    """Make the first miss look as if it happened `hours` ago."""
+    from datetime import timedelta
+
+    from app.time_utils import utc_now
+
+    record = memory_service.get_memory_record(record_id)
+    provenance = json.loads(record["provenance_json"])
+    provenance["anchor_missing_since"] = (utc_now() - timedelta(hours=hours)).isoformat()
+    with get_db() as conn:
+        conn.execute(
+            "UPDATE memory_records SET provenance_json = ? WHERE id = ?", (json.dumps(provenance), record_id)
+        )
+        conn.commit()
+
+
+def test_a_pass_verifies_what_is_there_and_only_notes_the_first_miss(clean_db, tmp_path):
+    (tmp_path / "here.py").write_text("# code")
+    _set_root(tmp_path)
+    present = _write(content="Ranking lives here.", subject_anchor="repo:here.py")
+    gone = _write(content="Ranking used to live there.", subject_anchor="repo:gone.py")
+
+    result = verification_service.verify_scope("workspace:proj")
+    assert (result["verified"], result["missing"], result["auto_retracted"]) == (1, 1, 0)
+    assert memory_service.get_memory_record(present["id"])["anchor_checked_at"]
+    kept = memory_service.get_memory_record(gone["id"])
+    assert kept["record_status"] == "active" and "anchor_missing_since" in kept["provenance_json"]
+
+
+def test_a_second_miss_an_hour_later_retracts_it_on_behalf_of_the_rule(clean_db, tmp_path):
+    from app.services import audit_service
+
+    _set_root(tmp_path)
+    gone = _write(subject_anchor="repo:gone.py")
+    verification_service.verify_scope("workspace:proj")
+    _age_miss(gone["id"], hours=2)
+
+    result = verification_service.verify_scope("workspace:proj")
+    assert result["auto_retracted"] == 1
+    record = memory_service.get_memory_record(gone["id"])
+    assert record["record_status"] == "retracted"
+    event = audit_service.query_events(action="memory_auto_retracted", limit=5)[0]
+    assert event["actor_id"] == "rule:anchor_missing" and event["resource_id"] == gone["id"]
+    assert memory_service.restore_memory(gone["id"])  # soft: restorable
+
+
+def test_a_second_miss_within_the_hour_waits(clean_db, tmp_path):
+    _set_root(tmp_path)
+    gone = _write(subject_anchor="repo:gone.py")
+    verification_service.verify_scope("workspace:proj")
+    _age_miss(gone["id"], hours=0)
+    assert verification_service.verify_scope("workspace:proj")["auto_retracted"] == 0
+    assert memory_service.get_memory_record(gone["id"])["record_status"] == "active"
+
+
+def test_an_anchor_that_comes_back_clears_the_note(clean_db, tmp_path):
+    _set_root(tmp_path)
+    record = _write(subject_anchor="repo:moved.py")
+    verification_service.verify_scope("workspace:proj")
+    assert "anchor_missing_since" in memory_service.get_memory_record(record["id"])["provenance_json"]
+    (tmp_path / "moved.py").write_text("# back")
+    verification_service.verify_scope("workspace:proj")
+    assert "anchor_missing_since" not in memory_service.get_memory_record(record["id"])["provenance_json"]
+
+
+def test_a_host_anchor_is_a_plain_label_and_never_takes_a_place_in_the_pass(clean_db, tmp_path):
+    _set_root(tmp_path)
+    host = _write(content="The build server answers on 192.0.2.10.", subject_anchor="host:192.0.2.10")
+    result = verification_service.verify_scope("workspace:proj")
+    assert result["checked"] == 0
+    assert memory_service.get_memory_record(host["id"])["anchor_checked_at"] is None
+    assert "host" not in verification_service.available_anchor_types()

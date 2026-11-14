@@ -8,15 +8,16 @@ It does not run, schedule, or replace those agents.
 
 - Durable, scoped memory that agents can share across sessions and runtimes.
 - Encrypted credential storage. Agents receive references instead of raw secrets.
-- Connector bindings that run external API, MCP, adapter, and HTTP actions server-side.
+- Connector connections that run external API, MCP, adapter, and HTTP actions server-side.
 - Scoped access and an audit trail.
-- Activity records with structured handoffs for visible work and task transfer.
+- Activity records with structured handoffs: what each agent is doing and has done, and what a person must decide.
+- Housekeeping that needs no person: plain-noise memories and abandoned tasks close themselves; what is left for a person (approvals, credential requests, questions) is one list.
 
 ## Interfaces
 
 - MCP at `/mcp` for agent tools.
 - REST API for integrations and automation.
-- Dashboard for setup, access control, connector bindings, and activity review.
+- Dashboard for setup, access control, connector connections, and activity review.
 
 ## Product boundary
 
@@ -28,7 +29,7 @@ state and controlled capabilities that the runtime uses.
 
 Agent Core is local-first and self-hosted. Memory, credentials, and configuration
 live on the operator's disk. Outbound calls happen when an agent runs a connector
-action, when maintenance tests a binding to verify an anchored memory, and for
+action, when maintenance tests a service connection to verify a `service:` anchored memory, and for
 registered outbound webhooks.
 
 ## Start here

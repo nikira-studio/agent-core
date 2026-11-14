@@ -1,31 +1,22 @@
 EPISODIC = (
-    "SAG-638 routine fallback sweep heartbeat (2026-06-07 15:16 UTC). "
+    "PROJ-638 routine fallback sweep heartbeat (2026-06-07 15:16 UTC). "
     "Continuation tick on the now-activated registry. Tests 29/29 pass."
 )
 DURABLE = "Do NOT edit vendored dependencies directly: it is pulled frequently, so core edits get clobbered."
 
 
-def test_mcp_write_warns_on_episodic_content(test_client, agent_token):
+def test_mcp_write_refuses_episodic_content_and_says_where_it_belongs(test_client, agent_token):
     r = test_client.post(
         "/mcp",
         headers={"Authorization": f"Bearer {agent_token}"},
         json={
             "tool": "memory_write",
-            "params": {
-                "content": EPISODIC,
-                "memory_class": "fact",
-                "scope": "agent:testagent",
-            },
+            "params": {"content": EPISODIC, "memory_class": "fact", "scope": "agent:testagent"},
         },
     )
-    assert r.status_code == 201, r.json()
-    data = r.json()["data"]
-
-    codes = [w["code"] for w in data.get("warnings", [])]
-    assert "EPISODIC_CONTENT" in codes
-    # The write still succeeds — advisory, never blocking.
-    assert data["record"]["id"]
-    assert data["record"]["expires_at"] is not None
+    assert r.status_code == 422, r.json()
+    error = r.json()["error"]
+    assert error["code"] == "TOO_SPECIFIC_TO_ONE_OCCURRENCE" and "activity_update" in error["message"]
 
 
 def test_mcp_write_is_quiet_for_durable_content(test_client, agent_token):
@@ -47,36 +38,23 @@ def test_mcp_write_is_quiet_for_durable_content(test_client, agent_token):
     assert data["record"]["expires_at"] is None
 
 
-def test_rest_write_warns_on_episodic_content(test_client, agent_token):
+def test_rest_write_refuses_episodic_content(test_client, agent_token):
     r = test_client.post(
         "/api/memory/write",
         headers={"Authorization": f"Bearer {agent_token}"},
-        json={
-            "content": EPISODIC,
-            "memory_class": "fact",
-            "scope": "agent:testagent",
-        },
+        json={"content": EPISODIC, "memory_class": "fact", "scope": "agent:testagent"},
     )
-    assert r.status_code == 201, r.json()
-    data = r.json()["data"]
-    assert [w["code"] for w in data.get("warnings", [])] == ["EPISODIC_CONTENT"]
+    assert r.status_code == 422, r.json()
+    assert r.json()["error"]["code"] == "TOO_SPECIFIC_TO_ONE_OCCURRENCE"
 
 
-def test_episodic_record_is_swept_once_expired(test_client, agent_token):
+def test_episodic_record_is_retracted_once_expired(test_client, agent_token):
     """The expiry has to actually retire the record, not just decorate it."""
-    r = test_client.post(
-        "/mcp",
-        headers={"Authorization": f"Bearer {agent_token}"},
-        json={
-            "tool": "memory_write",
-            "params": {
-                "content": EPISODIC,
-                "memory_class": "fact",
-                "scope": "agent:testagent",
-            },
-        },
-    )
-    record_id = r.json()["data"]["record"]["id"]
+    # Agents are refused such a record now; one that predates the refusal still gets an expiry from the service.
+    from app.services import memory_service
+
+    record, _ = memory_service.write_memory(content=EPISODIC, memory_class="fact", scope="agent:testagent")
+    record_id = record["id"]
 
     from app.database import get_db
     from app.services import backup_service
@@ -92,9 +70,9 @@ def test_episodic_record_is_swept_once_expired(test_client, agent_token):
 
     with get_db() as conn:
         row = conn.execute(
-            "SELECT 1 FROM memory_records WHERE id = ?", (record_id,)
+            "SELECT record_status FROM memory_records WHERE id = ?", (record_id,)
         ).fetchone()
-    assert row is None
+    assert row is not None and row["record_status"] == "retracted"  # an expiry retracts (restorable), it does not delete
 
 
 def test_a_write_is_never_a_duplicate_of_itself(test_client, agent_token, monkeypatch):
@@ -143,7 +121,7 @@ def test_settings_accept_the_new_knobs(test_client, admin_token):
         headers={"Authorization": f"Bearer {admin_token}"},
         json={
             "scratchpad_retention_days": "7",
-            "solo_mode_enabled": "false",
+
             "episodic_memory_ttl_days": "14",
             "memory_dedupe_similarity": "0.88",
         },
@@ -159,7 +137,7 @@ def test_settings_accept_the_new_knobs(test_client, admin_token):
 
 
 def test_settings_reject_out_of_range_knobs(test_client, admin_token):
-    base = {"scratchpad_retention_days": "7", "solo_mode_enabled": "false"}
+    base = {"scratchpad_retention_days": "7",}
 
     r = test_client.post(
         "/api/dashboard/system-settings",
@@ -185,7 +163,7 @@ def test_settings_zero_ttl_is_allowed(test_client, admin_token):
         headers={"Authorization": f"Bearer {admin_token}"},
         json={
             "scratchpad_retention_days": "7",
-            "solo_mode_enabled": "false",
+
             "episodic_memory_ttl_days": "0",
         },
     )

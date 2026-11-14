@@ -3,7 +3,7 @@
 from fastapi import APIRouter, Request, Depends
 
 from app.branding import APP_NAME
-from app.routes.dashboard_shared import render_page, require_auth, escape_html, get_icon
+from app.routes.dashboard_shared import render_page, settings_header, require_auth, escape_html, get_icon
 from app.security.public_url import public_base_url
 
 router = APIRouter()
@@ -19,7 +19,7 @@ def webhooks_page(request: Request, session: dict = Depends(require_auth)):
             """
 <div class="page-header"><h1>Admin Access Required</h1></div>
 <div class="card"><p>Webhook management is restricted to administrators.</p>
-<a href="/" class="btn">Back to Overview</a></div>""",
+<a href="/" class="btn">Back to Needs you</a></div>""",
             nav_active="/webhooks",
             session=session,
             status_code=403,
@@ -40,7 +40,9 @@ def webhooks_page(request: Request, session: dict = Depends(require_auth)):
     inbound_key_rotated = inbound_key_row["rotated_at"][:19] if (inbound_key_row and inbound_key_row.get("rotated_at")) else ""
 
     event_type_options = "".join(
-        f'<label class="checkbox-label"><input type="checkbox" name="event_types" value="{e}"> {e}</label>'
+        f'<label class="checkbox-label"><input type="checkbox" name="event_types" value="{e}"> '
+        f'<span><strong>{escape_html(wh_svc.WEBHOOK_EVENT_LABELS.get(e, (e, ""))[0])}</strong>'
+        f'<br><small class="form-hint">{escape_html(wh_svc.WEBHOOK_EVENT_LABELS.get(e, ("", ""))[1])} Receivers get it as <code>{e}</code>.</small></span></label>'
         for e in event_types
     )
 
@@ -51,7 +53,9 @@ def webhooks_page(request: Request, session: dict = Depends(require_auth)):
             if wh["enabled"]
             else "<span class='badge badge-stale'>disabled</span>"
         )
-        events_str = ", ".join(f"<code>{escape_html(e)}</code>" for e in wh["event_types"]) or "—"
+        events_str = ", ".join(
+            f"<span title=\"{escape_html(e)}\">{escape_html(wh_svc.WEBHOOK_EVENT_LABELS.get(e, (e, ''))[0])}</span>" for e in wh["event_types"]
+        ) or "—"
         wh_id = wh["id"]
         rows += (
             "<tr>"
@@ -68,7 +72,7 @@ def webhooks_page(request: Request, session: dict = Depends(require_auth)):
             f"<button type='button' class='btn btn-sm btn-danger icon-delete-btn'"
             f" data-webhook-delete='{escape_html(wh_id)}'"
             f" data-webhook-name='{escape_html(wh['name'])}'"
-            f" title='Delete webhook' aria-label='Delete webhook'>{get_icon('delete')}</button>"
+            f" title='Delete webhook' aria-label='Delete webhook'>{get_icon('delete')} Delete</button>"
             f"</div>"
             "</td>"
             "</tr>"
@@ -88,13 +92,15 @@ def webhooks_page(request: Request, session: dict = Depends(require_auth)):
         "<button class='btn btn-sm' onclick='generateInboundKey()'>Generate Key</button>"
     )
 
+    header_html = settings_header(
+        "webhooks",
+        True,
+        f'<p class="text-muted" style="max-width:760px;margin-top:0">Webhooks connect {APP_NAME} to other systems in two directions. '
+        f'<strong>Receiving</strong>: another system hands work to an agent. '
+        f'<strong>Sending</strong>: {APP_NAME} tells another system when something happens.</p>',
+    )
     body = f"""
-<div class="page-header">
-  <div>
-    <h1>Webhooks</h1>
-    <p class="text-muted" style="max-width:760px;margin-top:8px">Webhooks connect {APP_NAME} to other systems in two directions. <strong>Receiving</strong>: another system hands work to an agent. <strong>Sending</strong>: {APP_NAME} tells another system when something happens.</p>
-  </div>
-</div>
+{header_html}
 
 <!-- Inbound section -->
 <h2 style="margin-bottom:0.25rem">Receiving</h2>
@@ -119,7 +125,7 @@ def webhooks_page(request: Request, session: dict = Depends(require_auth)):
     <p style="margin:0.5rem 0 0;color:var(--text-muted);font-size:0.875em">Store this key now. It will not be shown again.</p>
   </div>
   <p style="margin-top:1rem;margin-bottom:0.5rem;color:var(--text-muted);font-size:0.875em">
-    Supported commands: <code>activity.create</code>, <code>activity.assign</code>, <code>activity.update</code>, <code>activity.cancel</code>, <code>activity.note</code>
+    Supported commands: <code>activity.create</code>, <code>activity.update</code>, <code>activity.cancel</code>, <code>activity.note</code>
   </p>
   <details style="margin-top:0.75rem">
     <summary style="cursor:pointer;font-size:0.9em;color:var(--text-muted)">How to send a command</summary>
@@ -135,7 +141,7 @@ Content-Type: application/json
   "task_description": "Review the latest support tickets",
   "memory_scope": "workspace:my-project"
 }}</code></pre>
-      <p style="margin:0;color:var(--text-muted)">The assigned agent picks up the task on its next <code>activity_pickup</code> call. Other commands (<code>activity.cancel</code>, <code>activity.note</code>, etc.) require an <code>activity_id</code> from the create response.</p>
+      <p style="margin:0;color:var(--text-muted)">The named agent sees the task in its session context. Other commands (<code>activity.cancel</code>, <code>activity.note</code>, etc.) require an <code>activity_id</code> from the create response.</p>
     </div>
   </details>
 </div>
@@ -175,7 +181,7 @@ Content-Type: application/json
 
 <!-- Create webhook modal -->
 <div class="modal-overlay" id="create-webhook-modal" style="display:none">
-  <div class="modal">
+  <div class="modal modal-wide">
     <h3>New Webhook</h3>
     <div id="create-webhook-error" class="error-box" style="display:none"></div>
     <label>Name <span style="color:var(--text-muted);font-size:0.875em">(for your own reference)</span>
@@ -210,8 +216,9 @@ Content-Type: application/json
     <label>URL <span style="color:var(--text-muted);font-size:0.875em">(where messages are sent)</span>
       <input type="text" id="edit-wh-url">
     </label>
-    <label>New Secret <span style="color:var(--text-muted);font-size:0.875em">(leave blank to keep existing)</span>
-      <input type="password" id="edit-wh-secret" placeholder="Leave blank to keep current secret">
+    <label>Secret <span style="color:var(--text-muted);font-size:0.875em">(signs each message; leave empty to keep the saved one)</span>
+      <div class="secret-state"><span class="badge badge-success">A secret is saved</span></div>
+      <input type="password" id="edit-wh-secret" placeholder="\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022 saved; type to replace">
     </label>
     <label>Subscribe to events</label>
     <div class="checkbox-group" id="edit-wh-event-types">
@@ -229,9 +236,9 @@ Content-Type: application/json
 
 <!-- Deliveries modal -->
 <div class="modal-overlay" id="deliveries-modal" style="display:none">
-  <div class="modal" style="max-width:700px">
+  <div class="modal modal-detail">
     <h3 id="deliveries-modal-title">Recent Deliveries</h3>
-    <div id="deliveries-content" style="max-height:420px;overflow-y:auto"></div>
+    <div id="deliveries-content"></div>
     <div class="modal-actions">
       <button class="btn btn-secondary" onclick="document.getElementById('deliveries-modal').style.display='none'">Close</button>
     </div>
@@ -240,7 +247,7 @@ Content-Type: application/json
 
 <!-- Test webhook modal -->
 <div class="modal-overlay" id="test-webhook-modal" style="display:none">
-  <div class="modal" style="max-width:420px">
+  <div class="modal">
     <h3>Test Webhook Delivery</h3>
     <input type="hidden" id="test-webhook-id">
     <p style="color:var(--text-muted);font-size:0.9em;margin-bottom:12px">Send a sample payload to verify your endpoint handles each event type correctly.</p>
@@ -260,7 +267,7 @@ Content-Type: application/json
 <script>
 function copyToClipboard(text, label) {
   if (navigator.clipboard && window.isSecureContext) {
-    navigator.clipboard.writeText(text).then(() => alert(label + ' copied.')).catch(() => fallbackCopy(text, label));
+    navigator.clipboard.writeText(text).then(() => showToast(label + ' copied.', 'success')).catch(() => fallbackCopy(text, label));
   } else {
     fallbackCopy(text, label);
   }
@@ -273,8 +280,8 @@ function fallbackCopy(text, label) {
   document.body.appendChild(ta);
   ta.focus();
   ta.select();
-  try { document.execCommand('copy'); alert(label + ' copied.'); }
-  catch { prompt('Copy this ' + label + ':', text); }
+  try { document.execCommand('copy'); showToast(label + ' copied.', 'success'); }
+  catch { promptDialog('Select it and copy.', { title: 'Copy this ' + label, input: { value: text }, confirmLabel: 'Done' }); }
   document.body.removeChild(ta);
 }
 
@@ -298,20 +305,20 @@ function copyInboundKey() {
 }
 
 async function generateInboundKey() {
-  if (!confirm('Generate an inbound key? The key will be shown once.')) return;
+  if (!await confirmDialog('Generate an inbound key? The key will be shown once.')) return;
   const r = await fetch('/api/webhooks/inbound/key', {method: 'POST'});
   const data = await r.json();
-  if (!data.ok) { alert('Failed: ' + (data.error?.message || 'unknown')); return; }
+  if (!data.ok) { showToast('Failed: ' + (data.error?.message || 'unknown'), 'danger'); return; }
   document.getElementById('inbound-key-value').textContent = data.data.key;
   document.getElementById('inbound-key-reveal').style.display = 'block';
   location.reload = () => {};  // suppress auto-reload so user can copy
 }
 
 async function rotateInboundKey() {
-  if (!confirm('Rotate the inbound key? The previous key will stop working immediately.')) return;
+  if (!await confirmDialog('Rotate the inbound key? The previous key will stop working immediately.')) return;
   const r = await fetch('/api/webhooks/inbound/key/rotate', {method: 'POST'});
   const data = await r.json();
-  if (!data.ok) { alert('Failed: ' + (data.error?.message || 'unknown')); return; }
+  if (!data.ok) { showToast('Failed: ' + (data.error?.message || 'unknown'), 'danger'); return; }
   document.getElementById('inbound-key-value').textContent = data.data.key;
   document.getElementById('inbound-key-reveal').style.display = 'block';
   location.reload = () => {};
@@ -343,6 +350,7 @@ async function createWebhook() {
     return;
   }
   document.getElementById('create-webhook-modal').style.display = 'none';
+  showToast('Webhook created', 'success');
   location.reload();
 }
 
@@ -391,15 +399,16 @@ async function submitEditWebhook() {
     return;
   }
   document.getElementById('edit-webhook-modal').style.display = 'none';
+  showToast('Webhook updated', 'success');
   location.reload();
 }
 
 async function deleteWebhook(id, name) {
-  if (!confirm('Delete webhook "' + name + '"? This cannot be undone.')) return;
+  if (!await confirmDialog('Delete webhook "' + name + '"? This cannot be undone.')) return;
   const r = await fetch('/api/webhooks/' + id, {method: 'DELETE'});
   const data = await r.json();
-  if (data.ok) location.reload();
-  else alert('Delete failed: ' + (data.error?.message || 'unknown error'));
+  if (data.ok) { showToast('Webhook deleted', 'success'); location.reload(); }
+  else showToast('Delete failed: ' + ((data.error && data.error.message) || 'unknown error'), 'danger');
 }
 
 async function openTestWebhook(id) {

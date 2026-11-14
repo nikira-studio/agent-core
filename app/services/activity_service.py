@@ -134,7 +134,7 @@ def get_activity(activity_id: str) -> Optional[dict]:
 # Statuses whose needs_human request counts as open: the same ones session
 # context and the Activity page list them for.
 OPEN_REQUEST_STATUSES = ("blocked", "completed", "active", "stale")
-HANDOFF_RESOLUTION_KINDS = ("person", "agent", "superseded")
+HANDOFF_RESOLUTION_KINDS = ("person", "agent", "superseded", "expired")
 REQUEST_SUMMARY_CHARS = 200
 
 
@@ -176,6 +176,8 @@ def merge_handoff(previous: dict, new: dict, *, previous_resolved: bool) -> dict
         asks = [] if previous_resolved else split_asks(previous.get("needs_human"))
         asks += [ask for ask in split_asks(new["needs_human"]) if ask not in asks]
         merged["needs_human"] = "\n\n".join(asks)
+        if new.get("needs_human_url"):
+            merged["needs_human_url"] = new["needs_human_url"]
     if len(json.dumps(merged)) > HANDOFF_MAX_CHARS:
         raise ValueError(
             f"the amended handoff would be over {HANDOFF_MAX_CHARS} characters; "
@@ -510,6 +512,8 @@ def handoff_followups(
 
     extra: dict = {}
     warnings: list[dict] = []
+    if getattr(handoff, "notice", None):
+        warnings.append({"code": "NEEDS_HUMAN_STATES_NO_ACTION", "message": handoff.notice})
     if closing and not activity.get("handoff_json"):
         warnings.append(
             {
@@ -624,7 +628,9 @@ def list_needs_human(
     with get_db() as conn:
         rows = conn.execute(
             "SELECT id, agent_id, user_id, memory_scope, status, task_description, updated_at, "
+            "handoff_requested_at AS asked_at, "
             "json_extract(handoff_json, '$.needs_human') AS needs_human, "
+            "json_extract(handoff_json, '$.needs_human_url') AS needs_human_url, "
             f"{task_ref_sql} AS task_ref "
             f"FROM agent_activity WHERE {' AND '.join(conditions)} "
             "ORDER BY updated_at DESC LIMIT ?",
@@ -660,11 +666,30 @@ def list_superseded_requests(user_id: Optional[str] = None, limit: int = 20) -> 
     return [dict(r) for r in rows]
 
 
+def _attribution_mark(conn, activity_id: str):
+    """(scope, newest workspace change number) before a write, for naming who made the change."""
+    from app.services import workspace_sync_service
+
+    row = conn.execute("SELECT memory_scope FROM agent_activity WHERE id = ?", (activity_id,)).fetchone()
+    scope = row["memory_scope"] if row else None
+    return scope, (workspace_sync_service.latest_sequence(conn, scope) if scope else 0)
+
+
+def _attribute(conn, mark, actor: Optional[str]) -> None:
+    from app.services import workspace_sync_service
+
+    scope, sequence = mark
+    if scope:
+        workspace_sync_service.attribute_changes_since(conn, scope, sequence, actor)
+
+
 def heartbeat_activity(activity_id: str) -> bool:
+    """The agent is still working: refresh the heartbeat, and bring a stale record back to active."""
     now = utc_now_iso()
     with get_db() as conn:
         cursor = conn.execute(
-            "UPDATE agent_activity SET heartbeat_at = ?, updated_at = ? WHERE id = ? AND status = 'active'",
+            "UPDATE agent_activity SET heartbeat_at = ?, updated_at = ?, status = 'active' "
+            "WHERE id = ? AND status IN ('active', 'stale')",
             (now, now, activity_id),
         )
         conn.commit()
@@ -680,7 +705,18 @@ def update_activity(
     status: Optional[str] = None,
     metadata_json: Optional[str] = None,
     source_execution_id: Optional[str] = None,
+    alive: bool = False,
+    actor: Optional[str] = None,
 ) -> bool:
+    """Change fields of an activity record.
+
+    ``actor`` is who made the change when it is not the task's own agent (a person closing a blocked
+    task, an admin editing one): the workspace change feed names them instead of the task's owner.
+
+    ``alive`` is for the agent that owns the task reporting on it: a progress note, a new description,
+    a result or metadata is proof it is still working, so an open record's heartbeat is refreshed and a
+    stale one goes back to active. An admin editing a record from the dashboard does not pass it.
+    """
     updates = []
     params = []
     now = utc_now_iso()
@@ -701,7 +737,9 @@ def update_activity(
         updates.append("status = ?")
         params.append(status)
         if status in ("completed", "cancelled", "blocked"):
-            updates.append("ended_at = ?")
+            # A record closed a second time (a blocked one finally closed out) keeps the time its work
+            # ended, so a clean-up months later is not mistaken for work done that day.
+            updates.append("ended_at = COALESCE(ended_at, ?)")
             params.append(now)
     if metadata_json is not None:
         updates.append("metadata_json = ?")
@@ -713,15 +751,24 @@ def update_activity(
     if not updates:
         return False
 
+    if alive:
+        # Only an open record: a closing update ends it, and an ended record is never revived here.
+        updates.append("heartbeat_at = CASE WHEN status IN ('active', 'stale') THEN ? ELSE heartbeat_at END")
+        params.append(now)
+        if not status:
+            updates.append("status = CASE WHEN status = 'stale' THEN 'active' ELSE status END")
+
     updates.append("updated_at = ?")
     params.append(now)
     params.append(activity_id)
 
     with get_db() as conn:
+        mark = _attribution_mark(conn, activity_id)
         cursor = conn.execute(
             f"UPDATE agent_activity SET {', '.join(updates)} WHERE id = ?",
             params,
         )
+        _attribute(conn, mark, actor)
         conn.commit()
         return cursor.rowcount > 0
 
@@ -1001,92 +1048,214 @@ def mark_stale_activities(threshold_minutes: Optional[int] = None) -> int:
             for row in rows
             if row["heartbeat_at"] and parse_utc_datetime(row["heartbeat_at"]) < cutoff
         ]
-        if not stale_ids:
-            return 0
-        cursor = conn.execute(
-            f"UPDATE agent_activity SET status = 'stale', updated_at = ? WHERE id IN ({','.join('?' for _ in stale_ids)})",
-            [utc_now_iso(), *stale_ids],
-        )
+        marked = 0
+        if stale_ids:
+            cursor = conn.execute(
+                f"UPDATE agent_activity SET status = 'stale', updated_at = ? WHERE id IN ({','.join('?' for _ in stale_ids)})",
+                [utc_now_iso(), *stale_ids],
+            )
+            conn.commit()
+            marked = cursor.rowcount
+    close_abandoned_activities()
+    expire_unanswered_asks()
+    end_unattended_blocked()
+    return marked
+
+
+def close_abandoned_activities(after_hours: Optional[int] = None) -> int:
+    """Close open tasks nobody has updated for ``after_hours`` as ended without a report.
+
+    Nobody answers for a task that simply stopped, so the record closes itself: cancelled, with the time
+    of its last sign of life as the end, and a result that says what happened. An agent that comes back
+    starts a new record. Returns how many were closed.
+    """
+    hours = settings.ABANDONED_AFTER_HOURS if after_hours is None else after_hours
+    if hours <= 0:
+        return 0
+    cutoff = (utc_now() - timedelta(hours=hours)).isoformat()
+    now = utc_now_iso()
+    closed = 0
+    with get_db() as conn:
+        rows = conn.execute(
+            "SELECT id, heartbeat_at, updated_at FROM agent_activity WHERE status IN ('active', 'stale') "
+            "AND COALESCE(heartbeat_at, updated_at) < ?",
+            (cutoff,),
+        ).fetchall()
+        for row in rows:
+            mark = _attribution_mark(conn, row["id"])
+            last = row["heartbeat_at"] or row["updated_at"]
+            cursor = conn.execute(
+                "UPDATE agent_activity SET status = 'cancelled', ended_at = ?, updated_at = ?, "
+                "task_result = COALESCE(NULLIF(task_result, ''), ?) "
+                "WHERE id = ? AND status IN ('active', 'stale')",
+                (last, last, f"Ended without report: no update for {hours} hours.", row["id"]),
+            )
+            _attribute(conn, mark, "maintenance")
+            if cursor.rowcount:
+                _resolve_in_connection(
+                    conn, row["id"], kind="expired", resolved_by="maintenance",
+                    reason="The task ended without a report, so its ask no longer waits.", at=now,
+                )
+            closed += cursor.rowcount
         conn.commit()
-        return cursor.rowcount
+    return closed
 
 
-def reassign_activity(
-    activity_id: str,
-    new_agent_id: str,
+def expire_unanswered_asks(after_days: Optional[int] = None) -> int:
+    """An ask to a person that nothing has touched for ``after_days`` stops waiting.
+
+    A person who never answers must not leave it on the Needs you page forever. The record and its text stay
+    in Activity; only the waiting flag goes (resolution kind "expired"). An open task is left to the abandoned
+    rule, which resolves its ask when it closes the task. Returns how many asks expired.
+    """
+    days = settings.ASK_EXPIRES_AFTER_DAYS if after_days is None else after_days
+    if days <= 0:
+        return 0
+    cutoff = (utc_now() - timedelta(days=days)).isoformat()
+    now = utc_now_iso()
+    expired = 0
+    with get_db() as conn:
+        rows = conn.execute(
+            "SELECT id FROM agent_activity WHERE json_valid(handoff_json) AND handoff_resolved_at IS NULL "
+            "AND COALESCE(json_extract(handoff_json, '$.needs_human'), '') != '' "
+            "AND status IN ('blocked', 'completed', 'cancelled') AND updated_at < ?",
+            (cutoff,),
+        ).fetchall()
+        for row in rows:
+            if _resolve_in_connection(
+                conn, row["id"], kind="expired", resolved_by="maintenance",
+                reason=f"No answer and no change for {days} days.", at=now,
+            ):
+                expired += 1
+        # An ask that only says nothing is needed was never one (older records predate the write-time check).
+        from app.services.session_context_service import _NO_ACTION
+
+        for row in conn.execute(
+            "SELECT id, handoff_json FROM agent_activity WHERE json_valid(handoff_json) AND handoff_resolved_at IS NULL "
+            "AND COALESCE(json_extract(handoff_json, '$.needs_human'), '') != '' "
+            "AND status IN ('blocked', 'completed', 'cancelled', 'stale')"
+        ).fetchall():
+            ask = (load_handoff(row["handoff_json"]).get("needs_human") or "").strip()
+            if ask and _NO_ACTION.match(ask) and _resolve_in_connection(
+                conn, row["id"], kind="expired", resolved_by="maintenance",
+                reason="The ask says nothing is needed.", at=now,
+            ):
+                expired += 1
+        conn.commit()
+    return expired
+
+
+def end_unattended_blocked(after_days: Optional[int] = None) -> int:
+    """A blocked task with nothing waiting on a person and no change for ``after_days`` ends as cancelled.
+
+    Same wording as the abandoned rule: "Ended without report", ended at its last sign of life. A task whose ask is
+    still open is left alone (the ask lapses first, see expire_unanswered_asks, and the task goes in the same
+    pass). A recent resolution by a person or agent counts as a change; an expiry does not. Returns how many ended.
+    """
+    days = settings.ASK_EXPIRES_AFTER_DAYS if after_days is None else after_days
+    if days <= 0:
+        return 0
+    cutoff = (utc_now() - timedelta(days=days)).isoformat()
+    now = utc_now_iso()
+    ended = 0
+    with get_db() as conn:
+        rows = conn.execute(
+            "SELECT id, updated_at, handoff_json, handoff_resolved_at FROM agent_activity "
+            "WHERE status = 'blocked' AND updated_at < ? AND (handoff_resolved_at IS NOT NULL OR "
+            "COALESCE(json_extract(CASE WHEN json_valid(handoff_json) THEN handoff_json END, '$.needs_human'), '') = '')",
+            (cutoff,),
+        ).fetchall()
+        for row in rows:
+            resolution = load_handoff(row["handoff_json"]).get("resolution") or {}
+            if row["handoff_resolved_at"] and resolution.get("kind") != "expired" and row["handoff_resolved_at"] >= cutoff:
+                continue
+            mark = _attribution_mark(conn, row["id"])
+            cursor = conn.execute(
+                "UPDATE agent_activity SET status = 'cancelled', ended_at = ?, updated_at = ?, "
+                "task_result = COALESCE(NULLIF(task_result, ''), ?) WHERE id = ? AND status = 'blocked'",
+                (row["updated_at"], row["updated_at"], f"Ended without report: no update for {days} days.", row["id"]),
+            )
+            _attribute(conn, mark, "maintenance")
+            ended += cursor.rowcount
+        conn.commit()
+    return ended
+
+
+def resolve_ask_on_close(
+    before: dict,
+    new_status: Optional[str],
+    *,
+    new_handoff: Optional[dict],
+    actor_type: str,
+    actor_id: Optional[str],
+    task_result: Optional[str] = None,
 ) -> Optional[dict]:
-    activity = get_activity(activity_id)
-    if not activity:
+    """Closing a task (completed or cancelled) ends the ask it was carrying, unless the same update restates one.
+
+    The work the ask was about is over, so it must not keep waiting on a person. The agent that owns the record
+    closing it is an "agent" resolution; anyone else (an admin finishing it off) is a "person" resolution. A
+    handoff in the same update that carries its own needs_human is a new ask and is left alone. Returns the
+    ask that was ended (id, status, needs_human) so the caller can tell the closer, or None.
+    """
+    from app.services import audit_service
+
+    if new_status not in ("completed", "cancelled") or (new_handoff or {}).get("needs_human"):
         return None
-    if activity["status"] not in ("active", "stale"):
+    before = get_activity(before["id"]) or before  # the stored record, whatever the caller's copy carried
+    handoff = load_handoff(before.get("handoff_json"))
+    ask = (handoff.get("needs_human") or "").strip()
+    if not ask or before.get("handoff_resolved_at"):
         return None
+    by_owner = actor_type == "agent" and actor_id == before.get("assigned_agent_id")
+    kind = "agent" if by_owner else "person"
+    result = " ".join((task_result or "").split())[:200]
+    reason = f"Task closed as {new_status}" + (f": {result}" if result else "")
+    resolution = resolve_handoff(before["id"], kind=kind, resolved_by=actor_id, reason=reason)
+    if not resolution:
+        return None
+    updated = get_activity(before["id"]) or before
+    audit_service.write_event(
+        actor_type=actor_type, actor_id=actor_id, action="handoff_resolved", resource_type="activity",
+        resource_id=before["id"], result="success",
+        details=audit_details(updated, kind=kind, actor_type=actor_type, reason=reason),
+    )
+    notify("activity_handoff_resolved", updated, handoff_resolution=kind)
+    return {"id": before["id"], "status": new_status, "needs_human": ask}
 
-    old_agent = activity["assigned_agent_id"] or activity["agent_id"]
+
+def closed_ask_followup(closed: Optional[dict]) -> dict:
+    """Response fields that tell the closer an ask was ended with its task."""
+    if not closed:
+        return {}
+    return {
+        "resolved_requests": [closed],
+        "warnings": [
+            {
+                "code": "HANDOFF_ASK_CLOSED",
+                "message": (
+                    "Closing the task ended its ask to a person (listed in resolved_requests). If it still "
+                    "applies, restate it now with a handoff that carries needs_human."
+                ),
+            }
+        ],
+    }
+
+
+def cancel_activity(activity_id: str, actor: Optional[str] = None) -> bool:
     now = utc_now_iso()
-
     with get_db() as conn:
-        cursor = conn.execute(
-            """
-            UPDATE agent_activity
-            SET assigned_agent_id = ?, reassigned_from_agent_id = ?,
-                status = 'active', heartbeat_at = ?, updated_at = ?
-            WHERE id = ? AND status IN ('active', 'stale')
-            """,
-            (new_agent_id, old_agent, now, now, activity_id),
-        )
-        conn.commit()
-        if cursor.rowcount == 0:
-            return None
-
-    return get_activity(activity_id)
-
-
-def cancel_activity(activity_id: str) -> bool:
-    now = utc_now_iso()
-    with get_db() as conn:
+        mark = _attribution_mark(conn, activity_id)
         cursor = conn.execute(
             "UPDATE agent_activity SET status = 'cancelled', ended_at = ?, updated_at = ? WHERE id = ?",
             (now, now, activity_id),
         )
+        _attribute(conn, mark, actor)
+        if cursor.rowcount:
+            _resolve_in_connection(
+                conn, activity_id, kind="person", resolved_by=actor, reason="The task was cancelled.", at=now
+            )
         conn.commit()
         return cursor.rowcount > 0
-
-
-def claim_next_activity(
-    agent_id: str,
-    authorized_scopes: list[str],
-) -> Optional[dict]:
-    if not authorized_scopes:
-        return None
-    now = utc_now_iso()
-    placeholders = ",".join("?" for _ in authorized_scopes)
-    with get_db() as conn:
-        row = conn.execute(
-            f"""
-            SELECT id, agent_id, user_id, assigned_agent_id, reassigned_from_agent_id,
-                   task_description, task_note, task_result, status, memory_scope, started_at, updated_at,
-                   heartbeat_at, ended_at, metadata_json
-            FROM agent_activity
-            WHERE assigned_agent_id = ? AND status = 'active'
-            AND memory_scope IN ({placeholders})
-            ORDER BY started_at ASC
-            LIMIT 1
-            """,
-            [agent_id] + list(authorized_scopes),
-        ).fetchone()
-        if not row:
-            return None
-        conn.execute(
-            """
-            UPDATE agent_activity SET heartbeat_at = ?, updated_at = ?
-            WHERE id = ? AND status = 'active' AND assigned_agent_id = ?
-            """,
-            (now, now, row["id"], agent_id),
-        )
-        result = dict(row)
-        result["heartbeat_at"] = now
-        result["updated_at"] = now
-        return result
 
 
 def get_active_activity_for_agent(
@@ -1117,6 +1286,51 @@ def get_active_activity_for_agent(
             params,
         ).fetchone()
         return dict(row) if row else None
+
+
+def find_record_for_execution(
+    agent_id: str,
+    user_id: Optional[str],
+    memory_scope: str,
+    execution_id: Optional[str],
+) -> Optional[dict]:
+    """The open record this session's update belongs to.
+
+    An agent id is shared by every session that uses the key, so "the agent's one open record in this
+    scope" lets two parallel sessions overwrite each other's description and notes. With an execution id:
+    the record that execution started is the one; failing that, a record no live session owns (left by an
+    earlier session, or from before executions were recorded) is taken over; a record another live
+    execution is still working on is left alone and the caller starts its own. Without an execution id
+    the old rule applies: the agent's most recently updated open record in the scope.
+    """
+    if not execution_id:
+        return get_active_activity_for_agent(agent_id, user_id, memory_scope=memory_scope)
+    cutoff = (utc_now() - timedelta(minutes=settings.EXECUTION_STALE_MINUTES)).isoformat()
+    conditions = ["a.assigned_agent_id = ?", "a.status IN ('active', 'stale')", "a.memory_scope = ?"]
+    params: list = [agent_id, memory_scope]
+    if user_id:
+        conditions.append("a.user_id = ?")
+        params.append(user_id)
+    with get_db() as conn:
+        rows = conn.execute(
+            f"""
+            SELECT a.id, a.source_execution_id, e.last_seen_at
+            FROM agent_activity a LEFT JOIN agent_executions e ON e.id = a.source_execution_id
+            WHERE {" AND ".join(conditions)}
+            ORDER BY a.updated_at DESC
+            """,
+            params,
+        ).fetchall()
+    chosen = None
+    for row in rows:
+        owner = row["source_execution_id"]
+        if owner == execution_id:
+            chosen = row["id"]
+            break
+        owned_by_live_session = owner and row["last_seen_at"] and row["last_seen_at"] >= cutoff
+        if chosen is None and not owned_by_live_session:
+            chosen = row["id"]
+    return get_activity(chosen) if chosen else None
 
 
 def get_latest_closed_activity_for_agent(
@@ -1303,3 +1517,41 @@ def audit_details(activity: dict, **extra) -> dict:
         details["assigned_agent_id"] = activity.get("assigned_agent_id")
     details.update({k: v for k, v in extra.items() if v is not None})
     return details
+
+
+DIFFERENT_TASK_RATIO = 0.5
+
+
+def is_different_task(current: Optional[str], new: Optional[str]) -> bool:
+    """True when ``new`` describes another task than ``current``, not a rewording of it. A description that merely
+    refines the open task (a longer or corrected wording) is an edit; one that shares little with it is a new task."""
+    a = " ".join((current or "").split()).lower()
+    b = " ".join((new or "").split()).lower()
+    if not a or not b or a == b:
+        return False
+    if a in b or b in a:
+        return False
+    import difflib
+
+    return difflib.SequenceMatcher(None, a[:300], b[:300], autojunk=False).ratio() < DIFFERENT_TASK_RATIO
+
+
+def end_replaced_task(existing: dict, new_description: str, agent_id: str) -> dict:
+    """End an open task because the same session started a different one: cancelled, existing result kept, never lost."""
+    from app.services import audit_service
+
+    result = (existing.get("task_result") or "").strip() or "Ended without report: a new task began in this session before this one was closed."
+    update_activity(existing["id"], status="cancelled", task_result=result)
+    resolve_ask_on_close(existing, "cancelled", new_handoff=None, actor_type="agent", actor_id=agent_id, task_result=result)
+    ended = get_activity(existing["id"]) or existing
+    audit_service.write_event(
+        actor_type="agent",
+        actor_id=agent_id,
+        action="activity_update",
+        resource_type="activity",
+        resource_id=existing["id"],
+        result="success",
+        details=audit_details(ended, previous_status=existing["status"], new_status="cancelled", action="update"),
+    )
+    notify("activity_cancelled", ended, previous_status=existing["status"])
+    return ended

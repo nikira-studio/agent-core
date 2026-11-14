@@ -49,7 +49,7 @@ function initNetworkLimits() {
   }
 
   async function save(changes, noteId, confirmText) {
-    if (confirmText && !confirm(confirmText)) return;
+    if (confirmText && !await confirmDialog(confirmText)) return;
     const j = await apiFetch('/api/network-limits', { method: 'PUT', body: JSON.stringify(changes) });
     if (j.ok) { render(j.data.network_limits); note(noteId, 'Saved.'); }
     else note(noteId, (j.error && j.error.message) || 'Could not save', 'danger');

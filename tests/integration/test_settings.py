@@ -41,19 +41,19 @@ def test_non_admin_settings_hides_admin_controls(authenticated_client):
     html = r.text
     assert "Rotate Broker Credential" not in html
     assert "Backup & Restore" not in html
-    assert "Encryption Key" not in html
+    assert "Put back an earlier key" not in html and "Show status" not in html
 
 
 def test_admin_settings_exposes_encryption_key_and_restore_controls(admin_client):
     r = admin_client.get("/settings")
     assert r.status_code == 200
     html = r.text
-    assert "Secrets Snapshot" in html
-    assert "Credential Entries" in html
-    assert "This key protects stored credential values" in html
+    assert "How secrets are protected" in html and "Secrets Snapshot" not in html
+    assert "Saved credentials" in html
+    assert "Saved credentials are stored encrypted with a key kept on this server" in html
     assert f"{CREDENTIAL_PREFIX}* references at runtime" in html
-    assert "Rotate Key" in html
-    assert "Restore Key" in html
+    assert "Rotate key" in html
+    assert "Put back an earlier key" in html
     assert 'id="restore-file"' in html
     assert 'value="merge"' not in html
     assert "/api/credentials/rotate" in html
@@ -241,7 +241,7 @@ def test_settings_otp_page_loads(authenticated_client):
     r = authenticated_client.get("/settings/otp")
     assert r.status_code == 200
     html = r.text
-    assert "Two-Factor" in html or "OTP" in html
+    assert "Two-step sign-in" in html
     assert "startOtpEnrollment" in html
     assert "Preparing two-step sign-in" in html
     assert "QR code could not be generated" in html
@@ -658,7 +658,7 @@ def test_admin_can_update_retracted_retention_days(admin_client):
         json={
             "scratchpad_retention_days": "14",
             "retracted_retention_days": "45",
-            "solo_mode_enabled": "false",
+
         },
         headers=csrf_headers(admin_client),
     )
@@ -678,7 +678,7 @@ def test_retracted_retention_days_omitted_is_backward_compatible(admin_client):
     # existing test above) must not be broken by its addition.
     r = admin_client.post(
         "/api/dashboard/system-settings",
-        json={"scratchpad_retention_days": "14", "solo_mode_enabled": "false"},
+        json={"scratchpad_retention_days": "14",},
         headers=csrf_headers(admin_client),
     )
     assert r.status_code == 200, r.json()
@@ -690,7 +690,7 @@ def test_retracted_retention_days_rejects_out_of_range(admin_client):
         json={
             "scratchpad_retention_days": "14",
             "retracted_retention_days": "0",
-            "solo_mode_enabled": "false",
+
         },
         headers=csrf_headers(admin_client),
     )
@@ -807,9 +807,9 @@ def test_settings_is_grouped_into_tabs_for_an_admin(admin_client):
     memory = html.split('id="tab-memory"')[1].split("</section>")[0]
     data = html.split('id="tab-data"')[1].split("</section>")[0]
     security = html.split('id="tab-security"')[1].split("</section>")[0]
-    assert "vector-model" in memory and "unconfirmed-inference-days" in memory
+    assert "vector-model" in memory and "unconfirmed-inference-days" not in memory  # no review settings: nothing asks a person
     assert "scratchpad-retention-days" in data and "Run Maintenance" in data and "pruneActivity" in data
-    assert "Encryption Key" in security and "Rotate helper key" in security
+    assert "Encryption key" in security and "Rotate helper key" in security
 
 
 def test_a_regular_user_sees_only_their_account_without_tabs(authenticated_client):
@@ -856,3 +856,110 @@ def test_the_account_tab_names_its_password_card_sign_in_so_security_means_one_t
     html = admin_client.get("/settings").text
     account = html.split('id="tab-account"', 1)[1].split('id="tab-memory"', 1)[0]
     assert "<h2>Sign-in</h2>" in account and "<h2>Security</h2>" not in account
+
+
+def test_the_encryption_key_row_says_what_it_means_in_plain_words(admin_client):
+    from app.security.encryption import encrypt_value
+
+    encrypt_value("x")  # the key list is created the first time anything is encrypted
+    def key_row():
+        html = admin_client.get("/settings").text
+        security = html.split('id="tab-security"')[1].split("</section>")[0]
+        row = security.split("<td>Encryption key</td>")[1].split("</tr>")[0]
+        return security, row
+
+    security, row = key_row()
+    assert "in use" in row and "encrypted with the current key" in row
+    assert "earlier key" not in row  # one key: just the first sentence
+    assert "<details" not in row and "Key ID " in row
+    for jargon in ("keyring", "Keyring", "Primary", "primary"):
+        assert jargon not in security
+
+    from tests.conftest import csrf_headers
+
+    r = admin_client.post("/api/credentials/rotate", headers=csrf_headers(admin_client))
+    assert r.status_code == 200, r.text
+    security, row = key_row()
+    assert "1 earlier key is kept so other protected data saved before the last change (changed " in row
+    assert "webhook secrets and two-step sign-in" in row
+    assert "<details" not in row
+    assert "keys in use" not in security
+
+
+def test_startup_checks_read_in_plain_words(admin_client):
+    checks = admin_client.get("/api/backup/startup-checks").json()["data"]["checks"]
+    text = " ".join(c["message"] for c in checks)
+    assert "FTS5" not in text and "credential.key" not in text
+    page = admin_client.get("/settings").text
+    assert "names[c.check]" in page and "Text search" in page
+
+
+def test_a_saved_secret_says_it_exists_and_is_never_shown(admin_client):
+    from app.services import vector_settings_service
+
+    memory_tab = lambda: admin_client.get("/settings").text.split('id="tab-memory"')[1].split("</section>")[0]  # noqa: E731
+    page = memory_tab()
+    assert "No key saved" in page and "A key is saved" not in page and 'placeholder="Paste the key"' in page
+
+    vector_settings_service.save_vector_api_key("sk-test-never-render-me")
+    page = memory_tab()
+    assert "A key is saved" in page and "No key saved" not in page
+    assert "saved <span class=\"local-dt\"" in page and "data-dt-style=\"date\"" in page  # when it was saved, in the viewer's time zone
+    assert "saved; type to replace" in page
+    assert "sk-test-never-render-me" not in admin_client.get("/settings").text  # the value is never rendered
+
+    # the helper card says whether its key exists
+    security = admin_client.get("/settings").text.split('id="tab-security"')[1].split("</section>")[0]
+    assert "helper key" in security.lower() and ("A helper key is saved" in security or "No helper key saved" in security)
+
+
+def test_other_stored_secret_fields_say_a_value_is_there(admin_client):
+    users = admin_client.get("/users").text
+    assert "A password is set" in users and "set; type to replace" in users
+    webhooks = admin_client.get("/webhooks").text
+    assert "A secret is saved" in webhooks and "saved; type to replace" in webhooks
+    js = admin_client.get("/static/js/credentials.js").text
+    assert "setSecretState('edit-credential-value'" in js
+    assert "Leave it empty to keep the saved value" in admin_client.get("/credentials").text
+
+
+def test_a_fold_is_for_long_rarely_needed_content_and_never_inside_a_fold(admin_client):
+    import re
+
+    for route in ("/settings", "/memory", "/agents", "/connectors", "/credentials", "/webhooks", "/users",
+                  "/audit", "/activity", "/integrations"):
+        page = admin_client.get(route).text
+        # no fold inside a fold
+        depth = 0
+        for token in re.finditer(r"<details\b|</details>", page):
+            depth += 1 if token.group().startswith("<details") else -1
+            assert depth <= 1, route
+    settings = admin_client.get("/settings").text
+    memory = settings.split('id="tab-memory"')[1].split("</section>")[0]
+    assert "Advanced: re-embed memory" not in memory and "<summary>More</summary>" not in memory
+    assert "until then they match by text only" in memory  # the note is just there
+    assert "Prune log" in admin_client.get("/audit").text and "<summary class=\"btn btn-secondary\">Advanced</summary>" not in admin_client.get("/audit").text
+
+
+def test_the_retracted_hint_and_dialog_show_the_live_retention_number(admin_client):
+    from app.services import system_settings_service
+
+    def retracted_page():
+        return admin_client.get("/memory?show=retracted").text
+
+    page = retracted_page()
+    assert "kept for <a href=\"/settings#retracted-retention-days\">30 days</a>, then deleted for good" in page
+    assert "const RETRACTED_DAYS = 30;" in page
+    assert "the retention period" not in page
+
+    system_settings_service.write_raw({"retracted_retention_days": "45", "scratchpad_retention_days": "3"})
+    page = retracted_page()
+    assert '<a href="/settings#retracted-retention-days">45 days</a>' in page
+    assert "const RETRACTED_DAYS = 45;" in page  # the retract confirmation uses it too
+    assert "deleted after 3 days" in admin_client.get("/memory").text  # the scratchpad hint in the save dialog
+    assert "Deleted for good on" in page  # the detail says when
+
+
+def test_the_retention_number_is_plain_text_for_someone_who_cannot_change_it(authenticated_client):
+    page = authenticated_client.get("/memory?show=retracted").text
+    assert "kept for 30 days, then deleted for good" in page and "/settings#retracted-retention-days" not in page

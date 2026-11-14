@@ -14,9 +14,8 @@ What limits the blast radius:
 
 - **Scopes** decide what any agent can read or write; nothing is global by default.
 - **Provenance is server-stamped**: who wrote a record, through which channel, during which activity, and cannot be supplied by the caller.
-- **Standing context is granted, not taken.** Agents can *request* that a record be pinned, but only an operator applies it. A pinned record enters every session in the scope without anyone searching for it, so it is the highest-value target for a poisoned write and the one place an agent's reach is deliberately cut short.
 - **Removal is reversible.** Retraction hides a record and keeps it restorable for the retention window; only the maintenance sweep deletes.
-- **The clean-up rules propose, never act,** so no automated judgement removes a record without a person agreeing.
+- **Clean-up is narrow and reversible.** Only four kinds of plain noise (per-occurrence logs, ticket-closeout narration, duplicates, facts whose anchor is gone) retract themselves; the retraction is soft, audited by rule name and capped per run, and nothing is retracted on a judgement about usefulness.
 
 What is *not* solved: nothing detects a plausible-but-wrong record written in good faith, and any agent with write access to a scope can add to it. Treat write access to a shared scope as trust in that agent's output.
 
@@ -29,7 +28,7 @@ Secrets have one controlled path out (below). Memory *content* has two, both off
 | Feature | What is sent | Sent where |
 | --- | --- | --- |
 | **Embedding backend** | Record content, on write and on search | The embedding endpoint you configured |
-| **Verification bindings** | The anchor value only, never record content | The binding's service |
+| **Verification connections** | The anchor value only, never record content | The connection's service |
 
 Point any of these at a service on a machine you control and nothing leaves it. Point one at a hosted API and your memory content is sent there. That is the entire trade-off, and it is why none of them has a default and why the features that use them stay off until switched on.
 
@@ -49,7 +48,7 @@ Credentials are managed from the **Credentials** page or the `/api/credentials` 
 
 1. A user with permission calls the reveal endpoint from an authenticated session.
 2. The local credential helper calls the internal resolution endpoint with a valid helper key and an authorized agent identity.
-3. A service binding resolves the credential server-side so Agent Core can call the external service directly.
+3. A service connection resolves the credential server-side so Agent Core can call the external service directly.
 
 In the service case, the raw secret stays inside the Agent Core process and is not returned to the agent.
 
@@ -124,14 +123,14 @@ Two known limits, noted and left as they are for now:
 Services are the server-side path for external actions:
 
 1. You create a stored credential.
-2. You create a service binding that points to that credential and has its own scope.
-3. An agent calls `connectors_run` with a binding ID, action, and parameters.
-4. Agent Core verifies that the binding is visible to the agent. Binding visibility grants access to every action enabled on the service.
+2. You create a service connection that points to that credential and has its own scope.
+3. An agent calls `connectors_run` with a connection ID, action, and parameters.
+4. Agent Core verifies that the connection is visible to the agent. Connection visibility grants access to every action enabled on the service.
 5. Agent Core resolves the credential internally, calls the external service, logs the execution, and returns the result.
 
-Both transports enforce binding visibility identically: `connectors_run` over MCP and `POST /api/connector-bindings/{id}/run` over REST call the same check. Services define the available actions; bindings decide which users, agents, or workspaces can use the connection.
+Both transports enforce connection visibility identically: `connectors_run` over MCP and `POST /api/connector-bindings/{id}/run` over REST call the same check. Services define the available actions; connections decide which users, agents, or workspaces can use the connection.
 
-Credential scope controls access to the stored secret. Binding scope controls where the service is available. In normal workspace use, set both to the same workspace.
+Credential scope controls access to the stored secret. Connection scope controls where the service is available. In normal workspace use, set both to the same workspace.
 
 ---
 
@@ -166,7 +165,7 @@ An agent that should prepare an admin change but not make it holds the `admin_pr
 - An approval changes only what it was proposed against: if a target changed in between, it fails and applies nothing.
 - Secret values are never proposed. The person types them on the approval page.
 - An agent can have at most 10 approvals pending (50 in total), so a flood of harmless proposals cannot bury a real one.
-- Changes that widen what an agent can do (`agent.create`, `agent.update`, `credential_grant.create`, `binding.create`, `binding.update`, `connector_type.actions`: a binding hands its credential's power to every agent that can use it) are approved only by a person signed in to the dashboard, as every approval is.
+- Changes that widen what an agent can do (`agent.create`, `agent.update`, `credential_grant.create`, `binding.create`, `binding.update`, `connector_type.actions`: a connection hands its credential's power to every agent that can use it) are approved only by a person signed in to the dashboard, as every approval is.
 
 ## Rate limits
 
@@ -188,7 +187,7 @@ Rate-limited responses include `X-RateLimit-Limit`, `X-RateLimit-Remaining`, and
 
 If you suspect your encryption key has been exposed, or just as a routine security practice, you can rotate it. This generates a new key, re-encrypts all credential entries, and keeps the old key in the keyring so nothing breaks.
 
-**From the dashboard:** Settings → Security → Encryption Key → Rotate Key (requires admin access)
+**From the dashboard:** Settings → Security → Encryption key → Rotate key (requires admin access)
 
 **Via the API:**
 
@@ -236,7 +235,7 @@ Outbound webhooks let external systems receive signed notifications when events 
 
 **Delivery is retried, then logged.** Timeouts, connection errors, `408`, `429` and `5xx` responses are retried with exponential backoff up to the configured attempt limit (5 by default); anything else, or the final failure, is recorded as dead in the delivery log. Retries mean an event can arrive more than once, so receivers should de-duplicate on `X-Agent-Core-Event-Id`. Keep receiver endpoints fast.
 
-**SSRF protection.** Webhook URLs are validated against the same SSRF guard as other outbound URLs. Private network addresses (RFC 1918, loopback, link-local) are allowed by default for local and operator-managed deployments. If you want to block them, set `AGENT_CORE_BLOCK_INTERNAL_HOSTS=true` and use `AGENT_CORE_ALLOWED_INTERNAL_HOSTS` as an exception list.
+**SSRF protection.** Webhook URLs are validated against the same SSRF guard as other outbound URLs. Private network addresses (RFC 1918, loopback, link-local) are blocked on a fresh install and allowed on an install that already had data; change it under Settings → Security → Network limits (Allow, Report only or Block), or with `AGENT_CORE_INTERNAL_HOSTS_MODE`. Hosts you list under *Allowed private addresses* (or in `AGENT_CORE_ALLOWED_INTERNAL_HOSTS`) are always allowed.
 
 **Signature verification.** Every delivery includes `X-Agent-Core-Signature: sha256=<hex>`. Receivers should verify this before acting on the payload:
 

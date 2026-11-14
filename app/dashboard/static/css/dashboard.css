@@ -381,14 +381,16 @@ a:focus-visible {
 
 .connector-card-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 0.35rem;
   align-items: center;
   justify-content: flex-end;
   min-width: 0;
-  overflow: hidden;
 }
 
 .connector-card-actions .btn {
+  flex: 0 0 auto;
+  white-space: nowrap;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -397,9 +399,9 @@ a:focus-visible {
 }
 
 .connector-card-actions .icon-delete-btn {
-  flex: 0 0 30px;
-  width: 30px;
-  padding: 0;
+  flex: 0 0 auto;
+  width: auto;
+  padding: 0 10px;
 }
 
 .directory-controls {
@@ -905,32 +907,115 @@ tr:hover td {
   display: flex;
 }
 
+/* One pop-up pattern: fixed header (title and a close X), a body that scrolls, a fixed footer with the actions.
+   dashboard.js builds the header and the scrolling body around existing markup the first time a dialog opens. */
+.modal-overlay { overscroll-behavior: contain; }
+
 .modal {
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: var(--radius-xl);
-  padding: 24px;
+  padding: 0;
   width: 100%;
-  max-width: 500px;
-  max-height: 90vh;
-  overflow-y: auto;
+  max-width: 520px;
+  max-height: min(90vh, 860px);
+  max-height: min(90dvh, 860px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
   box-shadow: var(--shadow);
 }
+.modal:focus { outline: none; }
+/* Detail views (what something is) are wider than forms (what to fill in). */
+.modal.modal-wide { max-width: 700px; }
+.modal.modal-detail { max-width: 860px; }
+.modal.modal-confirm { max-width: 440px; }
 
-.modal h2,
-.modal h3:not(.sub-heading) {
-  margin-bottom: 16px;
+.modal-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 16px 14px 24px;
+  border-bottom: 1px solid var(--border);
+  flex: 0 0 auto;
+}
+.modal-title { min-width: 0; flex: 1; }
+.modal-title h1,
+.modal-title h2,
+.modal-title h3,
+.modal-title h4 {
+  margin: 0;
+  padding-top: 5px;
   font-size: 1.1rem;
   font-weight: 600;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
 }
+.modal-x {
+  flex: 0 0 auto;
+  width: 34px;
+  height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: 0;
+  border-radius: 8px;
+  color: var(--muted);
+  font-size: 1.5rem;
+  line-height: 1;
+  cursor: pointer;
+}
+.modal-x:hover { background: var(--bg); color: var(--text); }
+.modal-x:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+.modal-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 20px 24px 0;
+}
+/* Content that is not a footer ends with some air above the footer. */
+.modal-scroll > :last-child:not(.modal-footer) { margin-bottom: 20px; }
 
 .modal-footer {
   display: flex;
   justify-content: flex-end;
+  flex-wrap: wrap;
   gap: 8px;
   margin-top: 20px;
   padding-top: 16px;
   border-top: 1px solid var(--border);
+}
+.modal-scroll .modal-footer {
+  margin: 20px -24px 0;
+  padding: 14px 24px;
+  background: var(--panel);
+  position: sticky;
+  bottom: 0;
+  z-index: 1;
+}
+/* A footer inside a form is the form's last child; the sticky footer still pins to the dialog's bottom. */
+.modal-scroll h2:not(.modal-title *),
+.modal-scroll h3:not(.sub-heading) { margin: 0 0 12px; font-size: 1rem; font-weight: 600; }
+.modal-confirm .confirm-detail { margin: 0 0 4px; color: var(--muted); line-height: 1.5; }
+.modal-confirm .modal-scroll { padding-top: 16px; }
+
+@media (max-width: 600px) {
+  .modal-overlay { padding: 0; align-items: flex-end; }
+  .modal {
+    max-width: none;
+    max-height: 94dvh;
+    border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+    border-bottom: 0;
+  }
+  .modal.modal-wide, .modal.modal-detail, .modal.modal-confirm { max-width: none; }
+  .modal-header { padding-left: 18px; }
+  .modal-scroll { padding: 16px 18px 0; }
+  .modal-scroll .modal-footer { margin: 16px -18px 0; padding: 12px 18px calc(12px + env(safe-area-inset-bottom)); }
+  .modal-scroll .modal-footer .btn { flex: 1 1 auto; }
 }
 
 /* === Toast === */
@@ -1230,7 +1315,7 @@ th.activity-actions-header {
 
 .actions-cell .icon-delete-btn {
   min-width: 30px;
-  padding: 0 8px;
+  padding: 0 10px;
 }
 
 /* === Section Title === */
@@ -1805,9 +1890,6 @@ th.activity-actions-header {
 }
 
 /* === Agent forms === */
-.modal.modal-wide {
-  max-width: 680px;
-}
 .form-section {
   margin-bottom: 20px;
 }
@@ -1990,7 +2072,7 @@ th.activity-actions-header {
   .stack-table th.col-scope { width: 130px; }
   .stack-table th.col-expires { width: 72px; }
   .stack-table th.col-used { width: 140px; }
-  .stack-table th.col-actions { width: 180px; }
+  .stack-table th.col-actions { width: 205px; }
   .stack-table td:first-child { overflow-wrap: anywhere; }
 }
 
@@ -2004,12 +2086,18 @@ th.activity-actions-header {
   .stack-table td.actions-cell { display: flex; gap: 6px; flex-wrap: wrap; padding-top: 8px; }
 }
 
-/* Activity: Start and Cancel sit behind "More"; opens inline so the table never clips it. */
+/* "More" on a row opens a small floating menu. It is positioned over the page (dashboard.js anchors it to the button), so the row never changes width or height when it opens. */
 .row-more { display: inline-block; vertical-align: middle; }
 .row-more > summary { list-style: none; cursor: pointer; }
 .row-more > summary::-webkit-details-marker { display: none; }
 .row-more[open] > summary { background: var(--border); }
-.row-more-list { display: flex; gap: 6px; margin-top: 6px; }
+.row-more-list {
+  display: none; position: fixed; z-index: 1000; min-width: 160px; max-width: calc(100vw - 16px);
+  flex-direction: column; align-items: stretch; gap: 4px; padding: 6px;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
+}
+.row-more[open] > .row-more-list { display: flex; }
+.row-more-list .btn, .row-more-list a.btn { width: 100%; justify-content: flex-start; text-align: left; margin: 0; white-space: nowrap; }
 details.card-fold > summary { list-style: none; }
 details.card-fold > summary::-webkit-details-marker { display: none; }
 details.card-fold > summary h2,
@@ -2063,3 +2151,137 @@ details.card-fold[open] > summary::before { content: "\25BE\00a0"; }
   .stack-cards td.mem-actions { order: 5; width: 100%; }
   .stack-cards td.empty { width: 100%; text-align: center; }
 }
+
+
+/* Keyboard users can jump past the sidebar. */
+.skip-link {
+  position: absolute;
+  left: 8px;
+  top: -48px;
+  z-index: 1000;
+  padding: 8px 14px;
+  background: var(--bg-card, #fff);
+  color: var(--text, #000);
+  border: 2px solid var(--primary, #1d4ed8);
+  border-radius: 6px;
+}
+.skip-link:focus { top: 8px; }
+
+
+/* Tabs inside a sidebar entry. */
+.page-tabs { display: flex; flex-wrap: wrap; gap: 4px; margin: 0 0 16px; border-bottom: 1px solid var(--border); }
+.page-tabs a { padding: 8px 14px; color: var(--muted); text-decoration: none; border-bottom: 2px solid transparent; margin-bottom: -1px; }
+.page-tabs a:hover { color: var(--text); }
+.page-tabs a.active { color: var(--text); border-bottom-color: var(--accent); }
+
+/* Phones: the navigation is behind a Menu button. */
+.nav-toggle { display: none; }
+@media (max-width: 768px) {
+  .nav-toggle { display: inline-block; margin: 4px 0 8px; padding: 8px 14px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--panel); color: var(--text); }
+  .sidebar nav { display: none; }
+  .sidebar.nav-open nav { display: flex; }
+}
+
+/* A task row opens to what it concluded. */
+.activity-more > summary { cursor: pointer; }
+.activity-detail { margin-top: 8px; padding: 8px 12px; border-left: 3px solid var(--border); font-size: 0.9rem; }
+.activity-detail p { margin: 0 0 8px; }
+.activity-detail ul { margin: 0 0 8px 18px; padding: 0; }
+
+.icon-delete-btn { display: inline-flex; align-items: center; gap: 6px; }
+
+/* In table rows the word is enough; the icon only costs width the Actions column does not have. */
+.actions-cell .icon-delete-btn svg { display: none; }
+
+/* One row of tabs under a page heading stays one row on a phone: it scrolls sideways instead of wrapping to a second row. */
+.card-head-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 8px; }
+.card-head-row h2 { margin: 0; border-bottom: 0; padding-bottom: 0; }
+@media (max-width: 720px) {
+  .page-tabs { flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: thin; }
+  .page-tabs a { white-space: nowrap; flex: 0 0 auto; }
+  /* Fade the right edge so it reads as "more this way". */
+  .page-tabs.scrolls { -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent); mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent); }
+  .page-tabs.scrolls.at-end { -webkit-mask-image: none; mask-image: none; }
+}
+
+.status-neutral { color: var(--muted); }
+
+/* Memory detail: what it says first, then facts in a compact grid. */
+.mem-detail-content { background: var(--bg); padding: 12px 14px; border-radius: 8px; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.5; margin: 0 0 14px; }
+.mem-facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px 20px; margin: 0 0 14px; }
+.mem-facts > div { min-width: 0; }
+.mem-facts dt { font-size: 0.72rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); margin-bottom: 2px; }
+.mem-facts dd { margin: 0; overflow-wrap: anywhere; }
+.mem-more { margin: 0 0 14px; }
+.mem-more > summary { cursor: pointer; color: var(--muted); padding: 4px 0; }
+.mem-version { margin: 8px 0; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); overflow-wrap: anywhere; }
+.badge-nowrap, .modal .badge { white-space: nowrap; }
+.modal-confirm .confirm-detail { white-space: pre-line; }
+.modal-confirm .confirm-input { width: 100%; margin: 6px 0 4px; }
+
+.secret-state { display: flex; align-items: center; gap: 8px; margin: 0 0 6px; }
+
+/* A fold is a quiet text toggle, not a box: no default marker, a small arrow, and a focus ring only for the keyboard
+   that hugs the words instead of spanning the whole row. */
+details:not(.row-more):not(.card-fold):not(.activity-more) > summary:not(.btn) {
+  display: inline-block;
+  list-style: none;
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 0.9rem;
+  padding: 4px 2px;
+  border-radius: 4px;
+}
+details:not(.row-more):not(.card-fold):not(.activity-more) > summary:not(.btn)::-webkit-details-marker { display: none; }
+details:not(.row-more):not(.card-fold):not(.activity-more) > summary:not(.btn)::before { content: "\25B8\00a0"; }
+details[open]:not(.row-more):not(.card-fold):not(.activity-more) > summary:not(.btn)::before { content: "\25BE\00a0"; }
+details > summary:not(.btn):hover { color: var(--text); }
+details > summary:focus { outline: none; }
+details > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+details[open]:not(.row-more):not(.card-fold):not(.activity-more) > summary:not(.btn) { margin-bottom: 6px; }
+
+/* Health strip: the live tiles first, the two limits you chose below them and quieter; text centred in equal tiles. */
+.stat-tile { display: flex; flex-direction: column; justify-content: center; align-items: center; min-height: 84px; }
+.stat-tile .label { margin: 0 0 4px; }
+.stat-tile .tile-value { font-size: 0.95rem; font-weight: 600; line-height: 1.3; }
+.stat-group-label { font-size: 0.72rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); margin: 4px 0 8px; }
+.stat-grid-limits { margin-bottom: 0; }
+.stat-limit { background: transparent; min-height: 64px; }
+.stat-limit .tile-value { font-weight: 500; color: var(--muted); }
+.getting-started-fold { margin: 0 0 20px; }
+.getting-started-fold > summary { font-size: 0.9rem; }
+
+/* Activity rows stay one or two lines: the title opens the detail dialog. */
+.activity-title { color: var(--text); text-decoration: none; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.activity-title:hover { color: var(--accent); text-decoration: underline; }
+.activity-scope-cell { white-space: normal; }
+
+/* Lists and section headings inside a dialog: bullets sit inside the text column, sections are evenly spaced. */
+.modal-scroll ul, .modal-scroll ol { margin: 0 0 14px; padding-left: 20px; }
+.modal-scroll li { margin: 0 0 4px; }
+.modal-scroll h3.sub-heading, .modal-scroll h3.form-section-title { margin: 18px 0 8px; }
+.modal-scroll > h3.sub-heading:first-child, .modal-scroll > h3.form-section-title:first-child { margin-top: 0; }
+
+/* A card that is one fold: arrow, title and a short hint on one line, the whole line the toggle, no rule under it. */
+details.fold-card:not(.row-more):not(.card-fold):not(.activity-more) > summary:not(.btn) {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 2px 12px;
+  list-style: none;
+  cursor: pointer;
+  padding: 2px 0;
+  margin: 0;
+  border: 0;
+  color: var(--text);
+  font-size: inherit;
+}
+details.fold-card > summary::-webkit-details-marker { display: none; }
+details.fold-card:not(.row-more):not(.card-fold):not(.activity-more) > summary:not(.btn)::before { content: "\25B8"; color: var(--muted); display: inline-block; width: 1em; flex: 0 0 auto; }
+details.fold-card[open]:not(.row-more):not(.card-fold):not(.activity-more) > summary:not(.btn)::before { content: "\25BE"; color: var(--accent); }
+details.fold-card .fold-title { font-size: 1.05rem; font-weight: 600; }
+details.fold-card .fold-hint { font-size: 0.85rem; color: var(--muted); }
+details.fold-card > summary:hover .fold-title { color: var(--accent); }
+details.fold-card > summary:focus { outline: none; }
+details.fold-card > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; border-radius: 4px; }
+details.fold-card[open]:not(.row-more):not(.card-fold):not(.activity-more) > summary:not(.btn) { margin-bottom: 16px; }
