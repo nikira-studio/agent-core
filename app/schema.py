@@ -574,6 +574,7 @@ def _apply_schema_migrations(conn) -> None:
         (25, "memory-cleanup-queue-removed", _migrate_025_memory_cleanup_queue_removed),
         (26, "drop-unused-settings-and-column", _migrate_026_drop_unused_settings_and_column),
         (27, "binding-test-note", _migrate_027_binding_test_note),
+        (28, "connection-action-limits", _migrate_028_connection_action_limits),
     )
     applied = {
         row["revision"]
@@ -1636,6 +1637,20 @@ def _migrate_019_trusted_device_sessions(conn) -> None:
     )
     conn.execute("DROP TABLE sessions")
     conn.execute("ALTER TABLE sessions_rebuilt RENAME TO sessions")
+
+
+def _migrate_028_connection_action_limits(conn) -> None:
+    """A connection may narrow what its service allows (1.3.1).
+
+    ``actions_mode`` is ``all`` (everything the service allows: every existing connection), ``read_only`` (only actions
+    that declare they do not change anything) or ``custom`` (``actions_disabled_json`` lists what this connection turns
+    off). A connection can only narrow: the service's own switches always win.
+    """
+    columns = {row["name"] for row in conn.execute("PRAGMA table_info(connector_bindings)").fetchall()}
+    if "actions_mode" not in columns:
+        conn.execute("ALTER TABLE connector_bindings ADD COLUMN actions_mode TEXT NOT NULL DEFAULT 'all'")
+    if "actions_disabled_json" not in columns:
+        conn.execute("ALTER TABLE connector_bindings ADD COLUMN actions_disabled_json TEXT")
 
 
 def _migrate_027_binding_test_note(conn) -> None:

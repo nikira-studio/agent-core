@@ -2,6 +2,12 @@
 
 Notable changes to Agent Core are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow [Semantic Versioning](https://semver.org/).
 
+## [1.3.1] - 2026-11-14
+
+### Added
+
+- **A connection can allow less than its service.** Until now what a service may do was set once for every connection (View Actions), so giving one agent a read-only view of a service meant importing a second copy of it. A connection now has its own actions: **everything the service allows** (the default; every existing connection), **read-only** (only actions that declare they change nothing; an action that does not say counts as a change, so a tool that appears on an MCP server later stays off until the server says it is read-only) or **choose actions** (it lists what it turns off). A connection can only narrow: what the service switched off for everyone stays off. One rule backs every place an action is used: running it (a refused action answers `CONNECTION_DISABLED_ACTION` and is never sent, before any approval is held), resolving a connection for an action, the action lists agents see (`connectors_actions_list`, which takes an optional `binding_id`, and `GET /api/connector-bindings/{id}/tools`), `connectors_summary` (each connection reports its mode and how many actions it allows; one that allows nothing is not usable), and the connection test. An agent only sees and can only run what one of its connections allows. Only a person can choose what a connection allows; an agent cannot, and a connection an agent creates is read-only. Edit a connection to choose; the connections table says "Read-only · 12 of 20 actions". Schema revision 28 adds the two columns with `all` as the default, so nothing changes for an existing connection.
+
 ## [1.3.0] - 2026-11-13
 
 The release that makes Agent Core run itself: nothing it promises depends on an agent remembering, and a person's role is setup and exceptions.

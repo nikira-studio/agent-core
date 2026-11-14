@@ -376,6 +376,17 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
                 f"{worst['action']} failing {worst['failures']}/{worst['calls']}"
                 + (f" (+{len(failing) - 1} more)" if len(failing) > 1 else "")
             )
+        # A connection that allows less than its service says so under the service's name.
+        actions_note = ""
+        if ct and (b.get("actions_mode") or "all") != "all":
+            allowed_n = len(connector_service.effective_actions(ct, b))
+            total_n = len(connector_service.catalogue_actions(ct))
+            label = "Read-only" if b.get("actions_mode") == "read_only" else "Chosen actions"
+            actions_note = (
+                f"<div class='form-hint' style='margin:2px 0 0'>{label}"
+                + (f" &middot; {allowed_n} of {total_n} actions" if total_n else "")
+                + "</div>"
+            )
         oauth_button = ""
         if ct and ct.get("auth_type") == "oauth2":
             oauth_label = (
@@ -390,7 +401,7 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
         bindings_rows += f"""
         <tr data-binding-id="{b["id"]}" data-connector-type-id="{escape_html(b.get("connector_type_id", ""))}" data-provider-type="{escape_html(ct.get("provider_type", "") if ct else "")}">
           <td style="{text_style}">{escape_html(b.get("name", ""))}</td>
-          <td data-label="Service" style="{text_style}">{escape_html(ct.get("display_name", "") if ct else b.get("connector_type_id", ""))}</td>
+          <td data-label="Service" style="{text_style}">{escape_html(ct.get("display_name", "") if ct else b.get("connector_type_id", ""))}{actions_note}</td>
           <td data-label="Workspace" style="{text_style}" title="{escape_html(b.get("scope", ""))}">{escape_html(scope_names.get(b.get("scope", ""), b.get("scope", "")))}</td>
           <td data-label="Status" class="{status_cls}" style="{text_style}"{(' title="' + escape_html(b["last_test_note"]) + '"') if (b.get("last_test_note") and not b.get("last_error")) else ((' title="' + escape_html(b["last_error"]) + '"') if b.get("last_error") else "")}>{escape_html(status_text)}</td>
           <td class='actions-cell'>
@@ -700,6 +711,14 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
               <div class="form-hint">Use another server for this connection only. It must offer the same tools, or add it as a separate service.</div>
             </div>
           </details>
+          <div class="form-group actions-group" id="binding-actions-group">
+            <label>What this connection can do</label>
+            <label class="checkbox-label"><input type="radio" name="binding-actions-mode" value="all" checked> Everything the service allows</label>
+            <label class="checkbox-label"><input type="radio" name="binding-actions-mode" value="read_only"> Read-only <span class="form-hint">(it can look things up, never change anything)</span></label>
+            <span data-actions-choose-wrap><label class="checkbox-label"><input type="radio" name="binding-actions-mode" value="custom"> Choose actions</label></span>
+            <div class="actions-pick" id="binding-actions-list" style="display:none"></div>
+            <div class="form-hint">A connection can only narrow what its service allows. Switching an action off for everyone is done on the service card (View Actions).</div>
+          </div>
           <div class="form-group">
             <label class="checkbox-label">
               <input type="checkbox" id="binding-enabled" checked> Enabled <span class="form-hint">(untick to pause it without deleting)</span>
@@ -750,6 +769,14 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
               <div class="form-hint">Leave blank to use the service's own address. A different one must offer the same tools.</div>
             </div>
           </details>
+          <div class="form-group actions-group" id="edit-binding-actions-group">
+            <label>What this connection can do</label>
+            <label class="checkbox-label"><input type="radio" name="edit-binding-actions-mode" value="all" checked> Everything the service allows</label>
+            <label class="checkbox-label"><input type="radio" name="edit-binding-actions-mode" value="read_only"> Read-only <span class="form-hint">(it can look things up, never change anything)</span></label>
+            <span data-actions-choose-wrap><label class="checkbox-label"><input type="radio" name="edit-binding-actions-mode" value="custom"> Choose actions</label></span>
+            <div class="actions-pick" id="edit-binding-actions-list" style="display:none"></div>
+            <div class="form-hint">A connection can only narrow what its service allows. Switching an action off for everyone is done on the service card (View Actions).</div>
+          </div>
           <div class="form-group">
             <label class="checkbox-label">
               <input type="checkbox" id="edit-binding-enabled"> Enabled <span class="form-hint">(untick to pause it without deleting)</span>

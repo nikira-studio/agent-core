@@ -168,6 +168,8 @@ def _row_to_binding(row: dict) -> dict:
         "last_tested_at": row.get("last_tested_at"),
         "last_error": row.get("last_error"),
         "last_test_note": row.get("last_test_note"),
+        "actions_mode": row.get("actions_mode") or "all",
+        "disabled_actions": _json_list(row.get("actions_disabled_json")),
         "created_by": row.get("created_by"),
         "created_at": row.get("created_at"),
         "updated_at": row.get("updated_at"),
@@ -436,6 +438,200 @@ def _validate_endpoint_override(connector_type, endpoint_url, credential_id, con
     return endpoint_url
 
 
+# ---- What a connection allows -----------------------------------------------------------------------------------
+#
+# A service keeps the catalogue of its actions and a service-wide off switch (disabled_actions: an admin's kill switch
+# for everyone). A connection may narrow that further, never widen it:
+#
+#   allowed = in the service's catalogue, not switched off by the service, and permitted by the connection's mode
+#
+# Modes: "all" (everything the service allows; every connection that existed before 1.3.1), "read_only" (only actions that
+# declare they change nothing; an action that does not say is treated as one that does) and "custom" (the connection
+# lists what it turns off; a tool that appears later is on unless the service turns it off).
+
+ACTIONS_MODES = ("all", "read_only", "custom")
+_READ_SIDE_EFFECTS = ("none", "read")
+
+
+def _json_list(value) -> list[str]:
+    try:
+        data = json.loads(value) if isinstance(value, str) and value else []
+    except (TypeError, ValueError):
+        return []
+    return [item for item in data if isinstance(item, str)] if isinstance(data, list) else []
+
+
+def catalogue_actions(connector_type: dict) -> list[str]:
+    """Every action name the service offers, whatever kind of service it is."""
+    names: list[str] = []
+
+    def add(name):
+        if isinstance(name, str) and name and name not in names:
+            names.append(name)
+
+    if connector_type.get("provider_type") == "mcp":
+        try:
+            snapshot = json.loads(connector_type.get("tool_snapshot_json") or "{}")
+        except (TypeError, ValueError):
+            snapshot = {}
+        for tool in (snapshot.get("tools") if isinstance(snapshot, dict) else None) or []:
+            if isinstance(tool, dict):
+                add(tool.get("name") or tool.get("tool") or tool.get("action"))
+        if names:
+            return names
+    if connector_type.get("operations_json"):
+        try:
+            operations = json.loads(connector_type["operations_json"]).get("operations", [])
+        except (TypeError, ValueError, AttributeError):
+            operations = []
+        for operation in operations:
+            if isinstance(operation, dict):
+                add(operation.get("operation_id"))
+        if names:
+            return names
+    for name in normalize_action_names(connector_type.get("supported_actions")):
+        add(name)
+    try:
+        requests = (json.loads(connector_type.get("backend_json") or "{}") or {}).get("requests") or {}
+    except (TypeError, ValueError, AttributeError):
+        requests = {}
+    for name in requests if isinstance(requests, dict) else []:
+        add(name)
+    return names
+
+
+def action_side_effect(connector_type: dict, action: str) -> str:
+    """What an action says it does: "read" (changes nothing), "write" (changes something), or "unknown".
+
+    Adapters declare it on every action; an imported API spec says it through the HTTP method; an MCP tool says it
+    with the readOnlyHint it lists. Anything that does not say is "unknown", which a read-only connection treats as
+    a write."""
+    for item in connector_type.get("supported_actions") or []:
+        if isinstance(item, dict) and item.get("name") == action:
+            declared = item.get("side_effect")
+            if declared in _READ_SIDE_EFFECTS:
+                return "read"
+            if declared:
+                return "write"
+    if connector_type.get("provider_type") == "mcp":
+        try:
+            snapshot = json.loads(connector_type.get("tool_snapshot_json") or "{}")
+        except (TypeError, ValueError):
+            snapshot = {}
+        for tool in (snapshot.get("tools") if isinstance(snapshot, dict) else None) or []:
+            if isinstance(tool, dict) and (tool.get("name") or tool.get("tool") or tool.get("action")) == action:
+                raw = tool.get("raw") if isinstance(tool.get("raw"), dict) else tool
+                annotations = raw.get("annotations") or tool.get("annotations") or {}
+                if isinstance(annotations, dict):
+                    if annotations.get("readOnlyHint") is True and annotations.get("destructiveHint") is not True:
+                        return "read"
+                    if annotations.get("readOnlyHint") is False or annotations.get("destructiveHint") is True:
+                        return "write"
+                return "unknown"
+    try:
+        operations = json.loads(connector_type.get("operations_json") or "{}").get("operations", [])
+    except (TypeError, ValueError, AttributeError):
+        operations = []
+    for operation in operations:
+        if isinstance(operation, dict) and operation.get("operation_id") == action:
+            return "read" if str(operation.get("method") or "").upper() in ("GET", "HEAD", "OPTIONS") else "write"
+    try:
+        requests = (json.loads(connector_type.get("backend_json") or "{}") or {}).get("requests") or {}
+    except (TypeError, ValueError, AttributeError):
+        requests = {}
+    spec = requests.get(action) if isinstance(requests, dict) else None
+    if isinstance(spec, dict):
+        declared = spec.get("side_effect")
+        if declared in _READ_SIDE_EFFECTS:
+            return "read"
+        if declared:
+            return "write"
+        return "read" if str(spec.get("method") or "").upper() in ("GET", "HEAD", "OPTIONS") else "write"
+    if connector_type.get("backend_type") == "generic_http" or connector_type.get("provider_type") == "generic_http":
+        # A plain web service has no catalogue: the action is "METHOD /path".
+        method = (action or "").strip().split(None, 1)[0].upper() if (action or "").strip() else ""
+        return "read" if method in ("GET", "HEAD") else "unknown"
+    return "unknown"
+
+
+def connection_allows(connector_type: dict, binding: dict, action: str) -> bool:
+    """The one rule: may this connection run this action? (The service's switches always win.)"""
+    if not action or action in (connector_type.get("disabled_actions") or []):
+        return False
+    mode = (binding or {}).get("actions_mode") or "all"
+    if mode == "all":
+        return True
+    if mode == "custom":
+        return action not in ((binding or {}).get("disabled_actions") or [])
+    if mode == "read_only":
+        return action_side_effect(connector_type, action) == "read"
+    return False  # an unrecognised mode is never a way to widen
+
+
+def connection_narrows(connector_type: dict, binding: dict, action: str) -> bool:
+    """True when this connection (not its service) is what stops the action. A service-wide switch keeps its own message."""
+    return action not in (connector_type.get("disabled_actions") or []) and not connection_allows(
+        connector_type, binding, action
+    )
+
+
+def connection_refusal(binding: dict, action: str) -> dict:
+    mode = (binding or {}).get("actions_mode") or "all"
+    why = "is read-only" if mode == "read_only" else "does not allow it"
+    return {
+        "success": False,
+        "error": f"This connection {why}: {action}. Ask the owner to change the connection's actions.",
+        "error_code": "CONNECTION_DISABLED_ACTION",
+    }
+
+
+def effective_actions(connector_type: dict, binding: dict) -> list[str]:
+    """What a connection can run: the service's catalogue, less the service's switches, less the connection's own."""
+    return [name for name in catalogue_actions(connector_type) if connection_allows(connector_type, binding, name)]
+
+
+def connection_disabled_actions(connector_type: dict, binding: dict) -> list[str]:
+    """Everything this connection cannot run (service-wide off plus its own narrowing): the list the tools use."""
+    allowed = set(effective_actions(connector_type, binding))
+    off = [name for name in catalogue_actions(connector_type) if name not in allowed]
+    for name in connector_type.get("disabled_actions") or []:
+        if name not in off:
+            off.append(name)
+    return off
+
+
+def listing_disabled_actions(connector_type: dict, bindings: list[dict]) -> list[str]:
+    """The disabled list for showing a service's actions to a caller who can use ``bindings`` of it.
+
+    With no connection to use, it is the service's own list. With connections, an action is shown only if at least one
+    of them can run it, so an agent never sees (or is offered) what none of its connections allows."""
+    if not bindings:
+        return list(connector_type.get("disabled_actions") or [])
+    allowed: set[str] = set()
+    for binding in bindings:
+        allowed.update(effective_actions(connector_type, binding))
+    off = [name for name in catalogue_actions(connector_type) if name not in allowed]
+    for name in connector_type.get("disabled_actions") or []:
+        if name not in off:
+            off.append(name)
+    return off
+
+
+def validate_actions_setting(connector_type: dict, mode, disabled) -> tuple[str, list[str]]:
+    """Check a requested mode and list; returns (mode, disabled list) or raises ValueError with a plain message."""
+    mode = mode or "all"
+    if mode not in ACTIONS_MODES:
+        raise ValueError("actions_mode must be all, read_only or custom")
+    if mode != "custom":
+        return mode, []
+    names = [item for item in (disabled or []) if isinstance(item, str)]
+    known = set(catalogue_actions(connector_type))
+    unknown = [n for n in names if known and n not in known]
+    if unknown:
+        raise ValueError("This service has no action named " + ", ".join(unknown))
+    return mode, sorted(set(names))
+
+
 def list_bindings(
     scope: Optional[str] = None,
     connector_type_id: Optional[str] = None,
@@ -502,6 +698,8 @@ def create_binding(
     description: Optional[str] = None,
     metadata_json: Optional[str] = None,
     endpoint_url_override: Optional[str] = None,
+    actions_mode: Optional[str] = None,
+    disabled_actions: Optional[list[str]] = None,
 ) -> dict:
     normalized_scope = _normalize_scope(scope)
     config_data = _parse_json_object(config_json)
@@ -516,14 +714,16 @@ def create_binding(
     endpoint_url_override = _validate_endpoint_override(
         connector_type, endpoint_url_override, credential_id, config_json
     )
+    actions_mode, narrowed = validate_actions_setting(connector_type or {}, actions_mode, disabled_actions)
     binding_id = secrets.token_urlsafe(16)
     with get_db() as conn:
         conn.execute(
             """
             INSERT INTO connector_bindings
             (id, connector_type_id, name, scope, credential_id, config_json, enabled, created_by,
-             logical_alias, is_preferred, priority, description, metadata_json, endpoint_url_override)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             logical_alias, is_preferred, priority, description, metadata_json, endpoint_url_override,
+             actions_mode, actions_disabled_json)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 binding_id,
@@ -537,6 +737,7 @@ def create_binding(
                 logical_alias.strip() if logical_alias and logical_alias.strip() else None,
                 int(is_preferred), int(priority), description, metadata_json,
                 endpoint_url_override,
+                actions_mode, json.dumps(narrowed) if narrowed else None,
             ),
         )
         conn.commit()
@@ -560,6 +761,8 @@ def update_binding(binding_id: str, **fields) -> bool:
         "description",
         "metadata_json",
         "endpoint_url_override",
+        "actions_mode",
+        "disabled_actions",
     )
     # Status fields are nullable and must be clearable: a successful test has to
     # reset last_error to NULL, otherwise a binding that failed once would keep
@@ -604,12 +807,26 @@ def update_binding(binding_id: str, **fields) -> bool:
                 config_value = fields.get("config_json") if fields.get("config_json") is not None else current.get("config_json") if current else None
                 updates.append("endpoint_url_override = ?")
                 params.append(_validate_endpoint_override(connector_type, val, credential_id, config_value))
+            elif key in ("actions_mode", "disabled_actions"):
+                continue  # handled together below, validated against the service
             elif key == "logical_alias":
                 updates.append("logical_alias = ?")
                 params.append(val.strip() if isinstance(val, str) and val.strip() else None)
             else:
                 updates.append(f"{key} = ?")
                 params.append(val)
+    if fields.get("actions_mode") is not None or fields.get("disabled_actions") is not None:
+        current = get_binding(binding_id)
+        if current is None:
+            return False
+        connector_type = get_connector_type(current["connector_type_id"]) or {}
+        mode = fields.get("actions_mode") if fields.get("actions_mode") is not None else current["actions_mode"]
+        listed = fields.get("disabled_actions") if fields.get("disabled_actions") is not None else current["disabled_actions"]
+        mode, narrowed = validate_actions_setting(connector_type, mode, listed)
+        updates.append("actions_mode = ?")
+        params.append(mode)
+        updates.append("actions_disabled_json = ?")
+        params.append(json.dumps(narrowed) if narrowed else None)
     if not updates:
         return False
     updates.append("updated_at = CURRENT_TIMESTAMP")
@@ -1013,6 +1230,8 @@ def test_binding(binding_id: str) -> dict:
         update_binding(binding_id, last_tested_at=_utc_now(), last_error=message)
         return {"success": False, "error": message, "error_code": "NO_CREDENTIAL"}
 
+    # The connection test only ever picks an action this connection is allowed to run.
+    connector_type = dict(connector_type, disabled_actions=connection_disabled_actions(connector_type, binding))
     executor = _resolve_executor(connector_type)
     if not executor:
         if connector_type.get("provider_type") == "mcp":
@@ -1182,11 +1401,16 @@ def build_capability_summary(
             binding_config = _parse_json_object(binding.get("config_json")) or {}
             auth_required = _connector_requires_credential(connector_type, binding_config)
             credential_ready = (not auth_required) or credential_present
+            catalogue = catalogue_actions(connector_type)
+            allowed_here = effective_actions(connector_type, binding)
+            # A connection that allows nothing is not usable, however many actions its service offers.
+            has_actions = (len(allowed_here) > 0) if catalogue else (action_count > 0)
             usable = (
                 bool(binding.get("enabled"))
                 and credential_ready
                 and action_discovery["success"]
                 and action_count > 0
+                and has_actions
             )
             if usable:
                 usable_total += 1
@@ -1221,6 +1445,11 @@ def build_capability_summary(
                         "last_error": binding.get("last_error"),
                         "last_test_note": binding.get("last_test_note"),
                         "failing_actions": failing_actions,
+                    },
+                    "actions": {
+                        "mode": binding.get("actions_mode") or "all",
+                        "allowed": len(allowed_here),
+                        "total": len(catalogue),
                     },
                     "usable_by_caller": usable,
                 }
@@ -1391,6 +1620,9 @@ def execute_binding_action(
             "error": error_messages.get(action_error, "Action validation failed"),
             "error_code": action_error,
         }
+    # The last line of defence for every way an action can run: a connection never runs what it has narrowed away.
+    if connection_narrows(connector_type, binding, action):
+        return connection_refusal(binding, action)
     if params is not None and not isinstance(params, dict):
         return {
             "success": False,
@@ -1614,7 +1846,11 @@ def execute_authorized_binding_action_with_logging(
     from app.security.effective_authority import SystemAuthority
 
     if isinstance(authority, SystemAuthority):
-        held = _held_for_approval(get_binding(binding_id), action, params, authority)
+        system_binding = get_binding(binding_id)
+        system_type = get_connector_type(system_binding["connector_type_id"]) if system_binding else None
+        if system_binding and system_type and connection_narrows(system_type, system_binding, action):
+            return connection_refusal(system_binding, action)
+        held = _held_for_approval(system_binding, action, params, authority)
         if held is not None:
             return held
         token = _execution_authority.set(authority)
@@ -1624,12 +1860,15 @@ def execute_authorized_binding_action_with_logging(
             _execution_authority.reset(token)
     binding_for_auth = get_binding(binding_id)
     connector_type = get_connector_type(binding_for_auth["connector_type_id"]) if binding_for_auth else None
-    if not binding_for_auth or not connector_type or not can_run_binding_action(
-        authority, binding_for_auth, connector_type, action
+    if not binding_for_auth or not connector_type or not authority.can_binding_action(
+        binding_for_auth["id"], action, scope=binding_for_auth["scope"]
     ):
         from app.security.exceptions import APIError
 
         raise APIError("SCOPE_DENIED", "Access denied to this binding action", 403)
+    if connection_narrows(connector_type, binding_for_auth, action):
+        # Refused before anything is held for approval or sent: the connection does not allow this action.
+        return connection_refusal(binding_for_auth, action)
     held = _held_for_approval(binding_for_auth, action, params, authority)
     if held is not None:
         return held
@@ -1641,7 +1880,10 @@ def execute_authorized_binding_action_with_logging(
 
 
 def can_run_binding_action(authority, binding: dict, connector_type: dict, action: str) -> bool:
-    return authority.can_binding_action(binding["id"], action, scope=binding["scope"])
+    """May this caller run this action on this connection: their authority over its scope AND the connection's own limits."""
+    return authority.can_binding_action(binding["id"], action, scope=binding["scope"]) and connection_allows(
+        connector_type, binding, action
+    )
 
 
 def execute_binding_action_with_logging(

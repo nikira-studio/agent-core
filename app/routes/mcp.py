@@ -703,6 +703,7 @@ MANIFEST = {
                 "type": "object",
                 "properties": {
                     "connector_type_id": {"type": "string"},
+                    "binding_id": {"type": "string", "description": "Show only what this one connection can run."},
                     "action": {"type": "string", "description": "Return this one action with its full input schema."},
                     "query": {"type": "string", "description": "Substring filter on action names."},
                     "view": {"type": "string", "enum": ["compact", "full"], "default": "compact"},
@@ -2540,10 +2541,26 @@ async def _run_custom_mcp_tool(body: dict, ctx: EffectiveAuthority):
         view = "full" if wanted else params.get("view", "compact")
         if view not in ("compact", "full"):
             return _mcp_error("INVALID_PARAMS", "view must be 'compact' or 'full'", 400)
+        # What a caller sees is what its connections can run: one connection's menu with binding_id, otherwise the
+        # actions at least one of the connections it can use allows (the service's own list when it has none).
+        enforcer_for_actions = ctx.connector_enforcer()
+        if params.get("binding_id"):
+            wanted_binding = connector_service.get_binding(params["binding_id"])
+            if not wanted_binding or wanted_binding["connector_type_id"] != ct["id"]:
+                return _mcp_error("NOT_FOUND", "Connection not found", 404)
+            if not enforcer_for_actions.can_read(wanted_binding["scope"]):
+                return _mcp_error("SCOPE_DENIED", "Access denied to this connection", 403)
+            menu_disabled = connector_service.connection_disabled_actions(ct, wanted_binding)
+        else:
+            usable_for_menu = [
+                b for b in connector_service.list_bindings(connector_type_id=ct["id"], enabled=True)
+                if enforcer_for_actions.can_read(b["scope"])
+            ]
+            menu_disabled = connector_service.listing_disabled_actions(ct, usable_for_menu)
         tool_result = await asyncio.to_thread(
             connector_service.generate_connector_type_tools,
             ct,
-            disabled_actions=ct.get("disabled_actions") or [],
+            disabled_actions=menu_disabled,
             include_disabled=bool(params.get("include_disabled", False)),
             query=wanted or params.get("query"),
             limit=200 if wanted else min(int(params.get("limit", 100) or 100), 200),
@@ -2611,6 +2628,7 @@ async def _run_custom_mcp_tool(body: dict, ctx: EffectiveAuthority):
                                 "name": b["name"],
                                 "scope": b["scope"],
                                 "usable": b["usable_by_caller"],
+                                "actions": b["actions"]["mode"] if b["actions"]["mode"] == "all" else f"{b['actions']['mode']} ({b['actions']['allowed']}/{b['actions']['total']})",
                                 "health": b["health"]["test_status"],
                                 "failing_actions": len(b["health"]["failing_actions"]),
                             }
@@ -2639,6 +2657,8 @@ async def _run_custom_mcp_tool(body: dict, ctx: EffectiveAuthority):
             return _mcp_error("DISABLED", "This connection is switched off", 200)
         if not result.get("success") and result.get("error_code") == "DISABLED_ACTION":
             return _mcp_error("DISABLED_ACTION", result["error"], 200)
+        if not result.get("success") and result.get("error_code") == "CONNECTION_DISABLED_ACTION":
+            return _mcp_error("CONNECTION_DISABLED_ACTION", result["error"], 200)
         if not result.get("success") and result.get("error_code") == "INVALID_ACTION":
             return _mcp_error("INVALID_ACTION", result["error"], 200)
         if not result.get("success") and result.get("error_code") == "NO_CREDENTIAL":

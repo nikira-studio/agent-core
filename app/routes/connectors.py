@@ -107,6 +107,10 @@ class CreateBindingRequest(BaseModel):
     description: Optional[str] = None
     metadata_json: Optional[str] = None
     endpoint_url_override: Optional[str] = None
+    # What this connection allows: "all" (everything the service allows), "read_only", or "custom" with the actions it
+    # turns off. A connection can only narrow its service; it can never switch on what the service switched off.
+    actions_mode: Optional[str] = None
+    disabled_actions: Optional[list[str]] = None
 
 
 class UpdateBindingRequest(BaseModel):
@@ -122,6 +126,8 @@ class UpdateBindingRequest(BaseModel):
     metadata_json: Optional[str] = None
     endpoint_url_override: Optional[str] = None
     reset_endpoint_url_override: bool = False
+    actions_mode: Optional[str] = None
+    disabled_actions: Optional[list[str]] = None
 
 
 class ActionSettingsRequest(BaseModel):
@@ -240,6 +246,13 @@ def create_binding(
     problem = _private_address_problem(body.config_json, body.endpoint_url_override)
     if problem:
         return error_response("PRIVATE_ADDRESS", problem, 400)
+    actions_mode, disabled_actions = body.actions_mode, body.disabled_actions
+    if ctx.actor_type == "agent":
+        # What a connection allows is a person's decision. An agent cannot choose it, and a connection an agent makes
+        # is read-only, so creating a new connection is never a way around a narrower one.
+        if actions_mode is not None or disabled_actions is not None:
+            return error_response("ACTIONS_NOT_FOR_AGENTS", "Only a person can choose what a connection allows", 403)
+        actions_mode = "read_only"
     try:
         binding = connector_service.create_binding(
             connector_type_id=body.connector_type_id,
@@ -255,6 +268,8 @@ def create_binding(
             description=body.description,
             metadata_json=body.metadata_json,
             endpoint_url_override=body.endpoint_url_override,
+            actions_mode=actions_mode,
+            disabled_actions=disabled_actions,
         )
     except ValueError as e:
         return error_response("INVALID_CONFIG", str(e), 400)
@@ -265,6 +280,7 @@ def create_binding(
         resource_type="connector_binding",
         resource_id=binding["id"],
         result="success",
+        details={"actions_mode": binding.get("actions_mode")},
     )
     return success_response({"binding": binding}, status_code=201)
 
@@ -353,8 +369,12 @@ def update_binding(
             return error_response(
                 "SCOPE_DENIED", "Access denied to linked credential", 403
             )
+    if (body.actions_mode is not None or body.disabled_actions is not None) and ctx.actor_type == "agent":
+        return error_response("ACTIONS_NOT_FOR_AGENTS", "Only a person can choose what a connection allows", 403)
     try:
         update_fields = dict(
+            actions_mode=body.actions_mode,
+            disabled_actions=body.disabled_actions,
             name=body.name,
             scope=body.scope,
             credential_id=body.credential_id,
@@ -382,7 +402,22 @@ def update_binding(
         return error_response("INVALID_CONFIG", str(e), 400)
     if not ok:
         return error_response("UPDATE_FAILED", "No valid fields to update", 400)
-    return success_response({"binding": connector_service.get_binding(binding_id)})
+    updated_binding = connector_service.get_binding(binding_id)
+    if body.actions_mode is not None or body.disabled_actions is not None:
+        audit_service.write_event(
+            actor_type=ctx.actor_type,
+            actor_id=ctx.actor_id,
+            action="connector_binding_actions_updated",
+            resource_type="connector_binding",
+            resource_id=binding_id,
+            result="success",
+            details={
+                "from": binding.get("actions_mode"),
+                "to": updated_binding.get("actions_mode"),
+                "disabled_actions": updated_binding.get("disabled_actions"),
+            },
+        )
+    return success_response({"binding": updated_binding})
 
 
 @router.delete("/{binding_id}")
@@ -514,7 +549,7 @@ async def get_binding_tools(
     result = await asyncio.to_thread(
         connector_service.generate_connector_type_tools,
         connector_type,
-        disabled_actions=connector_type.get("disabled_actions") or [],
+        disabled_actions=connector_service.connection_disabled_actions(connector_type, binding),
         include_disabled=include_disabled,
         query=query,
         limit=min(max(int(limit or 100), 1), 200),
@@ -633,15 +668,33 @@ async def get_connector_type_tools(
     include_disabled: bool = False,
     limit: int = 100,
     offset: int = 0,
+    binding_id: Optional[str] = None,
     ctx: EffectiveAuthority = Depends(get_request_context),
 ):
     ct = connector_service.get_connector_type(connector_type_id)
     if not ct:
         return error_response("NOT_FOUND", "Service not found", 404)
+    disabled = ct.get("disabled_actions") or []
+    if binding_id:
+        # One connection's own menu: what it allows (its service's switches and its own narrowing).
+        binding = connector_service.get_binding(binding_id)
+        if not binding or binding["connector_type_id"] != connector_type_id:
+            return error_response("NOT_FOUND", "Connection not found", 404)
+        if not ctx.connector_enforcer().can_read(binding["scope"]):
+            return error_response("SCOPE_DENIED", "Access denied to this connection", 403)
+        disabled = connector_service.connection_disabled_actions(ct, binding)
+    elif ctx.actor_type == "agent" and not ctx.is_admin:
+        # An agent is shown only what one of its own connections can run.
+        enforcer = ctx.connector_enforcer()
+        usable = [
+            b for b in connector_service.list_bindings(connector_type_id=connector_type_id, enabled=True)
+            if enforcer.can_read(b["scope"])
+        ]
+        disabled = connector_service.listing_disabled_actions(ct, usable)
     result = await asyncio.to_thread(
         connector_service.generate_connector_type_tools,
         ct,
-        disabled_actions=ct.get("disabled_actions") or [],
+        disabled_actions=disabled,
         include_disabled=include_disabled,
         query=query,
         limit=min(max(int(limit or 100), 1), 200),

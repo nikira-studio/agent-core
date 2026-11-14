@@ -1,3 +1,73 @@
+
+// What a connection can do: everything its service allows, read-only, or a chosen set. A connection can only narrow
+// its service; actions the service has switched off for everyone are shown but cannot be switched on here.
+async function initActionsPicker(prefix, typeId, mode, disabled) {
+  const group = document.getElementById(prefix + '-actions-group');
+  if (!group) return;
+  const list = document.getElementById(prefix + '-actions-list');
+  group.dataset.typeId = typeId || '';
+  group.dataset.disabled = JSON.stringify(disabled || []);
+  const radios = group.querySelectorAll('input[type=radio]');
+  radios.forEach(function(r) { r.checked = r.value === (mode || 'all'); });
+  group.querySelectorAll('[data-actions-choose-wrap]').forEach(function(w) { w.style.display = ''; });
+  list.innerHTML = '';
+  list.style.display = 'none';
+  group.dataset.loaded = '';
+  if (!typeId) return;
+  const j = await apiFetch('/api/connector-types/' + encodeURIComponent(typeId) + '/tools?include_disabled=true&limit=200');
+  const tools = (j.ok && j.data && j.data.tools) || [];
+  group.dataset.tools = JSON.stringify(tools.map(function(t) { return { action: t.action, enabled: t.enabled !== false, description: t.description || t.summary || '' }; }));
+  group.dataset.loaded = '1';
+  if (!tools.length) {  // a plain web service has no list of actions to choose from
+    group.querySelectorAll('[data-actions-choose-wrap]').forEach(function(w) { w.style.display = 'none'; });
+    if ((mode || 'all') === 'custom') radios.forEach(function(r) { r.checked = r.value === 'all'; });
+  }
+  renderActionsChoices(prefix);
+}
+
+function renderActionsChoices(prefix) {
+  const group = document.getElementById(prefix + '-actions-group');
+  if (!group) return;
+  const list = document.getElementById(prefix + '-actions-list');
+  const chosen = group.querySelector('input[type=radio]:checked');
+  const mode = chosen ? chosen.value : 'all';
+  if (mode !== 'custom' || group.dataset.loaded !== '1') { list.style.display = 'none'; return; }
+  let off = [];
+  try { off = JSON.parse(group.dataset.disabled || '[]'); } catch (e) {}
+  let tools = [];
+  try { tools = JSON.parse(group.dataset.tools || '[]'); } catch (e) {}
+  list.innerHTML = tools.map(function(t, i) {
+    const id = prefix + '-act-' + i;
+    const blocked = !t.enabled;
+    return '<label class="checkbox-label" for="' + id + '"' + (blocked ? ' style="opacity:.6"' : '') + '>' +
+      '<input type="checkbox" id="' + id + '" data-action="' + escapeHtml(t.action) + '"' +
+      (blocked ? ' disabled' : (off.indexOf(t.action) === -1 ? ' checked' : '')) + '> ' + escapeHtml(t.action) +
+      (blocked ? ' <span class="form-hint">switched off for everyone on the service</span>' : '') + '</label>';
+  }).join('');
+  list.style.display = '';
+}
+
+function readActionsPicker(prefix) {
+  const group = document.getElementById(prefix + '-actions-group');
+  if (!group) return {};
+  const chosen = group.querySelector('input[type=radio]:checked');
+  const mode = chosen ? chosen.value : 'all';
+  if (mode !== 'custom') return { actions_mode: mode, disabled_actions: [] };
+  const off = Array.from(group.querySelectorAll('#' + prefix + '-actions-list input[type=checkbox]:not(:disabled)'))
+    .filter(function(c) { return !c.checked; }).map(function(c) { return c.dataset.action; });
+  return { actions_mode: 'custom', disabled_actions: off };
+}
+
+document.addEventListener('change', function(ev) {
+  const radio = ev.target.closest && ev.target.closest('.actions-group input[type=radio]');
+  if (!radio) return;
+  const group = radio.closest('.actions-group');
+  group.dataset.disabled = JSON.stringify(
+    Array.from(group.querySelectorAll('.actions-pick input[type=checkbox]:not(:disabled)')).filter(function(c) { return !c.checked; }).map(function(c) { return c.dataset.action; })
+  );
+  renderActionsChoices(group.id.replace('-actions-group', ''));
+});
+
 function parseBindingGuidance() {
   const select = document.getElementById('binding-connector-type');
   if (!select || select.selectedIndex < 0) return {};
@@ -254,6 +324,7 @@ function bindingConnectorTypeChanged() {
   if (credentialMode) credentialMode.value = defaultCredentialModeForGuidance(guidance);
   updateBindingFormContext();
   toggleBindingCredentialMode(false);
+  initActionsPicker('binding', document.getElementById('binding-connector-type').value, 'all', []);
 }
 
 function bindingCredentialRequired(guidance) {
@@ -381,6 +452,7 @@ async function createBinding(e) {
     credential_id: credentialId,
     config_json: configJson,
     enabled: document.getElementById('binding-enabled').checked,
+    ...readActionsPicker('binding'),
   };
   const endpointOverride = document.getElementById('binding-mcp-endpoint');
   const selectedType = document.getElementById('binding-connector-type').selectedOptions[0];
@@ -424,6 +496,7 @@ async function editBinding(id) {
   const bindingRow = document.querySelector('[data-binding-id="' + CSS.escape(id) + '"]');
   if (endpointGroup) endpointGroup.style.display = bindingRow?.dataset.providerType === 'mcp' ? '' : 'none';
   if (endpointInput) endpointInput.value = b.endpoint_url_override || '';
+  initActionsPicker('edit-binding', b.connector_type_id, b.actions_mode, b.disabled_actions);
   openModal('edit-binding-modal');
 }
 
@@ -436,6 +509,7 @@ async function submitEditBinding(e) {
     credential_id: document.getElementById('edit-binding-credential').value || null,
     config_json: document.getElementById('edit-binding-config').value || null,
     enabled: document.getElementById('edit-binding-enabled').checked,
+    ...readActionsPicker('edit-binding'),
   };
   const endpointInput = document.getElementById('edit-binding-mcp-endpoint');
   if (endpointInput && document.getElementById('edit-binding-mcp-endpoint-group').style.display !== 'none') {

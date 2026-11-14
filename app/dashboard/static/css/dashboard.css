@@ -2285,3 +2285,6 @@ details.fold-card > summary:hover .fold-title { color: var(--accent); }
 details.fold-card > summary:focus { outline: none; }
 details.fold-card > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; border-radius: 4px; }
 details.fold-card[open]:not(.row-more):not(.card-fold):not(.activity-more) > summary:not(.btn) { margin-bottom: 16px; }
+
+.actions-pick { max-height: 220px; overflow-y: auto; padding: 8px 10px; margin: 6px 0 4px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); }
+.actions-pick .checkbox-label { display: flex; margin: 2px 0; }

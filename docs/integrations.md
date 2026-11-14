@@ -107,7 +107,7 @@ Once connected, these tools are available in any session:
 | `connectors_list` | List installed services as lean summaries (no full specs); supports `limit`/`offset`. Use `connectors_actions_list` for a type's actions |
 | `connectors_bindings_list` | List service connections in authorized scopes |
 | `connectors_bindings_test` | Test a connection using the stored credential |
-| `connectors_actions_list` | List actions supported by a service |
+| `connectors_actions_list` | List the actions of a service that your connections allow (`binding_id` shows one connection's menu) |
 | `connectors_summary` | Summarize visible services, connections, credentials, actions, and health state |
 | `connectors_run` | Run one service action server-side using a connection |
 | `connectors_resolve` | Deterministically resolve a service (plus optional alias, scope, and action) to a single authorized connection |
@@ -706,7 +706,15 @@ Credential scope and connection scope are both intentional:
 - **Credential scope** controls who can access the stored secret.
 - **Connection scope** controls where the service is available to agents.
 
-Connection visibility grants access to every action enabled on the service. Disable an action on the service to remove it from all connections.
+#### What a connection can do
+
+A connection starts with everything its service allows. Disable an action on the service (Services → View Actions) to remove it from every connection: that is the admin's switch for everyone. A connection can then **narrow** that further, never widen it:
+
+- **Everything the service allows** (the default; every connection that existed before 1.3.1).
+- **Read-only**: only actions that declare they change nothing. Adapters declare this on every action; an imported API spec says it through the HTTP method (GET, HEAD, OPTIONS); an MCP tool says it with the `readOnlyHint` it lists. An action that does not say is treated as one that changes something, so a tool that appears on an MCP server later stays off for a read-only connection until the server declares it read-only. A plain web service is read-only for `GET /path` actions only.
+- **Choose actions**: the connection lists what it turns off. A tool that appears later is on, unless the service turns it off.
+
+Edit a connection (Services → Edit) to choose. The rule is one function applied everywhere: running an action, resolving a connection for an action, the action lists agents see (`connectors_actions_list`, optionally with `binding_id` for one connection's menu), `connectors_summary` (each connection reports its mode and how many actions it allows), and the connection test. An agent only sees and can only run what one of its connections allows. Only a person can choose what a connection allows; an agent cannot, and a connection an agent creates is read-only. A refused action answers `CONNECTION_DISABLED_ACTION` and is never sent. This replaces the need to import a second copy of a service to give an agent fewer actions.
 
 For normal workspace use, set both to the same workspace. For advanced use, a credential in a user scope can power multiple workspace connections if the acting agent has access to both.
 

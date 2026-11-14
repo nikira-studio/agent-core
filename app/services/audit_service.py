@@ -117,6 +117,7 @@ AUDIT_ACTIONS = (
     "connector_type_imported",
     "connector_type_refreshed",
     "connector_type_actions_updated",
+    "connector_binding_actions_updated",
     "connector_type_deleted",
     "adapter_installed",
     "adapter_updated",

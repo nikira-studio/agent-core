@@ -474,14 +474,14 @@ If the connector and credential are enough on their own, leave `config_json` emp
 | Method | Path | Auth | Description |
 | --- | --- | --- | --- |
 | `GET` | `/api/connector-bindings` | Agent/session | List visible service connections |
-| `POST` | `/api/connector-bindings` | Agent/session | Create a connection |
+| `POST` | `/api/connector-bindings` | Agent/session | Create a connection. Optional `actions_mode` (`all`, `read_only`, `custom`) and, for `custom`, `disabled_actions`: what the connection turns off. Only a person may set them; a connection an agent creates is `read_only` |
 | `GET` | `/api/connector-bindings/{binding_id}` | Agent/session | Get a connection |
-| `PUT` | `/api/connector-bindings/{binding_id}` | Agent/session | Update a connection |
+| `PUT` | `/api/connector-bindings/{binding_id}` | Agent/session | Update a connection, including `actions_mode` / `disabled_actions` (a person only; they can narrow the service's actions, never widen them) |
 | `DELETE` | `/api/connector-bindings/{binding_id}` | Agent/session | Delete a connection |
 | `POST` | `/api/connector-bindings/{binding_id}/test` | Agent/session | Test the connection using the stored credential |
 | `POST` | `/api/connector-bindings/{binding_id}/run` | Agent/session | Run a connection action directly through the REST API |
 | `POST` | `/api/connectors/{binding_id}/run` | Agent/session | Alias of the line above (intuitive path for plug-in scripts) |
-| `GET` | `/api/connector-bindings/{binding_id}/tools` | Agent/session | List the actions exposed by this connection |
+| `GET` | `/api/connector-bindings/{binding_id}/tools` | Agent/session | List the actions this connection allows (its service's switches and its own narrowing applied) |
 | `GET` | `/api/connector-bindings/{binding_id}/executions` | Agent/session | List execution history for a connection |
 | `POST` | `/api/connector-bindings/{binding_id}/oauth/start` | Agent/session (write scope) | Begin the browser OAuth authorization flow for an oauth2 adapter connection; returns the provider authorization URL |
 | `GET` | `/api/connector-bindings/oauth/callback` | Session | OAuth redirect target; exchanges the authorization code and stores tokens on the connection's credential |
@@ -707,7 +707,7 @@ Dispatch:
 | `connectors_list` | List installed connector types as lean summaries (id, name, auth/backend type, action_count; no full specs). Supports `limit`/`offset`; use `connectors_actions_list` for a type's actions |
 | `connectors_bindings_list` | List service connections in authorized scopes |
 | `connectors_bindings_test` | Test a connection using its stored credential |
-| `connectors_actions_list` | List actions supported by a connector type |
+| `connectors_actions_list` | List actions a connector type offers to you: only what at least one of your connections allows (pass `binding_id` for one connection's menu) |
 | `connectors_summary` | Summarize visible connector capability, connection, credential-presence, action, and health state |
 | `connectors_run` | Run one connector action server-side using a connection |
 | `connectors_resolve` | Deterministically resolve a connector type (plus optional alias, scope, and action) to a single authorized connection |
