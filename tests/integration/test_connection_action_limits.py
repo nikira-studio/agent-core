@@ -351,6 +351,12 @@ def test_a_read_only_web_connection_cannot_be_made_to_send_a_write_by_a_param_de
     assert sent[0]["headers"] == {"Accept": "application/json"}
     connector.execute("DELETE /thing/1", {}, None, '{"base_url": "https://web.example.test"}')
     assert sent[1]["method"] == "DELETE"  # the action is still what decides
+    # the generic call_endpoint action is the one that takes its method and path from the caller, and still does
+    connector.execute("call_endpoint", {"method": "PUT", "path": "/things/9", "body": {"a": 1}}, None, '{"base_url": "https://web.example.test"}')
+    assert sent[2]["method"] == "PUT" and sent[2]["path"] == "/things/9" and sent[2]["body"] == {"a": 1}
+    # a bare "GET" with a path param keeps working: the path is the caller's, the method is still the action's
+    connector.execute("GET", {"path": "/things/10", "method": "DELETE"}, None, '{"base_url": "https://web.example.test"}')
+    assert sent[3]["method"] == "GET" and sent[3]["path"] == "/things/10"
 
 
 def test_a_web_service_action_is_compared_in_one_spelling_so_respelling_it_does_not_get_round_a_limit(world):
