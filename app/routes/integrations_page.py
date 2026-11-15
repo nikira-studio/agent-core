@@ -710,25 +710,33 @@ def _ago(stamp):
     return f"{days} day{'s' if days != 1 else ''} ago"
 
 
-def _agent_signals(agent_id):
-    """When this agent last called Agent Core, and when a session start hook last gave it session context.
+def _agent_signals(agent_id, scope=None):
+    """(last call, last hook start, last hand test) for this agent.
 
-    A hook asks over REST and names why the session started; the agent's own session_context call arrives
-    over MCP. Only the first proves the hook ran, so an MCP delivery never counts.
+    A session start hook asks over REST and names why the session started; the agent's own session_context
+    call arrives over MCP. Only a REST start counts as the hook, so an MCP delivery never does. With a scope,
+    only starts that resolved to that workspace count: another machine's hook for the same agent elsewhere
+    is not this tool's. A session id beginning "try-" is the "Try it by hand" command, reported apart.
     """
     from app.database import get_db
 
+    started = (
+        "SELECT MAX(a.timestamp) FROM audit_log a LEFT JOIN agent_executions e ON e.id = a.resource_id "
+        "WHERE a.actor_type = 'agent' AND a.actor_id = ? AND a.action = 'context_injected' "
+        "AND json_extract(a.details_json, '$.channel') = 'rest' "
+        "AND json_extract(a.details_json, '$.source') IN ('startup', 'clear', 'compact', 'resume')"
+    )
+    args = [agent_id]
+    if scope:
+        started += " AND json_extract(a.details_json, '$.memory_scope') = ?"
+        args.append(scope)
     with get_db() as conn:
         seen = conn.execute(
             "SELECT MAX(timestamp) FROM audit_log WHERE actor_type = 'agent' AND actor_id = ?", (agent_id,)
         ).fetchone()[0]
-        hooked = conn.execute(
-            "SELECT MAX(timestamp) FROM audit_log WHERE actor_type = 'agent' AND actor_id = ? AND action = 'context_injected' "
-            "AND json_extract(details_json, '$.channel') = 'rest' "
-            "AND json_extract(details_json, '$.source') IN ('startup', 'clear', 'compact', 'resume')",
-            (agent_id,),
-        ).fetchone()[0]
-    return seen, hooked
+        hooked = conn.execute(started + " AND COALESCE(e.host_session_ref, '') NOT LIKE 'try-%'", args).fetchone()[0]
+        by_hand = conn.execute(started + " AND COALESCE(e.host_session_ref, '') LIKE 'try-%'", args).fetchone()[0]
+    return seen, hooked, by_hand
 
 
 def _step_status(ok, text):
@@ -1067,7 +1075,7 @@ def integrations_page(
             "data-output-type='mcp_tool' onclick='generateConnectionConfig(this)'>"
             f"Generate One-Time Key + {escape_html(_name)} MCP Config</button>"
         )
-        seen_at, hooked_at = _agent_signals(a_["id"])
+        seen_at, hooked_at, by_hand_at = _agent_signals(a_["id"], f"workspace:{w_['id']}" if w_ else None)
         connect_status = (
             _step_status(True, f"Connected: last seen {_ago(seen_at)}")
             if seen_at
@@ -1075,11 +1083,12 @@ def integrations_page(
         )
         hook_item = ""
         if target in _HOOK_CLIENTS:
-            hook_status = (
-                _step_status(True, f"Hook working: context delivered {_ago(hooked_at)}")
-                if hooked_at
-                else _step_status(False, "No session start seen yet")
-            )
+            if hooked_at:
+                hook_status = _step_status(True, f"Hook working: context delivered {_ago(hooked_at)}")
+            elif by_hand_at:
+                hook_status = _step_status(False, f"Run by hand {_ago(by_hand_at)}; the tool has not started it yet")
+            else:
+                hook_status = _step_status(False, "No session start seen yet")
             hook_item = (
                 f"<li><h3>Add the session start hook {hook_status}</h3>"
                 f"{_hook_step_html(target, base_url, w_)}</li>"
@@ -1735,7 +1744,7 @@ def _hook_steps(client_key, base_url):
             "Codex records the trust against the hook's registration, not the script, so updating the script does not ask again, "
             "but changing the registration (for example its matcher) does. "
             "If the status above still says \"No session start seen yet\" after a new thread, the app has not run the hook "
-            "(hooks in the Windows app have been reported not to run: openai/codex issue 35863). "
+            "(on a Windows install tested on 2026-11-15 the app did not start a trusted hook, although running it by hand worked; reported upstream as openai/codex issue 35863). "
             "In a session where it did not run, the instructions file (step b) still has the agent load the same context itself with `session_context`; only the automatic start is missing. "
             "The CLI and the app may keep separate approvals, so trust it in the one you use."
         )

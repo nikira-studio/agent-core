@@ -588,3 +588,36 @@ def test_codex_step_c_covers_the_desktop_app_and_a_workspace_with_no_repository_
     workspace_service.set_repo_root("agent-core", "C:\\Users\\alex\\media studio")
     _html, mapped, _o = _steps(integrations_client, "codex")
     assert "has no Repository folder yet" not in mapped
+
+
+def _start(client_agent, scope, source, channel, host_session_ref, exec_id):
+    """A session start as the hook (or a hand test) makes it: an execution plus its context_injected row."""
+    from app.database import get_db
+    from app.services import audit_service
+
+    with get_db() as conn:
+        conn.execute(
+            "INSERT INTO agent_executions (id, agent_id, user_id, memory_scope, host_session_ref, status, started_at, last_seen_at) "
+            "VALUES (?, ?, 'alex', ?, ?, 'active', '2026-11-15T00:00:00+00:00', '2026-11-15T00:00:00+00:00')",
+            (exec_id, client_agent, scope, host_session_ref),
+        )
+        conn.commit()
+    audit_service.write_event(actor_type="agent", actor_id=client_agent, action="context_injected",
+                              resource_type="execution", resource_id=exec_id, result="success",
+                              details={"memory_scope": scope, "resolved_by": "cwd", "source": source, "channel": channel})
+
+
+def test_the_hook_chip_is_for_the_chosen_workspace_and_a_hand_test_is_labelled(integrations_client):
+    from app.services.workspace_service import create_workspace
+
+    create_workspace("elsewhere", owner_user_id="alex", name="Elsewhere", description="")
+    # The same agent's hook ran in another workspace (another machine): it does not make this one read as working.
+    _start("claude-code", "workspace:elsewhere", "startup", "rest", "real-session-1", "x1")
+    assert "No session start seen yet" in _steps(integrations_client, "codex")[1]
+    # A hand test in this workspace is shown as such, not as the tool running the hook.
+    _start("claude-code", "workspace:agent-core", "startup", "rest", "try-1", "x2")
+    chip = _steps(integrations_client, "codex")[1]
+    assert "Run by hand" in chip and "the tool has not started it yet" in chip and "Hook working" not in chip
+    # A real start of this workspace's session is what makes it read as working.
+    _start("claude-code", "workspace:agent-core", "resume", "rest", "real-session-2", "x3")
+    assert "Hook working: context delivered just now" in _steps(integrations_client, "codex")[1]
