@@ -1103,7 +1103,9 @@ def integrations_page(
         tool_steps_html = (
             f"<p class='step-callout'>{escape_html(yourself.strip())}</p>"
             '<ol class="setup-steps">'
-            f"<li><h3>Connect it {connect_status}</h3><p>{connect_where}</p>{_section(c_label, c_text, f'{APP_SLUG}-mcp-config.txt', connect_btn)}</li>"
+            f"<li><h3>Connect it {connect_status}</h3><p>{connect_where}</p>"
+            "<p class='step-note'>Already connected on another machine? Copy that machine's entry instead of generating a key: a new key disconnects it.</p>"
+            f"{_section(c_label, c_text, f'{APP_SLUG}-mcp-config.txt', connect_btn)}</li>"
             f"<li><h3>Give it instructions</h3><p>{file_where}</p>{_section(f_label, f_text, file_name)}</li>"
             f"{hook_item}"
             "</ol>"
@@ -1683,11 +1685,12 @@ def _hook_steps(client_key, base_url):
                 "Stop": [{"hooks": [{"type": "command", "command": unix_command, "timeout": 10}]}],
             }
         }
-        # Claude Code runs a hook without a shell when it has `args`; the path is then used as written, so it is absolute.
+        # The plain shell form, written with the full path: verified on Windows in the Claude desktop app (Code tab).
+        win_command = f"python {win_script}"
         win_hook = {
             "hooks": {
-                "SessionStart": [{"matcher": matcher, "hooks": [{"type": "command", "command": "python", "args": [win_script], "timeout": 15}]}],
-                "Stop": [{"hooks": [{"type": "command", "command": "python", "args": [win_script], "timeout": 10}]}],
+                "SessionStart": [{"matcher": matcher, "hooks": [{"type": "command", "command": win_command, "timeout": 15}]}],
+                "Stop": [{"hooks": [{"type": "command", "command": win_command, "timeout": 10}]}],
             }
         }
         unix_where = (
@@ -1697,7 +1700,7 @@ def _hook_steps(client_key, base_url):
         win_where = (
             f"Merge this into `%USERPROFILE%\\{dot}\\settings.json` (all projects) or `{dot}\\settings.local.json` (one project). "
             f"Replace `{_WINDOWS_USER_FOLDER}` with your own user folder (in PowerShell, `echo $env:USERPROFILE` shows it). "
-            "The path is written in full because this form of hook does not expand `~` or `%USERPROFILE%`. "
+            "The path is written in full, with forward slashes; if your user folder contains a space, put the path in quotes. "
             "If the file already exists, add these entries to it instead of replacing it."
         )
         requirements = (

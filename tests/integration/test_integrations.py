@@ -569,7 +569,7 @@ def test_the_steps_tell_you_to_run_them_yourself_and_give_windows_commands(integ
     assert "~" not in handler["commandWindows"] and handler["command"].startswith("python3 ")
     claude = _json.loads(_hook_steps("claude_code", "https://core.test")["register"]["windows"])
     hook = claude["hooks"]["SessionStart"][0]["hooks"][0]
-    assert hook["command"] == "python" and hook["args"] == ["C:/Users/YOU/.claude/hooks/agent_core_hook.py"]
+    assert hook["command"] == "python C:/Users/YOU/.claude/hooks/agent_core_hook.py" and "args" not in hook
     # Existing settings are merged into, on every system.
     for key in ("claude_code", "codex"):
         steps = _hook_steps(key, "https://core.test")
@@ -627,3 +627,8 @@ def test_the_agents_tabs_read_agents_workspaces_connect(integrations_client):
     html = integrations_client.get("/integrations").text
     order = [html.index(f">{label}</a>", html.index("Agents</a>")) for label in ("Workspaces", "Connect")]
     assert order == sorted(order)
+
+
+def test_step_a_says_to_copy_the_entry_on_a_second_machine(integrations_client):
+    _html, steps, _o = _steps(integrations_client, "claude_code")
+    assert "Already connected on another machine?" in steps and "a new key disconnects it" in steps
