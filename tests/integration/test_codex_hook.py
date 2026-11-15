@@ -360,3 +360,36 @@ def test_an_unreachable_core_still_gives_the_unavailable_line_in_a_project(monke
         event = {"session_id": "s", "cwd": str(project), "source": "startup"}
         module.main(io.StringIO(json.dumps(event)), out, {"AGENT_CORE_URL": "http://c", "AGENT_CORE_API_KEY": "k"})
         assert "unavailable" in json.loads(out.getvalue())["systemMessage"]
+
+
+def test_the_claude_hook_finds_its_key_in_claude_config_dir(tmp_path):
+    hook = _load("claude-code", "agent_core_hook.py")
+    config_dir, home = tmp_path / "cfg", tmp_path / "home"
+    config_dir.mkdir()
+    home.mkdir()
+    (config_dir / ".claude.json").write_text(json.dumps({"mcpServers": {"agent-core": {
+        "url": "https://core.example/mcp", "headers": {"Authorization": "Bearer dir-key"}}}}))
+    env = {"CLAUDE_CONFIG_DIR": str(config_dir)}
+    assert hook.resolve_connection("/x", env=env, home=str(home)) == ("https://core.example", "dir-key")
+    assert hook.resolve_connection("/x", env={}, home=str(home)) == (None, None)  # without the variable, ~/.claude.json
+    (home / ".claude.json").write_text(json.dumps({"mcpServers": {"agent-core": {
+        "url": "https://home.example/mcp", "headers": {"Authorization": "Bearer home-key"}}}}))
+    assert hook.resolve_connection("/x", env=env, home=str(home)) == ("https://core.example", "dir-key")
+    assert hook.resolve_connection("/x", env={}, home=str(home)) == ("https://home.example", "home-key")
+
+
+def test_the_try_it_by_hand_command_in_both_outputs_pastes_and_runs(tmp_path):
+    import subprocess
+
+    from app.routes.integrations_page import _build_claude_code_hook, _build_codex_hook
+
+    for build, hook_dir in ((_build_claude_code_hook, "~/.claude/hooks"), (_build_codex_hook, "~/.codex/hooks")):
+        text = build("https://core.example")
+        assert "## Try it by hand" in text
+        block = text.split("## Try it by hand", 1)[1].split("```bash\n", 1)[1].split("\n```", 1)[0]
+        assert block.endswith(f"| python3 {hook_dir}/agent_core_hook.py")
+        echo = block.rsplit(" | python3", 1)[0]
+        result = subprocess.run(["bash", "-c", echo], capture_output=True, text=True, cwd=tmp_path)
+        event = json.loads(result.stdout)
+        assert event["hook_event_name"] == "SessionStart" and event["source"] == "startup" and event["cwd"] == str(tmp_path)
+        assert "exactly one workspace" in text and "Advanced access → Can Read From" in text

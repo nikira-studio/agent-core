@@ -44,7 +44,7 @@ docker compose up -d
 
 `docker-compose.yml` is gitignored, so your local copy (with your data path, port, and network settings) won't accidentally get committed. Edit it before starting if you need to customize anything.
 
-Open `http://localhost:3500`. You'll see the setup screen. The example compose file listens on this machine only (`127.0.0.1`) because **the first person to open the dashboard becomes its admin**; register before you expose the port to a network.
+Open `http://localhost:3500`. You'll see a sign-in screen that offers to create your admin account. The example compose file listens on this machine only (`127.0.0.1`) because **the first person to open the dashboard becomes its admin**; register before you expose the port to a network.
 
 ### Option B: Local Python
 

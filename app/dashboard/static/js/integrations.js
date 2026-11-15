@@ -151,7 +151,7 @@ async function generateConnectionConfig(btn) {
     showToast('Select user and agent first', 'warning');
     return;
   }
-  if (!await confirmDialog('Generate a new one-time key and config? This rotates the agent key and invalidates any previous key for this agent.')) return;
+  if (!await confirmDialog('Generate a new one-time key and config? This rotates the agent key and invalidates any previous key for this agent, so every tool already using that key (for example another tool connected to the same agent) must be given the new one.')) return;
 
   btn.disabled = true;
   btn.textContent = 'Generating...';

@@ -16,7 +16,8 @@ Configuration, first match wins; the URL and the key always come from the
 same place, so a repository's .mcp.json can never redirect a key it did not
 supply:
   AGENT_CORE_URL and AGENT_CORE_API_KEY  environment variables, both set
-  the Agent Core MCP server in .mcp.json (project) or ~/.claude.json (user):
+  the Agent Core MCP server in .mcp.json (project) or ~/.claude.json (user; in
+  $CLAUDE_CONFIG_DIR/.claude.json when that is set):
   its URL and Authorization header, so a rotated key is picked up automatically.
   AGENT_CORE_API_KEY alone pairs only with a URL from ~/.claude.json, which the
   user controls, never with one from a project's .mcp.json.
@@ -86,10 +87,13 @@ def resolve_connection(cwd, env=os.environ, home=None):
     name = env.get("AGENT_CORE_MCP_NAME", "agent-core")
     home = home or os.path.expanduser("~")
     project_dir = env.get("CLAUDE_PROJECT_DIR") or cwd
+    # Claude Code keeps its user configuration in ~/.claude.json, or in .claude.json inside CLAUDE_CONFIG_DIR when set.
+    config_dir = env.get("CLAUDE_CONFIG_DIR")
+    user_config = os.path.join(config_dir, ".claude.json") if config_dir else os.path.join(home, ".claude.json")
     # (config file, project key, whether its URL may carry the env key)
     candidates = [
         (os.path.join(project_dir, ".mcp.json"), None, False),
-        (os.path.join(home, ".claude.json"), project_dir, True),
+        (user_config, project_dir, True),
     ]
     for path, project, trusted in candidates:
         server = _mcp_server(path, name, project)

@@ -197,7 +197,7 @@ cp docker-compose.example.yml docker-compose.yml
 docker compose up -d
 ```
 
-Open `http://localhost:3500`. The setup screen walks you through creating an admin account. Whoever opens the dashboard first becomes the admin, which is why the example compose file listens on this machine only (`127.0.0.1`).
+Open `http://localhost:3500`. The first page is a sign-in screen that offers to create your admin account. Whoever opens the dashboard first becomes the admin, which is why the example compose file listens on this machine only (`127.0.0.1`).
 
 > `docker-compose.yml` is gitignored so your local settings (data paths, ports, custom networks) stay private. Edit it before starting if you need to change anything.
 

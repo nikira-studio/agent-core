@@ -279,11 +279,11 @@ SETUP_TOOLS = (
     ("claude_code", "Claude Code",
      "Run the <code>claude mcp add</code> command, or save the JSON as <code>.mcp.json</code> in your repo root.",
      "claude_md", "CLAUDE.md", "CLAUDE.md",
-     "Save this as <code>CLAUDE.md</code> in the workspace repository root. Claude Code reads it automatically."),
+     "Save this as <code>CLAUDE.md</code> in the root folder of your project (the folder you map to the workspace later). Claude Code reads it automatically."),
     ("codex", "Codex",
      "Add this to <code>~/.codex/config.toml</code>.",
      "agents_md", "AGENTS.md", "AGENTS.md",
-     "Save this as <code>AGENTS.md</code> in the workspace repository root. Codex reads it automatically."),
+     "Save this as <code>AGENTS.md</code> in the root folder of your project (the folder you map to the workspace later). Codex reads it automatically."),
     ("cursor", "Cursor",
      "Save this as <code>.cursor/mcp.json</code> in your workspace, or <code>~/.cursor/mcp.json</code> for every project, then run Reload MCP Servers.",
      "instructions", "Setup guide", f"{APP_SLUG}-instructions.md",
@@ -1500,7 +1500,7 @@ def _build_claude_code_hook(base_url):
 
 With this hook, every Claude Code session starts with {APP_NAME} context already loaded: standing rules, work waiting on a person, unfinished and handed-off work, recent results with their next steps, changes since the agent's last session, and an index of key records. When a task's activity is still open with no handoff, the hook asks the agent once to record one, so the next session can pick the work up. The agent does not have to remember a startup or closing routine.
 
-Requirements: `python3`, and the {APP_NAME} MCP server already added to Claude Code (MCP Config output). The hook reads the server URL and key from that MCP configuration, so a rotated key needs no change here.
+Requirements: `python3`, and the {APP_NAME} MCP server already added to Claude Code (MCP Config output). The hook reads the server URL and key from that MCP entry, in the project's `.mcp.json` or in `~/.claude.json` (`$CLAUDE_CONFIG_DIR/.claude.json` if you set that variable), so a rotated key needs no change here. If it finds no key there it stays silent.
 
 ## 1. Install the script
 
@@ -1519,7 +1519,17 @@ Merge this into `~/.claude/settings.json` (all projects) or `.claude/settings.lo
 
 ## 3. Map repositories to workspaces
 
-The hook sends the session's working directory. {APP_NAME} matches it against each workspace's repository folder (Workspaces → Edit Workspace, admin only), so the right workspace loads without per-repository setup. Enter the folder as it appears on the machine running Claude Code, not inside the {APP_NAME} container; only the path text is compared. The agent also needs read access to that workspace (Agents page → Edit the agent → Can Read From): a folder mapped to a workspace the agent cannot read behaves exactly like an unmapped one. Sessions in a folder no workspace claims, or none this agent can read, start normally, without context. To pin a workspace instead, set `AGENT_CORE_SCOPE=workspace:<id>` in the environment Claude Code runs in.
+The hook sends the session's working directory. {APP_NAME} matches it against each workspace's repository folder (Workspaces → Edit Workspace, admin only), so the right workspace loads without per-repository setup. Enter the folder as it appears on the machine running Claude Code, not inside the {APP_NAME} container; only the path text is compared. The agent also needs read access to that workspace (Agents page → Edit the agent → Advanced access → Can Read From): a folder mapped to a workspace the agent cannot read behaves exactly like an unmapped one. An agent that can read exactly one workspace gets that workspace in every folder, mapped or not. With several, a session in a folder no workspace claims (or none the agent can read) starts normally, without context. To pin a workspace instead, set `AGENT_CORE_SCOPE=workspace:<id>` in the environment Claude Code runs in.
+
+## Try it by hand
+
+From a project folder you mapped, feed the hook the event Claude Code sends and read what it prints:
+
+```bash
+echo '{{"hook_event_name":"SessionStart","source":"startup","session_id":"try-1","cwd":"'"$PWD"'"}}' | python3 ~/.claude/hooks/agent_core_hook.py
+```
+
+It prints one line of JSON whose `additionalContext` is the session context, or nothing when no workspace matches the folder. This opens a small session record in {APP_NAME}, which is harmless.
 
 ## Behavior
 
@@ -1579,7 +1589,17 @@ Codex skips a new or changed hook until you trust it. Start Codex, type `/hooks`
 
 ## 4. Map repositories to workspaces
 
-The hook sends the session's working directory. {APP_NAME} matches it against each workspace's repository folder (Workspaces → Edit Workspace, admin only), so the right workspace loads without per-repository setup. Enter the folder as it appears on the machine running Codex, not inside the {APP_NAME} container; only the path text is compared. The agent also needs read access to that workspace (Agents page → Edit the agent → Can Read From): a folder mapped to a workspace the agent cannot read behaves exactly like an unmapped one. Sessions in a folder no workspace claims, or none this agent can read, start normally, without context. To pin a workspace instead, set `AGENT_CORE_SCOPE=workspace:<id>` in the environment Codex runs in.
+The hook sends the session's working directory. {APP_NAME} matches it against each workspace's repository folder (Workspaces → Edit Workspace, admin only), so the right workspace loads without per-repository setup. Enter the folder as it appears on the machine running Codex, not inside the {APP_NAME} container; only the path text is compared. The agent also needs read access to that workspace (Agents page → Edit the agent → Advanced access → Can Read From): a folder mapped to a workspace the agent cannot read behaves exactly like an unmapped one. An agent that can read exactly one workspace gets that workspace in every folder, mapped or not. With several, a session in a folder no workspace claims (or none the agent can read) starts normally, without context. To pin a workspace instead, set `AGENT_CORE_SCOPE=workspace:<id>` in the environment Codex runs in.
+
+## Try it by hand
+
+From a project folder you mapped, feed the hook the event Codex sends and read what it prints:
+
+```bash
+echo '{{"hook_event_name":"SessionStart","source":"startup","session_id":"try-1","cwd":"'"$PWD"'"}}' | python3 ~/.codex/hooks/agent_core_hook.py
+```
+
+It prints one line of JSON whose `additionalContext` is the session context, or nothing when no workspace matches the folder. This opens a small session record in {APP_NAME}, which is harmless.
 
 ## Behavior
 
