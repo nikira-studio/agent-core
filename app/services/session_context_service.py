@@ -378,6 +378,10 @@ def fit(scope: str, execution_id: str, parts: dict, budget: int) -> tuple[str, d
     return text, limits, reductions
 
 
+# Only these are kept, under these names: the hook sends platform.system(); nothing else about the machine is stored.
+_OS_NAMES = {"windows": "Windows", "linux": "Linux", "darwin": "macOS"}
+
+
 def _already_received(agent_id: str, scope: str, host_session_ref: str) -> bool:
     """Was context for this scope injected into this host session before (at its start, a clear or a compact)?"""
     with get_db() as conn:
@@ -400,6 +404,7 @@ def build_session_context(
     cwd: Optional[str] = None,
     host_session_ref: Optional[str] = None,
     source: Optional[str] = None,
+    client_os: Optional[str] = None,
     budget: int = DEFAULT_BUDGET_CHARS,
     channel: str = "rest",
 ) -> dict:
@@ -471,6 +476,7 @@ def build_session_context(
             "memory_scope": scope,
             "resolved_by": resolved_by,
             "source": source,
+            "client_os": _OS_NAMES.get((client_os or "").strip().lower()),
             "channel": channel,
             "chars": len(text),
             "budget": budget,

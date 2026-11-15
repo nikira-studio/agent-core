@@ -27,6 +27,8 @@ supply:
   AGENT_CORE_CONTEXT_CHARS  session-start budget (default 9000; Claude Code
                        drops anything over 10,000 characters to a stub)
   AGENT_CORE_HANDOFF_NUDGE=0  turn the Stop nudge off
+  AGENT_CORE_NOTICES=0  turn off the one-line notices about a folder with no
+                       workspace and a project with no Agent Core connection
 
 It never breaks a session: any failure exits 0, at most with a one-line notice
 that never carries the key; a redirect is never followed (the key would go with
@@ -35,6 +37,7 @@ it) and the run is cut off after HARD_DEADLINE_SECONDS. Standard library only.
 
 import json
 import os
+import platform
 import stat
 import sys
 import threading
@@ -78,6 +81,18 @@ def _mcp_server(config_path, name, project=None):
     return server if isinstance(server, dict) else None
 
 
+def _candidates(cwd, env, home):
+    """(config file, project key, whether its URL may carry the env key), in the order they are read."""
+    project_dir = env.get("CLAUDE_PROJECT_DIR") or cwd
+    # Claude Code keeps its user configuration in ~/.claude.json, or in .claude.json inside CLAUDE_CONFIG_DIR when set.
+    config_dir = env.get("CLAUDE_CONFIG_DIR")
+    user_config = os.path.join(config_dir, ".claude.json") if config_dir else os.path.join(home, ".claude.json")
+    return [
+        (os.path.join(project_dir, ".mcp.json"), None, False),
+        (user_config, project_dir, True),
+    ]
+
+
 def resolve_connection(cwd, env=os.environ, home=None):
     """(base_url, api_key) or (None, None)."""
     url = env.get("AGENT_CORE_URL", "").rstrip("/")
@@ -86,15 +101,7 @@ def resolve_connection(cwd, env=os.environ, home=None):
         return url, key
     name = env.get("AGENT_CORE_MCP_NAME", "agent-core")
     home = home or os.path.expanduser("~")
-    project_dir = env.get("CLAUDE_PROJECT_DIR") or cwd
-    # Claude Code keeps its user configuration in ~/.claude.json, or in .claude.json inside CLAUDE_CONFIG_DIR when set.
-    config_dir = env.get("CLAUDE_CONFIG_DIR")
-    user_config = os.path.join(config_dir, ".claude.json") if config_dir else os.path.join(home, ".claude.json")
-    # (config file, project key, whether its URL may carry the env key)
-    candidates = [
-        (os.path.join(project_dir, ".mcp.json"), None, False),
-        (user_config, project_dir, True),
-    ]
+    candidates = _candidates(cwd, env, home)
     for path, project, trusted in candidates:
         server = _mcp_server(path, name, project)
         if not server or not isinstance(server.get("url"), str):
@@ -171,6 +178,15 @@ def _looks_like_project(cwd, home=None):
     return False
 
 
+def no_connection_notice(cwd, env, home=None):
+    """One line for a project that has the hook but no Agent Core connection: which files were read, never a key."""
+    files = " and ".join(path for path, _project, _trusted in _candidates(cwd, env, home or os.path.expanduser("~")))
+    return (
+        f"Agent Core: no connection found, so this session starts without shared context. Looked in {files} for an "
+        f"MCP server named {env.get('AGENT_CORE_MCP_NAME', 'agent-core')}; add it there (Connect page, step a)."
+    )
+
+
 def session_start(event, base_url, api_key, env):
     if event.get("source", "startup") not in INJECT_SOURCES:
         return None  # a fork carries its parent's context
@@ -182,6 +198,7 @@ def session_start(event, base_url, api_key, env):
         "cwd": event.get("cwd") or os.getcwd(),
         "host_session_ref": event.get("session_id"),
         "source": event.get("source", "startup"),
+        "client_os": platform.system(),
         "max_chars": max(1000, min(chars, 9500)),
     }
     if env.get("AGENT_CORE_SCOPE"):
@@ -192,7 +209,7 @@ def session_start(event, base_url, api_key, env):
         return {"systemMessage": f"Agent Core session context unavailable: {_reason(exc, api_key)}"}
     context = data.get("context")
     if not isinstance(context, str) or not context:
-        if data.get("resolved_by") == "unmatched" and _looks_like_project(payload["cwd"]):
+        if data.get("resolved_by") == "unmatched" and env.get("AGENT_CORE_NOTICES") != "0" and _looks_like_project(payload["cwd"]):
             return {"systemMessage": UNMAPPED_NOTICE}
         return None
     return {"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": context[:MAX_CONTEXT_CHARS]}}
@@ -238,10 +255,19 @@ def _run(stdin, stdout, env):
     handler = HANDLERS.get(event.get("hook_event_name", "SessionStart"))
     if handler is None:
         return 0
-    base_url, api_key = resolve_connection(event.get("cwd") or os.getcwd(), env)
+    cwd = event.get("cwd") or os.getcwd()
+    base_url, bearer = resolve_connection(cwd, env)
     if not base_url:
-        return 0  # not configured for this project: stay silent
-    output = handler(event, base_url, api_key, env)
+        # Silent unless a session starts in a project folder: there the person expects shared context.
+        if (
+            handler is session_start
+            and event.get("source", "startup") in INJECT_SOURCES
+            and env.get("AGENT_CORE_NOTICES") != "0"
+            and _looks_like_project(cwd)
+        ):
+            json.dump({"systemMessage": no_connection_notice(cwd, env)}, stdout)
+        return 0
+    output = handler(event, base_url, bearer, env)
     if output:
         json.dump(output, stdout)
     return 0

@@ -24,6 +24,8 @@ name an environment variable to send:
   AGENT_CORE_SCOPE     workspace scope; otherwise the server matches the cwd
                        against its configured workspace repo roots
   AGENT_CORE_CONTEXT_CHARS  session-start budget (default 9000)
+  AGENT_CORE_NOTICES=0  turn off the one-line notices about a folder with no
+                       workspace and a project with no Agent Core connection
 
 It never breaks a session: any failure exits 0, at most with a one-line notice
 that never carries the key, a redirect is never followed (the key would go with
@@ -33,6 +35,7 @@ Needs python3 3.11 or newer (tomllib); standard library only.
 
 import json
 import os
+import platform
 import stat
 import sys
 import threading
@@ -101,6 +104,15 @@ def _server_key(server, env):
 
 def _user_config(env, home):
     return os.path.join(env.get("CODEX_HOME") or os.path.join(home, ".codex"), "config.toml")
+
+
+def no_connection_notice(env, home=None):
+    """One line for a project that has the hook but no Agent Core connection: which file was read, never a key."""
+    path = _user_config(env, home or os.path.expanduser("~"))
+    return (
+        f"Agent Core: no connection found, so this session starts without shared context. Looked in {path} for an "
+        f"MCP server named {env.get('AGENT_CORE_MCP_NAME', 'agent-core')}; add it there (Connect page, step a)."
+    )
 
 
 def resolve_connection(cwd, env=os.environ, home=None):
@@ -194,6 +206,7 @@ def session_start(event, base_url, api_key, env):
         "cwd": event.get("cwd") or os.getcwd(),
         "host_session_ref": event.get("session_id"),
         "source": event.get("source", "startup"),
+        "client_os": platform.system(),
         "max_chars": max(1000, min(chars, 9500)),
     }
     if env.get("AGENT_CORE_SCOPE"):
@@ -204,7 +217,7 @@ def session_start(event, base_url, api_key, env):
         return {"systemMessage": f"Agent Core session context unavailable: {_reason(exc, api_key)}"}
     context = data.get("context")
     if not isinstance(context, str) or not context:
-        if data.get("resolved_by") == "unmatched" and _looks_like_project(payload["cwd"]):
+        if data.get("resolved_by") == "unmatched" and env.get("AGENT_CORE_NOTICES") != "0" and _looks_like_project(payload["cwd"]):
             return {"systemMessage": UNMAPPED_NOTICE}
         return None
     data = {"context": context[:MAX_CONTEXT_CHARS]}
@@ -235,9 +248,17 @@ def _run(stdin, stdout, env):
         return 0
     if not isinstance(event, dict) or event.get("hook_event_name", "SessionStart") != "SessionStart":
         return 0
-    base_url, bearer = resolve_connection(event.get("cwd") or os.getcwd(), env)
+    cwd = event.get("cwd") or os.getcwd()
+    base_url, bearer = resolve_connection(cwd, env)
     if not base_url:
-        return 0  # not configured for this project: stay silent
+        # Silent unless a session starts in a project folder: there the person expects shared context.
+        if (
+            event.get("source", "startup") in INJECT_SOURCES
+            and env.get("AGENT_CORE_NOTICES") != "0"
+            and _looks_like_project(cwd)
+        ):
+            json.dump({"systemMessage": no_connection_notice(env)}, stdout)
+        return 0
     output = session_start(event, base_url, bearer, env)
     if output:
         json.dump(output, stdout)

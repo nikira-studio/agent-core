@@ -632,3 +632,24 @@ def test_the_agents_tabs_read_agents_workspaces_connect(integrations_client):
 def test_step_a_says_to_copy_the_entry_on_a_second_machine(integrations_client):
     _html, steps, _o = _steps(integrations_client, "claude_code")
     assert "Already connected on another machine?" in steps and "a new key disconnects it" in steps
+
+
+def test_the_hook_status_names_the_machine_the_session_started_on(integrations_client):
+    _start("claude-code", "workspace:agent-core", "startup", "rest", "real-w", "w1")
+    assert "context delivered just now" in _steps(integrations_client, "codex")[1]
+    assert " from Windows" not in _steps(integrations_client, "codex")[1]  # an older hook sends no OS: nothing is claimed
+    from app.database import get_db
+    from app.services import audit_service
+
+    audit_service.write_event(actor_type="agent", actor_id="claude-code", action="context_injected",
+                              resource_type="execution", resource_id="w2", result="success",
+                              details={"memory_scope": "workspace:agent-core", "resolved_by": "cwd", "source": "startup",
+                                       "channel": "rest", "client_os": "Windows"})
+    assert "context delivered just now from Windows" in _steps(integrations_client, "codex")[1]
+
+
+def test_the_session_context_route_keeps_only_a_known_os_name(test_client, admin_token):
+    from app.services import session_context_service as svc
+
+    assert svc._OS_NAMES.get("windows") == "Windows" and svc._OS_NAMES.get("darwin") == "macOS"
+    assert svc._OS_NAMES.get("some weird <script>") is None

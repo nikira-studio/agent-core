@@ -20,6 +20,8 @@ class SessionContextRequest(BaseModel):
     cwd: Optional[str] = Field(default=None, max_length=4096)
     host_session_ref: Optional[str] = Field(default=None, max_length=200)
     source: Optional[str] = Field(default=None, max_length=40)
+    # The hook's operating system name (Windows, Linux, Darwin), so the Connect page can say which machine started a session.
+    client_os: Optional[str] = Field(default=None, max_length=20)
     max_chars: int = Field(
         default=session_context_service.DEFAULT_BUDGET_CHARS,
         ge=session_context_service.MIN_BUDGET_CHARS,
@@ -65,6 +67,7 @@ def session_context(
         cwd=body.cwd,
         host_session_ref=body.host_session_ref,
         source=body.source,
+        client_os=body.client_os,
         budget=body.max_chars,
         channel="rest",
     )

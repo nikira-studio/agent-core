@@ -711,7 +711,7 @@ def _ago(stamp):
 
 
 def _agent_signals(agent_id, scope=None):
-    """(last call, last hook start, last hand test) for this agent.
+    """(last call, last hook start, last hand test, the OS of that hook start) for this agent.
 
     A session start hook asks over REST and names why the session started; the agent's own session_context
     call arrives over MCP. Only a REST start counts as the hook, so an MCP delivery never does. With a scope,
@@ -721,7 +721,8 @@ def _agent_signals(agent_id, scope=None):
     from app.database import get_db
 
     started = (
-        "SELECT MAX(a.timestamp) FROM audit_log a LEFT JOIN agent_executions e ON e.id = a.resource_id "
+        "SELECT a.timestamp, json_extract(a.details_json, '$.client_os') FROM audit_log a "
+        "LEFT JOIN agent_executions e ON e.id = a.resource_id "
         "WHERE a.actor_type = 'agent' AND a.actor_id = ? AND a.action = 'context_injected' "
         "AND json_extract(a.details_json, '$.channel') = 'rest' "
         "AND json_extract(a.details_json, '$.source') IN ('startup', 'clear', 'compact', 'resume')"
@@ -730,13 +731,14 @@ def _agent_signals(agent_id, scope=None):
     if scope:
         started += " AND json_extract(a.details_json, '$.memory_scope') = ?"
         args.append(scope)
+    latest = " ORDER BY a.id DESC LIMIT 1"
     with get_db() as conn:
         seen = conn.execute(
             "SELECT MAX(timestamp) FROM audit_log WHERE actor_type = 'agent' AND actor_id = ?", (agent_id,)
         ).fetchone()[0]
-        hooked = conn.execute(started + " AND COALESCE(e.host_session_ref, '') NOT LIKE 'try-%'", args).fetchone()[0]
-        by_hand = conn.execute(started + " AND COALESCE(e.host_session_ref, '') LIKE 'try-%'", args).fetchone()[0]
-    return seen, hooked, by_hand
+        hooked = conn.execute(started + " AND COALESCE(e.host_session_ref, '') NOT LIKE 'try-%'" + latest, args).fetchone()
+        by_hand = conn.execute(started + " AND COALESCE(e.host_session_ref, '') LIKE 'try-%'" + latest, args).fetchone()
+    return seen, (hooked[0] if hooked else None), (by_hand[0] if by_hand else None), (hooked[1] if hooked else None)
 
 
 def _step_status(ok, text):
@@ -1075,7 +1077,7 @@ def integrations_page(
             "data-output-type='mcp_tool' onclick='generateConnectionConfig(this)'>"
             f"Generate One-Time Key + {escape_html(_name)} MCP Config</button>"
         )
-        seen_at, hooked_at, by_hand_at = _agent_signals(a_["id"], f"workspace:{w_['id']}" if w_ else None)
+        seen_at, hooked_at, by_hand_at, hooked_os = _agent_signals(a_["id"], f"workspace:{w_['id']}" if w_ else None)
         connect_status = (
             _step_status(True, f"Connected: last seen {_ago(seen_at)}")
             if seen_at
@@ -1084,7 +1086,9 @@ def integrations_page(
         hook_item = ""
         if target in _HOOK_CLIENTS:
             if hooked_at:
-                hook_status = _step_status(True, f"Hook working: context delivered {_ago(hooked_at)}")
+                hook_status = _step_status(
+                    True, f"Hook working: context delivered {_ago(hooked_at)}" + (f" from {hooked_os}" if hooked_os else "")
+                )
             elif by_hand_at:
                 hook_status = _step_status(False, f"Run by hand {_ago(by_hand_at)}; the tool has not started it yet")
             else:

@@ -1,3 +1,4 @@
+import platform
 import importlib.util
 import io
 import json
@@ -330,7 +331,7 @@ def test_hook_injects_context_asks_on_resume_skips_fork_and_never_fails(monkeypa
     result = json.loads(out.getvalue())
     assert result["hookSpecificOutput"]["hookEventName"] == "SessionStart"
     assert result["hookSpecificOutput"]["additionalContext"].startswith("# Agent Core")
-    assert sent == {"cwd": "/repo", "host_session_ref": "s1", "source": "startup", "max_chars": 9000}
+    assert sent == {"cwd": "/repo", "host_session_ref": "s1", "source": "startup", "client_os": platform.system(), "max_chars": 9000}
 
     # resume is passed on to Agent Core, which decides; a fork carries its parent's context and is not asked
     sent.clear()

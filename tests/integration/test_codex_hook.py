@@ -1,5 +1,6 @@
 """The Codex SessionStart hook: reads Codex's own MCP config, sends what the Claude Code hook sends, never breaks a session."""
 
+import platform
 import importlib.util
 import io
 import json
@@ -151,7 +152,7 @@ def test_asks_on_startup_clear_compact_and_resume_but_never_on_fork(monkeypatch)
         result = json.loads(out.getvalue())
         assert result["hookSpecificOutput"]["hookEventName"] == "SessionStart"
         assert result["hookSpecificOutput"]["additionalContext"].startswith("# Agent Core")
-    assert sent[0] == {"cwd": "/repo", "host_session_ref": "s1", "source": "startup", "max_chars": 9000}
+    assert sent[0] == {"cwd": "/repo", "host_session_ref": "s1", "source": "startup", "client_os": platform.system(), "max_chars": 9000}
     assert [p["source"] for p in sent] == ["startup", "clear", "compact", "resume"]
     out = io.StringIO()
     hook.main(io.StringIO(json.dumps({**event, "source": "fork"})), out, env)
@@ -159,7 +160,7 @@ def test_asks_on_startup_clear_compact_and_resume_but_never_on_fork(monkeypatch)
     # a pinned workspace and a smaller budget are passed on
     sent.clear()
     hook.main(io.StringIO(json.dumps(event)), io.StringIO(), {**env, "AGENT_CORE_SCOPE": "workspace:w", "AGENT_CORE_CONTEXT_CHARS": "4000"})
-    assert sent == [{"cwd": "/repo", "host_session_ref": "s1", "source": "startup", "max_chars": 4000, "memory_scope": "workspace:w"}]
+    assert sent == [{"cwd": "/repo", "host_session_ref": "s1", "source": "startup", "client_os": platform.system(), "max_chars": 4000, "memory_scope": "workspace:w"}]
 
 
 def test_an_unreachable_core_gives_one_line_and_a_normal_start(monkeypatch, tmp_path):
@@ -393,3 +394,54 @@ def test_the_try_it_by_hand_command_in_both_outputs_pastes_and_runs(tmp_path):
         event = json.loads(result.stdout)
         assert event["hook_event_name"] == "SessionStart" and event["source"] == "startup" and event["cwd"] == str(tmp_path)
         assert "exactly one workspace" in text and "Advanced access → Can Read From" in text
+
+
+def _run_no_connection(module, tmp_path, cwd, env=None, source="startup"):
+    out = io.StringIO()
+    env = {"HOME": str(tmp_path / "home"), "USERPROFILE": str(tmp_path / "home"), **(env or {})}
+    event = {"session_id": "s1", "cwd": str(cwd), "source": source, "hook_event_name": "SessionStart"}
+    assert module.main(io.StringIO(json.dumps(event)), out, env) == 0
+    return json.loads(out.getvalue()) if out.getvalue() else None
+
+
+def test_a_project_with_the_hook_but_no_connection_gets_one_line_naming_the_files_and_no_key(monkeypatch, tmp_path):
+    home = tmp_path / "home"
+    project = tmp_path / "proj"
+    (home).mkdir()
+    (project / ".git").mkdir(parents=True)
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    for module in _hooks():
+        result = _run_no_connection(module, tmp_path, project)
+        message = result["systemMessage"]
+        assert list(result) == ["systemMessage"] and "\n" not in message
+        assert "no connection found" in message and "Connect page, step a" in message
+        assert str(home) in message  # the file it looked in (the user config) is named
+        assert "Bearer" not in message and "AGENT_CORE_API_KEY" not in message
+        # A resume or compact in the same project says it too; a fork and a bare folder stay silent.
+        assert _run_no_connection(module, tmp_path, project, source="resume") is not None
+        assert _run_no_connection(module, tmp_path, project, source="fork") is None
+        assert _run_no_connection(module, tmp_path, tmp_path / "scratch") is None
+        assert _run_no_connection(module, tmp_path, home) is None
+        # The switch silences it.
+        assert _run_no_connection(module, tmp_path, project, env={"AGENT_CORE_NOTICES": "0"}) is None
+
+
+def test_the_claude_hook_names_both_files_it_read_and_the_codex_hook_its_config(monkeypatch, tmp_path):
+    home = tmp_path / "home"
+    project = tmp_path / "proj"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))  # never read the real ~/.claude.json: a hit would call a real server
+    monkeypatch.setenv("USERPROFILE", str(home))
+    (project / "CLAUDE.md").parent.mkdir(parents=True)
+    (project / "CLAUDE.md").write_text("x")
+    codex, claude = _hooks()
+    message = _run_no_connection(claude, tmp_path, project)["systemMessage"]
+    assert ".mcp.json" in message and ".claude.json" in message
+    message = _run_no_connection(claude, tmp_path, project, env={"CLAUDE_CONFIG_DIR": str(tmp_path / "cfg")})["systemMessage"]
+    assert str(tmp_path / "cfg") in message
+    message = _run_no_connection(codex, tmp_path, project, env={"CODEX_HOME": str(tmp_path / "chome")})["systemMessage"]
+    assert str(tmp_path / "chome" / "config.toml") in message
+    # With a connection (even one that then fails to answer) the missing-connection line is never shown.
+    out = _run(codex, monkeypatch, project, {"memory_scope": "workspace:p", "resolved_by": "cwd", "context": "# ctx"})
+    assert list(out) == ["hookSpecificOutput"]

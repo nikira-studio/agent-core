@@ -103,6 +103,30 @@ def workspaces_page(request: Request, session: dict = Depends(require_auth)):
 
     rows = "".join(workspace_row(p) for p in workspaces)
 
+
+    # Folders decide which host folders are read, so only an admin sets them; an agent's access is the agent's owner's to give,
+    # and the page lists only the agents this person can edit.
+    create_folders_html = (
+        '<div class="form-group"><label>Repository folders</label><div id="cp-repo-roots"></div>'
+        '<button type="button" class="btn btn-sm btn-secondary" onclick="addRepoRootRow(\'\', \'cp-repo-roots\')">Add folder</button>'
+        '<p class="form-hint">One per machine where this project lives, written as that machine names it. Agent sessions started in these folders get this workspace\'s context automatically. Leave empty to add them later.</p></div>'
+        if session.get("role") == "admin"
+        else ""
+    )
+    agent_boxes = "".join(
+        f"<label class='checkbox-label'><input type='checkbox' value='{escape_html(a['id'])}'> "
+        f"{escape_html(a.get('display_name') or a['id'])} <code>{escape_html(a['id'])}</code></label>"
+        for a in all_agents
+        if a.get("is_active")
+    )
+    create_agents_html = (
+        '<div class="form-group"><label>Agents that can use it</label>'
+        f'<div id="cp-agents">{agent_boxes}</div>'
+        '<p class="form-hint">A ticked agent can read and write this workspace. Without this an agent started in the workspace\'s folder gets no context. Fine-tune it later under Edit or on the Agents page.</p></div>'
+        if agent_boxes
+        else ""
+    )
+
     js = """
     <script>
     const DELETE_ICON = __DELETE_ICON__;
@@ -162,8 +186,8 @@ def workspaces_page(request: Request, session: dict = Depends(require_auth)):
         nameEl.value = p.name || '';
         descriptionEl.value = p.description || '';
         const folders = p.repo_roots || (p.repo_root ? [p.repo_root] : []);
-        folders.forEach(addRepoRootRow);
-        if (!folders.length) { addRepoRootRow(''); }
+        folders.forEach(function(folder) { addRepoRootRow(folder, 'ep-repo-roots'); });
+        if (!folders.length) { addRepoRootRow('', 'ep-repo-roots'); }
         renderWorkspaceCollaborators(p.id);
         renderWorkspaceAgentAccess(p.id);
       } catch (err) {
@@ -176,7 +200,7 @@ def workspaces_page(request: Request, session: dict = Depends(require_auth)):
         showToast(err.message || 'Error loading workspace', 'danger');
       }
     }
-    function addRepoRootRow(value) {
+    function addRepoRootRow(value, containerId) {
       const row = document.createElement('div');
       row.className = 'repo-root-row';
       const input = document.createElement('input');
@@ -192,10 +216,10 @@ def workspaces_page(request: Request, session: dict = Depends(require_auth)):
       remove.setAttribute('aria-label', 'Remove this folder');
       remove.addEventListener('click', function() { row.remove(); });
       row.append(input, remove);
-      document.getElementById('ep-repo-roots').appendChild(row);
+      document.getElementById(containerId || 'ep-repo-roots').appendChild(row);
     }
-    function repoRootsValue() {
-      return Array.from(document.querySelectorAll('#ep-repo-roots .ep-repo-root'))
+    function repoRootsValue(containerId) {
+      return Array.from(document.querySelectorAll('#' + (containerId || 'ep-repo-roots') + ' .ep-repo-root'))
         .map(function(el) { return el.value.trim(); })
         .filter(Boolean);
     }
@@ -528,6 +552,8 @@ def workspaces_page(request: Request, session: dict = Depends(require_auth)):
             <textarea id="cp-description" rows="2"></textarea>
             <p class="form-hint">A reminder of what this workspace is for.</p>
           </div>
+          {create_folders_html}
+          {create_agents_html}
           <div class="modal-footer">
             <button type="button" class="btn btn-secondary" onclick="closeModal('create-workspace-modal')">Cancel</button>
             <button type="submit" class="btn">Create</button>
@@ -575,19 +601,43 @@ def workspaces_page(request: Request, session: dict = Depends(require_auth)):
     <script>
     async function createProject(e) {
       e.preventDefault();
+      const id = document.getElementById('cp-id').value;
       const body = {
-        id: document.getElementById('cp-id').value,
+        id: id,
         name: document.getElementById('cp-name').value,
         description: document.getElementById('cp-description').value || '',
       };
       const j = await apiFetch('/api/workspaces', { method: 'POST', body: JSON.stringify(body) });
-      if (j.ok) {
-        closeModal('create-workspace-modal');
-        document.getElementById('create-workspace-form').reset();
+      if (!j.ok) { showToast(j.error.message || 'Failed', 'danger'); return; }
+      // The folders and the agents' access use the same calls the Edit dialog makes, so the same checks apply.
+      const problems = [];
+      const folders = repoRootsValue('cp-repo-roots');
+      if (folders.length) {
+        const r = await apiFetch('/api/workspaces/' + id, { method: 'PUT', body: JSON.stringify({ repo_roots: folders }) });
+        if (!r.ok) { problems.push('the folders were not saved (' + (r.error?.message || 'failed') + ')'); }
+      }
+      const scope = 'workspace:' + id;
+      const ticked = Array.from(document.querySelectorAll('#cp-agents input[type="checkbox"]:checked'));
+      for (const box of ticked) {
+        const agent = WORKSPACE_AGENT_STATE[box.value];
+        if (!agent) continue;
+        const read = (agent.read_scopes || []).filter(function(item) { return item !== scope; }).concat([scope]);
+        const write = (agent.write_scopes || []).filter(function(item) { return item !== scope; }).concat([scope]);
+        const r = await apiFetch('/api/agents/' + box.value, { method: 'PUT', body: JSON.stringify({ read_scopes: read, write_scopes: write }) });
+        if (!r.ok) { problems.push((agent.display_name || agent.id) + ' did not get access (' + (r.error?.message || 'failed') + ')'); }
+      }
+      closeModal('create-workspace-modal');
+      if (problems.length) {
+        showToast('Workspace created, but ' + problems.join('; ') + '. Fix it under Edit.', 'danger');
+        setTimeout(refreshProjects, 5000);
+      } else {
         showToast('Workspace created');
         refreshProjects();
-      } else { showToast(j.error.message || 'Failed', 'danger'); }
+      }
     }
+    document.addEventListener('DOMContentLoaded', function() {
+      if (document.getElementById('cp-repo-roots')) { addRepoRootRow('', 'cp-repo-roots'); }
+    });
     </script>""",
         "/workspaces",
         js,
