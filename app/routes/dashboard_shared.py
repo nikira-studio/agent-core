@@ -120,7 +120,7 @@ _SECTION_TABS = {
     "/": [("/", "Needs you"), ("/approvals", "Approvals")],
     "/activity": [("/activity", "Tasks"), ("/audit", "Audit log")],
     "/memory": [("/memory", "Memory")],
-    "/agents": [("/agents", "Agents"), ("/integrations", "Connect"), ("/workspaces", "Workspaces")],
+    "/agents": [("/agents", "Agents"), ("/workspaces", "Workspaces"), ("/integrations", "Connect")],
     "/connectors": [("/connectors", "Services"), ("/credentials", "Credentials")],
     "/settings": [("/settings", "Settings"), ("/users", "Users"), ("/webhooks", "Webhooks")],
 }

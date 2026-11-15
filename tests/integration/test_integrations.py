@@ -621,3 +621,9 @@ def test_the_hook_chip_is_for_the_chosen_workspace_and_a_hand_test_is_labelled(i
     # A real start of this workspace's session is what makes it read as working.
     _start("claude-code", "workspace:agent-core", "resume", "rest", "real-session-2", "x3")
     assert "Hook working: context delivered just now" in _steps(integrations_client, "codex")[1]
+
+
+def test_the_agents_tabs_read_agents_workspaces_connect(integrations_client):
+    html = integrations_client.get("/integrations").text
+    order = [html.index(f">{label}</a>", html.index("Agents</a>")) for label in ("Workspaces", "Connect")]
+    assert order == sorted(order)
