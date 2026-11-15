@@ -652,3 +652,17 @@ def test_step_a_says_to_copy_the_entry_on_a_second_machine_only_for_an_agent_alr
                               resource_type="memory", resource_id="x", result="success")
     _html, steps, _o = _steps(integrations_client, "claude_code")
     assert "Already connected on another machine?" in steps and "a new key disconnects it" in steps
+
+
+def test_the_by_hand_command_in_the_guide_pastes_and_runs(tmp_path):
+    import json as _json
+    import pathlib
+    import subprocess
+
+    doc = pathlib.Path("docs/integrations.md").read_text()
+    block = doc.split("**Checking it.**", 1)[1].split("```bash\n", 1)[1].split("\n```", 1)[0]
+    assert block.endswith("| python3 ~/.claude/hooks/agent_core_hook.py")
+    echo = block.rsplit(" | python3", 1)[0]
+    event = _json.loads(subprocess.run(["bash", "-c", echo], capture_output=True, text=True, cwd=tmp_path).stdout)
+    assert event["hook_event_name"] == "SessionStart" and event["session_id"] == "try-1" and event["cwd"] == str(tmp_path)
+    assert "```powershell" in doc.split("**Checking it.**", 1)[1]

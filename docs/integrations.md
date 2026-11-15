@@ -682,11 +682,23 @@ Where a hook does not run, the instructions file (CLAUDE.md or AGENTS.md) still 
 
 **Which workspace a session gets.** The workspace whose Repository folder contains the session's working directory. Add one folder per machine where the project lives, each written as that machine names it, under **Workspaces** → Edit Workspace → Repository folders (or in the Create Workspace dialog); Linux, macOS and Windows forms mix freely, and a Windows folder matches ignoring case and slash direction. The agent also needs read access to the workspace (**Agents** → Edit the agent → Advanced access → Can Read From; Create Workspace can set it). A folder that no workspace the agent can read claims starts without context, and in a project folder the hook says so in one line. An agent that can read exactly one workspace gets it in every folder.
 
-**Windows.** The steps use PowerShell to install the script and register it with the full path: Claude Code takes `python C:/Users/you/.claude/hooks/agent_core_hook.py`; Codex has a `commandWindows` entry, and the generated command creates `hooks.json` without overwriting one you have.
+**Windows.** The steps use PowerShell to install the script and register it with the full path, written with forward slashes: Claude Code takes `python C:/Users/you/.claude/hooks/agent_core_hook.py`; Codex has a `commandWindows` entry, and the generated command creates `hooks.json` without overwriting one you have. The commands use the address you opened the dashboard at, so open it from an address the machine you are setting up can reach.
 
-**A second machine.** Copy the existing entry (URL and key) from the machine that already works; do not generate a key, because that replaces the agent's key and disconnects the first machine. Give each tool its own agent when you can, for the same reason.
+**A second machine.** Copy the existing entry (URL and key) from the machine that already works; do not generate a key, because that replaces the agent's key and disconnects the first machine. The entry is in `~/.claude.json` or the project's `.mcp.json` for Claude Code, and `~/.codex/config.toml` for Codex. Change its address if it says `localhost`: the second machine needs one it can reach. Give each tool its own agent when you can, for the same reason.
 
-**Checking it.** Step c on the Connect page reads "Hook working: context delivered 3 hours ago from Windows" once a session start made by the hook has arrived for the workspace you chose, and "No session start seen yet" until then. An agent loading its own context does not count. The generated hook output also has a "Try it by hand" command; a run of it shows as "Run by hand". With the hook installed but no Agent Core connection in a project folder, the hook says so in one line, naming the files it looked in; `AGENT_CORE_NOTICES=0` turns that and the unmapped-folder line off.
+**Checking it.** Step c on the Connect page reads "Hook working: context delivered 3 hours ago from Windows" once a session start made by the hook has arrived for the workspace you chose, and "No session start seen yet" until then. An agent loading its own context does not count. To run the hook yourself, from a project folder, feed it a start event (use `.codex` instead of `.claude` for Codex). On macOS or Linux:
+
+```bash
+echo '{"hook_event_name":"SessionStart","source":"startup","session_id":"try-1","cwd":"'"$PWD"'"}' | python3 ~/.claude/hooks/agent_core_hook.py
+```
+
+In PowerShell on Windows:
+
+```powershell
+'{"hook_event_name":"SessionStart","source":"startup","session_id":"try-1","cwd":"' + ((Get-Location).Path -replace '\\','/') + '"}' | python "$env:USERPROFILE\.claude\hooks\agent_core_hook.py"
+```
+
+It prints one line of JSON holding the context, or nothing when no workspace matches the folder. A run with the session id `try-1` shows on the Connect page as "Run by hand", not as the tool running the hook. With the hook installed but no Agent Core connection in a project folder, the hook says so in one line, naming the files it looked in; `AGENT_CORE_NOTICES=0` turns that and the unmapped-folder line off.
 
 **Refresh workspace guidance after an upgrade.** `CLAUDE.md`, `AGENTS.md`, Instructions, Session Prompt, and Verification Prompt teach an already connected agent how to use new capabilities. They contain no key, so regenerating them is safe and does not change an MCP connection. MCP Config, Environment Variables, and Assistants onboarding can embed a key. They generate or rotate that key only when you press **Generate connection**.
 

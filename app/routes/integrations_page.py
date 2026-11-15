@@ -281,7 +281,7 @@ SETUP_TOOLS = (
      "claude_md", "CLAUDE.md", "CLAUDE.md",
      "Save this as <code>CLAUDE.md</code> in the root folder of your project (the folder you map to the workspace later). Claude Code reads it automatically."),
     ("codex", "Codex",
-     "Add this to <code>~/.codex/config.toml</code> (Windows: <code>%USERPROFILE%\\.codex\\config.toml</code>).",
+     "Add this to <code>~/.codex/config.toml</code> (on Windows, <code>config.toml</code> in the <code>.codex</code> folder of your user folder).",
      "agents_md", "AGENTS.md", "AGENTS.md",
      "Save this as <code>AGENTS.md</code> in the root folder of your project (the folder you map to the workspace later). Codex reads it automatically."),
     ("cursor", "Cursor",
@@ -1096,7 +1096,7 @@ def integrations_page(
         )
         # Only an agent Core has already seen can be connected somewhere else; a new key would disconnect that machine.
         second_machine = (
-            "<p class='step-note'>Already connected on another machine? Copy that machine's entry instead of generating a key: a new key disconnects it.</p>"
+            "<p class='step-note'>Already connected on another machine? Copy that machine's entry instead of generating a key: a new key disconnects it. Change its address if it says localhost.</p>"
             if seen_at
             else ""
         )
@@ -1697,8 +1697,10 @@ def _hook_steps(client_key, base_url):
             "Merge it into the existing file; do not replace the file."
         )
         win_where = (
-            f"Add this to `%USERPROFILE%\\{dot}\\settings.json`, merged into the existing file. "
-            f"Replace `{_WINDOWS_USER_FOLDER}` with your user folder (`echo $env:USERPROFILE` shows it); if it contains a space, quote the path."
+            f"Add this to `settings.json` in the `{dot}` folder of your user folder, merged into the existing file. "
+            f"Replace `{_WINDOWS_USER_FOLDER}` with your user folder written with forward slashes (for `C:\\Users\\jo`, `C:/Users/jo`). "
+            "If your folder contains a space, write the command as `\"python \\\"C:/Users/jo doe/...\\\"\"`. "
+            "If `python` is not recognised, use `py -3` instead."
         )
         requirements = (
             "Python 3 (`python3`; on Windows `python` or `py -3`) and step a done. "
@@ -1725,7 +1727,7 @@ def _hook_steps(client_key, base_url):
             f"Save this as `~/{dot}/hooks.json`. If the file already exists, add the SessionStart entry to it instead of replacing it."
         )
         win_where = (
-            f"The command creates `%USERPROFILE%\\{dot}\\hooks.json` if there is none. "
+            f"The command creates `hooks.json` in the `{dot}` folder of your user folder if there is none. "
             "If you already have one, copy the SessionStart entry from the command into it instead."
         )
         requirements = (
@@ -1922,8 +1924,7 @@ def _mcp_config_sections(base_url, api_key=None):
     sections = {
         "claude_code": f"""# Claude Code
 # Option 1 — CLI (recommended, adds to user-level config so it works in every project):
-claude mcp add --transport http --scope user {APP_SLUG} {base_url}/mcp \\
-  --header "Authorization: Bearer {key}"
+claude mcp add --transport http --scope user {APP_SLUG} {base_url}/mcp --header "Authorization: Bearer {key}"
 
 # Option 2 — create .mcp.json in your repo root (workspace-level, committable):
 # If committing, replace the key with an env var: "Bearer {_shell_api_key}"
