@@ -84,7 +84,7 @@ You won't be prompted for it during normal use, only at login.
 
 ## Step 4: Create a workspace and your first agent
 
-First open **Agents → Workspaces** and create a workspace, for example `my-project`: the shared place where agents keep memory and tasks. With one workspace, a new agent is set up to read and write it by default.
+First open **Agents → Workspaces** and create a workspace, for example `my-project`: the shared place where agents keep memory and tasks. With one workspace, a new agent is set up to read and write it by default. In the same dialog you can add your project's folder (one per machine where the project lives, written as that machine names it) and tick the agents that can use it; a session started in that folder then gets the workspace's context automatically.
 
 Agents are the identities that connect to Agent Core. Each one gets its own API key and its own scope of what memory, credentials, and service capabilities it can access. Service capabilities can come from imported OpenAPI specs, native MCP server registrations, the built-in Generic HTTP fallback, or installed **adapters**. Install adapters from the **Adapter Library** on the Services page; user-installed adapter files live in `data/adapters/` and built-in templates ship in `app/adapter_templates/` (see [Adapters](integrations.md#adapters)).
 
@@ -112,7 +112,7 @@ The **Shared memory** option adds the `shared` scope: memory every user and work
 
 ## Step 5: Connect your tool
 
-The fastest way to connect an agent to your tool is the **Connect** page at `http://localhost:3500/integrations`. Select your user, workspace, agent, and target tool, and it generates the exact config or `CLAUDE.md` content you need to paste in.
+The fastest way to connect an agent to your tool is the **Connect** page at `http://localhost:3500/integrations`. Select your user, workspace, agent, and target tool, and it shows, in order, the config to add to your tool, the `CLAUDE.md` or `AGENTS.md` content to save in your project and, for Claude Code and Codex, the session start hook that loads the workspace context when a session starts. Do the config and hook steps yourself in a terminal; an agent usually cannot.
 
 You do **not** need to create a `CLAUDE.md` or `AGENTS.md` file before the verification step. The verification prompt works as soon as the agent has MCP access and the right scopes.
 

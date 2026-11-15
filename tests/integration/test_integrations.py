@@ -495,14 +495,25 @@ def test_a_failed_access_check_offers_give_access(integrations_client):
     assert ">Give access</button>" not in good
 
 
-def test_the_docs_name_both_hooks_and_the_read_access_a_mapped_folder_needs():
+def test_the_docs_name_both_hooks_say_where_they_run_and_what_a_mapped_folder_needs():
     import pathlib
 
     doc = pathlib.Path("docs/integrations.md").read_text()
     assert "| Claude Code Hook |" in doc and "| Codex Hook |" in doc
-    assert "**Session start hooks.**" in doc
-    paragraph = doc.split("**Session start hooks.**", 1)[1].split("**Refresh workspace guidance", 1)[0]
-    assert "Repository folders" in paragraph and "read access" in paragraph and "exactly like an unmapped one" in paragraph
+    section = doc.split("### Session start hooks", 1)[1].split("**Refresh workspace guidance", 1)[0]
+    # The table of where the hook runs, with one row per tool.
+    for tool in ("Claude Code CLI", "Claude desktop app, Code tab", "Claude Cowork", "Codex CLI", "Codex desktop app"):
+        assert f"| {tool} |" in section, tool
+    assert "Repository folders" in section and "Can Read From" in section and "one folder per machine" in section
+    assert "second machine" in section.lower() and "does not count" in section
+    # Nothing in the guide still says a workspace has one folder, or that Codex has no hook.
+    assert "Codex has no hook" not in doc
+
+
+def test_the_docs_list_the_agents_tabs_in_the_new_order():
+    import pathlib
+
+    assert "| Workspaces, Connect |" in pathlib.Path("docs/dashboard-map.md").read_text()
 
 
 def _steps(client, target, agent="claude-code"):
