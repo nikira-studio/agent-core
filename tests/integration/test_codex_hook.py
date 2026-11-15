@@ -418,9 +418,9 @@ def test_a_project_with_the_hook_but_no_connection_gets_one_line_naming_the_file
         assert "no connection found" in message and "Connect page, step a" in message
         assert str(home) in message  # the file it looked in (the user config) is named
         assert "Bearer" not in message and "AGENT_CORE_API_KEY" not in message
-        # A resume or compact in the same project says it too; a fork and a bare folder stay silent.
-        assert _run_no_connection(module, tmp_path, project, source="resume") is not None
-        assert _run_no_connection(module, tmp_path, project, source="fork") is None
+        # Said once per session start: not again on a resume, clear, compact or fork; a bare folder stays silent.
+        for later in ("resume", "clear", "compact", "fork"):
+            assert _run_no_connection(module, tmp_path, project, source=later) is None, later
         assert _run_no_connection(module, tmp_path, tmp_path / "scratch") is None
         assert _run_no_connection(module, tmp_path, home) is None
         # The switch silences it.

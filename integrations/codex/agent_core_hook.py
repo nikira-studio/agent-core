@@ -206,7 +206,7 @@ def session_start(event, base_url, api_key, env):
         "cwd": event.get("cwd") or os.getcwd(),
         "host_session_ref": event.get("session_id"),
         "source": event.get("source", "startup"),
-        "client_os": platform.system(),
+        "client_os": platform.system()[:40],
         "max_chars": max(1000, min(chars, 9500)),
     }
     if env.get("AGENT_CORE_SCOPE"):
@@ -253,7 +253,7 @@ def _run(stdin, stdout, env):
     if not base_url:
         # Silent unless a session starts in a project folder: there the person expects shared context.
         if (
-            event.get("source", "startup") in INJECT_SOURCES
+            event.get("source", "startup") == "startup"  # not again on every clear, compact or resume
             and env.get("AGENT_CORE_NOTICES") != "0"
             and _looks_like_project(cwd)
         ):

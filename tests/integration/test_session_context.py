@@ -507,3 +507,9 @@ def test_resolved_handoff_request_stays_resolved_unless_it_changes(test_client, 
     assert activity_service.get_activity(activity["id"])["handoff_resolved_at"]
     activity_service.set_handoff(activity["id"], {"needs_human": "Sign the contract."})
     assert not activity_service.get_activity(activity["id"])["handoff_resolved_at"]
+
+
+def test_a_long_os_name_from_a_hook_never_makes_the_request_fail(test_client, admin_token):
+    headers = _setup(admin_token)
+    data = _context(test_client, headers, cwd="/x", host_session_ref="os-1", source="startup", client_os="MINGW64_NT-10.0-19045-extra")
+    assert data["resolved_by"] in ("only_workspace", "unmatched", "cwd", "private")

@@ -621,14 +621,24 @@ def workspaces_page(request: Request, session: dict = Depends(require_auth)):
       for (const box of ticked) {
         const agent = WORKSPACE_AGENT_STATE[box.value];
         if (!agent) continue;
-        const read = (agent.read_scopes || []).filter(function(item) { return item !== scope; }).concat([scope]);
-        const write = (agent.write_scopes || []).filter(function(item) { return item !== scope; }).concat([scope]);
+        // The agent's scopes as they are now, not as this page loaded them: someone may have changed them since.
+        let readNow = agent.read_scopes || [];
+        let writeNow = agent.write_scopes || [];
+        try {
+          const fresh = await apiFetch('/api/agents/' + box.value);
+          if (fresh.ok) {
+            readNow = JSON.parse(fresh.data.agent.read_scopes_json || '[]');
+            writeNow = JSON.parse(fresh.data.agent.write_scopes_json || '[]');
+          }
+        } catch (err) {}
+        const read = readNow.filter(function(item) { return item !== scope; }).concat([scope]);
+        const write = writeNow.filter(function(item) { return item !== scope; }).concat([scope]);
         const r = await apiFetch('/api/agents/' + box.value, { method: 'PUT', body: JSON.stringify({ read_scopes: read, write_scopes: write }) });
         if (!r.ok) { problems.push((agent.display_name || agent.id) + ' did not get access (' + (r.error?.message || 'failed') + ')'); }
       }
       closeModal('create-workspace-modal');
       if (problems.length) {
-        showToast('Workspace created, but ' + problems.join('; ') + '. Fix it under Edit.', 'danger');
+        showToast('Workspace created, but ' + problems.join('; ') + '.', 'danger');
         setTimeout(refreshProjects, 5000);
       } else {
         showToast('Workspace created');

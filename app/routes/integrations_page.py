@@ -761,33 +761,24 @@ def _no_repo_folder_note(workspace):
 
 
 def _hook_step_html(client_key, base_url, workspace=None):
-    """The whole hook step, in place: install, register, trust, map and try, each with a copy block and an OS switch."""
+    """The whole hook step, in place: install, register, trust, map; each with a copy block and an OS switch."""
     s = _hook_steps(client_key, base_url)
 
-    def both(kind, label, text_by_os=None):
-        panels = ""
+    def panels(per_os):
+        html = ""
         for os_key, os_label in (("unix", "macOS / Linux"), ("windows", "Windows")):
-            lang, code = s[kind][os_key]
-            panels += (
-                f"<div class='os-panel' data-os='{os_key}'><span class='os-label'>{os_label}</span>"
-                + (f"<p class='step-note'>{_inline_code(text_by_os[os_key])}</p>" if text_by_os else "")
-                + _output_section("", code)
-                + "</div>"
-            )
-        return f"<div class='hook-sub'><h4>{escape_html(label)}</h4>{panels}</div>"
+            html += f"<div class='os-panel' data-os='{os_key}'><span class='os-label'>{os_label}</span>{per_os(os_key)}</div>"
+        return html
 
-    register = ""
-    for os_key, os_label in (("unix", "macOS / Linux"), ("windows", "Windows")):
-        register += (
-            f"<div class='os-panel' data-os='{os_key}'><span class='os-label'>{os_label}</span>"
-            f"<p class='step-note'>{_inline_code(s['register_where'][os_key])}</p>"
-            + _output_section("", s["register"][os_key])
-            + (
-                "<p class='step-note'>Or create it from PowerShell, only if the file is not there yet:</p>" + _output_section("", s["register_cmd"])
-                if os_key == "windows" and s["register_cmd"] else ""
-            )
-            + "</div>"
-        )
+    def install(os_key):
+        return _output_section("", s["install"][os_key][1])
+
+    def register(os_key):
+        html = f"<p class='step-note'>{_inline_code(s['register_where'][os_key])}</p>"
+        if os_key == "windows" and s["register_cmd"]:
+            return html + _output_section("", s["register_cmd"])
+        return html + _output_section("", s["register"][os_key])
+
     n = iter(range(1, 6))
     html = (
         f"<p>{_inline_code(s['intro'])}</p>"
@@ -795,18 +786,18 @@ def _hook_step_html(client_key, base_url, workspace=None):
         "<div class='os-switch' role='group' aria-label='Operating system' hidden>"
         "<button type='button' class='btn btn-sm btn-secondary' data-os-pick='unix'>macOS / Linux</button>"
         "<button type='button' class='btn btn-sm btn-secondary' data-os-pick='windows'>Windows</button></div>"
-        + both("install", f"c{next(n)} · Install the script")
-        + f"<div class='hook-sub'><h4>c{next(n)} · Register it</h4>{register}</div>"
+        f"<div class='hook-sub'><h4>c{next(n)} · Install the script</h4>{panels(install)}</div>"
+        f"<div class='hook-sub'><h4>c{next(n)} · Register it</h4>{panels(register)}</div>"
     )
     if s["trust"]:
-        html += f"<div class='hook-sub'><h4>c{next(n)} · Trust it once</h4><p class='step-note'>{_inline_code(s['trust'])}</p></div>"
+        html += (
+            f"<div class='hook-sub'><h4>c{next(n)} · Trust it once</h4><p class='step-note'>{_inline_code(s['trust'])}</p>"
+            f"<div class='os-panel' data-os='windows'><p class='step-note'>{_inline_code(s['trust_windows'])}</p></div></div>"
+        )
     html += (
         f"<div class='hook-sub'><h4>c{next(n)} · Map your project folder to a workspace</h4>"
         + (_no_repo_folder_note(workspace) if workspace else "")
         + f"<p class='step-note'>{_inline_code(s['mapping'])}</p></div>"
-        "<details class='hook-try'><summary>Test the hook by hand</summary>"
-        + both("try", "From a project folder you mapped")
-        + f"<p class='step-note'>{_inline_code(s['try_note'])}</p></details>"
     )
     return f"<div class='hook-steps'>{html}</div>"
 
@@ -1100,15 +1091,19 @@ def integrations_page(
         yourself = (
             "Do steps a and c yourself, in a terminal. " if target in _HOOK_CLIENTS else "Do step a yourself, in a terminal. "
         ) + (
-            "An agent usually cannot: it runs in a sandbox without network access and cannot write to its own settings folder, "
-            "even though its connection to " + APP_NAME + " works. "
+            "An agent usually cannot: it runs in a sandbox without network access and cannot write to its own settings folder. "
             + (f"Step b is a file in your project, so {_name} can save that one for you." if file_type in ("claude_md", "agents_md") else "")
+        )
+        # Only an agent Core has already seen can be connected somewhere else; a new key would disconnect that machine.
+        second_machine = (
+            "<p class='step-note'>Already connected on another machine? Copy that machine's entry instead of generating a key: a new key disconnects it.</p>"
+            if seen_at
+            else ""
         )
         tool_steps_html = (
             f"<p class='step-callout'>{escape_html(yourself.strip())}</p>"
             '<ol class="setup-steps">'
-            f"<li><h3>Connect it {connect_status}</h3><p>{connect_where}</p>"
-            "<p class='step-note'>Already connected on another machine? Copy that machine's entry instead of generating a key: a new key disconnects it.</p>"
+            f"<li><h3>Connect it {connect_status}</h3><p>{connect_where}</p>{second_machine}"
             f"{_section(c_label, c_text, f'{APP_SLUG}-mcp-config.txt', connect_btn)}</li>"
             f"<li><h3>Give it instructions</h3><p>{file_where}</p>{_section(f_label, f_text, file_name)}</li>"
             f"{hook_item}"
@@ -1155,7 +1150,7 @@ def integrations_page(
               {agent_options}
             </select>
             <p class="form-hint">The agent identity the tool signs in as. It decides what the tool may read and write.</p>
-            <p class="form-hint">Choosing a user, workspace or agent only updates the preview below. Nothing is issued until you press <strong>Generate One-Time Key</strong> under the output (shown only for outputs that include a key), which replaces that agent's old key. CLAUDE.md, AGENTS.md, Instructions and the prompts are the same for every agent and safe to regenerate at any time.</p>
+            <p class="form-hint">Choosing here only updates the preview. Nothing is issued until you press <strong>Generate One-Time Key</strong>, which replaces that agent's old key. The instruction files and prompts are the same for every agent and safe to regenerate.</p>
           </div>
         </div>
       </div>
@@ -1664,7 +1659,7 @@ _WINDOWS_USER_FOLDER = "C:/Users/YOU"
 # and could not write to its own settings folder, though its MCP connection worked.
 DO_IT_YOURSELF = (
     "Do these steps yourself, in a terminal. An agent usually cannot: it runs in a sandbox without network access "
-    "and cannot write to its own settings folder, even though its connection to {app} works. "
+    "and cannot write to its own settings folder, though its connection to {app} works. "
     "The instructions file (CLAUDE.md or AGENTS.md) is different: it lives in your project, so an agent can save it for you."
 )
 
@@ -1698,22 +1693,19 @@ def _hook_steps(client_key, base_url):
             }
         }
         unix_where = (
-            f"Merge this into `~/{dot}/settings.json` (all projects) or `{dot}/settings.local.json` (one project). "
-            "If the file already exists, add these entries to it instead of replacing it."
+            f"Add this to `~/{dot}/settings.json` (or `{dot}/settings.local.json` for one project). "
+            "Merge it into the existing file; do not replace the file."
         )
         win_where = (
-            f"Merge this into `%USERPROFILE%\\{dot}\\settings.json` (all projects) or `{dot}\\settings.local.json` (one project). "
-            f"Replace `{_WINDOWS_USER_FOLDER}` with your own user folder (in PowerShell, `echo $env:USERPROFILE` shows it). "
-            "The path is written in full, with forward slashes; if your user folder contains a space, put the path in quotes. "
-            "If the file already exists, add these entries to it instead of replacing it."
+            f"Add this to `%USERPROFILE%\\{dot}\\settings.json`, merged into the existing file. "
+            f"Replace `{_WINDOWS_USER_FOLDER}` with your user folder (`echo $env:USERPROFILE` shows it); if it contains a space, quote the path."
         )
         requirements = (
-            f"`python3` (on Windows `python`; if that is not recognised, `py -3`), and the {APP_NAME} MCP server already added to Claude Code (step a). "
-            "The hook reads the server URL and key from that MCP entry, in the project's `.mcp.json` or in `~/.claude.json` "
-            "(`$CLAUDE_CONFIG_DIR/.claude.json` if you set that variable), so a rotated key needs no change here. "
-            "If it finds no key there it stays silent."
+            "Python 3 (`python3`; on Windows `python` or `py -3`) and step a done. "
+            "The hook reads the key from the MCP entry, so a rotated key needs no change here."
         )
         trust = None
+        trust_windows = None
     else:
         unix_hook = {
             "hooks": {
@@ -1730,30 +1722,24 @@ def _hook_steps(client_key, base_url):
         win_hook = json.loads(json.dumps(unix_hook))
         win_hook["hooks"]["SessionStart"][0]["hooks"][0]["commandWindows"] = f'python "{win_script}"'
         unix_where = (
-            f"Save this as `~/{dot}/hooks.json` (all projects). If that file already exists, add the SessionStart entry to it instead of replacing it. "
-            f"A project can use `<repo>/{dot}/hooks.json` instead. Codex also accepts the same hook as an inline "
-            "`[[hooks.SessionStart]]` table in `config.toml`; use one form per folder, not both."
+            f"Save this as `~/{dot}/hooks.json`. If the file already exists, add the SessionStart entry to it instead of replacing it."
         )
         win_where = (
-            f"Save this as `%USERPROFILE%\\{dot}\\hooks.json`. If that file already exists, add the SessionStart entry to it instead of replacing it. "
-            f"Replace `{_WINDOWS_USER_FOLDER}` with your own user folder (in PowerShell, `echo $env:USERPROFILE` shows it). "
-            "`commandWindows` is the command Codex runs on Windows; the other `command` is for macOS and Linux and can stay."
+            f"The command creates `%USERPROFILE%\\{dot}\\hooks.json` if there is none. "
+            "If you already have one, copy the SessionStart entry from the command into it instead."
         )
         requirements = (
-            f"`python3` 3.11 or newer (on Windows `python`; if that is not recognised, `py -3`), and the {APP_NAME} MCP server already added to Codex (step a). "
-            "The hook reads the server URL and key from `~/.codex/config.toml` (`%USERPROFILE%\\.codex\\config.toml` on Windows), "
-            "so a rotated key needs no change here."
+            "Python 3.11 or newer (`python3`; on Windows `python` or `py -3`) and step a done. "
+            "The hook reads the key from `config.toml`, so a rotated key needs no change here."
         )
         trust = (
-            f"Codex skips a new or changed hook until you trust it. In the Codex CLI, start Codex, type `/hooks`, find the {APP_NAME} SessionStart hook in the list, "
-            "and trust it; Codex prints a warning pointing to `/hooks` at startup while a hook still needs review. "
-            "The Codex desktop app has no `/hooks`: open Settings > Hooks (or select Review hooks in the composer), find the hook marked \"needs review\", trust it, then start a new thread. "
-            "Codex records the trust against the hook's registration, not the script, so updating the script does not ask again, "
-            "but changing the registration (for example its matcher) does. "
-            "If the status above still says \"No session start seen yet\" after a new thread, the app has not run the hook "
-            "(on a Windows install tested on 2026-11-15 the app did not start a trusted hook, although running it by hand worked; reported upstream as openai/codex issue 35863). "
-            "In a session where it did not run, the instructions file (step b) still has the agent load the same context itself with `session_context`; only the automatic start is missing. "
-            "The CLI and the app may keep separate approvals, so trust it in the one you use."
+            f"Codex skips a hook until you trust it. In the CLI, start Codex, type `/hooks` and trust the {APP_NAME} hook. "
+            "In the desktop app, open Settings > Hooks and trust the hook marked \"needs review\". "
+            "Changing the registration asks again; updating the script does not."
+        )
+        trust_windows = (
+            "The Windows desktop app does not start hooks yet, so there the instructions file (step b) loads the context. "
+            "See \"Where the session start hook runs\" in the integration guide."
         )
 
     # Windows PowerShell 5 writes a BOM or UTF-16 with `>` and Out-File; WriteAllText writes plain UTF-8.
@@ -1781,22 +1767,24 @@ def _hook_steps(client_key, base_url):
         f'python "{win_env_script}"'
     )
     mapping = (
-        f"The hook sends the session's working directory. {APP_NAME} matches it against each workspace's Repository folders "
-        f"(Workspaces → Edit Workspace, admin only), so the right workspace loads without per-repository setup. "
-        f"Add the folder as it appears on the machine running {name} (on Windows, for example `C:\\Users\\you\\my-repo`), not inside the {APP_NAME} container; "
-        "a workspace can list several folders, one for each machine where the project lives, and only the path text is compared. The agent also needs read access to that workspace (Agents page → Edit the agent → Advanced access → Can Read From): "
-        "a folder mapped to a workspace the agent cannot read behaves exactly like an unmapped one. "
+        f"Add your project folder to the workspace: Workspaces → Edit Workspace → Repository folders, one per machine where the project lives, "
+        f"written as that machine names it (on Windows, `C:\\Users\\you\\my-repo`). Admin only. "
+        "The agent also needs read access to the workspace: Agents page → Edit the agent → Advanced access → Can Read From. "
+        "Create Workspace can set both."
+    )
+    mapping_rules = (
+        "A folder that no workspace claims, or that is claimed by a workspace the agent cannot read, behaves exactly like an unmapped one: "
+        "the session starts without context, and in a project folder the hook says so. "
         "An agent that can read exactly one workspace gets that workspace in every folder, mapped or not. "
-        "With several, a session in a folder no workspace claims (or none the agent can read) starts normally, without context. "
-        f"To pin a workspace instead, set `AGENT_CORE_SCOPE=workspace:<id>` in the environment {name} runs in."
+        f"To pin a workspace, set `AGENT_CORE_SCOPE=workspace:<id>` in the environment {name} runs in."
     )
     return {
         "name": name,
         "output_type": c["output_type"],
         "intro": (
-            f"A hook runs when a {name} session starts and hands the agent its session context (standing rules, open work, "
-            "recent results with their next steps, changes since its last session, key records), so the agent does not have to remember a startup routine."
-            + (" When a task's activity is still open with no handoff, the hook also asks the agent once to record one." if client_key == "claude_code" else "")
+            f"Loads the agent's {APP_NAME} context when a {name} session starts: open work, recent results with their next steps, "
+            "changes since its last session, key records."
+            + (" It also asks the agent once to record a handoff if a task is left open." if client_key == "claude_code" else "")
         ),
         "requirements": requirements,
         "install": {"unix": ("bash", unix_install), "windows": ("powershell", win_install)},
@@ -1805,7 +1793,9 @@ def _hook_steps(client_key, base_url):
         "register_cmd": win_create_cmd,
         "do_it_yourself": DO_IT_YOURSELF.format(app=APP_NAME),
         "trust": trust,
+        "trust_windows": trust_windows,
         "mapping": mapping,
+        "mapping_rules": mapping_rules,
         "try": {"unix": ("bash", unix_try), "windows": ("powershell", win_try)},
         "try_note": (
             "It prints one line of JSON whose `additionalContext` is the session context, or nothing when no workspace matches the folder. "
@@ -1826,6 +1816,10 @@ def _hook_markdown(client_key, base_url):
             f"macOS / Linux:\n\n```{u[0]}\n{u[1]}\n```\n\nWindows (PowerShell):\n\n```{w[0]}\n{w[1]}\n```\n"
         )
 
+    windows_register = f"Windows: {s['register_where']['windows']}\n\n"
+    windows_register += (
+        f"```powershell\n{s['register_cmd']}\n```\n" if s["register_cmd"] else f"```json\n{s['register']['windows']}\n```\n"
+    )
     parts = [
         f"# {APP_NAME} hook for {name}\n",
         f"{s['intro']}\n",
@@ -1835,38 +1829,36 @@ def _hook_markdown(client_key, base_url):
         (
             f"## {next(n)}. Register the hook\n\n"
             f"macOS / Linux: {s['register_where']['unix']}\n\n```json\n{s['register']['unix']}\n```\n\n"
-            f"Windows: {s['register_where']['windows']}\n\n```json\n{s['register']['windows']}\n```\n"
-            + (
-                f"\nOr, in PowerShell, create it only if it is not there yet:\n\n```powershell\n{s['register_cmd']}\n```\n"
-                if s["register_cmd"] else ""
-            )
+            + windows_register
         ),
     ]
     if s["trust"]:
-        parts.append(f"## {next(n)}. Trust it once\n\n{s['trust']}\n")
-    parts.append(f"## {next(n)}. Map repositories to workspaces\n\n{s['mapping']}\n")
+        parts.append(f"## {next(n)}. Trust it once\n\n{s['trust']} On Windows: {s['trust_windows']}\n")
+    parts.append(f"## {next(n)}. Map your project folder to a workspace\n\n{s['mapping']}\n")
     parts.append(f"## Try it by hand\n\nFrom a project folder you mapped, feed the hook the event {name} sends and read what it prints:\n\n{pair('try')}\n{s['try_note']}\n")
     behavior = [
+        f"- {s['mapping_rules']}",
         "- Session context runs on `startup`, `clear`, `compact` and `resume`. A resumed session gets it only if it never received context for its workspace "
-        "(for example the folder was not mapped yet); one that already has it is left alone."
+        "(for example the folder was not mapped yet)."
         + ("" if claude else " A forked session keeps its parent's context."),
     ]
     if claude:
         behavior += [
             "- The handoff request blocks a stop at most once per task, and never while Claude is already continuing because of a stop hook. Set `AGENT_CORE_HANDOFF_NUDGE=0` to turn it off.",
             "- Output stays under Claude Code's 10,000-character limit; set `AGENT_CORE_CONTEXT_CHARS` to use less.",
-            f"- If {APP_NAME} cannot be reached, the session starts normally and Claude Code shows a one-line notice.",
+            "- The hook reads the server URL and key from the MCP entry in the project's `.mcp.json` or in `~/.claude.json` (`$CLAUDE_CONFIG_DIR/.claude.json` if set); with no entry it says so in a project folder.",
         ]
     else:
         behavior += [
             "- The context arrives as developer context in the session. `additionalContextLimit` (about 4,000 tokens) is set above the context's size so Codex does not replace it with a preview. Set `AGENT_CORE_CONTEXT_CHARS` to use less.",
             "- Only your own `~/.codex/config.toml` is read for the URL and key, never a repository's, and a redirect from the server is never followed, so a cloned project cannot make the hook send your key anywhere. "
             f"A project that keeps its own {APP_NAME} entry should set `AGENT_CORE_URL` and `AGENT_CORE_API_KEY` in the environment instead.",
-            f"- If {APP_NAME} cannot be reached, the session starts normally and Codex shows a one-line notice. Without a key in `config.toml` the hook stays silent.",
+            "- With no entry in `config.toml` the hook says so in a project folder.",
         ]
-    behavior.append(
-        f"- `AGENT_CORE_URL` and `AGENT_CORE_API_KEY` override the MCP configuration, and `AGENT_CORE_MCP_NAME` names a server other than `{APP_SLUG}`."
-    )
+    behavior += [
+        f"- If {APP_NAME} cannot be reached, the session starts normally and {name} shows a one-line notice. `AGENT_CORE_NOTICES=0` turns off the notices about a folder with no workspace and a project with no connection.",
+        f"- `AGENT_CORE_URL` and `AGENT_CORE_API_KEY` override the MCP configuration, and `AGENT_CORE_MCP_NAME` names a server other than `{APP_SLUG}`.",
+    ]
     parts.append("## Behavior\n\n" + "\n".join(behavior) + "\n")
     return "\n".join(parts)
 

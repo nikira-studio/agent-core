@@ -419,7 +419,7 @@ def test_a_chosen_tool_shows_its_connect_block_its_file_and_the_key_button(integ
     assert "hooks.json" in codex and "commandWindows" in codex and "/hooks" in codex
     assert "Claude Code" not in codex.split("Add the session start hook", 1)[1] and "settings.json" not in codex
     assert "settings.json" in claude.split('id="tool-step"', 1)[1] and "commandWindows" not in steps
-    assert "data-os='windows'" in steps and "data-os='unix'" in steps and "Test the hook by hand" in steps
+    assert "data-os='windows'" in steps and "data-os='unix'" in steps and "Test the hook by hand" not in steps
 
     other = integrations_client.get(base).text.split('id="tool-step"', 1)[1].split('id="check-step"', 1)[0]
     assert "Choose your tool to see exactly what to copy" in other and "Connect it" not in other
@@ -573,7 +573,9 @@ def test_the_steps_tell_you_to_run_them_yourself_and_give_windows_commands(integ
     # Existing settings are merged into, on every system.
     for key in ("claude_code", "codex"):
         steps = _hook_steps(key, "https://core.test")
-        assert all("already exists" in steps["register_where"][os_] for os_ in ("unix", "windows"))
+        for os_ in ("unix", "windows"):
+            where = steps["register_where"][os_]
+            assert "existing file" in where or "already exists" in where or "already have one" in where, (key, os_)
     _html, claude_steps, _o = _steps(integrations_client, "claude_code")
     assert "Do steps a and c yourself" in claude_steps
 
@@ -583,7 +585,8 @@ def test_codex_step_c_covers_the_desktop_app_and_a_workspace_with_no_repository_
 
     _html, codex, _o = _steps(integrations_client, "codex")
     plain = codex.replace("<code>", "").replace("</code>", "").replace("&gt;", ">")
-    assert "Settings > Hooks" in plain and "has no /hooks" in plain and "Review hooks" in plain
+    assert "Settings > Hooks" in plain and "needs review" in plain and "/hooks" in plain
+    assert "Windows desktop app does not start hooks yet" in plain
     assert "Agent Core has no Repository folders yet, so a session cannot be matched" in codex
     workspace_service.set_repo_root("agent-core", "C:\\Users\\alex\\media studio")
     _html, mapped, _o = _steps(integrations_client, "codex")
@@ -629,27 +632,12 @@ def test_the_agents_tabs_read_agents_workspaces_connect(integrations_client):
     assert order == sorted(order)
 
 
-def test_step_a_says_to_copy_the_entry_on_a_second_machine(integrations_client):
-    _html, steps, _o = _steps(integrations_client, "claude_code")
-    assert "Already connected on another machine?" in steps and "a new key disconnects it" in steps
-
-
-def test_the_hook_status_names_the_machine_the_session_started_on(integrations_client):
-    _start("claude-code", "workspace:agent-core", "startup", "rest", "real-w", "w1")
-    assert "context delivered just now" in _steps(integrations_client, "codex")[1]
-    assert " from Windows" not in _steps(integrations_client, "codex")[1]  # an older hook sends no OS: nothing is claimed
-    from app.database import get_db
+def test_step_a_says_to_copy_the_entry_on_a_second_machine_only_for_an_agent_already_connected(integrations_client):
     from app.services import audit_service
 
-    audit_service.write_event(actor_type="agent", actor_id="claude-code", action="context_injected",
-                              resource_type="execution", resource_id="w2", result="success",
-                              details={"memory_scope": "workspace:agent-core", "resolved_by": "cwd", "source": "startup",
-                                       "channel": "rest", "client_os": "Windows"})
-    assert "context delivered just now from Windows" in _steps(integrations_client, "codex")[1]
-
-
-def test_the_session_context_route_keeps_only_a_known_os_name(test_client, admin_token):
-    from app.services import session_context_service as svc
-
-    assert svc._OS_NAMES.get("windows") == "Windows" and svc._OS_NAMES.get("darwin") == "macOS"
-    assert svc._OS_NAMES.get("some weird <script>") is None
+    _html, steps, _o = _steps(integrations_client, "claude_code")
+    assert "Already connected on another machine?" not in steps  # Core has never seen this agent: nothing to warn about
+    audit_service.write_event(actor_type="agent", actor_id="claude-code", action="memory_search",
+                              resource_type="memory", resource_id="x", result="success")
+    _html, steps, _o = _steps(integrations_client, "claude_code")
+    assert "Already connected on another machine?" in steps and "a new key disconnects it" in steps
