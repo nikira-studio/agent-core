@@ -403,8 +403,23 @@ MANIFEST = {
                             "cancelled and a task_result saying why. Changes nothing else."
                         ),
                     },
-                    "memory_scope": {"type": "string"},
-                    "execution_id": {"type": "string"},
+                    "memory_scope": {
+                        "type": "string",
+                        "description": (
+                            "Where this task is recorded, written exactly as a scope: 'workspace:<name>' for a shared "
+                            "workspace you may write to, or 'agent:<your own agent id>' for your private scope. Leave it "
+                            "out to use your private scope. A scope you may not write to is refused, and the refusal "
+                            "lists the ones you can use."
+                        ),
+                    },
+                    "execution_id": {
+                        "type": "string",
+                        "description": (
+                            "The execution_id session_context returned to you for this session. Leave it out if you "
+                            "have none: a wrong or old one is ignored with a warning (the call is still saved) and "
+                            "only means your tasks cannot be told apart from another session's."
+                        ),
+                    },
                     "task_ref": {
                         "type": "string",
                         "description": (
@@ -589,8 +604,8 @@ MANIFEST = {
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "memory_scope": {"type": "string"},
-                    "execution_id": {"type": "string"},
+                    "memory_scope": {"type": "string", "description": "The scope to sync, written exactly as 'workspace:<name>' or 'agent:<your own agent id>': one you can read. A refusal lists the scopes you can use."},
+                    "execution_id": {"type": "string", "description": "The execution_id session_context returned to you. Leave it out on the first call."},
                     "after_cursor": {"type": "integer", "minimum": 0},
                     "limit": {"type": "integer", "default": 100, "maximum": 200},
                     "host_session_ref": {"type": "string"},
@@ -613,7 +628,7 @@ MANIFEST = {
                 "properties": {
                     "memory_scope": {
                         "type": "string",
-                        "description": "Workspace scope. Omit to match the cwd against configured workspace repo roots.",
+                        "description": "A scope you can read, written exactly as 'workspace:<name>' or 'agent:<your own agent id>'. Omit to match the cwd against configured workspace repo roots. A refusal lists the scopes you can use.",
                     },
                     "cwd": {"type": "string"},
                     "host_session_ref": {"type": "string"},
@@ -627,8 +642,8 @@ MANIFEST = {
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "memory_scope": {"type": "string"},
-                    "execution_id": {"type": "string"},
+                    "memory_scope": {"type": "string", "description": "The same scope you synced, written exactly as 'workspace:<name>' or 'agent:<your own agent id>'."},
+                    "execution_id": {"type": "string", "description": "The execution_id session_context returned to you."},
                     "cursor": {"type": "integer", "minimum": 0},
                 },
                 "required": ["memory_scope", "execution_id", "cursor"],
@@ -821,6 +836,40 @@ def _missing_params_message(tool: str, missing: list[str]) -> str:
         parts.append(f"{name} ({detail.rstrip('.')})" if detail else name)
     return f"{tool} requires {', '.join(parts)}"
 
+
+
+def _usable_scopes_text(ctx, kind: str) -> str:
+    """The scopes this caller may use, for a refusal: they are the caller's own, so naming them leaks nothing."""
+    scopes = sorted(ctx.write_scopes if kind == "write" else ctx.read_scopes)
+    shown = ", ".join(scopes[:12])
+    more = f" and {len(scopes) - 12} more (effective_authority lists them all)" if len(scopes) > 12 else ""
+    return shown + more if scopes else "none"
+
+
+def _refuse_scope(ctx, tool: str, sent, kind: str) -> JSONResponse:
+    """Refuse a scope the caller may not use: say which scopes it may use, and leave an audit row naming what was sent."""
+    from app.services import audit_service
+
+    text = " ".join(str(sent).split())[:200] if sent is not None else ""
+    try:
+        audit_service.write_event(
+            actor_type="agent",
+            actor_id=ctx.agent_id,
+            action="scope_denied",
+            resource_type="scope",
+            resource_id=None,
+            result="blocked",
+            details={"tool": tool, "scope_sent": text, "needed": kind},
+        )
+    except Exception:  # an audit failure must not change the answer the caller gets
+        pass
+    return _mcp_error(
+        "SCOPE_DENIED",
+        f"Access denied to memory_scope '{text}'. Scopes you can {'write to' if kind == 'write' else 'read'}: "
+        f"{_usable_scopes_text(ctx, kind)}. Write one exactly as shown"
+        + (", or leave memory_scope out to use your private scope." if kind == "write" and tool == "activity_update" else "."),
+        403,
+    )
 
 def _mcp_error(code: str, message: str, status: int = 200) -> JSONResponse:
     return JSONResponse(
@@ -1892,9 +1941,17 @@ async def _run_custom_mcp_tool(body: dict, ctx: EffectiveAuthority):
         # An agent identity can work in more than one workspace at once. The
         # requested scope identifies that activity stream; never select a
         # different active activity and then move it into this scope.
-        memory_scope = params.get("memory_scope") or f"agent:{ctx.agent_id}"
+        memory_scope = params.get("memory_scope")
+        if not memory_scope:
+            # Omitted: the agent's own private scope. If that is not writable for it but exactly one scope is,
+            # that one; with several, never guess.
+            memory_scope = f"agent:{ctx.agent_id}"
+            if not enforcer.can_write(memory_scope):
+                only = [x for x in sorted(ctx.write_scopes) if enforcer.can_write(x)]
+                if len(only) == 1:
+                    memory_scope = only[0]
         if not enforcer.can_write(memory_scope):
-            return _mcp_error("SCOPE_DENIED", "Access denied to memory_scope", 403)
+            return _refuse_scope(ctx, "activity_update", memory_scope, "write")
         # An id that is stale, another agent's or for another scope must not lose the write: it is dropped
         # (never attributed) and a warning says so.
         execution_id, execution_warning = params.get("execution_id"), None
@@ -1931,7 +1988,30 @@ async def _run_custom_mcp_tool(body: dict, ctx: EffectiveAuthority):
             ctx.agent_id, ctx.user_id, memory_scope, execution_id
         )
         extra_warnings: list = [execution_warning] if execution_warning else []
-        if existing and activity_service.is_different_task(existing.get("task_description"), params.get("task_description")):
+        if (
+            existing
+            and not execution_id
+            and activity_service.is_different_task(existing.get("task_description"), params.get("task_description"))
+        ):
+            # Without an execution id nothing says the open record is this session's: several sessions share one
+            # agent id. Never end it. Continue the open record this description belongs to, or start a new one and
+            # leave the older to the stale/abandoned rules.
+            sibling = activity_service.find_open_record_for_description(
+                ctx.agent_id, ctx.user_id, memory_scope, params.get("task_description")
+            )
+            if not sibling:
+                extra_warnings.append(
+                    {
+                        "code": "OTHER_OPEN_TASK_KEPT",
+                        "message": (
+                            f"Task {existing['id']} is still open and looks like another task, so it was left alone and "
+                            "this one started. Pass the execution_id from session_context so Agent Core can tell "
+                            "your session's records from another session's."
+                        ),
+                    }
+                )
+            existing = sibling
+        elif existing and activity_service.is_different_task(existing.get("task_description"), params.get("task_description")):
             # A new description for a different task is not a rename: the open task is kept and ended, and the new
             # one starts. (Before this, the first task silently became the second and vanished from the history.)
             ended = activity_service.end_replaced_task(existing, params["task_description"], ctx.agent_id)
@@ -2374,7 +2454,7 @@ async def _run_custom_mcp_tool(body: dict, ctx: EffectiveAuthority):
             not (requested.startswith("workspace:") or requested == f"agent:{ctx.agent_id}")
             or not enforcer.can_read(requested)
         ):
-            return _mcp_error("SCOPE_DENIED", "Access denied to this workspace", 403)
+            return _refuse_scope(ctx, "session_context", requested, "read")
         readable = readable_workspace_scopes(ctx)
         if requested and requested not in readable:
             readable.append(requested)
@@ -2404,7 +2484,7 @@ async def _run_custom_mcp_tool(body: dict, ctx: EffectiveAuthority):
 
         memory_scope = params["memory_scope"]
         if not enforcer.can_read(memory_scope):
-            return _mcp_error("SCOPE_DENIED", "Access denied to this workspace", 403)
+            return _refuse_scope(ctx, tool, memory_scope, "read")
         try:
             if tool == "workspace_sync":
                 result = workspace_sync_service.sync_workspace(
@@ -2629,6 +2709,7 @@ async def _run_custom_mcp_tool(body: dict, ctx: EffectiveAuthority):
                                 "name": b["name"],
                                 "scope": b["scope"],
                                 "usable": b["usable_by_caller"],
+                                **({"not_usable_because": b["not_usable_because"]} if b.get("not_usable_because") else {}),
                                 "actions": b["actions"]["mode"] if b["actions"]["mode"] == "all" else f"{b['actions']['mode']} ({b['actions']['allowed']}/{b['actions']['total']})",
                                 "health": b["health"]["test_status"],
                                 "failing_actions": len(b["health"]["failing_actions"]),

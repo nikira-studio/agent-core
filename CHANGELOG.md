@@ -2,6 +2,19 @@
 
 Notable changes to Agent Core are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow [Semantic Versioning](https://semver.org/).
 
+## [1.3.2] - 2026-11-15
+
+### Changed
+
+- **Credentials > "Used by" always says the same two things.** Each row shows "Given the secret:" (the agents that were given it, or "no one") and, on a second line whenever there are any, "N others can see its name" (agents that can read the credential's scope and so can ask for its reference; hover lists them and says what a reference lets them do: use it wherever Agent Core connects a service to it, never see the secret). Before, a row with one grant hid the second fact and a row with none showed only "N agents can get its reference", so the column stated different things on different rows. The Access dialog uses the same two labels ("Given the secret", "Others who can see its name"), names the workspace instead of its scope string, and the row now updates as soon as access is added or removed (the page no longer reloads when the dialog closes).
+- **Edit connection offers "Everything the service allows" when every action is ticked.** A connection set to "Choose actions" with every action ticked reads the same as "Everything" but would leave out actions the service adds later; the dialog now says so and offers a one-click switch.
+
+### Fixed
+
+- **Several sessions of one agent no longer end each other's activity records.** An `activity_update` sent without an `execution_id` used to take the agent's most recent open record in that scope and, if the new description looked like a different task, end that record as cancelled ("Ended without report: a new task began in this session…"). Sessions that share one agent id and do not send an execution id therefore cancelled each other's work (12 records on one install in three days). Now, without an execution id, an open record is never ended because of a different-looking description: the update continues the open record the description belongs to, or starts a new record and leaves the older one to the stale and abandoned rules (the response carries the warning `OTHER_OPEN_TASK_KEPT`, which says to pass the `execution_id` from `session_context`). With an execution id nothing changes.
+- **A wrong `memory_scope` can be fixed in one retry, and leaves a trace.** `activity_update` (and `session_context`, `workspace_sync`, `workspace_sync_ack`) now describe `memory_scope` in plain words: the form is `workspace:<name>` or `agent:<your own agent id>`, and what to leave out. When it is left out, `activity_update` uses the caller's private scope, or, if that is not writable for it but exactly one scope is, that one (never a guess among several). A refused scope names the scope that was sent and lists the scopes the caller may use (at most twelve, then a pointer to `effective_authority`), and writes an audit row `scope_denied` (result `blocked`) with the tool and the scope value that was sent; before, the refusal said only "Access denied to memory_scope" and left nothing to see. A wrong `execution_id` was already ignored with a warning rather than refused; the warning for a scope mismatch now also says what to do (use the one `session_context` returned for this scope, or leave it out).
+- **The services overview no longer calls a working plain web service unusable.** A plain web service declares no actions of its own (what it can do is the list of requests its connection allows), so the overview counted zero actions and showed `usable: false` for every caller although the connection ran fine. Its actions are now the connection's allowed requests ("N of M" for a read-only or chosen-actions connection), and whenever a connection is not usable the summary says why in one plain field, `not_usable_because` (switched off, credential missing, action list unreadable, no actions or allowed requests, or the connection allows none of the service's actions).
+
 ## [1.3.1] - 2026-11-14
 
 ### Changed
@@ -52,6 +65,7 @@ The release that makes Agent Core run itself: nothing it promises depends on an 
 
 
 ### Fixed
+
 
 - **One origin chip on every Services card.** The card chip means one thing: "Built-in" (ships with Agent Core) or "Added here" (an imported MCP server or API spec, a web service, an adapter added to this install). The "Installed" chip is gone (every card is installed), and how a service talks (MCP server, API spec, HTTP) moved to the meta line. "Update available" and the health chip stay. The ready-made services pages say the same words instead of System / Local.
 - **Activity > Tasks rows stay a line or two.** A task's title opens the full record in the shared detail dialog (also from a Detail button): facts (status, agent, workspace in plain words, started, last update, task link), then Result, Latest note, Next steps, Open questions and Needs you (with its answer box, or "Open in <site>"), each only when present, and the row's actions in the footer. The inline fold that poured text into one narrow column is gone; a task's actions show only the ones that apply; the Workspace column says "private to IT Admin" or the workspace's name instead of a raw scope. On Needs you, "Or tell <agent> here" is no longer folded.
@@ -124,6 +138,7 @@ The release that makes Agent Core run itself: nothing it promises depends on an 
 
 ### Fixed
 
+
 - **Documentation.** Admin examples (backup, key rotation, creating an agent, maintenance) now send an operator token (`Settings → Account → Operator tokens`); the sign-in session token they showed is refused on those routes. The quickstart no longer says creating an agent shows its key (the Connect page generates it), names the right place for two-step sign-in, and the README no longer lists the removed single-task authority. Settings sections are named as they are today (Account, Memory, Data and backup, Security).
 - Connect refuses an output type it does not know (`INVALID_OUTPUT_TYPE`) instead of quietly returning the verification prompt.
 - `PUT /api/agents/{id}` refuses a field it does not know instead of answering "Agent updated" and ignoring it. (An approval proposal that carries an unknown field for `agent.update` is refused too.)
@@ -156,6 +171,7 @@ The release that makes Agent Core run itself: nothing it promises depends on an 
 - A **Query Prefix** vector setting (`vector_query_prefix`), added to search text before it is embedded and never to stored memories, for models that embed queries differently from documents, such as `query: ` for snowflake-arctic-embed. Changing it needs no re-embed.
 
 ### Fixed
+
 
 - The broker wrapper's documented `agent_core_broker.py --agent-id <id> -- CMD` form ran the literal `--` as the command and failed; the separator is now dropped (the form without `--` worked before and still does).
 - Semantic search no longer depends on SQLite's limit on variables per statement. The candidate list was passed in one statement, which fails on SQLite builds limited to 999 variables (and on any build past its limit for a very large workspace) and then silently drops back to text matching. Candidates are now looked up in pages of 500, and only the best results are kept while scoring, so memory use no longer grows with the workspace. Results and tie order are unchanged. Not done: an indexed vector store (the sqlite-vec approach was removed earlier); scoring is still computed in Python.
@@ -223,6 +239,7 @@ The release that makes Agent Core run itself: nothing it promises depends on an 
 
 ### Fixed
 
+
 - `GET /api/auth/effective-authority` (and the MCP `effective_authority` tool) report `authorization_mode: "permanent"` again. The field went away with delegations, and clients that require it, such as an external human sign-in service, refused every Core user. It is always `permanent` now that delegated authority is gone.
 - HTTP-engine adapters return a non-2xx upstream reply (a 404, a session challenge) as `success: false` with its status and body again. Since the response-size cap, the error-response wrapper crashed with a `TypeError` instead.
 - MCP `activity_update` with an unknown `status` returns `400 INVALID_STATUS` instead of a 500; `?page=` values that are not numbers open page one instead of a 500; a malformed credential scope is a 400.
@@ -255,6 +272,7 @@ The release that makes Agent Core run itself: nothing it promises depends on an 
 - `result_fetch` reads are audited as `tool_result_fetched` against the offload handle. `scripts/value_report.py` reports whether stored data reaches agents: read-through of offloaded results, empty searches per agent, never-recalled memory per scope, and sync-stream composition.
 
 ### Fixed
+
 
 - `PUT /api/activity/{id}` with only a `handoff` no longer fails with `UPDATE_FAILED` (500).
 - MCP `memory_write` and `memory_search` now apply the same per-agent rate limits and concurrent-search limit as REST, as `docs/security.md` describes. Both transports share one budget.

@@ -505,3 +505,52 @@ def test_the_dialog_asks_the_server_per_connection_and_only_a_person_may(world):
     assert client.get(f"/api/connector-bindings/{held['id']}/credential-reach", headers=_bearer(world["key"])).status_code == 403
     page_js = client.get("/static/js/connectors.js").text
     assert "credential-reach" in page_js and "loadCredentialReach" in page_js
+
+
+# ---- the summary for a plain web service (its actions are the requests its connection allows) -------------------
+
+def _plain_web_binding(world, allowed, **kwargs):
+    cs.create_connector_type(
+        connector_type_id="plain-web", display_name="Plain web", auth_type="none", backend_type="generic_http",
+        endpoint_url="https://web.example.test", supported_actions=[],
+    )
+    config = json.dumps({"allowed": allowed} if allowed is not None else {})
+    return cs.create_binding("plain-web", "Plain web connection", "workspace:ops", config_json=config, **kwargs)
+
+
+def _summary_row(world, binding):
+    from app.security.effective_authority import EffectiveAuthority
+    from app.security.scope_enforcer import build_agent_context
+    from app.services import agent_service
+
+    context = build_agent_context(agent_service.get_agent_by_id("advisor"))
+    summary = cs.build_capability_summary(EffectiveAuthority(context=context).connector_enforcer(), enabled_only=False)
+    ct = next(c for c in summary["connectors"] if c["id"] == "plain-web")
+    return ct, next(b for b in ct["bindings"] if b["id"] == binding["id"])
+
+
+def test_a_plain_web_service_counts_its_connections_allowed_requests(world):
+    binding = _plain_web_binding(world, ["GET /a", "GET /b", "POST /c"])
+    ct, row = _summary_row(world, binding)
+    assert row["usable_by_caller"] is True and "not_usable_because" not in row
+    assert row["actions"] == {"mode": "all", "allowed": 3, "total": 3} and ct["action_count"] == 3
+
+
+def test_a_read_only_plain_web_connection_shows_n_of_m_and_none_allowed_says_why(world):
+    binding = _plain_web_binding(world, ["GET /a", "GET /b", "POST /c"], actions_mode="read_only")
+    _, row = _summary_row(world, binding)
+    assert row["usable_by_caller"] is True and row["actions"] == {"mode": "read_only", "allowed": 2, "total": 3}
+    only_writes = cs.update_binding(binding["id"], config_json=json.dumps({"allowed": ["POST /c"]}))
+    _, row = _summary_row(world, cs.get_binding(binding["id"]))
+    assert row["usable_by_caller"] is False and row["actions"]["allowed"] == 0
+    assert row["not_usable_because"].startswith("This connection allows none of the service's actions")
+
+
+def test_not_usable_always_says_why(world):
+    nothing_listed = _plain_web_binding(world, None)
+    _, row = _summary_row(world, nothing_listed)
+    assert row["usable_by_caller"] is False
+    assert row["not_usable_because"] == "The service lists no actions and this connection lists no allowed requests."
+    cs.update_binding(nothing_listed["id"], config_json=json.dumps({"allowed": ["GET /a"]}), enabled=False)
+    summary_off = _summary_row(world, cs.get_binding(nothing_listed["id"]))[1]
+    assert summary_off["not_usable_because"] == "This connection is switched off."

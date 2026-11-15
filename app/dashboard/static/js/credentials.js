@@ -140,7 +140,6 @@ document.addEventListener('click', async (event) => {
 // ── Who can use a credential ────────────────────────────────────────────
 // Everything from the server goes in through textContent, never innerHTML.
 let accessEntryId = null;
-let accessChanged = false;
 
 function accessEl(tag, text, cls) {
   const el = document.createElement(tag);
@@ -151,7 +150,6 @@ function accessEl(tag, text, cls) {
 
 async function openAccess(entryId) {
   accessEntryId = entryId;
-  accessChanged = false;
   document.getElementById('access-expires').value = '';
   document.getElementById('access-write').checked = false;
   await renderAccess();
@@ -160,7 +158,6 @@ async function openAccess(entryId) {
 
 function closeAccess() {
   closeModal('access-modal');
-  if (accessChanged) location.reload();
 }
 
 async function renderAccess() {
@@ -171,7 +168,7 @@ async function renderAccess() {
 
   const grants = document.getElementById('access-grants');
   grants.replaceChildren();
-  if (!d.grants.length) grants.append(accessEl('p', 'No service or container has been granted it. Add one so it can fetch this at startup.', 'text-muted'));
+  if (!d.grants.length) grants.append(accessEl('p', 'No one. Give it to an agent below so it can fetch the secret at startup.', 'text-muted'));
   d.grants.forEach(g => {
     const row = accessEl('div', null, 'access-row');
     row.append(accessEl('strong', g.display_name));
@@ -181,7 +178,7 @@ async function renderAccess() {
     remove.type = 'button';
     remove.addEventListener('click', async () => {
       const r = await apiFetch('/api/credential-consumers/grants/' + encodeURIComponent(g.id), { method: 'DELETE' });
-      if (r.ok) { accessChanged = true; showToast('Access removed', 'success'); renderAccess(); }
+      if (r.ok) { showToast('Access removed', 'success'); renderAccess(); }
       else showToast(r.error?.message || 'Could not remove access', 'danger');
     });
     row.append(remove);
@@ -221,9 +218,53 @@ async function renderAccess() {
   });
 
   const readers = document.getElementById('access-scope-readers');
-  readers.textContent = d.scope_readers.length
-    ? 'Agents that can read ' + d.entry.scope + ' can already see its reference: ' + d.scope_readers.join(', ') + '.'
-    : 'No other agent can read ' + d.entry.scope + ', so only those above can use it.';
+  readers.replaceChildren();
+  if (d.scope_readers.length) {
+    readers.append(accessEl('p', d.scope_readers.join(', '), 'used-by-others'));
+    readers.append(accessEl('p', REFERENCE_NOTE + ' They can see it because they can read ' + accessScopeName(d.entry) + '.', 'form-hint'));
+  } else {
+    readers.append(accessEl('p', 'No one else. Only the agents above can use it.', 'text-muted'));
+  }
+  renderUsedBy(d);
+}
+
+// The scope as the list shows it in plain words (a workspace's name, "Just me"), never the raw scope string.
+function accessScopeName(entry) {
+  const tr = document.querySelector('tr[data-credential-id="' + CSS.escape(entry.id) + '"]');
+  const cell = tr && tr.querySelector("td[data-label='Scope']");
+  return (cell && cell.textContent.trim()) || 'its scope';
+}
+
+const REFERENCE_NOTE = 'They can see its name (its reference) and use it wherever Agent Core connects a service to it. Agent Core does not show them the secret itself.';
+
+// The Used by cell in the list shows the same two groups under the same labels as this dialog, so it is rebuilt
+// from the dialog's data whenever access changes (the page is not reloaded). Mirrors used_by_cell in credentials_page.py.
+function renderUsedBy(d) {
+  const tr = document.querySelector('tr[data-credential-id="' + CSS.escape(d.entry.id) + '"]');
+  const cell = tr && tr.querySelector("td[data-label='Used by']");
+  if (!cell) return;
+  cell.replaceChildren();
+  const given = accessEl('div', null, 'used-by-given');
+  given.append(accessEl('span', 'Given the secret:', 'used-by-label'), document.createTextNode(' '));
+  if (!d.grants.length) given.append(accessEl('span', 'no one', 'text-muted'));
+  d.grants.slice(0, 4).forEach(g => {
+    const chip = accessEl('span', g.display_name, 'badge badge-info chip-trunc');
+    chip.title = g.display_name;
+    given.append(chip, document.createTextNode(' '));
+  });
+  if (d.grants.length > 4) given.append(accessEl('span', '+' + (d.grants.length - 4) + ' more', 'text-muted'));
+  cell.append(given);
+  if (d.scope_readers.length) {
+    const seen = accessEl('div', d.scope_readers.length + ' other' + (d.scope_readers.length === 1 ? '' : 's') + ' can see its name', 'text-muted used-by-seen');
+    seen.style.fontSize = '0.8rem';
+    seen.title = d.scope_readers.join(', ') + '. ' + REFERENCE_NOTE;
+    cell.append(seen);
+  }
+  if (d.services.length) {
+    const sv = accessEl('div', d.services.length + ' service' + (d.services.length === 1 ? '' : 's'), 'text-muted');
+    sv.style.fontSize = '0.8rem';
+    cell.append(sv);
+  }
 }
 
 document.addEventListener('click', async (ev) => {
@@ -236,7 +277,7 @@ document.addEventListener('click', async (ev) => {
     const expires = endOfDayUtc(document.getElementById('access-expires').value);
     if (expires) body.expires_at = expires;
     const r = await apiFetch('/api/credential-consumers/grants', { method: 'POST', body: JSON.stringify(body) });
-    if (r.ok) { accessChanged = true; showToast('Access given', 'success'); renderAccess(); }
+    if (r.ok) { showToast('Access given', 'success'); renderAccess(); }
     else showToast(r.error?.message || 'Could not give access', 'danger');
   }
 });

@@ -26,6 +26,12 @@ EXPIRY_WARNING_DAYS = 14
 _SCOPE_KIND_TAG = {"workspace": "workspace", "user": "personal", "agent": "agent"}
 
 
+REFERENCE_NOTE = (
+    "They can see its name (its reference) and use it wherever Agent Core connects a service to it. "
+    "Agent Core does not show them the secret itself."
+)
+
+
 def scope_html(scope: str) -> str:
     """The workspace (or person, or agent) a credential lives in, with a small tag for which it is.
 
@@ -109,6 +115,7 @@ def credentials_page(request: Request, session: dict = Depends(require_auth)):
 
     # Who can use each credential, for admins: the grants are theirs to manage.
     holders: dict[str, list[str]] = {}
+    holder_ids: dict[str, set[str]] = {}
     service_counts: dict[str, int] = {}
     if ctx.is_admin:
         agent_names = {a["id"]: a.get("display_name") or a["id"] for a in agents}
@@ -120,6 +127,7 @@ def credentials_page(request: Request, session: dict = Depends(require_auth)):
                     holders.setdefault(g["entry_id"], []).append(
                         agent_names.get(g["consumer_agent_id"], g["consumer_agent_id"])
                     )
+                    holder_ids.setdefault(g["entry_id"], set()).add(g["consumer_agent_id"])
             for r in conn.execute(
                 "SELECT credential_id, COUNT(*) AS n FROM connector_bindings WHERE credential_id IS NOT NULL GROUP BY credential_id"
             ).fetchall():
@@ -131,22 +139,33 @@ def credentials_page(request: Request, session: dict = Depends(require_auth)):
     scope_by_entry = {e["id"]: e.get("scope", "") for e in credential_entries}
 
     def used_by_cell(entry_id: str) -> str:
+        """Always the same parts, in the same order: who was given the secret, who else can see its name, services.
+
+        The dialog shows the same two groups under the same labels (credentials.js renderUsedBy mirrors this)."""
         names = holders.get(entry_id, [])
         chips = "".join(
             f"<span class='badge badge-info chip-trunc' title='{escape_html(n)}'>{escape_html(n)}</span> " for n in names[:4]
         )
         more = f"<span class='text-muted'>+{len(names) - 4} more</span> " if len(names) > 4 else ""
+        given = (
+            f"<div class='used-by-given'><span class='used-by-label'>Given the secret:</span> {chips}{more}</div>"
+            if names
+            else "<div class='used-by-given'><span class='used-by-label'>Given the secret:</span> <span class='text-muted'>no one</span></div>"
+        )
+        others = [
+            (a.get("display_name") or a["id"])
+            for a in active_agents
+            if a["id"] not in holder_ids.get(entry_id, set()) and can_read_reference(a, scope_by_entry.get(entry_id, ""))
+        ]
+        seen = ""
+        if others:
+            seen = (
+                f"<div class='text-muted used-by-seen' style='font-size:0.8rem' title='{escape_html(', '.join(others))}. {escape_html(REFERENCE_NOTE)}'>"
+                f"{len(others)} other{'s' if len(others) != 1 else ''} can see its name</div>"
+            )
         n_services = service_counts.get(entry_id, 0)
         services = f"<div class='text-muted' style='font-size:0.8rem'>{n_services} service{'s' if n_services != 1 else ''}</div>" if n_services else ""
-        if names or services:
-            return f"{chips}{more}{services}"
-        readers = sum(1 for a in active_agents if can_read_reference(a, scope_by_entry.get(entry_id, "")))
-        if readers:
-            return (
-                f"<span class='text-muted' title='These agents can ask for the reference with credential_get; "
-                f"only the secret itself stays hidden from them'>{readers} agent{'s' if readers != 1 else ''} can get its reference</span>"
-            )
-        return "<span class='text-muted'>no one</span>"
+        return f"{given}{seen}{services}"
 
     credential_rows = ""
     for e in credential_entries:
@@ -242,7 +261,7 @@ def credentials_page(request: Request, session: dict = Depends(require_auth)):
       <div class="modal modal-wide">
         <h2>Who can use <span id="access-name"></span></h2>
         <p class="form-hint" style="margin-bottom:12px">One credential per service: give it to each agent that needs it instead of storing it again. Use a separate credential only for a different account or an outside service.</p>
-        <h3 class="sub-heading form-section-title">Agents with access</h3>
+        <h3 class="sub-heading form-section-title">Given the secret</h3>
         <div id="access-grants"></div>
         <div class="form-group">
           <label for="access-agent">Give access to</label>
@@ -255,7 +274,8 @@ def credentials_page(request: Request, session: dict = Depends(require_auth)):
         </div>
         <h3 class="sub-heading form-section-title">Services using it</h3>
         <div id="access-services"></div>
-        <p class="form-hint" id="access-scope-readers"></p>
+        <h3 class="sub-heading form-section-title" id="access-others-title">Others who can see its name</h3>
+        <div id="access-scope-readers"></div>
         <details class="access-details">
           <summary>Advanced</summary>
           <div class="form-group">

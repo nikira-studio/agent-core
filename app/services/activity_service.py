@@ -1536,6 +1536,30 @@ def is_different_task(current: Optional[str], new: Optional[str]) -> bool:
     return difflib.SequenceMatcher(None, a[:300], b[:300], autojunk=False).ratio() < DIFFERENT_TASK_RATIO
 
 
+def find_open_record_for_description(
+    agent_id: str, user_id: Optional[str], memory_scope: str, description: Optional[str]
+) -> Optional[dict]:
+    """Among the agent's open records in a scope, the most recently updated one that ``description`` refines or repeats.
+
+    Used when an update arrives without an execution id: several sessions can share one agent id, and nothing says
+    which record is whose, so a different-looking description is another session's task, not a reason to end anyone's
+    record. Returns None when it matches none of them (the caller starts a new record)."""
+    conditions = ["assigned_agent_id = ?", "status IN ('active', 'stale')", "memory_scope = ?"]
+    params: list = [agent_id, memory_scope]
+    if user_id:
+        conditions.append("user_id = ?")
+        params.append(user_id)
+    with get_db() as conn:
+        rows = conn.execute(
+            f"SELECT id, task_description FROM agent_activity WHERE {' AND '.join(conditions)} ORDER BY updated_at DESC",
+            params,
+        ).fetchall()
+    for row in rows:
+        if not is_different_task(row["task_description"], description):
+            return get_activity(row["id"])
+    return None
+
+
 def end_replaced_task(existing: dict, new_description: str, agent_id: str) -> dict:
     """End an open task because the same session started a different one: cancelled, existing result kept, never lost."""
     from app.services import audit_service

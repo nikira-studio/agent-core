@@ -49,7 +49,7 @@ function renderActionsChoices(prefix) {
   const list = document.getElementById(prefix + '-actions-list');
   const chosen = group.querySelector('input[type=radio]:checked');
   const mode = chosen ? chosen.value : 'all';
-  if (mode !== 'custom' || group.dataset.loaded !== '1') { list.style.display = 'none'; return; }
+  if (mode !== 'custom' || group.dataset.loaded !== '1') { list.style.display = 'none'; updateAllTickedOffer(prefix); return; }
   let off = [];
   try { off = JSON.parse(group.dataset.disabled || '[]'); } catch (e) {}
   let tools = [];
@@ -63,6 +63,38 @@ function renderActionsChoices(prefix) {
       (blocked ? ' <span class="form-hint">switched off for everyone on the service</span>' : '') + '</label>';
   }).join('');
   list.style.display = '';
+  updateAllTickedOffer(prefix);
+}
+
+// When every action the service allows is ticked, "Choose actions" says the same as "Everything" except that it would
+// leave out actions the service adds later. Offer the switch instead of leaving that as a surprise.
+function updateAllTickedOffer(prefix) {
+  const group = document.getElementById(prefix + '-actions-group');
+  const list = document.getElementById(prefix + '-actions-list');
+  if (!group || !list) return;
+  let offer = document.getElementById(prefix + '-actions-offer');
+  if (!offer) {
+    offer = document.createElement('div');
+    offer.id = prefix + '-actions-offer';
+    offer.className = 'form-hint actions-offer';
+    list.insertAdjacentElement('afterend', offer);
+  }
+  const chosen = group.querySelector('input[type=radio]:checked');
+  const boxes = Array.from(list.querySelectorAll('input[type=checkbox]:not(:disabled)'));
+  const everyOneTicked = chosen && chosen.value === 'custom' && list.style.display !== 'none' && boxes.length > 0 && boxes.every(function(c) { return c.checked; });
+  offer.replaceChildren();
+  offer.style.display = everyOneTicked ? '' : 'none';
+  if (!everyOneTicked) return;
+  offer.append(document.createTextNode('Every action is ticked. Actions the service adds later would stay off. '));
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'btn btn-sm btn-secondary';
+  button.textContent = 'Use "Everything the service allows"';
+  button.addEventListener('click', function() {
+    const all = group.querySelector('input[type=radio][value=all]');
+    if (all) { all.checked = true; all.dispatchEvent(new Event('change', { bubbles: true })); }
+  });
+  offer.append(button);
 }
 
 // What to send: nothing, unless the person changed the choice (so opening and saving never rewrites it).
@@ -122,6 +154,8 @@ document.addEventListener('change', function(ev) {
     );
     renderActionsChoices(group.id.replace('-actions-group', ''));
     updateCredentialReach();
+  } else {
+    updateAllTickedOffer(group.id.replace('-actions-group', ''));
   }
 });
 

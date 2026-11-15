@@ -139,3 +139,21 @@ def test_the_dialog_says_whether_the_limit_holds_whenever_the_choice_is_not_ever
     connections.locator("#edit-binding-actions-group").get_by_label("Everything the service allows").check()
     assert not box.is_visible()
     connections.keyboard.press("Escape")
+
+
+def test_every_action_ticked_offers_everything_the_service_allows(connections):
+    connections.goto(connections.url)
+    connections.wait_for_load_state("load")
+    _open_edit(connections)
+    group = connections.locator("#edit-binding-actions-group")
+    group.get_by_label("Choose actions").check()
+    connections.wait_for_selector("#edit-binding-actions-list input", state="visible")
+    offer = connections.locator("#edit-binding-actions-offer")
+    assert offer.is_visible() and "Every action is ticked" in offer.inner_text()  # the one the service switched off is not counted
+    connections.locator("#edit-binding-actions-list input[data-action=create_thing]").uncheck()
+    assert not offer.is_visible()  # one is off: it is a real choice
+    connections.locator("#edit-binding-actions-list input[data-action=create_thing]").check()
+    offer.get_by_role("button").click()
+    assert connections.locator("#edit-binding-actions-group input[value=all]").is_checked()
+    assert not connections.locator("#edit-binding-actions-list").is_visible() and not offer.is_visible()
+    connections.keyboard.press("Escape")

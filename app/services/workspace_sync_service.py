@@ -108,7 +108,7 @@ IGNORED_EXECUTION_WARNINGS = {
     ),
     "EXECUTION_SCOPE_MISMATCH": (
         "execution_id ignored: it was started for a different memory scope than this call uses. "
-        "The call was saved without it."
+        "The call was saved without it. Use the execution_id session_context returned for this scope, or leave it out."
     ),
 }
 

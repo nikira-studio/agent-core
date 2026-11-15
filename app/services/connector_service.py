@@ -614,6 +614,25 @@ def connection_refusal(binding: dict, action: str) -> dict:
     }
 
 
+def plain_web_allowed_requests(connector_type: dict, binding: dict) -> list[str]:
+    """The requests a plain web service connection lists in its own settings ("allowed"), in one spelling.
+
+    A plain web service declares no actions of its own: what it can do is the list of requests its connection allows.
+    Empty when the service is not a plain web service or its connection lists none (then it takes any request)."""
+    if (connector_type or {}).get("backend_type") != "generic_http":
+        return []
+    config = _parse_json_object((binding or {}).get("config_json")) or {}
+    allowed = config.get("allowed")
+    if not isinstance(allowed, list):
+        return []
+    names: list[str] = []
+    for entry in allowed:
+        name = canonical_action_name(connector_type, str(entry)) if isinstance(entry, str) else ""
+        if name and name not in names:
+            names.append(name)
+    return names
+
+
 def effective_actions(connector_type: dict, binding: dict) -> list[str]:
     """What a connection can run: the service's catalogue, less the service's switches, less the connection's own."""
     return [name for name in catalogue_actions(connector_type) if connection_allows(connector_type, binding, name)]
@@ -1493,15 +1512,39 @@ def build_capability_summary(
             credential_ready = (not auth_required) or credential_present
             catalogue = catalogue_actions(connector_type)
             allowed_here = effective_actions(connector_type, binding)
-            # A connection that allows nothing is not usable, however many actions its service offers.
-            has_actions = (len(allowed_here) > 0) if catalogue else (action_count > 0)
+            # A plain web service lists no actions of its own: what it can do is the requests this connection allows.
+            listed_requests = plain_web_allowed_requests(connector_type, binding)
+            if listed_requests and not catalogue:
+                allowed_here = [name for name in listed_requests if connection_allows(connector_type, binding, name)]
+                shown_total = len(listed_requests)
+                has_actions = len(allowed_here) > 0
+                binding_action_count = len(listed_requests)
+            else:
+                shown_total = len(catalogue)
+                # A connection that allows nothing is not usable, however many actions its service offers.
+                has_actions = (len(allowed_here) > 0) if catalogue else (action_count > 0)
+                binding_action_count = action_count
+            enabled_here = bool(binding.get("enabled"))
             usable = (
-                bool(binding.get("enabled"))
+                enabled_here
                 and credential_ready
                 and action_discovery["success"]
-                and action_count > 0
+                and binding_action_count > 0
                 and has_actions
             )
+            # One plain reason whenever it is not usable, so a caller can tell broken from not-for-it.
+            if usable:
+                not_usable_because = None
+            elif not enabled_here:
+                not_usable_because = "This connection is switched off."
+            elif not credential_ready:
+                not_usable_because = "Its credential is missing."
+            elif not action_discovery["success"]:
+                not_usable_because = "The service's list of actions could not be read."
+            elif binding_action_count == 0:
+                not_usable_because = "The service lists no actions and this connection lists no allowed requests."
+            else:
+                not_usable_because = "This connection allows none of the service's actions (a person changes that under Services > Edit connection)."
             if usable:
                 usable_total += 1
 
@@ -1539,9 +1582,10 @@ def build_capability_summary(
                     "actions": {
                         "mode": binding.get("actions_mode") or "all",
                         "allowed": len(allowed_here),
-                        "total": len(catalogue),
+                        "total": shown_total,
                     },
                     "usable_by_caller": usable,
+                    **({"not_usable_because": not_usable_because} if not_usable_because else {}),
                 }
             )
 
@@ -1551,7 +1595,9 @@ def build_capability_summary(
                 "display_name": connector_type["display_name"],
                 "provider_type": connector_type.get("provider_type") or "openapi",
                 "auth_type": connector_type.get("auth_type"),
-                "action_count": action_count,
+                # a plain web service declares none itself: show the most its connections allow
+                "action_count": action_count
+                or (max([b["actions"]["total"] for b in binding_summaries] or [0]) if connector_type.get("backend_type") == "generic_http" else 0),
                 "action_discovery": action_discovery,
                 "binding_count": len(binding_summaries),
                 "visible_scopes": sorted(scopes),

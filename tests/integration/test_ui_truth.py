@@ -40,20 +40,75 @@ def test_the_services_tile_only_says_all_working_for_checks_that_passed(test_cli
     assert "1 failing" in _services_tile(test_client, admin_token)
 
 
-def test_a_credential_an_agent_can_already_get_by_reference_is_not_listed_as_used_by_no_one(test_client, admin_token):
+def _used_by(html, credential_name):
+    row = html.split(credential_name.replace("_", "_<wbr>"), 1)[1].split("</tr>", 1)[0]  # the page lets long names wrap
+    return row.split("data-label='Used by'>", 1)[1].split("</td>", 1)[0]
+
+
+def _ref_world():
+    with get_db() as conn:
+        owner_id = conn.execute("SELECT id FROM users LIMIT 1").fetchone()["id"]
+    workspace_service.create_workspace("cred-ws", "cred-ws", owner_id)
+    for agent_id, name, caps in (
+        ("ref-reader", "Ref Reader", ["memory", "credentials"]),
+        ("second-reader", "Second Reader", ["memory", "credentials"]),
+        ("holder", "Holder", ["memory", "credentials", "credentials_resolve"]),
+    ):
+        agent_service.create_agent(
+            agent_id=agent_id, display_name=name, owner_user_id=owner_id,
+            read_scopes=["workspace:cred-ws"], write_scopes=[], capabilities=caps,
+        )
+    return owner_id
+
+
+def test_the_used_by_cell_always_says_who_was_given_the_secret_and_who_else_can_see_its_name(test_client, admin_token):
+    _ref_world()
+    credential_service.create_credential("workspace:cred-ws", "api_token", "secret-value")
+    html = test_client.get("/credentials", headers=_admin(admin_token)).text
+    cell = _used_by(html, "api_token")
+    # nobody was given it, three agents can see its name: both facts are stated, in the same two lines
+    assert "Given the secret:" in cell and "no one" in cell
+    assert "3 others can see its name" in cell
+    assert "Ref Reader" in cell.split("title='", 1)[1].split("'", 1)[0]  # the names are on hover
+    assert "use it wherever Agent Core connects a service" in cell and "does not show them the secret" in cell
+    assert "secret-value" not in html and "can get its reference" not in html
+
+
+def test_a_grant_adds_a_chip_and_keeps_the_other_readers_fact(test_client, admin_token):
+    _ref_world()
+    entry = credential_service.create_credential("workspace:cred-ws", "api_token", "secret-value")
+    with get_db() as conn:
+        conn.execute(
+            "INSERT INTO credential_consumer_grants (id, entry_id, consumer_agent_id, created_by, created_at) "
+            "VALUES ('g1', ?, 'holder', 'admin', '2026-11-14T00:00:00+00:00')", (entry["id"],),
+        )
+    cell = _used_by(test_client.get("/credentials", headers=_admin(admin_token)).text, "api_token")
+    assert "Given the secret:" in cell and ">Holder<" in cell and "no one" not in cell
+    assert "2 others can see its name" in cell  # the holder is not counted twice
+
+
+def test_one_other_is_singular_and_nobody_else_leaves_no_line(test_client, admin_token):
     with get_db() as conn:
         owner_id = conn.execute("SELECT id FROM users LIMIT 1").fetchone()["id"]
     workspace_service.create_workspace("cred-ws", "cred-ws", owner_id)
     agent_service.create_agent(
-        agent_id="ref-reader", display_name="Ref Reader", owner_user_id=owner_id,
-        read_scopes=["workspace:cred-ws"], write_scopes=[],
-        capabilities=["memory", "credentials"],
+        agent_id="only-reader", display_name="Only Reader", owner_user_id=owner_id,
+        read_scopes=["workspace:cred-ws"], write_scopes=[], capabilities=["memory", "credentials"],
     )
     credential_service.create_credential("workspace:cred-ws", "api_token", "secret-value")
+    cell = _used_by(test_client.get("/credentials", headers=_admin(admin_token)).text, "api_token")
+    assert "1 other can see its name" in cell
+    credential_service.create_credential("workspace:nobody", "lonely_token", "secret-value")
+    lonely = _used_by(test_client.get("/credentials", headers=_admin(admin_token)).text, "lonely_token")
+    assert "Given the secret:" in lonely and "no one" in lonely and "can see its name" not in lonely
+
+
+def test_the_dialog_uses_the_same_two_labels_as_the_list(test_client, admin_token):
     html = test_client.get("/credentials", headers=_admin(admin_token)).text
-    assert "1 agent can get its reference" in html
-    assert "no one yet" not in html
-    assert "secret-value" not in html
+    assert ">Given the secret</h3>" in html and ">Others who can see its name</h3>" in html
+    assert "Agents with access" not in html
+    js = test_client.get("/static/js/credentials.js").text
+    assert "renderUsedBy" in js and "Given the secret:" in js and "location.reload" not in js.split("function closeAccess", 1)[1].split("}", 1)[0]
 
 
 def test_the_new_agent_dialog_is_not_titled_new_api_key():

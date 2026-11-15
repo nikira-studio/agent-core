@@ -2288,3 +2288,6 @@ details.fold-card[open]:not(.row-more):not(.card-fold):not(.activity-more) > sum
 
 .actions-pick { max-height: 220px; overflow-y: auto; padding: 8px 10px; margin: 6px 0 4px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); }
 .actions-pick .checkbox-label { display: flex; margin: 2px 0; }
+
+.used-by-label { color: var(--text-muted, #8a8f98); font-size: 0.8rem; }
+.actions-offer { margin-top: 8px; }
