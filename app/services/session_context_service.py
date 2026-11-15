@@ -67,7 +67,7 @@ def resolve_scope(
     """Pick the workspace for this session and say how it was chosen.
 
     An explicit scope wins. Otherwise the client's working directory is matched
-    against the configured workspace repo roots, deepest root first, so a hook
+    against the configured workspace repo folders (each workspace may have several), deepest folder first, so a hook
     needs no per-repo configuration. Only scopes the caller can read qualify.
     """
     readable = set(readable_scopes)
@@ -75,11 +75,13 @@ def resolve_scope(
         return (requested, "requested") if requested in readable else (None, "denied")
     if cwd:
         matches = []
-        for scope, root in _workspace_roots().items():
-            if scope not in readable or not isinstance(root, str) or not root:
+        for scope, value in _workspace_roots().items():
+            if scope not in readable:
                 continue
-            if folder_paths.folder_contains(root, cwd):
-                matches.append((len(folder_paths.normalize_folder(root)), scope))
+            # A workspace may list one folder per machine where the project lives; the deepest match anywhere wins.
+            for root in folder_paths.as_folder_list(value):
+                if folder_paths.folder_contains(root, cwd):
+                    matches.append((len(folder_paths.normalize_folder(root)), scope))
         if matches:
             return max(matches)[1], "cwd"
     workspaces = sorted(s for s in readable if s.startswith("workspace:"))

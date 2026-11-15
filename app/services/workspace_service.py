@@ -277,24 +277,41 @@ def delete_workspace_hard(workspace_id: str) -> bool:
         return cursor.rowcount > 0
 
 
-def get_repo_root(workspace_id: str) -> Optional[str]:
-    """The checkout folder linked to this workspace, if any.
-
-    Session context matches a session's working directory against these
-    folders, and the verifier checks repo: anchors under them.
-    """
-    key = f"workspace:{normalize_id(workspace_id)}"
+def _repo_roots_map() -> dict:
     with get_db() as conn:
         row = conn.execute(
-            "SELECT json_extract(value, '$.\"' || ? || '\"') AS root FROM system_settings "
-            "WHERE key = 'workspace_repo_roots' AND json_valid(value)",
-            (key,),
+            "SELECT value FROM system_settings WHERE key = 'workspace_repo_roots'"
         ).fetchone()
-    return row["root"] if row and row["root"] else None
+    try:
+        roots = json.loads(row["value"]) if row and row["value"] else {}
+    except (TypeError, ValueError):
+        return {}
+    return roots if isinstance(roots, dict) else {}
 
 
-def set_repo_root(workspace_id: str, path: Optional[str]) -> None:
-    """Link (or, with an empty path, unlink) the workspace's checkout folder."""
+def get_repo_roots(workspace_id: str) -> list:
+    """The checkout folders linked to this workspace, one per machine where the project lives.
+
+    Session context matches a session's working directory against these
+    folders, and the verifier checks repo: anchors under the ones it can see.
+    A value stored by an older build is a single string; both shapes read the same.
+    """
+    from app.services import folder_paths
+
+    key = f"workspace:{normalize_id(workspace_id)}"
+    return folder_paths.as_folder_list(_repo_roots_map().get(key))
+
+
+def get_repo_root(workspace_id: str) -> Optional[str]:
+    """The first linked folder, for callers that know only one."""
+    roots = get_repo_roots(workspace_id)
+    return roots[0] if roots else None
+
+
+def set_repo_roots(workspace_id: str, paths: list) -> None:
+    """Link the workspace to exactly these folders (an empty list unlinks it)."""
+    from app.services import folder_paths
+
     key = f"workspace:{normalize_id(workspace_id)}"
     with get_db() as conn:
         row = conn.execute(
@@ -306,8 +323,9 @@ def set_repo_root(workspace_id: str, path: Optional[str]) -> None:
             roots = {}
         if not isinstance(roots, dict):
             roots = {}
-        if path:
-            roots[key] = path
+        form = folder_paths.stored_form(list(paths))
+        if form is not None:
+            roots[key] = form
         else:
             roots.pop(key, None)
         conn.execute(
@@ -316,3 +334,8 @@ def set_repo_root(workspace_id: str, path: Optional[str]) -> None:
             (json.dumps(roots),),
         )
         conn.commit()
+
+
+def set_repo_root(workspace_id: str, path: Optional[str]) -> None:
+    """Link (or, with an empty path, unlink) a single checkout folder, replacing any others."""
+    set_repo_roots(workspace_id, [path] if path else [])

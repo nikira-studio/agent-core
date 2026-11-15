@@ -114,9 +114,11 @@ To make `repo:` anchors resolvable, map each workspace scope to a directory on t
 ```json
 {
   "workspace:my-project": "/srv/projects/my-project",
-  "workspace:docs": "/srv/projects/docs"
+  "workspace:docs": ["/srv/projects/docs", "C:\\Users\\you\\docs"]
 }
 ```
+
+A value is one folder, or a list of folders when the same project lives on several machines (a Linux path and a Windows path, say). Set them on the **Workspaces** page (Edit Workspace → Repository folders) rather than by hand. A session's working directory matches a workspace when it is inside any of its folders, and the deepest match across all workspaces wins. For anchor checks, Agent Core uses the first listed folder that exists on its own host; a folder it cannot see is skipped, and a workspace with none it can see reports `unverifiable`. A single folder is stored as a plain string, as in older versions, so rolling back to an older build keeps working for those; a workspace with several folders is a list, which an older build ignores for session context.
 
 **Anchor paths are relative to that root, never absolute.** The same directory has a different absolute path inside every agent's container, so an absolute anchor is resolvable only by whoever wrote it. Agent Core resolves the relative path against this installation's root, which is what lets agents with different mounts share the same memory.
 
@@ -124,7 +126,7 @@ A scope with no configured root reports `unverifiable` rather than guessing. It 
 
 | Setting (in `system_settings`) | Default | What it does |
 | --- | --- | --- |
-| `workspace_repo_roots` | `{}` | JSON map of workspace scope to filesystem root |
+| `workspace_repo_roots` | `{}` | JSON map of workspace scope to a filesystem root, or a list of roots (one per machine) |
 | `verification_pass_enabled` | `1` | Whether the maintenance sweep verifies anchored facts |
 | `verification_pass_limit` | `50` | Records checked per run, least-recently-attempted first |
 

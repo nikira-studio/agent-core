@@ -143,10 +143,10 @@ def workspaces_page(request: Request, session: dict = Depends(require_auth)):
       const collaboratorsEl = document.getElementById('ep-collaborators');
       const agentAccessEl = document.getElementById('ep-agent-access');
       idEl.textContent = id;
-      const repoRootEl = document.getElementById('ep-repo-root');
+      const repoRootsEl = document.getElementById('ep-repo-roots');
       nameEl.value = '';
       descriptionEl.value = '';
-      repoRootEl.value = '';
+      repoRootsEl.innerHTML = '';
       if (collaboratorsEl) {
         collaboratorsEl.innerHTML = '<div class="text-muted">Loading collaborators...</div>';
       }
@@ -161,7 +161,9 @@ def workspaces_page(request: Request, session: dict = Depends(require_auth)):
         idEl.textContent = p.id;
         nameEl.value = p.name || '';
         descriptionEl.value = p.description || '';
-        repoRootEl.value = p.repo_root || '';
+        const folders = p.repo_roots || (p.repo_root ? [p.repo_root] : []);
+        folders.forEach(addRepoRootRow);
+        if (!folders.length) { addRepoRootRow(''); }
         renderWorkspaceCollaborators(p.id);
         renderWorkspaceAgentAccess(p.id);
       } catch (err) {
@@ -174,13 +176,36 @@ def workspaces_page(request: Request, session: dict = Depends(require_auth)):
         showToast(err.message || 'Error loading workspace', 'danger');
       }
     }
+    function addRepoRootRow(value) {
+      const row = document.createElement('div');
+      row.className = 'repo-root-row';
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.className = 'ep-repo-root';
+      input.value = value || '';
+      input.placeholder = '/home/you/projects/my-repo';
+      input.setAttribute('aria-label', 'Repository folder');
+      const remove = document.createElement('button');
+      remove.type = 'button';
+      remove.className = 'btn btn-sm btn-secondary';
+      remove.textContent = 'Remove';
+      remove.setAttribute('aria-label', 'Remove this folder');
+      remove.addEventListener('click', function() { row.remove(); });
+      row.append(input, remove);
+      document.getElementById('ep-repo-roots').appendChild(row);
+    }
+    function repoRootsValue() {
+      return Array.from(document.querySelectorAll('#ep-repo-roots .ep-repo-root'))
+        .map(function(el) { return el.value.trim(); })
+        .filter(Boolean);
+    }
     async function submitEditProject(e) {
       e.preventDefault();
       const id = document.getElementById('ep-id').textContent;
       const body = {
         name: document.getElementById('ep-name').value,
         description: document.getElementById('ep-description').value,
-        repo_root: document.getElementById('ep-repo-root').value,
+        repo_roots: repoRootsValue(),
       };
       const j = await apiFetch('/api/workspaces/' + id, { method: 'PUT', body: JSON.stringify(body) });
       if (j.ok) { showToast('Workspace updated'); closeModal('edit-workspace-modal'); refreshProjects(); }
@@ -527,9 +552,10 @@ def workspaces_page(request: Request, session: dict = Depends(require_auth)):
             <p class="form-hint">A reminder of what this workspace is for.</p>
           </div>
           <div class="form-group">
-            <label for="ep-repo-root">Repository folder</label>
-            <input type="text" id="ep-repo-root" placeholder="/home/you/projects/my-repo or C:\\Users\\you\\projects\\my-repo">
-            <p class="form-hint">Absolute path of the checkout this workspace covers, written as the machine running your AI tool names it (a Windows path such as <code>C:\\Users\\you\\my-repo</code> works). Agent sessions started in this folder get this workspace's context automatically, and facts anchored to <code>repo:</code> paths are checked against it. Leave empty to unlink. Admin only.</p>
+            <label>Repository folders</label>
+            <div id="ep-repo-roots"></div>
+            <button type="button" class="btn btn-sm btn-secondary" onclick="addRepoRootRow('')">Add folder</button>
+            <p class="form-hint">One per machine where this project lives, written as that machine names it (for example <code>/home/you/my-repo</code> or <code>C:\\Users\\you\\my-repo</code>). Agent sessions started in any of these folders get this workspace's context automatically, and facts anchored to <code>repo:</code> paths are checked against the folder that exists on the machine running Agent Core. Leave empty to unlink. Admin only.</p>
           </div>
           <div class="form-group">
             <div id="ep-collaborators"></div>

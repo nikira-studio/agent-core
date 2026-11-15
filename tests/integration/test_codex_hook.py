@@ -323,7 +323,7 @@ def test_an_unmapped_project_folder_gets_one_line_and_a_mapped_one_gets_none(mon
                 result = _run(module, monkeypatch, cwd, UNMATCHED)
                 assert list(result) == ["systemMessage"]
                 assert "no workspace this agent can read is mapped to this folder" in result["systemMessage"]
-                assert "Repository folder" in result["systemMessage"] and "\n" not in result["systemMessage"]
+                assert "Repository folders" in result["systemMessage"] and "\n" not in result["systemMessage"]
             mapped = _run(module, monkeypatch, project, {"memory_scope": "workspace:p", "resolved_by": "cwd", "context": "# ctx"})
             assert list(mapped) == ["hookSpecificOutput"]  # context, never the notice
 

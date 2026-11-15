@@ -59,15 +59,18 @@ def _workspace_roots() -> dict:
 
 
 def _verify_repo(value: str, record: dict) -> tuple[str, str]:
-    roots = _workspace_roots()
-    root = roots.get(record.get("scope") or "")
-    if not root:
+    from app.services import folder_paths
+
+    folders = folder_paths.as_folder_list(_workspace_roots().get(record.get("scope") or ""))
+    if not folders:
         return (
             UNVERIFIABLE,
             f"no repository root configured for {record.get('scope')}",
         )
-    if not os.path.isdir(root):
-        return UNVERIFIABLE, f"configured root {root} is not a directory"
+    # A workspace lists a folder per machine; only one that exists on this host can be read here.
+    root = next((folder for folder in folders if os.path.isdir(folder)), None)
+    if root is None:
+        return UNVERIFIABLE, f"none of the configured folders ({', '.join(folders)}) is a directory on this host"
 
     # Contain the lookup inside the configured root: an anchor is data, and a
     # path that escapes its workspace must not be probed just because someone

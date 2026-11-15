@@ -502,7 +502,7 @@ def test_the_docs_name_both_hooks_and_the_read_access_a_mapped_folder_needs():
     assert "| Claude Code Hook |" in doc and "| Codex Hook |" in doc
     assert "**Session start hooks.**" in doc
     paragraph = doc.split("**Session start hooks.**", 1)[1].split("**Refresh workspace guidance", 1)[0]
-    assert "Repository folder" in paragraph and "read access" in paragraph and "exactly like an unmapped one" in paragraph
+    assert "Repository folders" in paragraph and "read access" in paragraph and "exactly like an unmapped one" in paragraph
 
 
 def _steps(client, target, agent="claude-code"):
@@ -584,10 +584,10 @@ def test_codex_step_c_covers_the_desktop_app_and_a_workspace_with_no_repository_
     _html, codex, _o = _steps(integrations_client, "codex")
     plain = codex.replace("<code>", "").replace("</code>", "").replace("&gt;", ">")
     assert "Settings > Hooks" in plain and "has no /hooks" in plain and "Review hooks" in plain
-    assert "Agent Core has no Repository folder yet, so a session cannot be matched" in codex
+    assert "Agent Core has no Repository folders yet, so a session cannot be matched" in codex
     workspace_service.set_repo_root("agent-core", "C:\\Users\\alex\\media studio")
     _html, mapped, _o = _steps(integrations_client, "codex")
-    assert "has no Repository folder yet" not in mapped
+    assert "has no Repository folders yet" not in mapped
 
 
 def _start(client_agent, scope, source, channel, host_session_ref, exec_id):

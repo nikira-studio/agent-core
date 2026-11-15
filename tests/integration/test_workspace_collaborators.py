@@ -296,7 +296,8 @@ def test_workspaces_page_script_does_not_call_server_helpers(test_client, admin_
     page = test_client.get("/workspaces").text
     test_client.cookies.clear()
     assert "get_icon(" not in page
-    assert 'id="ep-repo-root"' in page
+    assert 'id="ep-repo-roots"' in page and "Add folder" in page and "one per machine where this project lives" in page.lower()
+    assert "function addRepoRootRow" in page and "repo_roots: repoRootsValue()" in page
 
 
 def test_a_windows_repository_folder_links_and_matches_a_windows_session(test_client, admin_token):
@@ -315,3 +316,81 @@ def test_a_windows_repository_folder_links_and_matches_a_windows_session(test_cl
     scope, how = session_context_service.resolve_scope(scopes, None, "C:\\Users\\Alex\\media studio-old")
     assert scope is None and how == "unmatched"
     assert test_client.put("/api/workspaces/winrepo", headers=admin, json={"repo_root": "C:repo"}).status_code == 400
+
+
+def _put(client, headers, wid, **body):
+    return client.put(f"/api/workspaces/{wid}", headers=headers, json=body)
+
+
+def test_a_workspace_holds_several_folders_and_the_deepest_match_wins(test_client, admin_token):
+    from app.services import session_context_service, workspace_service
+
+    admin = {"Authorization": f"Bearer {admin_token}"}
+    for wid in ("multi", "inner"):
+        assert test_client.post("/api/workspaces", headers=admin, json={"id": wid, "name": wid}).status_code == 201
+    saved = _put(test_client, admin, "multi", repo_roots=["/mnt/nas/proj", "D:/windows/Proj/", "/mnt/nas/proj", ""])
+    assert saved.status_code == 200
+    got = test_client.get("/api/workspaces/multi", headers=admin).json()["data"]["workspace"]
+    assert got["repo_roots"] == ["/mnt/nas/proj", "D:\\windows\\Proj"] and got["repo_root"] == "/mnt/nas/proj"
+    scopes = ["workspace:multi", "workspace:inner", "workspace:other"]
+    for cwd in ("/mnt/nas/proj/src", "d:\\WINDOWS\\proj\\src"):
+        assert session_context_service.resolve_scope(scopes, None, cwd) == ("workspace:multi", "cwd")
+    # A folder inside one of them that another workspace claims more deeply goes to the deeper one.
+    assert _put(test_client, admin, "inner", repo_roots=["D:\\windows\\Proj\\vendor", "/srv/other"]).status_code == 200
+    assert session_context_service.resolve_scope(scopes, None, "D:\\windows\\Proj\\vendor\\lib")[0] == "workspace:inner"
+    assert session_context_service.resolve_scope(scopes, None, "D:\\windows\\Proj\\src")[0] == "workspace:multi"
+    # Remove one folder: the other still matches, the removed one does not.
+    assert _put(test_client, admin, "multi", repo_roots=["D:\\windows\\Proj"]).status_code == 200
+    assert workspace_service.get_repo_roots("multi") == ["D:\\windows\\Proj"]
+    assert session_context_service.resolve_scope(scopes, None, "/mnt/nas/proj/src")[1] == "unmatched"
+    assert _put(test_client, admin, "multi", repo_roots=["relative/dir"]).status_code == 400
+    assert _put(test_client, admin, "multi", repo_roots=[]).status_code == 200 and workspace_service.get_repo_roots("multi") == []
+
+
+def test_the_stored_shape_stays_readable_by_older_builds_and_old_values_are_read(test_client, admin_token):
+    import json as _json
+
+    from app.database import get_db
+    from app.services import session_context_service, workspace_service
+
+    admin = {"Authorization": f"Bearer {admin_token}"}
+    assert test_client.post("/api/workspaces", headers=admin, json={"id": "legacy", "name": "legacy"}).status_code == 201
+    with get_db() as conn:  # a value written by the one-folder build: a plain string
+        conn.execute("INSERT OR REPLACE INTO system_settings (key, value) VALUES ('workspace_repo_roots', ?)",
+                     (_json.dumps({"workspace:legacy": "/srv/legacy"}),))
+        conn.commit()
+    assert workspace_service.get_repo_roots("legacy") == ["/srv/legacy"] and workspace_service.get_repo_root("legacy") == "/srv/legacy"
+    assert session_context_service.resolve_scope(["workspace:legacy"], None, "/srv/legacy/app")[1] == "cwd"
+
+    def stored():
+        with get_db() as conn:
+            return _json.loads(conn.execute("SELECT value FROM system_settings WHERE key = 'workspace_repo_roots'").fetchone()[0])["workspace:legacy"]
+
+    # One folder is written back as a string (an older build reads it); several as a list.
+    assert _put(test_client, admin, "legacy", repo_roots=["/srv/legacy"]).status_code == 200 and stored() == "/srv/legacy"
+    assert _put(test_client, admin, "legacy", repo_roots=["/srv/legacy", "C:\\Users\\me\\legacy"]).status_code == 200
+    assert stored() == ["/srv/legacy", "C:\\Users\\me\\legacy"]
+    # The old single field: sending the first folder back unchanged keeps the rest (older dashboards do this on every save),
+    # a different folder replaces them all, an empty one unlinks.
+    assert _put(test_client, admin, "legacy", repo_root="/srv/legacy/").status_code == 200 and len(stored()) == 2
+    assert _put(test_client, admin, "legacy", repo_root="/srv/elsewhere").status_code == 200 and stored() == "/srv/elsewhere"
+    assert _put(test_client, admin, "legacy", repo_root="").status_code == 200 and workspace_service.get_repo_roots("legacy") == []
+
+
+def test_the_verifier_uses_the_folder_that_exists_on_the_host_and_skips_the_rest(test_client, tmp_path):
+    import json as _json
+
+    from app.database import get_db
+    from app.services import verification_service
+
+    (tmp_path / "src").mkdir()
+    with get_db() as conn:
+        conn.execute("INSERT OR REPLACE INTO system_settings (key, value) VALUES ('workspace_repo_roots', ?)",
+                     (_json.dumps({"workspace:v": ["C:\\Users\\me\\proj", str(tmp_path)], "workspace:w": ["C:\\only\\windows"]}),))
+        conn.commit()
+    status, _why = verification_service._verify_repo("src", {"scope": "workspace:v"})
+    assert status == verification_service.VERIFIED
+    status, _why = verification_service._verify_repo("missing.py", {"scope": "workspace:v"})
+    assert status == verification_service.MISSING
+    status, why = verification_service._verify_repo("src", {"scope": "workspace:w"})
+    assert status == verification_service.UNVERIFIABLE and "none of the configured folders" in why

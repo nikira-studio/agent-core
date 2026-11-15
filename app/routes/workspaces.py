@@ -24,8 +24,12 @@ class UpdateWorkspaceRequest(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
     is_active: Optional[bool] = None
-    # Absolute path of the checkout this workspace covers; "" unlinks it.
+    # Absolute path of the checkout this workspace covers; "" unlinks it. Setting it replaces every folder,
+    # except that sending back the first folder unchanged leaves the others alone (older clients do this on every save).
     repo_root: Optional[str] = Field(default=None, max_length=1024)
+    # The checkout folders, one per machine where the project lives, each written as that machine names it
+    # (POSIX or Windows form). Sets them all; an empty list unlinks the workspace.
+    repo_roots: Optional[list[str]] = Field(default=None, max_length=10)
 
 
 class WorkspaceCollaboratorRequest(BaseModel):
@@ -116,7 +120,13 @@ def get_workspace(
         return error_response("FORBIDDEN", "Access denied", 403)
 
     return success_response(
-        {"workspace": {**workspace, "repo_root": workspace_service.get_repo_root(workspace_id)}}
+        {
+            "workspace": {
+                **workspace,
+                "repo_root": workspace_service.get_repo_root(workspace_id),
+                "repo_roots": workspace_service.get_repo_roots(workspace_id),
+            }
+        }
     )
 
 
@@ -133,17 +143,37 @@ def update_workspace(
     if not _can_manage_workspace(workspace, session):
         return error_response("FORBIDDEN", "Access denied", 403)
 
-    repo_root = None
-    if body.repo_root is not None:
-        repo_root = body.repo_root.strip()
-        if repo_root and (not folder_paths.is_absolute_folder(repo_root) or "\x00" in repo_root):
-            return error_response("INVALID_PATH", "Repository folder must be an absolute path", 400)
-        repo_root = folder_paths.normalize_folder(repo_root) if repo_root else ""
-        if repo_root != (workspace_service.get_repo_root(workspace_id) or ""):
-            # It decides which host folders the verifier reads, so only an admin sets it.
+    if body.repo_roots is not None or body.repo_root is not None:
+        current = [folder_paths.normalize_folder(f) for f in workspace_service.get_repo_roots(workspace_id)]
+        if body.repo_roots is not None:
+            wanted = list(body.repo_roots)
+        else:
+            single = body.repo_root.strip()
+            if not single:
+                wanted = []
+            elif current and folder_paths.is_absolute_folder(single) and folder_paths.normalize_folder(single) == current[0]:
+                wanted = list(current)  # unchanged: leave the other folders alone
+            else:
+                wanted = [single]
+        folders = []
+        for entry in wanted:
+            entry = (entry or "").strip()
+            if not entry:
+                continue
+            if len(entry) > 1024 or not folder_paths.is_absolute_folder(entry) or "\x00" in entry:
+                return error_response(
+                    "INVALID_PATH",
+                    f"Repository folder must be an absolute path, as the machine running your tool writes it: {entry[:80]}",
+                    400,
+                )
+            clean = folder_paths.normalize_folder(entry)
+            if clean not in folders:
+                folders.append(clean)
+        if folders != current:
+            # They decide which host folders the verifier reads, so only an admin sets them.
             if session.get("role") != "admin":
                 return error_response("FORBIDDEN", "Only an admin can link a repository folder", 403)
-            workspace_service.set_repo_root(workspace_id, repo_root)
+            workspace_service.set_repo_roots(workspace_id, folders)
 
     workspace_service.update_workspace(
         workspace_id,

@@ -45,3 +45,17 @@ def folder_contains(root: str, path: str) -> bool:
         return path_key == root_key or path_key.startswith(root_key + "\\")
     root_clean, path_clean = os.path.normpath(root), os.path.normpath(path)
     return path_clean == root_clean or path_clean.startswith(root_clean.rstrip(os.sep) + os.sep)
+
+
+def as_folder_list(value) -> list:
+    """A stored folder value as a list: the old shape is one string, the new one a list of strings."""
+    items = [value] if isinstance(value, str) else value if isinstance(value, list) else []
+    return [item for item in items if isinstance(item, str) and item.strip()]
+
+
+def stored_form(folders: list):
+    """What is stored for a workspace's folders: one folder stays the plain string it always was
+    (so an older build still reads it), several are a list, none is nothing."""
+    if not folders:
+        return None
+    return folders[0] if len(folders) == 1 else list(folders)

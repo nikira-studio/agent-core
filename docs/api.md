@@ -544,7 +544,7 @@ The helper key authenticates the request. The `agent_id` must come from trusted 
 
 ## Session context
 
-`POST /api/session-context` (agent key) returns `{memory_scope, resolved_by, execution_id, context, chars, reductions, memory_ids, activity_ids}`. Body: optional `memory_scope`, `cwd`, `host_session_ref`, `source`, `max_chars` (1,000 to 50,000, default 9,000). Without `memory_scope`, `cwd` is matched against the `workspace_repo_roots` setting, deepest root first. `context` is fitted to `max_chars` by dropping whole items, cheapest first: the record index, then changes, then result detail. An execution is opened (or reused for the same `host_session_ref`) with its cursor at the newest change. Each call is audited as `context_injected`.
+`POST /api/session-context` (agent key) returns `{memory_scope, resolved_by, execution_id, context, chars, reductions, memory_ids, activity_ids}`. Body: optional `memory_scope`, `cwd`, `host_session_ref`, `source`, `max_chars` (1,000 to 50,000, default 9,000). Without `memory_scope`, `cwd` is matched against the `workspace_repo_roots` setting (a workspace may list several folders, one per machine; a Windows folder matches ignoring case and slash direction), deepest folder first. `context` is fitted to `max_chars` by dropping whole items, cheapest first: the record index, then changes, then result detail. An execution is opened (or reused for the same `host_session_ref`) with its cursor at the newest change. Each call is audited as `context_injected`.
 
 `POST /api/session-context/handoff-check` with `{host_session_ref}` returns `{nudge: false}` or `{nudge: true, activity_id, reason}`. It is used by the Claude Code Stop hook, and asks at most once per activity.
 

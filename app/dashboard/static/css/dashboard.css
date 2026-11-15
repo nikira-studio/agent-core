@@ -2310,3 +2310,7 @@ details.fold-card[open]:not(.row-more):not(.card-fold):not(.activity-more) > sum
 
 .used-by-label { color: var(--text-muted, #8a8f98); font-size: 0.8rem; }
 .actions-offer { margin-top: 8px; }
+
+/* Edit Workspace: one row per repository folder. */
+.repo-root-row { display: flex; gap: 8px; margin-bottom: 6px; }
+.repo-root-row input { flex: 1; min-width: 0; }

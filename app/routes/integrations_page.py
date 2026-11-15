@@ -746,15 +746,15 @@ def _step_status(ok, text):
 
 
 def _no_repo_folder_note(workspace):
-    """Say so when the chosen workspace has no Repository folder: without one a session cannot be matched to it."""
+    """Say so when the chosen workspace has no Repository folders: without one a session cannot be matched to it."""
     from app.services import workspace_service
 
-    if workspace_service.get_repo_root(workspace["id"]):
+    if workspace_service.get_repo_roots(workspace["id"]):
         return ""
     name = workspace.get("name") or workspace["id"]
     return (
-        f"<p class='step-note step-warn'>{escape_html(name)} has no Repository folder yet, so a session cannot be matched to it by its folder. "
-        "An admin sets it under Workspaces → Edit Workspace → Repository folder.</p>"
+        f"<p class='step-note step-warn'>{escape_html(name)} has no Repository folders yet, so a session cannot be matched to it by its folder. "
+        "An admin adds one under Workspaces → Edit Workspace → Repository folders, one per machine where this project lives.</p>"
     )
 
 
@@ -1774,10 +1774,10 @@ def _hook_steps(client_key, base_url):
         f'python "{win_env_script}"'
     )
     mapping = (
-        f"The hook sends the session's working directory. {APP_NAME} matches it against each workspace's repository folder "
+        f"The hook sends the session's working directory. {APP_NAME} matches it against each workspace's Repository folders "
         f"(Workspaces → Edit Workspace, admin only), so the right workspace loads without per-repository setup. "
-        f"Enter the folder as it appears on the machine running {name} (on Windows, for example `C:\\Users\\you\\my-repo`), not inside the {APP_NAME} container; "
-        "only the path text is compared. The agent also needs read access to that workspace (Agents page → Edit the agent → Advanced access → Can Read From): "
+        f"Add the folder as it appears on the machine running {name} (on Windows, for example `C:\\Users\\you\\my-repo`), not inside the {APP_NAME} container; "
+        "a workspace can list several folders, one for each machine where the project lives, and only the path text is compared. The agent also needs read access to that workspace (Agents page → Edit the agent → Advanced access → Can Read From): "
         "a folder mapped to a workspace the agent cannot read behaves exactly like an unmapped one. "
         "An agent that can read exactly one workspace gets that workspace in every folder, mapped or not. "
         "With several, a session in a folder no workspace claims (or none the agent can read) starts normally, without context. "

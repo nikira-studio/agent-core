@@ -161,7 +161,7 @@ def _reason(exc, api_key):
 PROJECT_MARKERS = (".git", "AGENTS.md", "CLAUDE.md")
 UNMAPPED_NOTICE = (
     "Agent Core: no workspace this agent can read is mapped to this folder, so this session starts "
-    "without shared context. Map the folder in Workspaces > Edit Workspace > Repository folder, "
+    "without shared context. Map the folder in Workspaces > Edit Workspace > Repository folders, "
     "and check the agent's access on the Agents page."
 )
 
