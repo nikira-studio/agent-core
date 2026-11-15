@@ -1519,7 +1519,7 @@ Merge this into `~/.claude/settings.json` (all projects) or `.claude/settings.lo
 
 ## 3. Map repositories to workspaces
 
-The hook sends the session's working directory. {APP_NAME} matches it against each workspace's repository folder (Workspaces → Edit Workspace, admin only), so the right workspace loads without per-repository setup. Enter the folder as it appears on the machine running Claude Code, not inside the {APP_NAME} container; only the path text is compared. Sessions in a folder no workspace claims start normally, without context. To pin a workspace instead, set `AGENT_CORE_SCOPE=workspace:<id>` in the environment Claude Code runs in.
+The hook sends the session's working directory. {APP_NAME} matches it against each workspace's repository folder (Workspaces → Edit Workspace, admin only), so the right workspace loads without per-repository setup. Enter the folder as it appears on the machine running Claude Code, not inside the {APP_NAME} container; only the path text is compared. The agent also needs read access to that workspace (Agents page → Edit the agent → Can Read From): a folder mapped to a workspace the agent cannot read behaves exactly like an unmapped one. Sessions in a folder no workspace claims, or none this agent can read, start normally, without context. To pin a workspace instead, set `AGENT_CORE_SCOPE=workspace:<id>` in the environment Claude Code runs in.
 
 ## Behavior
 
@@ -1579,7 +1579,7 @@ Codex skips a new or changed hook until you trust it. Start Codex, type `/hooks`
 
 ## 4. Map repositories to workspaces
 
-The hook sends the session's working directory. {APP_NAME} matches it against each workspace's repository folder (Workspaces → Edit Workspace, admin only), so the right workspace loads without per-repository setup. Enter the folder as it appears on the machine running Codex, not inside the {APP_NAME} container; only the path text is compared. Sessions in a folder no workspace claims start normally, without context. To pin a workspace instead, set `AGENT_CORE_SCOPE=workspace:<id>` in the environment Codex runs in.
+The hook sends the session's working directory. {APP_NAME} matches it against each workspace's repository folder (Workspaces → Edit Workspace, admin only), so the right workspace loads without per-repository setup. Enter the folder as it appears on the machine running Codex, not inside the {APP_NAME} container; only the path text is compared. The agent also needs read access to that workspace (Agents page → Edit the agent → Can Read From): a folder mapped to a workspace the agent cannot read behaves exactly like an unmapped one. Sessions in a folder no workspace claims, or none this agent can read, start normally, without context. To pin a workspace instead, set `AGENT_CORE_SCOPE=workspace:<id>` in the environment Codex runs in.
 
 ## Behavior
 

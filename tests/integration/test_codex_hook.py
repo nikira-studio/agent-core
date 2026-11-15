@@ -210,6 +210,11 @@ def test_the_script_is_served_and_the_output_has_no_key(test_client):
     assert "https://core.example/integrations/hooks/codex/agent_core_hook.py" in text
     assert "~/.codex/hooks.json" in text and "/hooks" in text and '"additionalContextLimit": 4000' in text
     assert "Bearer" not in text and "sk-" not in text
+    from app.routes.integrations_page import _build_claude_code_hook
+
+    for output in (text, _build_claude_code_hook("https://core.example")):
+        # a mapped folder the agent cannot read looks exactly like an unmapped one: the steps say so
+        assert "Can Read From" in output and "behaves exactly like an unmapped one" in output
     registered = json.loads(text.split("```json\n", 1)[1].split("\n```", 1)[0])
     handler = registered["hooks"]["SessionStart"][0]["hooks"][0]
     assert handler["command"] == "python3 ~/.codex/hooks/agent_core_hook.py" and handler["timeout"] == 15

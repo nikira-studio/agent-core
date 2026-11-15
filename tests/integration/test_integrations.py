@@ -489,3 +489,13 @@ def test_a_failed_access_check_offers_give_access(integrations_client):
         "/integrations?user_id=alex&workspace_id=agent-core&agent_id=claude-code&target=claude_code&output_type=instructions"
     ).text
     assert ">Give access</button>" not in good
+
+
+def test_the_docs_name_both_hooks_and_the_read_access_a_mapped_folder_needs():
+    import pathlib
+
+    doc = pathlib.Path("docs/integrations.md").read_text()
+    assert "| Claude Code Hook |" in doc and "| Codex Hook |" in doc
+    assert "**Session start hooks.**" in doc
+    paragraph = doc.split("**Session start hooks.**", 1)[1].split("**Refresh workspace guidance", 1)[0]
+    assert "Repository folder" in paragraph and "read access" in paragraph and "exactly like an unmapped one" in paragraph

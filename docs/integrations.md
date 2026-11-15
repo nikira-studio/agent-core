@@ -645,8 +645,9 @@ The **Connect** page (`/integrations`) generates everything you need for a speci
 - `CLAUDE.md` or `AGENTS.md` content with instructions for the agent
 - Environment variable snippets
 - Verification prompts to paste into the agent to confirm it's connected
+- A session start hook for Claude Code and for Codex, so a session begins with its workspace context already loaded
 
-The Connect page is three steps. **1. Who is connecting?** Pick the user, workspace and agent. **2. Which tool?** Pick Claude Code, Codex, Cursor, Windsurf, Antigravity or Other MCP tool; the page then shows only what that tool needs, in order: its MCP config (with the **Generate One-Time Key** button, which makes a new key for the agent and replaces its old one), then the file it reads (CLAUDE.md for Claude Code, AGENTS.md for Codex, the setup guide for the others). **3. Check it works.** Test the connection address and run the Verification Prompt. Everything else is under **Other outputs**.
+The Connect page is three steps. **1. Who is connecting?** Pick the user, workspace and agent. **2. Which tool?** Pick Claude Code, Codex, Cursor, Windsurf, Antigravity or Other MCP tool; the page then shows only what that tool needs, in order: its MCP config (with the **Generate One-Time Key** button, which makes a new key for the agent and replaces its old one), then the file it reads (CLAUDE.md for Claude Code, AGENTS.md for Codex, the setup guide for the others), then, for Claude Code and Codex, the session start hook. **3. Check it works.** Test the connection address and run the Verification Prompt. Everything else is under **Other outputs**.
 
 **Other outputs** holds every output the page can generate, as tabs. Each output type is available for every tool preset:
 
@@ -659,7 +660,11 @@ The Connect page is three steps. **1. Who is connecting?** Pick the user, worksp
 | AGENTS.md | Equivalent instructions for Codex or other `AGENTS.md`-aware tools |
 | Assistants | Reusable onboarding instructions for assistant-style agents that update their own MCP config |
 | Session Prompt | A startup prompt the agent can run at the beginning of each session |
+| Claude Code Hook | The script, where to install it and how to register it in Claude Code, so each session starts with its workspace context (`agent-core-claude-code-hook.md`) |
+| Codex Hook | The same for Codex, including the one-time trust step in `/hooks` (`agent-core-codex-hook.md`) |
 | Verification Prompt | A one-time prompt that confirms the full end-to-end connection is working |
+
+**Session start hooks.** A hook runs when a Claude Code or Codex session starts, asks Agent Core for the session context (work waiting on a person, unfinished and handed-off work, recent results, key records) and puts it in front of the agent, so the agent does not have to be told to look. The Connect page generates the exact install and registration steps for each (**Other outputs** → Claude Code Hook or Codex Hook; the script itself is served by Agent Core at `/integrations/hooks/`). The hook contains no key; it reads the one already in the tool's MCP configuration. Which workspace a session gets comes from its folder: map the folder under **Workspaces** → Edit Workspace → Repository folder, and give the agent read access to that workspace on the **Agents** page. A folder that is mapped to a workspace the agent cannot read behaves exactly like an unmapped one: the session starts without context, and in a project folder the hook says so in one line.
 
 **Refresh workspace guidance after an upgrade.** `CLAUDE.md`, `AGENTS.md`, Instructions, Session Prompt, and Verification Prompt teach an already connected agent how to use new capabilities. They contain no key, so regenerating them is safe and does not change an MCP connection. MCP Config, Environment Variables, and Assistants onboarding can embed a key. They generate or rotate that key only when you press **Generate connection**.
 
