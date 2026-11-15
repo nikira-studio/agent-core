@@ -156,6 +156,31 @@ def _reason(exc, api_key):
     return type(exc).__name__
 
 
+PROJECT_MARKERS = (".git", "AGENTS.md", "CLAUDE.md")
+UNMAPPED_NOTICE = (
+    "Agent Core: no workspace this agent can read is mapped to this folder, so this session starts "
+    "without shared context. Map the folder in Workspaces > Edit Workspace > Repository folder, "
+    "and check the agent's access on the Agents page."
+)
+
+
+def _looks_like_project(cwd, home=None):
+    """True when cwd or a parent below the home directory holds .git, AGENTS.md or CLAUDE.md.
+
+    The home directory itself, the filesystem root and bare folders such as /tmp do not count, so the
+    notice about an unmapped folder never appears where nobody expects a workspace."""
+    try:
+        home = os.path.realpath(home or os.path.expanduser("~"))
+        directory = os.path.realpath(cwd)
+        while directory not in (home, os.sep) and os.path.dirname(directory) != directory:
+            if any(os.path.exists(os.path.join(directory, marker)) for marker in PROJECT_MARKERS):
+                return True
+            directory = os.path.dirname(directory)
+    except (OSError, ValueError, TypeError):
+        pass
+    return False
+
+
 def session_start(event, base_url, api_key, env):
     if event.get("source", "startup") not in INJECT_SOURCES:
         return None
@@ -177,6 +202,8 @@ def session_start(event, base_url, api_key, env):
         return {"systemMessage": f"Agent Core session context unavailable: {_reason(exc, api_key)}"}
     context = data.get("context")
     if not isinstance(context, str) or not context:
+        if data.get("resolved_by") == "unmatched" and _looks_like_project(payload["cwd"]):
+            return {"systemMessage": UNMAPPED_NOTICE}
         return None
     data = {"context": context[:MAX_CONTEXT_CHARS]}
     return {"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": data["context"]}}

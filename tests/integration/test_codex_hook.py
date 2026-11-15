@@ -285,3 +285,71 @@ def test_both_hooks_only_pass_on_a_string_context_and_never_quote_a_key(monkeypa
         out = io.StringIO()
         module.main(io.StringIO(json.dumps(event)), out, env)
         assert "SECRET-KEY" not in out.getvalue() and "unavailable" in out.getvalue()
+
+
+def _hooks():
+    return (_codex(), _load("claude-code", "agent_core_hook.py"))
+
+
+def _run(module, monkeypatch, cwd, answer, source="startup"):
+    monkeypatch.setattr(module, "post", lambda *a: answer)
+    out = io.StringIO()
+    env = {"AGENT_CORE_URL": "http://core", "AGENT_CORE_API_KEY": "k"}
+    event = {"session_id": "s1", "cwd": str(cwd), "source": source, "hook_event_name": "SessionStart"}
+    assert module.main(io.StringIO(json.dumps(event)), out, env) == 0
+    return json.loads(out.getvalue()) if out.getvalue() else None
+
+
+UNMATCHED = {"memory_scope": None, "resolved_by": "unmatched", "execution_id": None, "context": ""}
+
+
+def test_an_unmapped_project_folder_gets_one_line_and_a_mapped_one_gets_none(monkeypatch, tmp_path):
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    (tmp_path / "home").mkdir()
+    for marker in (".git", "AGENTS.md", "CLAUDE.md"):
+        project = tmp_path / f"proj-{marker}"
+        (project / "src" / "deep").mkdir(parents=True)
+        if marker == ".git":
+            (project / ".git").mkdir()
+        else:
+            (project / marker).write_text("x")
+        for module in _hooks():
+            for cwd in (project, project / "src" / "deep"):  # the folder itself and a subfolder
+                result = _run(module, monkeypatch, cwd, UNMATCHED)
+                assert list(result) == ["systemMessage"]
+                assert "no workspace this agent can read is mapped to this folder" in result["systemMessage"]
+                assert "Repository folder" in result["systemMessage"] and "\n" not in result["systemMessage"]
+            mapped = _run(module, monkeypatch, project, {"memory_scope": "workspace:p", "resolved_by": "cwd", "context": "# ctx"})
+            assert list(mapped) == ["hookSpecificOutput"]  # context, never the notice
+
+
+def test_bare_folders_home_and_the_filesystem_root_stay_silent(monkeypatch, tmp_path):
+    home = tmp_path / "home"
+    bare = tmp_path / "scratch" / "inner"
+    bare.mkdir(parents=True)
+    home.mkdir()
+    (home / "AGENTS.md").write_text("x")  # the home directory is never a project
+    (home / "notes").mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    for module in _hooks():
+        for cwd in (bare, home, home / "notes", "/", "/nonexistent/place"):
+            assert _run(module, monkeypatch, cwd, UNMATCHED) is None, cwd
+        # only an "unmatched" answer produces the notice, whatever the folder
+        project = tmp_path / "proj"
+        (project / ".git").mkdir(parents=True, exist_ok=True)
+        for answer in ({"resolved_by": "requested", "context": ""}, {"context": ""}, {"resolved_by": "private", "context": ""}):
+            assert _run(module, monkeypatch, project, answer) is None
+        # resumed sessions are not touched at all
+        assert _run(module, monkeypatch, project, UNMATCHED, source="resume") is None
+
+
+def test_an_unreachable_core_still_gives_the_unavailable_line_in_a_project(monkeypatch, tmp_path):
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    project = tmp_path / "proj"
+    (project / ".git").mkdir(parents=True)
+    for module in _hooks():
+        monkeypatch.setattr(module, "post", lambda *a: (_ for _ in ()).throw(OSError("refused")))
+        out = io.StringIO()
+        event = {"session_id": "s", "cwd": str(project), "source": "startup"}
+        module.main(io.StringIO(json.dumps(event)), out, {"AGENT_CORE_URL": "http://c", "AGENT_CORE_API_KEY": "k"})
+        assert "unavailable" in json.loads(out.getvalue())["systemMessage"]

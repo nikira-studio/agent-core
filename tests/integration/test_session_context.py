@@ -140,6 +140,7 @@ def test_scope_resolves_from_cwd_by_deepest_root(test_client, admin_token, tmp_p
     assert _context(test_client, headers, cwd=str(outer / "x"))["memory_scope"] == "workspace:ctx-other"
     unmatched = _context(test_client, headers, cwd=str(tmp_path / "elsewhere"))
     assert unmatched["memory_scope"] is None and unmatched["context"] == ""
+    assert unmatched["resolved_by"] == "unmatched"  # the hooks key their unmapped-folder notice on this
 
 
 def test_scope_the_agent_cannot_read_is_denied(test_client, admin_token):
