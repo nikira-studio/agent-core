@@ -4,7 +4,7 @@ import os
 from pydantic import BaseModel, Field
 from typing import Optional
 
-from app.services import audit_service, workspace_service
+from app.services import audit_service, folder_paths, workspace_service
 from app.security.dependencies import get_current_session, get_request_context
 from app.security.effective_authority import EffectiveAuthority
 from app.security.response_helpers import success_response, error_response
@@ -136,9 +136,9 @@ def update_workspace(
     repo_root = None
     if body.repo_root is not None:
         repo_root = body.repo_root.strip()
-        if repo_root and (not os.path.isabs(repo_root) or "\x00" in repo_root):
+        if repo_root and (not folder_paths.is_absolute_folder(repo_root) or "\x00" in repo_root):
             return error_response("INVALID_PATH", "Repository folder must be an absolute path", 400)
-        repo_root = os.path.normpath(repo_root) if repo_root else ""
+        repo_root = folder_paths.normalize_folder(repo_root) if repo_root else ""
         if repo_root != (workspace_service.get_repo_root(workspace_id) or ""):
             # It decides which host folders the verifier reads, so only an admin sets it.
             if session.get("role") != "admin":

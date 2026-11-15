@@ -297,3 +297,21 @@ def test_workspaces_page_script_does_not_call_server_helpers(test_client, admin_
     test_client.cookies.clear()
     assert "get_icon(" not in page
     assert 'id="ep-repo-root"' in page
+
+
+def test_a_windows_repository_folder_links_and_matches_a_windows_session(test_client, admin_token):
+    from app.services import session_context_service
+
+    admin = {"Authorization": f"Bearer {admin_token}"}
+    assert test_client.post("/api/workspaces", headers=admin, json={"id": "winrepo", "name": "Win"}).status_code == 201
+    saved = test_client.put("/api/workspaces/winrepo", headers=admin, json={"repo_root": "c:/Users/Alex/media studio/"})
+    assert saved.status_code == 200
+    fetched = test_client.get("/api/workspaces/winrepo", headers=admin).json()["data"]["workspace"]
+    assert fetched["repo_root"] == "C:\\Users\\Alex\\media studio"
+    scopes = ["workspace:winrepo", "workspace:other"]
+    for cwd in ("C:\\Users\\Alex\\media studio", "c:\\users\\alex\\Media Studio\\clips"):
+        scope, how = session_context_service.resolve_scope(scopes, None, cwd)
+        assert (scope, how) == ("workspace:winrepo", "cwd")
+    scope, how = session_context_service.resolve_scope(scopes, None, "C:\\Users\\Alex\\media studio-old")
+    assert scope is None and how == "unmatched"
+    assert test_client.put("/api/workspaces/winrepo", headers=admin, json={"repo_root": "C:repo"}).status_code == 400

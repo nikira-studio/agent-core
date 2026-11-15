@@ -28,7 +28,7 @@ from typing import Optional
 
 from app.branding import APP_NAME
 from app.database import get_db
-from app.services import audit_service, workspace_sync_service
+from app.services import audit_service, folder_paths, workspace_sync_service
 
 DEFAULT_BUDGET_CHARS = 9000
 MAX_BUDGET_CHARS = 50000
@@ -74,14 +74,12 @@ def resolve_scope(
     if requested:
         return (requested, "requested") if requested in readable else (None, "denied")
     if cwd:
-        path = os.path.normpath(cwd)
         matches = []
         for scope, root in _workspace_roots().items():
             if scope not in readable or not isinstance(root, str) or not root:
                 continue
-            root = os.path.normpath(root)
-            if path == root or path.startswith(root + os.sep):
-                matches.append((len(root), scope))
+            if folder_paths.folder_contains(root, cwd):
+                matches.append((len(folder_paths.normalize_folder(root)), scope))
         if matches:
             return max(matches)[1], "cwd"
     workspaces = sorted(s for s in readable if s.startswith("workspace:"))

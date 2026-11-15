@@ -227,7 +227,10 @@ def main(stdin=sys.stdin, stdout=sys.stdout, env=os.environ):
 
 def _run(stdin, stdout, env):
     try:
-        event = json.load(stdin)
+        # Read bytes and decode as UTF-8: on Windows the default text decoding is the
+        # system code page, which would garble a folder name with accents.
+        raw = stdin.buffer.read().decode("utf-8", "replace") if hasattr(stdin, "buffer") else stdin.read()
+        event = json.loads(raw)
     except ValueError:
         return 0
     if not isinstance(event, dict):

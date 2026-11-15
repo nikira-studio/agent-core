@@ -272,3 +272,29 @@ document.addEventListener('click', function(ev) {
   ev.preventDefault();
   downloadCurrentOutput(btn.dataset.downloadFilename, btn);
 });
+
+// The hook step shows both operating systems; with scripting on, show the visitor's and offer a switch.
+function pickSetupOs(os) {
+  document.querySelectorAll('.hook-steps').forEach(function(box) {
+    box.dataset.os = os;
+    box.querySelectorAll('[data-os-pick]').forEach(function(b) {
+      b.setAttribute('aria-pressed', b.dataset.osPick === os ? 'true' : 'false');
+    });
+  });
+  try { localStorage.setItem('ac-setup-os', os); } catch (e) {}
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+  var boxes = document.querySelectorAll('.hook-steps');
+  if (!boxes.length) return;
+  boxes.forEach(function(box) { var sw = box.querySelector('.os-switch'); if (sw) sw.hidden = false; });
+  var os = null;
+  try { os = localStorage.getItem('ac-setup-os'); } catch (e) {}
+  if (os !== 'unix' && os !== 'windows') os = /Win/i.test(navigator.platform || navigator.userAgent || '') ? 'windows' : 'unix';
+  pickSetupOs(os);
+});
+
+document.addEventListener('click', function(ev) {
+  var b = ev.target.closest('[data-os-pick]');
+  if (b) pickSetupOs(b.dataset.osPick);
+});

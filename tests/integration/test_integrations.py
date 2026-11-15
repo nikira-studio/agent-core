@@ -69,10 +69,10 @@ def test_integrations_page_loads(integrations_client):
     assert 'id="target"' not in html
     assert 'id="output_type"' not in html
     assert "setup-tabs" in html
-    assert 'data-setup-path="connection"' in html
-    assert 'data-setup-path="workspace-instructions"' in html
-    assert "1. Connect a client" in html
-    assert "2. Add or refresh workspace instructions" in html
+    # One flat list of other outputs; the old two-group sub-flow repeated the guided steps.
+    assert "data-setup-path" not in html
+    assert "1. Connect a client" not in html and "2. Add or refresh workspace instructions" not in html
+    assert "Only what the steps above do not already give you" in html
     assert "Connection doctor" in html
     assert 'id="test-connection-details-btn"' in html
     assert "/mcp" in html
@@ -88,13 +88,13 @@ def test_integrations_keeps_connection_setup_separate_from_workspace_guidance(
 
     instruction_page = integrations_client.get(common + "agents_md")
     assert instruction_page.status_code == 200
-    assert "You can refresh them" in instruction_page.text
+    assert "Only what the steps above do not already give you" in instruction_page.text
     assert "id='generate-connection-btn'" not in instruction_page.text
     assert "Refresh Preview" in instruction_page.text
 
     connection_page = integrations_client.get(common + "mcp_json")
     assert connection_page.status_code == 200
-    assert "Generating one creates a new key for the selected agent" in connection_page.text
+    assert "creates a new key and replaces the agent's old one" in connection_page.text
     assert "id='generate-connection-btn'" in connection_page.text
 
 
@@ -375,7 +375,7 @@ def test_the_form_says_what_the_agent_choice_affects(test_client, admin_token):
     )
     assert r.status_code == 200
     assert "only updates the preview" in r.text
-    assert "creates a new key for the selected agent" in r.text
+    assert "replaces that agent's old key" in r.text
     assert "the same for every agent" in r.text
 
 
@@ -414,8 +414,12 @@ def test_a_chosen_tool_shows_its_connect_block_its_file_and_the_key_button(integ
 
     codex = integrations_client.get(base + "&target=codex").text.split('id="tool-step"', 1)[1].split('id="check-step"', 1)[0]
     assert "# Codex CLI" in codex and "# Claude Code" not in codex and "AGENTS.md" in codex
-    assert "Add the session start hook" in codex and "Other outputs → Codex Hook" in codex
-    assert "Claude Code Hook" not in codex  # each tool is pointed at its own hook
+    # The hook is in the step itself, for this tool only, with both operating systems.
+    assert "Add the session start hook" in codex and "Other outputs → Codex Hook" not in codex
+    assert "hooks.json" in codex and "commandWindows" in codex and "/hooks" in codex
+    assert "Claude Code" not in codex.split("Add the session start hook", 1)[1] and "settings.json" not in codex
+    assert "settings.json" in claude.split('id="tool-step"', 1)[1] and "commandWindows" not in steps
+    assert "data-os='windows'" in steps and "data-os='unix'" in steps and "Test the hook by hand" in steps
 
     other = integrations_client.get(base).text.split('id="tool-step"', 1)[1].split('id="check-step"', 1)[0]
     assert "Choose your tool to see exactly what to copy" in other and "Connect it" not in other
@@ -499,3 +503,64 @@ def test_the_docs_name_both_hooks_and_the_read_access_a_mapped_folder_needs():
     assert "**Session start hooks.**" in doc
     paragraph = doc.split("**Session start hooks.**", 1)[1].split("**Refresh workspace guidance", 1)[0]
     assert "Repository folder" in paragraph and "read access" in paragraph and "exactly like an unmapped one" in paragraph
+
+
+def _steps(client, target, agent="claude-code"):
+    base = f"/integrations?user_id=alex&workspace_id=agent-core&agent_id={agent}&target={target}"
+    html = client.get(base).text
+    return html, html.split('id="tool-step"', 1)[1].split('id="check-step"', 1)[0], html.split('id="other-outputs"', 1)[1]
+
+
+def test_other_outputs_do_not_repeat_what_the_chosen_tools_steps_show(integrations_client):
+    from app.routes.integrations_page import _agent_setup_output_options
+
+    everything = {label for _v, label, _f in _agent_setup_output_options()}
+    _html, _steps_html, other = _steps(integrations_client, "codex")
+    tabs = set(re.findall(r'<a class="setup-tab [^"]*" href="[^"]*">([^<]+)</a>', other))
+    # Codex's own file, its hook and the verification prompt are in the steps; everything else stays.
+    assert tabs == everything - {"AGENTS.md", "Codex Hook", "Verification Prompt"}
+    _html, _steps_html, other = _steps(integrations_client, "claude_code")
+    tabs = set(re.findall(r'<a class="setup-tab [^"]*" href="[^"]*">([^<]+)</a>', other))
+    assert tabs == everything - {"CLAUDE.md", "Claude Code Hook", "Verification Prompt"}
+    # A tool without a hook of its own sees both hooks as "other tools' files".
+    _html, _steps_html, other = _steps(integrations_client, "cursor")
+    tabs = set(re.findall(r'<a class="setup-tab [^"]*" href="[^"]*">([^<]+)</a>', other))
+    assert {"Claude Code Hook", "Codex Hook", "CLAUDE.md", "AGENTS.md"} <= tabs and "Instructions" not in tabs
+
+
+def test_steps_say_whether_agent_core_has_seen_the_connection_and_the_hook(integrations_client):
+    from app.services import audit_service
+
+    _html, before, _o = _steps(integrations_client, "codex")
+    assert "No connection seen yet" in before and "No session start seen yet" in before
+    audit_service.write_event(actor_type="agent", actor_id="claude-code", action="memory_search",
+                              resource_type="memory", resource_id="x", result="success")
+    _html, connected, _o = _steps(integrations_client, "codex")
+    assert "Connected: last seen just now" in connected and "No session start seen yet" in connected
+    audit_service.write_event(actor_type="agent", actor_id="claude-code", action="context_injected",
+                              resource_type="execution", resource_id="e1", result="success")
+    _html, hooked, _o = _steps(integrations_client, "codex")
+    assert "Hook working: context delivered just now" in hooked
+
+
+def test_the_steps_tell_you_to_run_them_yourself_and_give_windows_commands(integrations_client):
+    import json as _json
+
+    _html, codex, _o = _steps(integrations_client, "codex")
+    assert "Do steps a and c yourself, in a terminal" in codex and "without network access" in codex
+    assert "Invoke-WebRequest" in codex and "WriteAllText" in codex and "Test-Path" in codex
+    from app.routes.integrations_page import _hook_steps
+
+    win = _json.loads(_hook_steps("codex", "https://core.test")["register"]["windows"])
+    handler = win["hooks"]["SessionStart"][0]["hooks"][0]
+    assert handler["commandWindows"] == 'python "C:/Users/YOU/.codex/hooks/agent_core_hook.py"'
+    assert "~" not in handler["commandWindows"] and handler["command"].startswith("python3 ")
+    claude = _json.loads(_hook_steps("claude_code", "https://core.test")["register"]["windows"])
+    hook = claude["hooks"]["SessionStart"][0]["hooks"][0]
+    assert hook["command"] == "python" and hook["args"] == ["C:/Users/YOU/.claude/hooks/agent_core_hook.py"]
+    # Existing settings are merged into, on every system.
+    for key in ("claude_code", "codex"):
+        steps = _hook_steps(key, "https://core.test")
+        assert all("already exists" in steps["register_where"][os_] for os_ in ("unix", "windows"))
+    _html, claude_steps, _o = _steps(integrations_client, "claude_code")
+    assert "Do steps a and c yourself" in claude_steps

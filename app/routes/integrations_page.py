@@ -281,7 +281,7 @@ SETUP_TOOLS = (
      "claude_md", "CLAUDE.md", "CLAUDE.md",
      "Save this as <code>CLAUDE.md</code> in the root folder of your project (the folder you map to the workspace later). Claude Code reads it automatically."),
     ("codex", "Codex",
-     "Add this to <code>~/.codex/config.toml</code>.",
+     "Add this to <code>~/.codex/config.toml</code> (Windows: <code>%USERPROFILE%\\.codex\\config.toml</code>).",
      "agents_md", "AGENTS.md", "AGENTS.md",
      "Save this as <code>AGENTS.md</code> in the root folder of your project (the folder you map to the workspace later). Codex reads it automatically."),
     ("cursor", "Cursor",
@@ -661,6 +661,126 @@ def integration_hook_script(name: str):
     return PlainTextResponse(path.read_text(encoding="utf-8"), media_type="text/x-python")
 
 
+def _output_section(label, text, file_name=None, key_button=""):
+    """A labelled copy block. A file_name adds a Download button; a command does not need one."""
+    download = (
+        f"<button type='button' class='btn btn-sm btn-secondary' data-download-filename='{escape_html(file_name)}'>Download</button>"
+        if file_name
+        else ""
+    )
+    return (
+        "<div class='output-section'>"
+        # The key button comes first, in reading order, not below a screenful of config text.
+        + (f"<div class='output-actions' style='margin-bottom:8px'>{key_button}</div>" if key_button else "")
+        + (f"<div class='output-label'>{escape_html(label)}</div>" if label else "")
+        + f"<pre class='output-block'>{escape_html(text)}</pre>"
+        "<div class='output-actions'>"
+        "<button type='button' class='btn btn-sm btn-secondary' onclick=\"copyGeneratedOutput(this)\">Copy</button>"
+        f"{download}"
+        "</div></div>"
+    )
+
+
+def _inline_code(text):
+    """Escape a sentence and turn its `backtick` spans into <code>."""
+    out, parts = [], escape_html(text).split("`")
+    for i, part in enumerate(parts):
+        out.append(f"<code>{part}</code>" if i % 2 else part)
+    return "".join(out)
+
+
+def _ago(stamp):
+    """'3 hours ago' for a stored UTC timestamp, or '' when there is none."""
+    if not stamp:
+        return ""
+    from app.time_utils import parse_utc_datetime, utc_now
+
+    try:
+        seconds = int((utc_now() - parse_utc_datetime(stamp)).total_seconds())
+    except (TypeError, ValueError):
+        return ""
+    if seconds < 90:
+        return "just now"
+    if seconds < 3600:
+        return f"{seconds // 60} minutes ago"
+    if seconds < 86400:
+        hours = seconds // 3600
+        return f"{hours} hour{'s' if hours != 1 else ''} ago"
+    days = seconds // 86400
+    return f"{days} day{'s' if days != 1 else ''} ago"
+
+
+def _agent_signals(agent_id):
+    """When this agent last called Agent Core, and when a hook last gave it session context."""
+    from app.database import get_db
+
+    with get_db() as conn:
+        seen = conn.execute(
+            "SELECT MAX(timestamp) FROM audit_log WHERE actor_type = 'agent' AND actor_id = ?", (agent_id,)
+        ).fetchone()[0]
+        hooked = conn.execute(
+            "SELECT MAX(timestamp) FROM audit_log WHERE actor_type = 'agent' AND actor_id = ? AND action = 'context_injected'",
+            (agent_id,),
+        ).fetchone()[0]
+    return seen, hooked
+
+
+def _step_status(ok, text):
+    """A small chip beside a step's heading: green when Agent Core has seen it work, grey when not yet."""
+    cls = "step-status step-status-ok" if ok else "step-status"
+    return f"<span class='{cls}'>{escape_html(text)}</span>"
+
+
+def _hook_step_html(client_key, base_url):
+    """The whole hook step, in place: install, register, trust, map and try, each with a copy block and an OS switch."""
+    s = _hook_steps(client_key, base_url)
+
+    def both(kind, label, text_by_os=None):
+        panels = ""
+        for os_key, os_label in (("unix", "macOS / Linux"), ("windows", "Windows")):
+            lang, code = s[kind][os_key]
+            panels += (
+                f"<div class='os-panel' data-os='{os_key}'><span class='os-label'>{os_label}</span>"
+                + (f"<p class='step-note'>{_inline_code(text_by_os[os_key])}</p>" if text_by_os else "")
+                + _output_section("", code)
+                + "</div>"
+            )
+        return f"<div class='hook-sub'><h4>{escape_html(label)}</h4>{panels}</div>"
+
+    register = ""
+    for os_key, os_label in (("unix", "macOS / Linux"), ("windows", "Windows")):
+        register += (
+            f"<div class='os-panel' data-os='{os_key}'><span class='os-label'>{os_label}</span>"
+            f"<p class='step-note'>{_inline_code(s['register_where'][os_key])}</p>"
+            + _output_section("", s["register"][os_key])
+            + (
+                "<p class='step-note'>Or create it from PowerShell, only if the file is not there yet:</p>" + _output_section("", s["register_cmd"])
+                if os_key == "windows" and s["register_cmd"] else ""
+            )
+            + "</div>"
+        )
+    n = iter(range(1, 6))
+    html = (
+        f"<p>{_inline_code(s['intro'])}</p>"
+        f"<p class='step-note'>Needs: {_inline_code(s['requirements'])}</p>"
+        "<div class='os-switch' role='group' aria-label='Operating system' hidden>"
+        "<button type='button' class='btn btn-sm btn-secondary' data-os-pick='unix'>macOS / Linux</button>"
+        "<button type='button' class='btn btn-sm btn-secondary' data-os-pick='windows'>Windows</button></div>"
+        + both("install", f"c{next(n)} · Install the script")
+        + f"<div class='hook-sub'><h4>c{next(n)} · Register it</h4>{register}</div>"
+    )
+    if s["trust"]:
+        html += f"<div class='hook-sub'><h4>c{next(n)} · Trust it once</h4><p class='step-note'>{_inline_code(s['trust'])}</p></div>"
+    html += (
+        f"<div class='hook-sub'><h4>c{next(n)} · Map your project folder to a workspace</h4>"
+        f"<p class='step-note'>{_inline_code(s['mapping'])}</p></div>"
+        "<details class='hook-try'><summary>Test the hook by hand</summary>"
+        + both("try", "From a project folder you mapped")
+        + f"<p class='step-note'>{_inline_code(s['try_note'])}</p></details>"
+    )
+    return f"<div class='hook-steps'>{html}</div>"
+
+
 @router.get("/integrations")
 def integrations_page(
     request: Request,
@@ -836,9 +956,15 @@ def integrations_page(
             )
         return tabs
 
-    connection_options, instruction_options = _agent_setup_output_groups(target)
-    connection_tabs = output_tabs(connection_options)
-    instruction_tabs = output_tabs(instruction_options)
+    # What the guided steps already show for the chosen tool is not repeated under Other outputs.
+    shown_in_steps = set()
+    _chosen = next((t for t in SETUP_TOOLS if t[0] == target), None) if tool_selected and tool_ctx else None
+    if _chosen:
+        shown_in_steps = {_chosen[3], "verification"}
+        if target in _HOOK_CLIENTS:
+            shown_in_steps.add(_HOOK_CLIENTS[target]["output_type"])
+    other_options = [o for o in _agent_setup_output_options(target) if o[0] not in shown_in_steps]
+    other_tabs = output_tabs(other_options)
     filename = next(
         (f for v, _l, f in _agent_setup_output_options(target) if v == output_type),
         f"{APP_SLUG}-output.txt",
@@ -889,18 +1015,7 @@ def integrations_page(
         f"<div class='output-label'>{output_label}</div>" if output_label else ""
     )
 
-    def _section(label, text, file_name, key_button=""):
-        return (
-            "<div class='output-section'>"
-            # The key button comes first, in reading order, not below a screenful of config text.
-            + (f"<div class='output-actions' style='margin-bottom:8px'>{key_button}</div>" if key_button else "")
-            + f"<div class='output-label'>{escape_html(label)}</div>"
-            f"<pre class='output-block'>{escape_html(text)}</pre>"
-            "<div class='output-actions'>"
-            "<button type='button' class='btn btn-sm btn-secondary' onclick=\"copyGeneratedOutput(this)\">Copy</button>"
-            f"<button type='button' class='btn btn-sm btn-secondary' data-download-filename='{escape_html(file_name)}'>Download</button>"
-            "</div></div>"
-        )
+    _section = _output_section
 
     tool_links = "".join(
         f'<a class="setup-tab {"active" if tool_selected and t[0] == target else ""}" '
@@ -932,18 +1047,34 @@ def integrations_page(
             "data-output-type='mcp_tool' onclick='generateConnectionConfig(this)'>"
             f"Generate One-Time Key + {escape_html(_name)} MCP Config</button>"
         )
-        hook_names = {"claude_code": ("Claude Code", "claude_code_hook"), "codex": ("Codex", "codex_hook")}
+        seen_at, hooked_at = _agent_signals(a_["id"])
+        connect_status = (
+            _step_status(True, f"Connected: last seen {_ago(seen_at)}")
+            if seen_at
+            else _step_status(False, "No connection seen yet")
+        )
         hook_item = ""
-        if target in hook_names:
-            hook_client, hook_type = hook_names[target]
-            hook_item = (
-                "<li><h3>Add the session start hook</h3>"
-                f"<p>A hook runs when a {hook_client} session starts and hands the agent its session context (open work, recent results, key records) with no step to remember. The steps are under "
-                f"<a href=\"{page_path}?{urlencode({**current_params, 'output_type': hook_type})}#other-outputs\">Other outputs → {hook_client} Hook</a>.</p></li>"
+        if target in _HOOK_CLIENTS:
+            hook_status = (
+                _step_status(True, f"Hook working: context delivered {_ago(hooked_at)}")
+                if hooked_at
+                else _step_status(False, "No session start seen yet")
             )
+            hook_item = (
+                f"<li><h3>Add the session start hook {hook_status}</h3>"
+                f"{_hook_step_html(target, base_url)}</li>"
+            )
+        yourself = (
+            "Do steps a and c yourself, in a terminal. " if target in _HOOK_CLIENTS else "Do step a yourself, in a terminal. "
+        ) + (
+            "An agent usually cannot: it runs in a sandbox without network access and cannot write to its own settings folder, "
+            "even though its connection to " + APP_NAME + " works. "
+            + (f"Step b is a file in your project, so {_name} can save that one for you." if file_type in ("claude_md", "agents_md") else "")
+        )
         tool_steps_html = (
+            f"<p class='step-callout'>{escape_html(yourself.strip())}</p>"
             '<ol class="setup-steps">'
-            f"<li><h3>Connect it</h3><p>{connect_where}</p>{_section(c_label, c_text, f'{APP_SLUG}-mcp-config.txt', connect_btn)}</li>"
+            f"<li><h3>Connect it {connect_status}</h3><p>{connect_where}</p>{_section(c_label, c_text, f'{APP_SLUG}-mcp-config.txt', connect_btn)}</li>"
             f"<li><h3>Give it instructions</h3><p>{file_where}</p>{_section(f_label, f_text, file_name)}</li>"
             f"{hook_item}"
             "</ol>"
@@ -1018,20 +1149,11 @@ def integrations_page(
       </div>
 
       <details class="card fold-card" id="other-outputs" {other_open}>
-        <summary><span class="fold-title">Other outputs</span><span class="fold-hint">Instruction files for other tools, environment variables, raw config</span></summary>
-        <p class="form-hint">Everything this page can generate, as tabs: environment variables, the session prompt, the Claude Code and Codex hooks, and the full MCP config for every tool.</p>
+        <summary><span class="fold-title">Other outputs</span><span class="fold-hint">Environment variables, session prompt, the full MCP config, files for other tools</span></summary>
+        <p class="form-hint">Only what the steps above do not already give you. Where a tab offers Generate One-Time Key, pressing it creates a new key and replaces the agent's old one.</p>
         {destination_section}
         <div class="form-section" id="generated-output">
-        <div class="setup-output-group" data-setup-path="connection">
-          <h3>1. Connect a client</h3>
-          <p>Use these the first time you connect a tool, or when you deliberately replace its connection settings or key. Generating one creates a new key for the selected agent and replaces its old one.</p>
-          <div class="setup-tabs">{connection_tabs}</div>
-        </div>
-        <div class="setup-output-group" data-setup-path="workspace-instructions">
-          <h3>2. Add or refresh workspace instructions</h3>
-          <p>Use these outputs for a repository or a single session. They contain no key. You can refresh them after an Agent Core update or reuse them in another workspace without changing an MCP connection.</p>
-          <div class="setup-tabs">{instruction_tabs}</div>
-        </div>
+        <div class="setup-tabs">{other_tabs}</div>
         <div class="output-section">
         {output_label_html}
         {output_display}
@@ -1482,133 +1604,238 @@ def _connection_key_value(api_key=None):
     return api_key or "{{" + ENV_PREFIX + "API_KEY}}"
 
 
-def _build_claude_code_hook(base_url):
-    script_url = f"{base_url}/integrations/hooks/claude-code/agent_core_hook.py"
-    command = "python3 ~/.claude/hooks/agent_core_hook.py"
-    hook = {
-        "hooks": {
-            "SessionStart": [
-                {
-                    "matcher": "startup|clear|compact|resume",
-                    "hooks": [{"type": "command", "command": command, "timeout": 15}],
-                }
-            ],
-            "Stop": [{"hooks": [{"type": "command", "command": command, "timeout": 10}]}],
+# What each hook client needs. One source for the guided step on the Connect page and for the
+# full-text output tab, so the two cannot drift.
+_HOOK_CLIENTS = {
+    "claude_code": {
+        "name": "Claude Code",
+        "slug": "claude-code",
+        "dot": ".claude",
+        "settings": "settings.json",
+        "output_type": "claude_code_hook",
+    },
+    "codex": {
+        "name": "Codex",
+        "slug": "codex",
+        "dot": ".codex",
+        "settings": "hooks.json",
+        "output_type": "codex_hook",
+    },
+}
+
+_WINDOWS_USER_FOLDER = "C:/Users/YOU"
+
+# Alex's Windows test: handed these steps, Codex could not follow them. Its shell had no network
+# and could not write to its own settings folder, though its MCP connection worked.
+DO_IT_YOURSELF = (
+    "Do these steps yourself, in a terminal. An agent usually cannot: it runs in a sandbox without network access "
+    "and cannot write to its own settings folder, even though its connection to {app} works. "
+    "The instructions file (CLAUDE.md or AGENTS.md) is different: it lives in your project, so an agent can save it for you."
+)
+
+
+def _hook_steps(client_key, base_url):
+    """The install, register, trust, map and try-it text for one tool, for macOS/Linux and Windows."""
+    c = _HOOK_CLIENTS[client_key]
+    name, slug, dot = c["name"], c["slug"], c["dot"]
+    script_url = f"{base_url}/integrations/hooks/{slug}/agent_core_hook.py"
+    unix_script = f"~/{dot}/hooks/agent_core_hook.py"
+    # Forward slashes: valid in Windows paths, and nothing to double in JSON.
+    win_script = f"{_WINDOWS_USER_FOLDER}/{dot}/hooks/agent_core_hook.py"
+    win_env_script = rf"$env:USERPROFILE\{dot}\hooks\agent_core_hook.py"
+    win_env_hooks = rf"$env:USERPROFILE\{dot}\hooks.json"
+    unix_command = f"python3 {unix_script}"
+    matcher = "startup|clear|compact|resume"
+
+    if client_key == "claude_code":
+        unix_hook = {
+            "hooks": {
+                "SessionStart": [{"matcher": matcher, "hooks": [{"type": "command", "command": unix_command, "timeout": 15}]}],
+                "Stop": [{"hooks": [{"type": "command", "command": unix_command, "timeout": 10}]}],
+            }
         }
+        # Claude Code runs a hook without a shell when it has `args`; the path is then used as written, so it is absolute.
+        win_hook = {
+            "hooks": {
+                "SessionStart": [{"matcher": matcher, "hooks": [{"type": "command", "command": "python", "args": [win_script], "timeout": 15}]}],
+                "Stop": [{"hooks": [{"type": "command", "command": "python", "args": [win_script], "timeout": 10}]}],
+            }
+        }
+        unix_where = (
+            f"Merge this into `~/{dot}/settings.json` (all projects) or `{dot}/settings.local.json` (one project). "
+            "If the file already exists, add these entries to it instead of replacing it."
+        )
+        win_where = (
+            f"Merge this into `%USERPROFILE%\\{dot}\\settings.json` (all projects) or `{dot}\\settings.local.json` (one project). "
+            f"Replace `{_WINDOWS_USER_FOLDER}` with your own user folder (in PowerShell, `echo $env:USERPROFILE` shows it). "
+            "The path is written in full because this form of hook does not expand `~` or `%USERPROFILE%`. "
+            "If the file already exists, add these entries to it instead of replacing it."
+        )
+        requirements = (
+            f"`python3` (on Windows `python`; if that is not recognised, `py -3`), and the {APP_NAME} MCP server already added to Claude Code (step a). "
+            "The hook reads the server URL and key from that MCP entry, in the project's `.mcp.json` or in `~/.claude.json` "
+            "(`$CLAUDE_CONFIG_DIR/.claude.json` if you set that variable), so a rotated key needs no change here. "
+            "If it finds no key there it stays silent."
+        )
+        trust = None
+    else:
+        unix_hook = {
+            "hooks": {
+                "SessionStart": [{
+                    "matcher": matcher,
+                    "hooks": [{
+                        "type": "command", "command": unix_command, "timeout": 15,
+                        "statusMessage": f"Loading {APP_NAME} context", "additionalContextLimit": 4000,
+                    }],
+                }]
+            }
+        }
+        # `commandWindows` is Codex's documented Windows-only override; the POSIX command stays beside it.
+        win_hook = json.loads(json.dumps(unix_hook))
+        win_hook["hooks"]["SessionStart"][0]["hooks"][0]["commandWindows"] = f'python "{win_script}"'
+        unix_where = (
+            f"Save this as `~/{dot}/hooks.json` (all projects). If that file already exists, add the SessionStart entry to it instead of replacing it. "
+            f"A project can use `<repo>/{dot}/hooks.json` instead. Codex also accepts the same hook as an inline "
+            "`[[hooks.SessionStart]]` table in `config.toml`; use one form per folder, not both."
+        )
+        win_where = (
+            f"Save this as `%USERPROFILE%\\{dot}\\hooks.json`. If that file already exists, add the SessionStart entry to it instead of replacing it. "
+            f"Replace `{_WINDOWS_USER_FOLDER}` with your own user folder (in PowerShell, `echo $env:USERPROFILE` shows it). "
+            "`commandWindows` is the command Codex runs on Windows; the other `command` is for macOS and Linux and can stay."
+        )
+        requirements = (
+            f"`python3` 3.11 or newer (on Windows `python`; if that is not recognised, `py -3`), and the {APP_NAME} MCP server already added to Codex (step a). "
+            "The hook reads the server URL and key from `~/.codex/config.toml` (`%USERPROFILE%\\.codex\\config.toml` on Windows), "
+            "so a rotated key needs no change here."
+        )
+        trust = (
+            f"Codex skips a new or changed hook until you trust it. Start Codex, type `/hooks`, find the {APP_NAME} SessionStart hook in the list, "
+            "and trust it. Codex prints a warning pointing to `/hooks` at startup while a hook still needs review. "
+            "Codex records the trust against the hook's registration, not the script, so updating the script does not ask again, "
+            "but changing the registration (for example its matcher) does."
+        )
+
+    # Windows PowerShell 5 writes a BOM or UTF-16 with `>` and Out-File; WriteAllText writes plain UTF-8.
+    win_create_cmd = None
+    if client_key == "codex":
+        win_create_cmd = (
+            f'$f = "{win_env_hooks}"\n'
+            "$json = @'\n" + json.dumps(win_hook, indent=2) + "\n'@\n"
+            f"$json = $json.Replace('{_WINDOWS_USER_FOLDER}', ($env:USERPROFILE -replace '\\\\', '/'))\n"
+            'if (Test-Path $f) { Write-Host "hooks.json already exists: add the SessionStart entry to it by hand" } '
+            "else { [IO.File]::WriteAllText($f, $json) }"
+        )
+    unix_install = f"mkdir -p ~/{dot}/hooks\ncurl -fsSL {script_url} -o {unix_script}"
+    win_install = (
+        f'New-Item -ItemType Directory -Force "$env:USERPROFILE\\{dot}\\hooks" | Out-Null\n'
+        f'Invoke-WebRequest {script_url} -OutFile "{win_env_script}"'
+    )
+    unix_try = (
+        "echo '{\"hook_event_name\":\"SessionStart\",\"source\":\"startup\",\"session_id\":\"try-1\",\"cwd\":\"'\"$PWD\"'\"}' "
+        f"| python3 {unix_script}"
+    )
+    win_try = (
+        "'{\"hook_event_name\":\"SessionStart\",\"source\":\"startup\",\"session_id\":\"try-1\",\"cwd\":\"' + "
+        "((Get-Location).Path -replace '\\\\','/') + '\"}' | "
+        f'python "{win_env_script}"'
+    )
+    mapping = (
+        f"The hook sends the session's working directory. {APP_NAME} matches it against each workspace's repository folder "
+        f"(Workspaces → Edit Workspace, admin only), so the right workspace loads without per-repository setup. "
+        f"Enter the folder as it appears on the machine running {name} (on Windows, for example `C:\\Users\\you\\my-repo`), not inside the {APP_NAME} container; "
+        "only the path text is compared. The agent also needs read access to that workspace (Agents page → Edit the agent → Advanced access → Can Read From): "
+        "a folder mapped to a workspace the agent cannot read behaves exactly like an unmapped one. "
+        "An agent that can read exactly one workspace gets that workspace in every folder, mapped or not. "
+        "With several, a session in a folder no workspace claims (or none the agent can read) starts normally, without context. "
+        f"To pin a workspace instead, set `AGENT_CORE_SCOPE=workspace:<id>` in the environment {name} runs in."
+    )
+    return {
+        "name": name,
+        "output_type": c["output_type"],
+        "intro": (
+            f"A hook runs when a {name} session starts and hands the agent its session context (standing rules, open work, "
+            "recent results with their next steps, changes since its last session, key records), so the agent does not have to remember a startup routine."
+            + (" When a task's activity is still open with no handoff, the hook also asks the agent once to record one." if client_key == "claude_code" else "")
+        ),
+        "requirements": requirements,
+        "install": {"unix": ("bash", unix_install), "windows": ("powershell", win_install)},
+        "register_where": {"unix": unix_where, "windows": win_where},
+        "register": {"unix": json.dumps(unix_hook, indent=2), "windows": json.dumps(win_hook, indent=2)},
+        "register_cmd": win_create_cmd,
+        "do_it_yourself": DO_IT_YOURSELF.format(app=APP_NAME),
+        "trust": trust,
+        "mapping": mapping,
+        "try": {"unix": ("bash", unix_try), "windows": ("powershell", win_try)},
+        "try_note": (
+            "It prints one line of JSON whose `additionalContext` is the session context, or nothing when no workspace matches the folder. "
+            f"This opens a small session record in {APP_NAME}, which is harmless."
+        ),
     }
-    return f"""# {APP_NAME} hook for Claude Code
 
-With this hook, every Claude Code session starts with {APP_NAME} context already loaded: standing rules, work waiting on a person, unfinished and handed-off work, recent results with their next steps, changes since the agent's last session, and an index of key records. When a task's activity is still open with no handoff, the hook asks the agent once to record one, so the next session can pick the work up. The agent does not have to remember a startup or closing routine.
 
-Requirements: `python3`, and the {APP_NAME} MCP server already added to Claude Code (MCP Config output). The hook reads the server URL and key from that MCP entry, in the project's `.mcp.json` or in `~/.claude.json` (`$CLAUDE_CONFIG_DIR/.claude.json` if you set that variable), so a rotated key needs no change here. If it finds no key there it stays silent.
+def _hook_markdown(client_key, base_url):
+    s = _hook_steps(client_key, base_url)
+    name = s["name"]
+    claude = client_key == "claude_code"
+    n = iter(range(1, 9))
 
-## 1. Install the script
+    def pair(key):
+        u, w = s[key]["unix"], s[key]["windows"]
+        return (
+            f"macOS / Linux:\n\n```{u[0]}\n{u[1]}\n```\n\nWindows (PowerShell):\n\n```{w[0]}\n{w[1]}\n```\n"
+        )
 
-```bash
-mkdir -p ~/.claude/hooks
-curl -fsSL {script_url} -o ~/.claude/hooks/agent_core_hook.py
-```
+    parts = [
+        f"# {APP_NAME} hook for {name}\n",
+        f"{s['intro']}\n",
+        f"**{s['do_it_yourself']}**\n",
+        f"Requirements: {s['requirements']}\n",
+        f"## {next(n)}. Install the script\n\n{pair('install')}",
+        (
+            f"## {next(n)}. Register the hook\n\n"
+            f"macOS / Linux: {s['register_where']['unix']}\n\n```json\n{s['register']['unix']}\n```\n\n"
+            f"Windows: {s['register_where']['windows']}\n\n```json\n{s['register']['windows']}\n```\n"
+            + (
+                f"\nOr, in PowerShell, create it only if it is not there yet:\n\n```powershell\n{s['register_cmd']}\n```\n"
+                if s["register_cmd"] else ""
+            )
+        ),
+    ]
+    if s["trust"]:
+        parts.append(f"## {next(n)}. Trust it once\n\n{s['trust']}\n")
+    parts.append(f"## {next(n)}. Map repositories to workspaces\n\n{s['mapping']}\n")
+    parts.append(f"## Try it by hand\n\nFrom a project folder you mapped, feed the hook the event {name} sends and read what it prints:\n\n{pair('try')}\n{s['try_note']}\n")
+    behavior = [
+        "- Session context runs on `startup`, `clear`, `compact` and `resume`. A resumed session gets it only if it never received context for its workspace "
+        "(for example the folder was not mapped yet); one that already has it is left alone."
+        + ("" if claude else " A forked session keeps its parent's context."),
+    ]
+    if claude:
+        behavior += [
+            "- The handoff request blocks a stop at most once per task, and never while Claude is already continuing because of a stop hook. Set `AGENT_CORE_HANDOFF_NUDGE=0` to turn it off.",
+            "- Output stays under Claude Code's 10,000-character limit; set `AGENT_CORE_CONTEXT_CHARS` to use less.",
+            f"- If {APP_NAME} cannot be reached, the session starts normally and Claude Code shows a one-line notice.",
+        ]
+    else:
+        behavior += [
+            "- The context arrives as developer context in the session. `additionalContextLimit` (about 4,000 tokens) is set above the context's size so Codex does not replace it with a preview. Set `AGENT_CORE_CONTEXT_CHARS` to use less.",
+            "- Only your own `~/.codex/config.toml` is read for the URL and key, never a repository's, and a redirect from the server is never followed, so a cloned project cannot make the hook send your key anywhere. "
+            f"A project that keeps its own {APP_NAME} entry should set `AGENT_CORE_URL` and `AGENT_CORE_API_KEY` in the environment instead.",
+            f"- If {APP_NAME} cannot be reached, the session starts normally and Codex shows a one-line notice. Without a key in `config.toml` the hook stays silent.",
+        ]
+    behavior.append(
+        f"- `AGENT_CORE_URL` and `AGENT_CORE_API_KEY` override the MCP configuration, and `AGENT_CORE_MCP_NAME` names a server other than `{APP_SLUG}`."
+    )
+    parts.append("## Behavior\n\n" + "\n".join(behavior) + "\n")
+    return "\n".join(parts)
 
-## 2. Register the hook
 
-Merge this into `~/.claude/settings.json` (all projects) or `.claude/settings.local.json` (one project):
-
-```json
-{json.dumps(hook, indent=2)}
-```
-
-## 3. Map repositories to workspaces
-
-The hook sends the session's working directory. {APP_NAME} matches it against each workspace's repository folder (Workspaces → Edit Workspace, admin only), so the right workspace loads without per-repository setup. Enter the folder as it appears on the machine running Claude Code, not inside the {APP_NAME} container; only the path text is compared. The agent also needs read access to that workspace (Agents page → Edit the agent → Advanced access → Can Read From): a folder mapped to a workspace the agent cannot read behaves exactly like an unmapped one. An agent that can read exactly one workspace gets that workspace in every folder, mapped or not. With several, a session in a folder no workspace claims (or none the agent can read) starts normally, without context. To pin a workspace instead, set `AGENT_CORE_SCOPE=workspace:<id>` in the environment Claude Code runs in.
-
-## Try it by hand
-
-From a project folder you mapped, feed the hook the event Claude Code sends and read what it prints:
-
-```bash
-echo '{{"hook_event_name":"SessionStart","source":"startup","session_id":"try-1","cwd":"'"$PWD"'"}}' | python3 ~/.claude/hooks/agent_core_hook.py
-```
-
-It prints one line of JSON whose `additionalContext` is the session context, or nothing when no workspace matches the folder. This opens a small session record in {APP_NAME}, which is harmless.
-
-## Behavior
-
-- Session context runs on `startup`, `clear`, `compact` and `resume`. A resumed session gets it only if it never received context for its workspace (for example the folder was not mapped yet); one that already has it is left alone.
-- The handoff request blocks a stop at most once per task, and never while Claude is already continuing because of a stop hook. Set `AGENT_CORE_HANDOFF_NUDGE=0` to turn it off.
-- Output stays under Claude Code's 10,000-character limit; set `AGENT_CORE_CONTEXT_CHARS` to use less.
-- If {APP_NAME} cannot be reached, the session starts normally and Claude Code shows a one-line notice.
-- `AGENT_CORE_URL` and `AGENT_CORE_API_KEY` override the MCP configuration, and `AGENT_CORE_MCP_NAME` names a server other than `{APP_SLUG}`.
-"""
+def _build_claude_code_hook(base_url):
+    return _hook_markdown("claude_code", base_url)
 
 
 def _build_codex_hook(base_url):
-    script_url = f"{base_url}/integrations/hooks/codex/agent_core_hook.py"
-    command = "python3 ~/.codex/hooks/agent_core_hook.py"
-    hook = {
-        "hooks": {
-            "SessionStart": [
-                {
-                    "matcher": "startup|clear|compact|resume",
-                    "hooks": [
-                        {
-                            "type": "command",
-                            "command": command,
-                            "timeout": 15,
-                            "statusMessage": f"Loading {APP_NAME} context",
-                            "additionalContextLimit": 4000,
-                        }
-                    ],
-                }
-            ]
-        }
-    }
-    return f"""# {APP_NAME} hook for Codex
-
-With this hook, every Codex session starts with {APP_NAME} context already loaded: standing rules, work waiting on a person, unfinished and handed-off work, recent results with their next steps, changes since the agent's last session, and an index of key records. The agent does not have to be told to look.
-
-Requirements: `python3` 3.11 or newer, and the {APP_NAME} MCP server already added to Codex (MCP Config output). The hook reads the server URL and key from `~/.codex/config.toml`, so a rotated key needs no change here.
-
-## 1. Install the script
-
-```bash
-mkdir -p ~/.codex/hooks
-curl -fsSL {script_url} -o ~/.codex/hooks/agent_core_hook.py
-```
-
-## 2. Register the hook
-
-Save this as `~/.codex/hooks.json` (all projects), or merge it into the file if you already have one. A project can use `<repo>/.codex/hooks.json` instead. Codex also accepts the same hook as an inline `[[hooks.SessionStart]]` table in `config.toml`; use one form per folder, not both.
-
-```json
-{json.dumps(hook, indent=2)}
-```
-
-## 3. Trust it once
-
-Codex skips a new or changed hook until you trust it. Start Codex, type `/hooks`, find the {APP_NAME} SessionStart hook in the list, and trust it. Codex prints a warning pointing to `/hooks` at startup while a hook still needs review. Codex records the trust against the hook's registration, not the script, so updating the script does not ask again, but changing the registration (for example its matcher) does.
-
-## 4. Map repositories to workspaces
-
-The hook sends the session's working directory. {APP_NAME} matches it against each workspace's repository folder (Workspaces → Edit Workspace, admin only), so the right workspace loads without per-repository setup. Enter the folder as it appears on the machine running Codex, not inside the {APP_NAME} container; only the path text is compared. The agent also needs read access to that workspace (Agents page → Edit the agent → Advanced access → Can Read From): a folder mapped to a workspace the agent cannot read behaves exactly like an unmapped one. An agent that can read exactly one workspace gets that workspace in every folder, mapped or not. With several, a session in a folder no workspace claims (or none the agent can read) starts normally, without context. To pin a workspace instead, set `AGENT_CORE_SCOPE=workspace:<id>` in the environment Codex runs in.
-
-## Try it by hand
-
-From a project folder you mapped, feed the hook the event Codex sends and read what it prints:
-
-```bash
-echo '{{"hook_event_name":"SessionStart","source":"startup","session_id":"try-1","cwd":"'"$PWD"'"}}' | python3 ~/.codex/hooks/agent_core_hook.py
-```
-
-It prints one line of JSON whose `additionalContext` is the session context, or nothing when no workspace matches the folder. This opens a small session record in {APP_NAME}, which is harmless.
-
-## Behavior
-
-- Session context runs on `startup`, `clear`, `compact` and `resume`. A resumed session gets it only if it never received context for its workspace (for example the folder was not mapped yet); one that already has it is left alone. A forked session keeps its parent's context.
-- The context arrives as developer context in the session. `additionalContextLimit` (about 4,000 tokens) is set above the context's size so Codex does not replace it with a preview. Set `AGENT_CORE_CONTEXT_CHARS` to use less.
-- Only your own `~/.codex/config.toml` is read for the URL and key, never a repository's, and a redirect from the server is never followed, so a cloned project cannot make the hook send your key anywhere. A project that keeps its own {APP_NAME} entry should set `AGENT_CORE_URL` and `AGENT_CORE_API_KEY` in the environment instead.
-- If {APP_NAME} cannot be reached, the session starts normally and Codex shows a one-line notice. Without a key in `config.toml` the hook stays silent.
-- `AGENT_CORE_URL` and `AGENT_CORE_API_KEY` override `config.toml`, and `AGENT_CORE_MCP_NAME` names a server other than `{APP_SLUG}`.
-"""
+    return _hook_markdown("codex", base_url)
 
 
 def _mcp_config_sections(base_url, api_key=None):

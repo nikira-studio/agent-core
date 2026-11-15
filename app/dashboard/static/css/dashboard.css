@@ -2126,6 +2126,24 @@ details.card-fold[open] > summary::before { content: "\25BE\00a0"; }
 .setup-steps > li > p { margin: 0 0 8px; color: var(--muted); font-size: 0.85rem; }
 .output-section + .output-section { margin-top: 12px; }
 #other-outputs { margin-top: 16px; }
+
+/* Connect: a step's status chip, the do-it-yourself note, and the hook step's own sub-steps. */
+.setup-steps > li > h3 .step-status { margin-left: 8px; font-size: 0.75rem; font-weight: 500; color: var(--muted); border: 1px solid var(--border); border-radius: 999px; padding: 1px 9px; vertical-align: middle; white-space: normal; }
+.setup-steps > li > h3 .step-status-ok { color: var(--success); border-color: var(--success); }
+.step-callout { margin: 14px 0 0; padding: 8px 12px; border: 1px solid var(--border); background: rgba(128,128,128,0.08); font-size: 0.85rem; border-radius: 6px; }
+.hook-steps .step-note { margin: 0 0 8px; color: var(--muted); font-size: 0.85rem; }
+.hook-sub { margin-top: 14px; }
+.hook-sub > h4 { margin: 0 0 6px; font-size: 0.9rem; }
+.os-switch { display: flex; gap: 6px; margin: 10px 0 0; }
+.os-switch[hidden] { display: none; }
+.os-switch .btn[aria-pressed="true"] { background: var(--accent-fill); color: #fff; border-color: transparent; }
+.os-panel + .os-panel { margin-top: 10px; }
+.os-label { display: inline-block; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); margin-bottom: 4px; }
+.hook-steps[data-os="unix"] .os-panel[data-os="windows"], .hook-steps[data-os="windows"] .os-panel[data-os="unix"] { display: none; }
+.hook-steps[data-os] .os-label { display: none; }
+.hook-try { margin-top: 14px; }
+.hook-try > summary { cursor: pointer; font-size: 0.9rem; }
+.hook-steps pre.output-block { white-space: pre-wrap; overflow-wrap: anywhere; }
 @media (max-width: 720px) {
   #tool-step .setup-tabs { flex-wrap: wrap; overflow-x: visible; }
 }

@@ -528,8 +528,8 @@ def workspaces_page(request: Request, session: dict = Depends(require_auth)):
           </div>
           <div class="form-group">
             <label for="ep-repo-root">Repository folder</label>
-            <input type="text" id="ep-repo-root" placeholder="/home/you/projects/my-repo">
-            <p class="form-hint">Absolute path of the checkout this workspace covers. Agent sessions started in this folder get this workspace's context automatically, and facts anchored to <code>repo:</code> paths are checked against it. Leave empty to unlink. Admin only.</p>
+            <input type="text" id="ep-repo-root" placeholder="/home/you/projects/my-repo or C:\\Users\\you\\projects\\my-repo">
+            <p class="form-hint">Absolute path of the checkout this workspace covers, written as the machine running your AI tool names it (a Windows path such as <code>C:\\Users\\you\\my-repo</code> works). Agent sessions started in this folder get this workspace's context automatically, and facts anchored to <code>repo:</code> paths are checked against it. Leave empty to unlink. Admin only.</p>
           </div>
           <div class="form-group">
             <div id="ep-collaborators"></div>
