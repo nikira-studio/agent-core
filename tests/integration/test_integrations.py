@@ -537,8 +537,20 @@ def test_steps_say_whether_agent_core_has_seen_the_connection_and_the_hook(integ
                               resource_type="memory", resource_id="x", result="success")
     _html, connected, _o = _steps(integrations_client, "codex")
     assert "Connected: last seen just now" in connected and "No session start seen yet" in connected
+    # The agent loading its own context over MCP (what AGENTS.md tells it to do) is not the hook running.
     audit_service.write_event(actor_type="agent", actor_id="claude-code", action="context_injected",
-                              resource_type="execution", resource_id="e1", result="success")
+                              resource_type="execution", resource_id="e0", result="success",
+                              details={"memory_scope": "workspace:agent-core", "resolved_by": "requested", "source": "mcp", "channel": "mcp"})
+    _html, mcp_only, _o = _steps(integrations_client, "codex")
+    assert "No session start seen yet" in mcp_only and "Hook working" not in mcp_only
+    # A REST request with no session-start source is not a hook either.
+    audit_service.write_event(actor_type="agent", actor_id="claude-code", action="context_injected",
+                              resource_type="execution", resource_id="e0b", result="success",
+                              details={"memory_scope": "workspace:agent-core", "resolved_by": "requested", "source": None, "channel": "rest"})
+    assert "Hook working" not in _steps(integrations_client, "codex")[1]
+    audit_service.write_event(actor_type="agent", actor_id="claude-code", action="context_injected",
+                              resource_type="execution", resource_id="e1", result="success",
+                              details={"memory_scope": "workspace:agent-core", "resolved_by": "cwd", "source": "startup", "channel": "rest"})
     _html, hooked, _o = _steps(integrations_client, "codex")
     assert "Hook working: context delivered just now" in hooked
 

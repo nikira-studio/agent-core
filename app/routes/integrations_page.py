@@ -711,7 +711,11 @@ def _ago(stamp):
 
 
 def _agent_signals(agent_id):
-    """When this agent last called Agent Core, and when a hook last gave it session context."""
+    """When this agent last called Agent Core, and when a session start hook last gave it session context.
+
+    A hook asks over REST and names why the session started; the agent's own session_context call arrives
+    over MCP. Only the first proves the hook ran, so an MCP delivery never counts.
+    """
     from app.database import get_db
 
     with get_db() as conn:
@@ -719,7 +723,9 @@ def _agent_signals(agent_id):
             "SELECT MAX(timestamp) FROM audit_log WHERE actor_type = 'agent' AND actor_id = ?", (agent_id,)
         ).fetchone()[0]
         hooked = conn.execute(
-            "SELECT MAX(timestamp) FROM audit_log WHERE actor_type = 'agent' AND actor_id = ? AND action = 'context_injected'",
+            "SELECT MAX(timestamp) FROM audit_log WHERE actor_type = 'agent' AND actor_id = ? AND action = 'context_injected' "
+            "AND json_extract(details_json, '$.channel') = 'rest' "
+            "AND json_extract(details_json, '$.source') IN ('startup', 'clear', 'compact', 'resume')",
             (agent_id,),
         ).fetchone()[0]
     return seen, hooked
@@ -1725,7 +1731,7 @@ def _hook_steps(client_key, base_url):
         trust = (
             f"Codex skips a new or changed hook until you trust it. In the Codex CLI, start Codex, type `/hooks`, find the {APP_NAME} SessionStart hook in the list, "
             "and trust it; Codex prints a warning pointing to `/hooks` at startup while a hook still needs review. "
-            "The Codex desktop app has no `/hooks`: select Review hooks in the composer or open Settings > Hooks, trust the hook there, then start a new thread. "
+            "The Codex desktop app has no `/hooks`: open Settings > Hooks (or select Review hooks in the composer), find the hook marked \"needs review\", trust it, then start a new thread. "
             "Codex records the trust against the hook's registration, not the script, so updating the script does not ask again, "
             "but changing the registration (for example its matcher) does. "
             "If the status above still says \"No session start seen yet\" after a new thread, the app has not run the hook "
