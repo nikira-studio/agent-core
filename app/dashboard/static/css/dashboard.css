@@ -2133,6 +2133,7 @@ details.card-fold[open] > summary::before { content: "\25BE\00a0"; }
 .step-callout { margin: 14px 0 0; padding: 8px 12px; border: 1px solid var(--border); background: rgba(128,128,128,0.08); font-size: 0.85rem; border-radius: 6px; }
 .hook-steps .step-note { margin: 0 0 8px; color: var(--muted); font-size: 0.85rem; }
 .hook-sub { margin-top: 14px; }
+.hook-steps .step-warn { color: var(--warning); }
 .hook-sub > h4 { margin: 0 0 6px; font-size: 0.9rem; }
 .os-switch { display: flex; gap: 6px; margin: 10px 0 0; }
 .os-switch[hidden] { display: none; }

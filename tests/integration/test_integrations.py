@@ -564,3 +564,15 @@ def test_the_steps_tell_you_to_run_them_yourself_and_give_windows_commands(integ
         assert all("already exists" in steps["register_where"][os_] for os_ in ("unix", "windows"))
     _html, claude_steps, _o = _steps(integrations_client, "claude_code")
     assert "Do steps a and c yourself" in claude_steps
+
+
+def test_codex_step_c_covers_the_desktop_app_and_a_workspace_with_no_repository_folder(integrations_client):
+    from app.services import workspace_service
+
+    _html, codex, _o = _steps(integrations_client, "codex")
+    plain = codex.replace("<code>", "").replace("</code>", "").replace("&gt;", ">")
+    assert "Settings > Hooks" in plain and "has no /hooks" in plain and "Review hooks" in plain
+    assert "Agent Core has no Repository folder yet, so a session cannot be matched" in codex
+    workspace_service.set_repo_root("agent-core", "C:\\Users\\alex\\media studio")
+    _html, mapped, _o = _steps(integrations_client, "codex")
+    assert "has no Repository folder yet" not in mapped

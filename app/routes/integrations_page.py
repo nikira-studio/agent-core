@@ -731,7 +731,20 @@ def _step_status(ok, text):
     return f"<span class='{cls}'>{escape_html(text)}</span>"
 
 
-def _hook_step_html(client_key, base_url):
+def _no_repo_folder_note(workspace):
+    """Say so when the chosen workspace has no Repository folder: without one a session cannot be matched to it."""
+    from app.services import workspace_service
+
+    if workspace_service.get_repo_root(workspace["id"]):
+        return ""
+    name = workspace.get("name") or workspace["id"]
+    return (
+        f"<p class='step-note step-warn'>{escape_html(name)} has no Repository folder yet, so a session cannot be matched to it by its folder. "
+        "An admin sets it under Workspaces → Edit Workspace → Repository folder.</p>"
+    )
+
+
+def _hook_step_html(client_key, base_url, workspace=None):
     """The whole hook step, in place: install, register, trust, map and try, each with a copy block and an OS switch."""
     s = _hook_steps(client_key, base_url)
 
@@ -773,7 +786,8 @@ def _hook_step_html(client_key, base_url):
         html += f"<div class='hook-sub'><h4>c{next(n)} · Trust it once</h4><p class='step-note'>{_inline_code(s['trust'])}</p></div>"
     html += (
         f"<div class='hook-sub'><h4>c{next(n)} · Map your project folder to a workspace</h4>"
-        f"<p class='step-note'>{_inline_code(s['mapping'])}</p></div>"
+        + (_no_repo_folder_note(workspace) if workspace else "")
+        + f"<p class='step-note'>{_inline_code(s['mapping'])}</p></div>"
         "<details class='hook-try'><summary>Test the hook by hand</summary>"
         + both("try", "From a project folder you mapped")
         + f"<p class='step-note'>{_inline_code(s['try_note'])}</p></details>"
@@ -1062,7 +1076,7 @@ def integrations_page(
             )
             hook_item = (
                 f"<li><h3>Add the session start hook {hook_status}</h3>"
-                f"{_hook_step_html(target, base_url)}</li>"
+                f"{_hook_step_html(target, base_url, w_)}</li>"
             )
         yourself = (
             "Do steps a and c yourself, in a terminal. " if target in _HOOK_CLIENTS else "Do step a yourself, in a terminal. "
@@ -1709,10 +1723,15 @@ def _hook_steps(client_key, base_url):
             "so a rotated key needs no change here."
         )
         trust = (
-            f"Codex skips a new or changed hook until you trust it. Start Codex, type `/hooks`, find the {APP_NAME} SessionStart hook in the list, "
-            "and trust it. Codex prints a warning pointing to `/hooks` at startup while a hook still needs review. "
+            f"Codex skips a new or changed hook until you trust it. In the Codex CLI, start Codex, type `/hooks`, find the {APP_NAME} SessionStart hook in the list, "
+            "and trust it; Codex prints a warning pointing to `/hooks` at startup while a hook still needs review. "
+            "The Codex desktop app has no `/hooks`: select Review hooks in the composer or open Settings > Hooks, trust the hook there, then start a new thread. "
             "Codex records the trust against the hook's registration, not the script, so updating the script does not ask again, "
-            "but changing the registration (for example its matcher) does."
+            "but changing the registration (for example its matcher) does. "
+            "If the status above still says \"No session start seen yet\" after a new thread, the app has not run the hook "
+            "(hooks in the Windows app have been reported not to run: openai/codex issue 35863). "
+            "In a session where it did not run, the instructions file (step b) still has the agent load the same context itself with `session_context`; only the automatic start is missing. "
+            "The CLI and the app may keep separate approvals, so trust it in the one you use."
         )
 
     # Windows PowerShell 5 writes a BOM or UTF-16 with `>` and Out-File; WriteAllText writes plain UTF-8.
