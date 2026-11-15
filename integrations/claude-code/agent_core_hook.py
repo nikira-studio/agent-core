@@ -27,18 +27,25 @@ supply:
                        drops anything over 10,000 characters to a stub)
   AGENT_CORE_HANDOFF_NUDGE=0  turn the Stop nudge off
 
-It never breaks a session: any failure exits 0, at most with a one-line notice.
-Standard library only.
+It never breaks a session: any failure exits 0, at most with a one-line notice
+that never carries the key; a redirect is never followed (the key would go with
+it) and the run is cut off after HARD_DEADLINE_SECONDS. Standard library only.
 """
 
 import json
 import os
+import stat
 import sys
+import threading
 import urllib.error
 import urllib.request
 
 INJECT_SOURCES = {"startup", "clear", "compact"}
 TIMEOUT_SECONDS = 8
+HARD_DEADLINE_SECONDS = 12  # under the 15s the install text registers; covers DNS and slow servers
+MAX_CONFIG_BYTES = 1024 * 1024
+MAX_RESPONSE_BYTES = 1_000_000
+MAX_CONTEXT_CHARS = 10_000
 DEFAULT_CHARS = 9000
 NETWORK_ERRORS = (OSError, ValueError, RuntimeError, urllib.error.URLError)
 
@@ -49,9 +56,15 @@ def _dict(value):
 
 def _mcp_server(config_path, name, project=None):
     try:
-        with open(config_path, encoding="utf-8") as handle:
-            config = _dict(json.load(handle))
-    except (OSError, ValueError):
+        # A regular file of sane size only: a symlink to /dev/zero or a FIFO must not hang a session.
+        if not stat.S_ISREG(os.stat(config_path).st_mode):
+            return None
+        with open(config_path, "rb") as handle:
+            raw = handle.read(MAX_CONFIG_BYTES + 1)
+        if len(raw) > MAX_CONFIG_BYTES:
+            return None
+        config = _dict(json.loads(raw.decode("utf-8")))
+    except Exception:  # unreadable, not UTF-8, not JSON, nested too deep: treat as absent
         return None
     servers = _dict(config.get("mcpServers"))
     if project:
@@ -92,6 +105,26 @@ def resolve_connection(cwd, env=os.environ, home=None):
     return None, None
 
 
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *args, **kwargs):
+        return None  # the key travels in a header: a redirect would carry it to another host
+
+
+_OPENER = urllib.request.build_opener(_NoRedirect)
+
+
+def _reason(exc, api_key):
+    """One short line about a failure, never the key and never raw exception text that could hold it."""
+    if isinstance(exc, urllib.error.HTTPError):
+        return f"HTTP {exc.code}"
+    if isinstance(exc, urllib.error.URLError):
+        return "cannot reach it"
+    if isinstance(exc, RuntimeError):  # Agent Core's own error message
+        text = "".join(ch for ch in str(exc) if ch.isprintable())[:120]
+        return text.replace(api_key, "***") if api_key else text
+    return type(exc).__name__
+
+
 def post(base_url, api_key, path, payload):
     request = urllib.request.Request(
         f"{base_url}{path}",
@@ -99,8 +132,8 @@ def post(base_url, api_key, path, payload):
         headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
         method="POST",
     )
-    with urllib.request.urlopen(request, timeout=TIMEOUT_SECONDS) as response:
-        body = json.loads(response.read().decode("utf-8"))
+    with _OPENER.open(request, timeout=TIMEOUT_SECONDS) as response:
+        body = json.loads(response.read(MAX_RESPONSE_BYTES).decode("utf-8"))
     if not isinstance(body, dict) or not body.get("ok"):
         error = body.get("error") if isinstance(body, dict) else None
         raise RuntimeError(_dict(error).get("message") or str(error or "request failed"))
@@ -125,10 +158,11 @@ def session_start(event, base_url, api_key, env):
     try:
         data = post(base_url, api_key, "/api/session-context", payload)
     except NETWORK_ERRORS as exc:
-        return {"systemMessage": f"Agent Core session context unavailable: {exc}"}
-    if not data.get("context"):
+        return {"systemMessage": f"Agent Core session context unavailable: {_reason(exc, api_key)}"}
+    context = data.get("context")
+    if not isinstance(context, str) or not context:
         return None
-    return {"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": data["context"]}}
+    return {"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": context[:MAX_CONTEXT_CHARS]}}
 
 
 def stop(event, base_url, api_key, env):
@@ -177,5 +211,13 @@ def _run(stdin, stdout, env):
     return 0
 
 
+def _hard_deadline():
+    timer = threading.Timer(HARD_DEADLINE_SECONDS, lambda: os._exit(0))
+    timer.daemon = True
+    timer.start()
+    return timer
+
+
 if __name__ == "__main__":
+    _hard_deadline()
     sys.exit(main())

@@ -239,6 +239,7 @@ def _agent_setup_output_options(target=None):
         ("session", "Session Prompt", f"{APP_SLUG}-session-prompt.md"),
         ("verification", "Verification Prompt", f"{APP_SLUG}-verification.md"),
         ("claude_code_hook", "Claude Code Hook", f"{APP_SLUG}-claude-code-hook.md"),
+        ("codex_hook", "Codex Hook", f"{APP_SLUG}-codex-hook.md"),
     ]
 
 
@@ -643,6 +644,10 @@ HOOK_SCRIPTS = {
     / "integrations"
     / "claude-code"
     / "agent_core_hook.py",
+    "codex/agent_core_hook.py": Path(__file__).resolve().parents[2]
+    / "integrations"
+    / "codex"
+    / "agent_core_hook.py",
 }
 
 
@@ -927,13 +932,15 @@ def integrations_page(
             "data-output-type='mcp_tool' onclick='generateConnectionConfig(this)'>"
             f"Generate One-Time Key + {escape_html(_name)} MCP Config</button>"
         )
-        hook_item = (
-            "<li><h3>Add the session start hook</h3>"
-            "<p>A hook runs when a Claude Code session starts and hands the agent its session context (open work, recent results, key records) with no step to remember. The steps are under "
-            f"<a href=\"{page_path}?{urlencode({**current_params, 'output_type': 'claude_code_hook'})}#other-outputs\">Other outputs → Claude Code Hook</a>.</p></li>"
-            if target == "claude_code"
-            else ""
-        )
+        hook_names = {"claude_code": ("Claude Code", "claude_code_hook"), "codex": ("Codex", "codex_hook")}
+        hook_item = ""
+        if target in hook_names:
+            hook_client, hook_type = hook_names[target]
+            hook_item = (
+                "<li><h3>Add the session start hook</h3>"
+                f"<p>A hook runs when a {hook_client} session starts and hands the agent its session context (open work, recent results, key records) with no step to remember. The steps are under "
+                f"<a href=\"{page_path}?{urlencode({**current_params, 'output_type': hook_type})}#other-outputs\">Other outputs → {hook_client} Hook</a>.</p></li>"
+            )
         tool_steps_html = (
             '<ol class="setup-steps">'
             f"<li><h3>Connect it</h3><p>{connect_where}</p>{_section(c_label, c_text, f'{APP_SLUG}-mcp-config.txt', connect_btn)}</li>"
@@ -1012,7 +1019,7 @@ def integrations_page(
 
       <details class="card fold-card" id="other-outputs" {other_open}>
         <summary><span class="fold-title">Other outputs</span><span class="fold-hint">Instruction files for other tools, environment variables, raw config</span></summary>
-        <p class="form-hint">Everything this page can generate, as tabs: environment variables, the session prompt, the Claude Code hook, and the full MCP config for every tool.</p>
+        <p class="form-hint">Everything this page can generate, as tabs: environment variables, the session prompt, the Claude Code and Codex hooks, and the full MCP config for every tool.</p>
         {destination_section}
         <div class="form-section" id="generated-output">
         <div class="setup-output-group" data-setup-path="connection">
@@ -1064,7 +1071,7 @@ def _agent_setup_extra_js(base_url):
 # verification prompt without saying so, so a mistyped type looked like it had worked.
 KNOWN_OUTPUT_TYPES = frozenset({
     "instructions", "session", "claude_md", "agents_md", "assistants_md", "mcp_json", "mcp_tool",
-    "cursor_mcp_json", "windsurf_mcp_json", "env", "claude_code_hook", "verification",
+    "cursor_mcp_json", "windsurf_mcp_json", "env", "claude_code_hook", "codex_hook", "verification",
 })
 
 KEY_BEARING_OUTPUTS = frozenset(
@@ -1179,6 +1186,9 @@ def _build_agent_setup_output_for(
     elif output_type == "claude_code_hook":
         label = "Claude Code Hook"
         content = _build_claude_code_hook(base_url)
+    elif output_type == "codex_hook":
+        label = "Codex Hook"
+        content = _build_codex_hook(base_url)
     else:
         label = "Verification Prompt"
         content = _build_verification_prompt(workspace_scope or agent_scope)
@@ -1521,6 +1531,66 @@ The hook sends the session's working directory. {APP_NAME} matches it against ea
 """
 
 
+def _build_codex_hook(base_url):
+    script_url = f"{base_url}/integrations/hooks/codex/agent_core_hook.py"
+    command = "python3 ~/.codex/hooks/agent_core_hook.py"
+    hook = {
+        "hooks": {
+            "SessionStart": [
+                {
+                    "matcher": "startup|clear|compact",
+                    "hooks": [
+                        {
+                            "type": "command",
+                            "command": command,
+                            "timeout": 15,
+                            "statusMessage": f"Loading {APP_NAME} context",
+                            "additionalContextLimit": 4000,
+                        }
+                    ],
+                }
+            ]
+        }
+    }
+    return f"""# {APP_NAME} hook for Codex
+
+With this hook, every Codex session starts with {APP_NAME} context already loaded: standing rules, work waiting on a person, unfinished and handed-off work, recent results with their next steps, changes since the agent's last session, and an index of key records. The agent does not have to be told to look.
+
+Requirements: `python3` 3.11 or newer, and the {APP_NAME} MCP server already added to Codex (MCP Config output). The hook reads the server URL and key from `~/.codex/config.toml`, so a rotated key needs no change here.
+
+## 1. Install the script
+
+```bash
+mkdir -p ~/.codex/hooks
+curl -fsSL {script_url} -o ~/.codex/hooks/agent_core_hook.py
+```
+
+## 2. Register the hook
+
+Save this as `~/.codex/hooks.json` (all projects), or merge it into the file if you already have one. A project can use `<repo>/.codex/hooks.json` instead. Codex also accepts the same hook as an inline `[[hooks.SessionStart]]` table in `config.toml`; use one form per folder, not both.
+
+```json
+{json.dumps(hook, indent=2)}
+```
+
+## 3. Trust it once
+
+Codex skips a new or changed hook until you trust it. Start Codex, type `/hooks`, find the {APP_NAME} SessionStart hook in the list, and trust it. Codex prints a warning pointing to `/hooks` at startup while a hook still needs review. Codex records the trust against the hook's registration, so editing the registration asks you again.
+
+## 4. Map repositories to workspaces
+
+The hook sends the session's working directory. {APP_NAME} matches it against each workspace's repository folder (Workspaces → Edit Workspace, admin only), so the right workspace loads without per-repository setup. Enter the folder as it appears on the machine running Codex, not inside the {APP_NAME} container; only the path text is compared. Sessions in a folder no workspace claims start normally, without context. To pin a workspace instead, set `AGENT_CORE_SCOPE=workspace:<id>` in the environment Codex runs in.
+
+## Behavior
+
+- Session context runs on `startup`, `clear` and `compact`. A resumed or forked session keeps its earlier context.
+- The context arrives as developer context in the session. `additionalContextLimit` (about 4,000 tokens) is set above the context's size so Codex does not replace it with a preview. Set `AGENT_CORE_CONTEXT_CHARS` to use less.
+- Only your own `~/.codex/config.toml` is read for the URL and key, never a repository's, and a redirect from the server is never followed, so a cloned project cannot make the hook send your key anywhere. A project that keeps its own {APP_NAME} entry should set `AGENT_CORE_URL` and `AGENT_CORE_API_KEY` in the environment instead.
+- If {APP_NAME} cannot be reached, the session starts normally and Codex shows a one-line notice. Without a key in `config.toml` the hook stays silent.
+- `AGENT_CORE_URL` and `AGENT_CORE_API_KEY` override `config.toml`, and `AGENT_CORE_MCP_NAME` names a server other than `{APP_SLUG}`.
+"""
+
+
 def _mcp_config_sections(base_url, api_key=None):
     """The MCP config as separate per-tool blocks, in the order the full text prints them."""
     key = _connection_key_value(api_key)
@@ -1672,6 +1742,8 @@ def _get_destination_guidance(target, output_type):
         return "Paste this into the first message or workspace instructions field for a single agent session."
     elif output_type == "claude_code_hook":
         return "Follow these steps on each machine that runs Claude Code. The hook contains no key; it reuses the MCP configuration."
+    elif output_type == "codex_hook":
+        return "Follow these steps on each machine that runs Codex. The hook contains no key; it reuses the MCP configuration, and you trust it once in Codex with /hooks."
     elif output_type == "verification":
         return "Paste this into your connected agent after setup. It writes, finds and closes one note in a scope the agent can write to, and reports whether each step worked."
     return ""

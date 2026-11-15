@@ -414,7 +414,8 @@ def test_a_chosen_tool_shows_its_connect_block_its_file_and_the_key_button(integ
 
     codex = integrations_client.get(base + "&target=codex").text.split('id="tool-step"', 1)[1].split('id="check-step"', 1)[0]
     assert "# Codex CLI" in codex and "# Claude Code" not in codex and "AGENTS.md" in codex
-    assert "Add the session start hook" not in codex
+    assert "Add the session start hook" in codex and "Other outputs → Codex Hook" in codex
+    assert "Claude Code Hook" not in codex  # each tool is pointed at its own hook
 
     other = integrations_client.get(base).text.split('id="tool-step"', 1)[1].split('id="check-step"', 1)[0]
     assert "Choose your tool to see exactly what to copy" in other and "Connect it" not in other
