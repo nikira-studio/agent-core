@@ -1489,7 +1489,7 @@ def _build_claude_code_hook(base_url):
         "hooks": {
             "SessionStart": [
                 {
-                    "matcher": "startup|clear|compact",
+                    "matcher": "startup|clear|compact|resume",
                     "hooks": [{"type": "command", "command": command, "timeout": 15}],
                 }
             ],
@@ -1523,7 +1523,7 @@ The hook sends the session's working directory. {APP_NAME} matches it against ea
 
 ## Behavior
 
-- Session context runs on `startup`, `clear` and `compact`. A resumed session keeps its earlier context.
+- Session context runs on `startup`, `clear`, `compact` and `resume`. A resumed session gets it only if it never received context for its workspace (for example the folder was not mapped yet); one that already has it is left alone.
 - The handoff request blocks a stop at most once per task, and never while Claude is already continuing because of a stop hook. Set `AGENT_CORE_HANDOFF_NUDGE=0` to turn it off.
 - Output stays under Claude Code's 10,000-character limit; set `AGENT_CORE_CONTEXT_CHARS` to use less.
 - If {APP_NAME} cannot be reached, the session starts normally and Claude Code shows a one-line notice.
@@ -1538,7 +1538,7 @@ def _build_codex_hook(base_url):
         "hooks": {
             "SessionStart": [
                 {
-                    "matcher": "startup|clear|compact",
+                    "matcher": "startup|clear|compact|resume",
                     "hooks": [
                         {
                             "type": "command",
@@ -1575,7 +1575,7 @@ Save this as `~/.codex/hooks.json` (all projects), or merge it into the file if 
 
 ## 3. Trust it once
 
-Codex skips a new or changed hook until you trust it. Start Codex, type `/hooks`, find the {APP_NAME} SessionStart hook in the list, and trust it. Codex prints a warning pointing to `/hooks` at startup while a hook still needs review. Codex records the trust against the hook's registration, so editing the registration asks you again.
+Codex skips a new or changed hook until you trust it. Start Codex, type `/hooks`, find the {APP_NAME} SessionStart hook in the list, and trust it. Codex prints a warning pointing to `/hooks` at startup while a hook still needs review. Codex records the trust against the hook's registration, not the script, so updating the script does not ask again, but changing the registration (for example its matcher) does.
 
 ## 4. Map repositories to workspaces
 
@@ -1583,7 +1583,7 @@ The hook sends the session's working directory. {APP_NAME} matches it against ea
 
 ## Behavior
 
-- Session context runs on `startup`, `clear` and `compact`. A resumed or forked session keeps its earlier context.
+- Session context runs on `startup`, `clear`, `compact` and `resume`. A resumed session gets it only if it never received context for its workspace (for example the folder was not mapped yet); one that already has it is left alone. A forked session keeps its parent's context.
 - The context arrives as developer context in the session. `additionalContextLimit` (about 4,000 tokens) is set above the context's size so Codex does not replace it with a preview. Set `AGENT_CORE_CONTEXT_CHARS` to use less.
 - Only your own `~/.codex/config.toml` is read for the URL and key, never a repository's, and a redirect from the server is never followed, so a cloned project cannot make the hook send your key anywhere. A project that keeps its own {APP_NAME} entry should set `AGENT_CORE_URL` and `AGENT_CORE_API_KEY` in the environment instead.
 - If {APP_NAME} cannot be reached, the session starts normally and Codex shows a one-line notice. Without a key in `config.toml` the hook stays silent.

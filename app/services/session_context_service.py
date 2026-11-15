@@ -378,6 +378,19 @@ def fit(scope: str, execution_id: str, parts: dict, budget: int) -> tuple[str, d
     return text, limits, reductions
 
 
+def _already_received(agent_id: str, scope: str, host_session_ref: str) -> bool:
+    """Was context for this scope injected into this host session before (at its start, a clear or a compact)?"""
+    with get_db() as conn:
+        row = conn.execute(
+            """SELECT 1 FROM audit_log a JOIN agent_executions e ON e.id = a.resource_id
+            WHERE a.action = 'context_injected' AND a.resource_type = 'execution' AND a.actor_id = ?
+              AND e.host_session_ref = ? AND json_extract(a.details_json, '$.memory_scope') = ?
+            LIMIT 1""",
+            (agent_id, host_session_ref, scope),
+        ).fetchone()
+    return row is not None
+
+
 def build_session_context(
     *,
     agent_id: str,
@@ -398,6 +411,17 @@ def build_session_context(
             "resolved_by": resolved_by,
             "execution_id": None,
             "context": "",
+        }
+    if source == "resume" and host_session_ref and _already_received(agent_id, scope, host_session_ref):
+        # A resumed session keeps what it was given when it started: say nothing, so the hook stays
+        # silent. One that never got context for this workspace (the folder was unmapped then, or
+        # the agent had no access yet) falls through and gets it now.
+        return {
+            "memory_scope": scope,
+            "resolved_by": resolved_by,
+            "execution_id": None,
+            "context": "",
+            "already_received": True,
         }
 
     execution = workspace_sync_service.start_session_execution(

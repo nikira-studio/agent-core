@@ -133,7 +133,7 @@ def test_malformed_config_and_events_exit_cleanly(tmp_path):
         assert out.getvalue() == ""
 
 
-def test_injects_context_on_startup_clear_and_compact_but_not_resume_or_fork(monkeypatch):
+def test_asks_on_startup_clear_compact_and_resume_but_never_on_fork(monkeypatch):
     hook = _codex()
     env = {"AGENT_CORE_URL": "http://core", "AGENT_CORE_API_KEY": "k"}
     sent = []
@@ -145,17 +145,17 @@ def test_injects_context_on_startup_clear_and_compact_but_not_resume_or_fork(mon
 
     monkeypatch.setattr(hook, "post", fake_post)
     event = {"session_id": "s1", "cwd": "/repo", "hook_event_name": "SessionStart", "model": "m", "permission_mode": "default"}
-    for source in ("startup", "clear", "compact"):
+    for source in ("startup", "clear", "compact", "resume"):
         out = io.StringIO()
         assert hook.main(io.StringIO(json.dumps({**event, "source": source})), out, env) == 0
         result = json.loads(out.getvalue())
         assert result["hookSpecificOutput"]["hookEventName"] == "SessionStart"
         assert result["hookSpecificOutput"]["additionalContext"].startswith("# Agent Core")
     assert sent[0] == {"cwd": "/repo", "host_session_ref": "s1", "source": "startup", "max_chars": 9000}
-    for source in ("resume", "fork"):
-        out = io.StringIO()
-        hook.main(io.StringIO(json.dumps({**event, "source": source})), out, env)
-        assert out.getvalue() == ""
+    assert [p["source"] for p in sent] == ["startup", "clear", "compact", "resume"]
+    out = io.StringIO()
+    hook.main(io.StringIO(json.dumps({**event, "source": "fork"})), out, env)
+    assert out.getvalue() == "" and len(sent) == 4  # a fork carries its parent's context: Core is not even asked
     # a pinned workspace and a smaller budget are passed on
     sent.clear()
     hook.main(io.StringIO(json.dumps(event)), io.StringIO(), {**env, "AGENT_CORE_SCOPE": "workspace:w", "AGENT_CORE_CONTEXT_CHARS": "4000"})
@@ -339,8 +339,10 @@ def test_bare_folders_home_and_the_filesystem_root_stay_silent(monkeypatch, tmp_
         (project / ".git").mkdir(parents=True, exist_ok=True)
         for answer in ({"resolved_by": "requested", "context": ""}, {"context": ""}, {"resolved_by": "private", "context": ""}):
             assert _run(module, monkeypatch, project, answer) is None
-        # resumed sessions are not touched at all
-        assert _run(module, monkeypatch, project, UNMATCHED, source="resume") is None
+        # a fork is not touched at all
+        assert _run(module, monkeypatch, project, UNMATCHED, source="fork") is None
+        # a resumed session that already has its context hears nothing: Core answers with an empty context
+        assert _run(module, monkeypatch, project, {"memory_scope": "workspace:p", "resolved_by": "cwd", "context": "", "already_received": True}, source="resume") is None
 
 
 def test_an_unreachable_core_still_gives_the_unavailable_line_in_a_project(monkeypatch, tmp_path):

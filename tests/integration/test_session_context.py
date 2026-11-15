@@ -133,6 +133,65 @@ def test_same_host_session_reuses_its_execution(test_client, admin_token):
     assert other["execution_id"] != first["execution_id"]
 
 
+def _injections(ref):
+    with get_db() as conn:
+        return conn.execute(
+            "SELECT COUNT(*) FROM audit_log a JOIN agent_executions e ON e.id = a.resource_id "
+            "WHERE a.action = 'context_injected' AND e.host_session_ref = ?", (ref,),
+        ).fetchone()[0]
+
+
+def test_resume_injects_only_for_a_session_that_never_received_context(test_client, admin_token, tmp_path):
+    folder = tmp_path / "proj"
+    headers = _setup(admin_token, roots={SCOPE: str(folder)})
+
+    # A session that started before its folder was mapped got nothing; resuming it now delivers.
+    unmapped = _context(test_client, headers, cwd=str(tmp_path / "elsewhere"), host_session_ref="s-old", source="startup")
+    assert unmapped["context"] == "" and unmapped["resolved_by"] == "unmatched" and _injections("s-old") == 0
+    first = _context(test_client, headers, cwd=str(folder), host_session_ref="s-old", source="resume")
+    assert first["context"].startswith("# Agent Core session context") and first["resolved_by"] == "cwd"
+    assert _injections("s-old") == 1
+
+    # Resumed again: it has the context now, so it hears nothing and no execution or audit row is added.
+    again = _context(test_client, headers, cwd=str(folder), host_session_ref="s-old", source="resume")
+    assert again["context"] == "" and again["already_received"] is True and again["memory_scope"] == SCOPE
+    assert again["execution_id"] is None and _injections("s-old") == 1
+
+    # A session that got context at its start, however long ago, is left alone when resumed.
+    started = _context(test_client, headers, cwd=str(folder), host_session_ref="s-new", source="startup")
+    assert started["context"] and _injections("s-new") == 1
+    with get_db() as conn:  # long ago: the execution is stale, the fact that it was given context is not
+        conn.execute("UPDATE agent_executions SET last_seen_at = '2026-01-01T00:00:00+00:00' WHERE host_session_ref = 's-new'")
+        conn.commit()
+    quiet = _context(test_client, headers, cwd=str(folder), host_session_ref="s-new", source="resume")
+    assert quiet["context"] == "" and quiet["already_received"] is True and _injections("s-new") == 1
+
+
+def test_resume_into_a_different_workspace_than_the_one_it_was_given_gets_context(test_client, admin_token, tmp_path):
+    outer, inner = tmp_path / "a", tmp_path / "b"
+    headers = _setup(admin_token, roots={SCOPE: str(outer), "workspace:ctx-other": str(inner)})
+    _context(test_client, headers, cwd=str(outer), host_session_ref="s-move", source="startup")
+    moved = _context(test_client, headers, cwd=str(inner), host_session_ref="s-move", source="resume")
+    assert moved["memory_scope"] == "workspace:ctx-other" and moved["context"]
+    assert "already_received" not in moved
+
+
+def test_resume_without_a_session_ref_cannot_be_judged_and_gets_context(test_client, admin_token):
+    headers = _setup(admin_token)
+    first = _context(test_client, headers, memory_scope=SCOPE, source="resume")
+    second = _context(test_client, headers, memory_scope=SCOPE, source="resume")
+    assert first["context"] and second["context"]
+
+
+def test_startup_clear_and_compact_always_deliver_and_unmatched_resume_stays_unmatched(test_client, admin_token, tmp_path):
+    headers = _setup(admin_token, roots={SCOPE: str(tmp_path / "proj")})
+    for source in ("startup", "clear", "compact", "startup"):
+        data = _context(test_client, headers, cwd=str(tmp_path / "proj"), host_session_ref="s-same", source=source)
+        assert data["context"] and "already_received" not in data
+    nowhere = _context(test_client, headers, cwd=str(tmp_path / "nowhere"), host_session_ref="s-x", source="resume")
+    assert nowhere["memory_scope"] is None and nowhere["resolved_by"] == "unmatched" and nowhere["context"] == ""
+
+
 def test_scope_resolves_from_cwd_by_deepest_root(test_client, admin_token, tmp_path):
     outer, inner = tmp_path / "proj", tmp_path / "proj" / "sub"
     headers = _setup(admin_token, roots={"workspace:ctx-other": str(outer), SCOPE: str(inner)})
@@ -254,7 +313,7 @@ def test_hook_exits_cleanly_on_malformed_config_and_events(tmp_path):
         assert hook.main(stdin=io.StringIO(stdin), stdout=io.StringIO(), env={}) == 0
 
 
-def test_hook_injects_context_skips_resume_and_never_fails(monkeypatch):
+def test_hook_injects_context_asks_on_resume_skips_fork_and_never_fails(monkeypatch):
     hook = _hook()
     env = {"AGENT_CORE_URL": "http://core", "AGENT_CORE_API_KEY": "k"}
     sent = {}
@@ -273,9 +332,15 @@ def test_hook_injects_context_skips_resume_and_never_fails(monkeypatch):
     assert result["hookSpecificOutput"]["additionalContext"].startswith("# Agent Core")
     assert sent == {"cwd": "/repo", "host_session_ref": "s1", "source": "startup", "max_chars": 9000}
 
+    # resume is passed on to Agent Core, which decides; a fork carries its parent's context and is not asked
+    sent.clear()
     out = io.StringIO()
     hook.main(io.StringIO(json.dumps({**event, "source": "resume"})), out, env)
-    assert out.getvalue() == ""
+    assert sent["source"] == "resume" and json.loads(out.getvalue())["hookSpecificOutput"]["additionalContext"]
+    sent.clear()
+    out = io.StringIO()
+    hook.main(io.StringIO(json.dumps({**event, "source": "fork"})), out, env)
+    assert out.getvalue() == "" and sent == {}
 
     def failing(*_):
         raise OSError("connection refused")

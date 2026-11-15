@@ -40,7 +40,9 @@ import threading
 import urllib.error
 import urllib.request
 
-INJECT_SOURCES = {"startup", "clear", "compact"}
+# resume is asked about too: Agent Core answers only for a session that never received context for this
+# workspace (the folder was unmapped when it started), and a session that has it hears nothing. A fork carries its parent's.
+INJECT_SOURCES = {"startup", "clear", "compact", "resume"}
 TIMEOUT_SECONDS = 8
 HARD_DEADLINE_SECONDS = 12  # under the 15s the install text registers; covers DNS and slow servers
 MAX_CONFIG_BYTES = 1024 * 1024
@@ -167,7 +169,7 @@ def _looks_like_project(cwd, home=None):
 
 def session_start(event, base_url, api_key, env):
     if event.get("source", "startup") not in INJECT_SOURCES:
-        return None  # resume and fork carry their context already
+        return None  # a fork carries its parent's context
     try:
         chars = int(env.get("AGENT_CORE_CONTEXT_CHARS", DEFAULT_CHARS))
     except ValueError:

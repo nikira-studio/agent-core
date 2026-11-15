@@ -45,7 +45,9 @@ try:
 except ImportError:  # python older than 3.11: stay silent rather than fail a session
     tomllib = None
 
-INJECT_SOURCES = {"startup", "clear", "compact"}  # resume and fork carry their context already
+# resume is asked about too: Agent Core answers only for a session that never received context for this
+# workspace (the folder was unmapped when it started), and a session that has it hears nothing. A fork carries its parent's.
+INJECT_SOURCES = {"startup", "clear", "compact", "resume"}
 TIMEOUT_SECONDS = 8
 HARD_DEADLINE_SECONDS = 12  # under the 15s the install text registers; covers DNS and slow servers
 MAX_CONFIG_BYTES = 256 * 1024
