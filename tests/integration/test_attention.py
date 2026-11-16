@@ -286,3 +286,73 @@ def test_the_overview_and_attention_list_read_the_same_groups(test_client, admin
     assert only_handoffs["credential_requests"] == []
     nothing = waiting_service.waiting_on_person(scopes=[])
     assert nothing["handoffs"] == [] and nothing["credential_requests"] == []
+
+
+def _asked(events):
+    return [p for e, p in events if e == "activity_handoff_requested"]
+
+
+def test_a_new_or_changed_ask_is_announced_once_and_a_resolve_is_not(test_client, admin_token, monkeypatch):
+    worker, _ = _setup()
+    events = []
+    monkeypatch.setattr(webhook_service, "dispatch_event", lambda event, payload: events.append((event, payload)))
+
+    created = _mcp(test_client, worker, "activity_update", memory_scope=A, task_description="Ship the release").json()["data"]["activity"]
+    assert _asked(events) == []  # a task with no ask says nothing
+
+    asked = _mcp(test_client, worker, "activity_update", memory_scope=A, status="blocked", handoff={
+        "completed": "Built it", "needs_human": "Approve the release", "needs_human_url": "https://tracker.example/42",
+    })
+    assert asked.status_code == 200, asked.json()
+    [payload] = _asked(events)
+    assert payload["activity_id"] == created["id"] and payload["agent_id"] == "att-worker"
+    assert payload["memory_scope"] == A and payload["task_description"] == "Ship the release"
+    assert payload["needs_human"] == "Approve the release"
+    assert payload["needs_human_url"] == "https://tracker.example/42"
+    assert payload["path"] == f"/activity?task={created['id']}"
+    assert payload["handoff"]["needs_human"] == "Approve the release" and payload["handoff_resolved_at"] is None
+
+    # The same ask standing, however often the activity is updated or the handoff sent again.
+    activity_service.set_handoff(created["id"], {"completed": "Built it", "needs_human": "Approve the release"})
+    test_client.put(f"/api/activity/{created['id']}", headers=worker, json={"task_note": "still waiting"})
+    test_client.put(f"/api/activity/{created['id']}", headers=worker, json={
+        "handoff": {"completed": "Built it", "needs_human": "Approve the release"},
+    })
+    assert len(_asked(events)) == 1
+
+    # A changed ask is a new question.
+    activity_service.set_handoff(created["id"], {"needs_human": "Approve the release, and pick a date"})
+    assert [p["needs_human"] for p in _asked(events)] == ["Approve the release", "Approve the release, and pick a date"]
+
+    # Resolving is the other event, not this one.
+    before = len(events)
+    resolved = _mcp(test_client, worker, "activity_handoff_resolve", activity_id=created["id"], reason="Done")
+    assert resolved.status_code == 200, resolved.json()
+    assert [e for e, _ in events[before:]] == ["activity_handoff_resolved"]
+    assert len(_asked(events)) == 2
+
+    # Asked again after it was resolved: a new question, even in the same words.
+    activity_service.set_handoff(created["id"], {"needs_human": "Approve the release again"}, amend=True)
+    assert len(_asked(events)) == 3
+
+
+def test_only_webhooks_subscribed_to_the_question_event_receive_it(test_client, admin_token):
+    worker, _ = _setup()
+    wanted = webhook_service.create_webhook(
+        name="asks", url="https://hooks.example/asks", secret_plaintext="s", event_types=["activity_handoff_requested"], created_by="t",
+    )
+    other = webhook_service.create_webhook(
+        name="answers", url="https://hooks.example/answers", secret_plaintext="s", event_types=["activity_handoff_resolved"], created_by="t",
+    )
+    _waiting(A, "Pick a vendor")
+    with get_db() as conn:
+        rows = conn.execute("SELECT webhook_id, event_type FROM webhook_delivery_log").fetchall()
+    assert [(r["webhook_id"], r["event_type"]) for r in rows] == [(wanted["id"], "activity_handoff_requested")]
+    assert other["id"] not in {r["webhook_id"] for r in rows}
+
+
+def test_the_question_event_is_listed_with_a_label_and_a_sample():
+    assert "activity_handoff_requested" in webhook_service.WEBHOOK_EVENT_TYPES
+    assert webhook_service.WEBHOOK_EVENT_LABELS["activity_handoff_requested"][0] == "A question is asked"
+    sample = webhook_service._sample_payload("activity_handoff_requested")
+    assert sample["needs_human"] and sample["path"].startswith("/activity?task=") and "needs_human_url" in sample

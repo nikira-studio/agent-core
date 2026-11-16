@@ -1047,7 +1047,7 @@ The secret is write-only. It is never returned in list or get responses.
 
 ### Supported event types
 
-`activity_created`, `activity_updated`, `activity_heartbeat`, `activity_cancelled`, `activity_recovered`, `connector_executed`
+`activity_created`, `activity_updated`, `activity_heartbeat`, `activity_cancelled`, `activity_recovered`, `activity_handoff_requested`, `activity_handoff_resolved`, `connector_executed`, `approval_requested`
 
 ### Delivery payload
 
@@ -1061,7 +1061,7 @@ Every delivery is a signed HTTP POST. The envelope is the same for all event typ
 }
 ```
 
-**Activity event `data` fields** (`activity_created`, `activity_updated`, `activity_heartbeat`, `activity_cancelled`, `activity_recovered`):
+**Activity event `data` fields** (`activity_created`, `activity_updated`, `activity_heartbeat`, `activity_cancelled`, `activity_recovered`, `activity_handoff_requested`, `activity_handoff_resolved`; the last two add the `handoff` object, and `activity_handoff_requested` also `needs_human`, `needs_human_url` and a relative `path` to the page where the person answers; see the Integrations guide):
 
 ```json
 {

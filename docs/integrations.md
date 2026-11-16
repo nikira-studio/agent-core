@@ -938,8 +938,10 @@ Webhooks are **admin-only** and managed from the **Webhooks** page in the dashbo
 | `activity_heartbeat` | An agent sends a heartbeat on an active task |
 | `activity_cancelled` | An activity is cancelled |
 | `activity_recovered` | An activity is recovered (resumed or closed) |
+| `activity_handoff_requested` | An agent asks a person for something and waits: a handoff with a `needs_human` request is recorded, or its text changes, or it is asked again after being resolved. It fires once per ask; later updates of the same activity while the same ask stands send nothing |
 | `activity_handoff_resolved` | A handoff's `needs_human` request is settled: by a person, by the agent that asked, or superseded by that agent's newer request. `handoff_resolution` says which |
 | `connector_executed` | A service connection action completes |
+| `approval_requested` | An agent proposes a change that waits for a person's approval. The payload carries ids only (see below) |
 
 ### Payload shape
 
@@ -953,7 +955,7 @@ Every delivery is an HTTP POST with `Content-Type: application/json`. The envelo
 }
 ```
 
-Activity events (`activity_created`, `activity_updated`, `activity_heartbeat`, `activity_cancelled`, `activity_recovered`, `activity_handoff_resolved`) include the full activity context so receivers can act without a follow-up lookup:
+Activity events (`activity_created`, `activity_updated`, `activity_heartbeat`, `activity_cancelled`, `activity_recovered`, `activity_handoff_requested`, `activity_handoff_resolved`) include the full activity context so receivers can act without a follow-up lookup:
 
 ```json
 {
@@ -975,6 +977,10 @@ Activity events (`activity_created`, `activity_updated`, `activity_heartbeat`, `
 ```
 
 `task_note` is optional and is typically populated for in-flight updates. `task_result` is optional and is typically populated when a task is completed. `previous_status` is present on `activity_updated` and `activity_cancelled`. `recovery_action` and `result` are present on `activity_recovered`. When the activity has a handoff, the payload adds `handoff` (`completed`, `next_steps`, `open_questions`, `needs_human`) and `handoff_resolved_at`; when it is linked to another system's task, it adds `task_ref`. A receiver can tell a new request for a person from `status` plus `handoff.needs_human` with `handoff_resolved_at` empty.
+
+`activity_handoff_requested` adds what a notifier needs without a second call: `needs_human` (the request text, whole), `needs_human_url` (where the person acts, when the agent gave one, otherwise absent) and `path`, the dashboard page where the person answers it, as `/activity?task=<activity_id>`. The path is relative: Agent Core has no setting for its public address, so the receiver adds the address it already knows. `handoff.needs_human_url` and `handoff_resolved_at` (null while it waits) are there too.
+
+`approval_requested` carries `approval_id`, `kind`, `scope`, `proposed_by`, `expires_at` and `path` (`/approvals/<approval_id>`). It has no title or summary on purpose, so the receiver can show who asked and where to look but not what was asked.
 
 Service events (`connector_executed`) include connection identity, scope, and result:
 

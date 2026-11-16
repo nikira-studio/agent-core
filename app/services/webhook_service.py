@@ -26,6 +26,7 @@ WEBHOOK_EVENT_TYPES = (
     "activity_heartbeat",
     "activity_cancelled",
     "activity_recovered",
+    "activity_handoff_requested",
     "activity_handoff_resolved",
     "connector_executed",
     "approval_requested",
@@ -38,6 +39,7 @@ WEBHOOK_EVENT_LABELS = {
     "activity_heartbeat": ("A task is still alive", "An agent signals that its task is still being worked on."),
     "activity_cancelled": ("A task is cancelled", "A task is cancelled, or closed by itself after sitting idle."),
     "activity_recovered": ("A stalled task resumes", "A task that had gone quiet is worked on again."),
+    "activity_handoff_requested": ("A question is asked", "An agent asks a person for something and waits."),
     "activity_handoff_resolved": ("A question is answered", "A question an agent asked a person is answered or dismissed."),
     "connector_executed": ("A service action runs", "An agent runs an action on one of your connected services."),
     "approval_requested": ("An approval is requested", "An agent proposes a change that waits for a person."),
@@ -434,6 +436,7 @@ def _sample_payload(event_type: str) -> dict:
         "activity_heartbeat",
         "activity_cancelled",
         "activity_recovered",
+        "activity_handoff_requested",
         "activity_handoff_resolved",
     ):
         status_map = {
@@ -442,6 +445,7 @@ def _sample_payload(event_type: str) -> dict:
             "activity_heartbeat": "active",
             "activity_cancelled": "cancelled",
             "activity_recovered": "active",
+            "activity_handoff_requested": "blocked",
             "activity_handoff_resolved": "blocked",
         }
         data = {
@@ -462,7 +466,7 @@ def _sample_payload(event_type: str) -> dict:
             "ended_at": now if event_type == "activity_cancelled" else None,
             "previous_status": "active" if event_type != "activity_created" else None,
         }
-        if event_type in ("activity_updated", "activity_handoff_resolved"):
+        if event_type in ("activity_updated", "activity_handoff_requested", "activity_handoff_resolved"):
             data["task_ref"] = "example:sample-task"
             data["handoff"] = {
                 "completed": "Drafted the change",
@@ -470,6 +474,10 @@ def _sample_payload(event_type: str) -> dict:
                 "needs_human": "Approve the draft before it ships",
             }
             data["handoff_resolved_at"] = now if event_type == "activity_handoff_resolved" else None
+        if event_type == "activity_handoff_requested":
+            data["needs_human"] = data["handoff"]["needs_human"]
+            data["needs_human_url"] = None
+            data["path"] = "/activity?task=sample-activity-id"
     elif event_type == "connector_executed":
         data = {
             "binding_id": "sample-binding-id",

@@ -1,4 +1,5 @@
 import json
+import logging
 import re
 import secrets
 from typing import Optional
@@ -7,6 +8,8 @@ from datetime import timedelta
 from app.database import get_db
 from app.config import settings
 from app.time_utils import parse_utc_datetime, utc_now, utc_now_iso
+
+logger = logging.getLogger(__name__)
 
 
 def create_activity(
@@ -239,7 +242,32 @@ def set_handoff(activity_id: str, handoff: dict, *, amend: bool = False) -> Opti
         )
         _record_handoff_change(conn, activity_id, "handoff_recorded")
         conn.commit()
-        return stored
+    if stored.get("needs_human") and not same_request:
+        announce_question(activity_id, stored)
+    return stored
+
+
+def announce_question(activity_id: str, handoff: dict) -> None:
+    """Tell webhook receivers that an agent now waits on a person: once per new or changed ask.
+
+    set_handoff calls this only when the ask is new or its text changed (or it was asked again after being
+    resolved), so a later update of the same activity while the ask stands sends nothing. The payload is the
+    usual activity payload plus what a notifier needs without a second call; `path` is relative because
+    the service knows no public address of its own.
+    """
+    try:
+        activity = get_activity(activity_id)
+        if not activity:
+            return
+        notify(
+            "activity_handoff_requested",
+            activity,
+            needs_human=handoff.get("needs_human"),
+            needs_human_url=handoff.get("needs_human_url"),
+            path=f"/activity?task={activity_id}",
+        )
+    except Exception:  # a failed announcement must never undo or fail the handoff that was just stored
+        logger.exception("Could not announce the handoff request for %s", activity_id)
 
 
 def _resolve_in_connection(
