@@ -427,6 +427,7 @@ def test_stop_check_asks_once_per_activity(test_client, admin_token):
          task_description="Long task", execution_id=start["execution_id"])
     first = check()
     assert first["nudge"] and "handoff=" in first["reason"]
+    assert "say nothing to the user about closing it" in first["reason"]  # the close is quiet
     assert check() == {"nudge": False}  # never twice for the same activity
     assert check("other-session") == {"nudge": False}
 
@@ -513,3 +514,14 @@ def test_a_long_os_name_from_a_hook_never_makes_the_request_fail(test_client, ad
     headers = _setup(admin_token)
     data = _context(test_client, headers, cwd="/x", host_session_ref="os-1", source="startup", client_os="MINGW64_NT-10.0-19045-extra")
     assert data["resolved_by"] in ("only_workspace", "unmatched", "cwd", "private")
+
+
+def test_session_context_header_is_background_with_the_user_first_and_silent_bookkeeping(test_client, admin_token):
+    headers = _setup(admin_token)
+    text = _context(test_client, headers, memory_scope=SCOPE, host_session_ref="s-quiet")["context"]
+    header = text.split("\n## ")[0]
+    assert "not one being resumed" in header and "do not tell the user you are resuming" in header
+    assert "The user's message, the project's own instructions and any starting command come first" in header
+    assert "alongside or after your first answer" in header and "Keep that bookkeeping silent" in header
+    assert "cover the whole workspace" in header and "only when it bears on what the user asks" in header
+    assert "Begin each task" not in text

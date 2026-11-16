@@ -1515,9 +1515,9 @@ def _compact_workspace_context(base_url, user_scope, workspace_scope, agent_scop
     """
     default_scope = workspace_scope or agent_scope
     session_line = (
-        f"- FIRST, every session, before any other tool: if your context already holds an \"{APP_NAME} session context\" block (a SessionStart hook injects it), use it; otherwise call `session_context` with `memory_scope` `{workspace_scope}`. It lists open work, recent results and key records, and gives the `execution_id` to pass to `activity_update` and `memory_write`. Other agents' work shows up there, not in real time."
+        f"- Each session, before your other Agent Core tools: if your context already holds an \"{APP_NAME} session context\" block (a SessionStart hook injects it), use it; otherwise call `session_context` with `memory_scope` `{workspace_scope}`. It gives the `execution_id` to pass to `activity_update` and `memory_write`."
         if workspace_scope
-        else f"- FIRST, every session, before any other tool: call `session_context` with `memory_scope` `{agent_scope}`: it lists your open work, recent results and key memories, and gives the `execution_id` to pass to `activity_update` and `memory_write`. With no workspace you see only your own work; ask the owner for a workspace to share with other agents."
+        else f"- Each session, before your other Agent Core tools: call `session_context` with `memory_scope` `{agent_scope}`: it lists your open work, recent results and key memories, and gives the `execution_id` to pass to `activity_update` and `memory_write`. With no workspace you see only your own work; ask the owner for a workspace to share with other agents."
     )
     scope_line = (
         f"- Workspace: `{workspace_scope}`: read and write its memory and tasks. Preferences of your owner: `{user_scope}` (read). Private scratch only: `{agent_scope}`."
@@ -1530,7 +1530,8 @@ def _compact_workspace_context(base_url, user_scope, workspace_scope, agent_scop
 
 {scope_line}
 {session_line}
-- Work: open a task with `activity_update` (`status: active`, `memory_scope: {default_scope}`) and keep it alive with a short note every few minutes. Close it with a `task_result` of one or two sentences saying what was done and where (a commit, a file). Put a request to a person in the handoff's `needs_human`.
+- Order: the user's message, project instructions and any starting command come first; do bookkeeping after or beside your first answer and never mention it unless asked. Session context is background, not a resumed conversation; use its open work only if relevant.
+- Work: open a task with `activity_update` (`status: active`, `memory_scope: {default_scope}`); a short note every few minutes keeps it alive. Close it with a one- or two-sentence `task_result` saying what was done and where. Put a request to a person in the handoff's `needs_human`.
 - Before deciding something earlier sessions may have settled, `memory_search` `{default_scope}`; if it finds nothing, retry with exact words.
 - {MEMORY_WRITE_WHEN}
 - Secrets: `credential_get` returns an `{CREDENTIAL_PREFIX}*` reference; never ask for or print a raw secret. If one is missing, `credential_request`.

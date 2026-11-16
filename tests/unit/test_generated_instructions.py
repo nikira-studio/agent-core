@@ -64,3 +64,11 @@ def test_with_no_workspace_the_agent_is_told_to_start_from_its_own_private_scope
     for name, text in _all(workspace=None).items():
         assert "`session_context`" in text and f"`memory_scope` `{AGENT}`" in text, name
         assert "`execution_id`" in text and "ask the owner for a workspace" in text, name
+
+
+def test_each_file_puts_the_user_first_and_keeps_the_bookkeeping_silent():
+    for name, text in _all().items():
+        assert "starting command come first" in text, name
+        assert "never mention it unless asked" in text, name
+        assert "background, not a resumed conversation" in text, name
+        assert "FIRST" not in text, name

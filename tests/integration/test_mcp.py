@@ -50,6 +50,11 @@ def test_mcp_jsonrpc_initialize(test_client, agent_token):
 
     assert data["result"]["serverInfo"]["name"] == APP_NAME
     assert "tools" in data["result"]["capabilities"]
+    instructions = data["result"]["instructions"]
+    assert "come first" in instructions and "alongside or after the first answer" in instructions
+    assert "not one being resumed" in instructions and "whole workspace" in instructions
+    assert "Keep all of this silent" in instructions
+    assert "FIRST" not in instructions
 
 
 def test_mcp_jsonrpc_initialized_notification(test_client, agent_token):

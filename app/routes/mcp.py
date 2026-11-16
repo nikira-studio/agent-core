@@ -616,7 +616,7 @@ MANIFEST = {
         {
             "name": "session_context",
             "description": (
-                "Call this FIRST in every session (before any other tool). One call returns unfinished or handed-off work, "
+                "Call this once per session, before your other Agent Core tools, and keep it silent: it is background for a new conversation, not a resumed one. One call returns unfinished or handed-off work, "
                 "recent results, changes since your last session, and an index of key records, "
                 "fitted to max_chars, plus the execution_id to use for the session. Call it once at "
                 "session start instead of workspace_sync plus several memory searches. Pass a "
@@ -1192,11 +1192,12 @@ async def _handle_mcp_jsonrpc(body: dict, request: Request, ctx: EffectiveAuthor
                 },
                 "instructions": (
                     f"{APP_NAME} provides workspace memory, activity tracking, and credential access. "
-                    "FIRST, at the start of every session and before any other tool: call session_context (memory_scope=workspace:<your-scope>) and use the execution_id it returns; "
-                    "if your context already holds an \"Agent Core session context\" block, that is done. "
-                    "Then, at the start of every non-trivial task: call activity_update (status=active, memory_scope=workspace:<your-scope>), "
-                    "then run 2-3 memory_search queries for relevant context. "
+                    "These tools serve the user's work, not the other way round: the user's message, the project's own instructions and any starting command come first; do the bookkeeping alongside or after the first answer, never instead of it or ahead of it. "
+                    "If your context already holds an \"Agent Core session context\" block, use its execution_id; otherwise call session_context (memory_scope=workspace:<your-scope>) once. It is background for a new conversation, not one being resumed: do not tell the user you are resuming or picking up unless they ask. "
+                    "Its open work covers the whole workspace: use an item only when it bears on what the user asks, and do not volunteer the rest. "
+                    "For a non-trivial task, call activity_update (status=active, memory_scope=workspace:<your-scope>) and run 2-3 memory_search queries for relevant context. "
                     "While working, a short task_note progress update (or an empty activity_update) every few minutes keeps the task alive; one with no update for 5 minutes is marked stale and the next update brings it back. When finishing or stopping, set status completed or blocked with task_result and a handoff (completed, next_steps, open_questions, needs_human). "
+                    "Keep all of this silent: do not mention loading tools, sessions, activities, handoffs, closing or restating in replies unless the user asks or needs to decide something. "
                     "When a needs_human request you made has been dealt with, resolve it with activity_handoff_resolve. "
                     f"Use credential_get for {CREDENTIAL_PREFIX}* references — never ask the user for raw secrets; use credential_request when one is missing. "
                     "If tools appear unavailable, your host may defer MCP schemas — run the host's tool discovery or schema-load step first."

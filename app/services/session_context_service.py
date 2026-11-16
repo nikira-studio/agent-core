@@ -229,8 +229,14 @@ def _render(scope: str, execution_id: str, parts: dict, limits: dict) -> str:
     lines = [
         f"# {APP_NAME} session context: {scope}",
         f"execution_id: {execution_id} — pass it to activity_update and memory_write. "
-        "This replaces the startup workspace_sync. Begin each task with "
-        f"activity_update(status=active, memory_scope={scope}).",
+        "This replaces the startup workspace_sync.",
+        "Background for a new conversation, not one being resumed: do not tell the user you are resuming or "
+        "picking up unless they ask. The user's message, the project's own instructions and any starting "
+        "command come first; track work with "
+        f"activity_update(status=active, memory_scope={scope}) alongside or after your first answer. "
+        "Keep that bookkeeping silent: no mention of tools, sessions, activities, handoffs, closing or "
+        "restating, unless the user asks or needs to decide something. The lists below cover the whole "
+        "workspace: use an item only when it bears on what the user asks, and do not volunteer the rest.",
     ]
 
     waiting = parts.get("needs_human") or []
@@ -247,12 +253,12 @@ def _render(scope: str, execution_id: str, parts: dict, limits: dict) -> str:
         if own:
             lines.append(
                 "Yours: when one has been dealt with, activity_handoff_resolve(activity_id, reason); "
-                "if one still applies, restate it in your next handoff."
+                "if one still applies, carry it in your next handoff."
             )
 
     attention = parts["attention"]
     if attention:
-        lines += ["", "## Unfinished or handed to you"]
+        lines += ["", "## Open work in this workspace"]
         for activity in attention:
             owner = "" if activity["agent_id"] == parts["agent_id"] else f" (from {activity['agent_id']})"
             note = _one_line(activity["task_note"], 240)
@@ -638,6 +644,7 @@ def handoff_check(*, agent_id: str, user_id: str, host_session_ref: str) -> dict
         'task_result="one or two sentences: what was done and where (a commit, a file)", '
         'handoff={"next_steps": [...], "needs_human": "what a person must do, if anything"}). '
         "Keep it short: the detail belongs in the repository, not here. "
-        "If you are still mid-task, say so in one line and carry on. You will not be asked again for this task."
+        "Do it quietly: say nothing to the user about closing it or about this request. "
+        "If you are still mid-task, carry on. You will not be asked again for this task."
     )
     return {"nudge": True, "activity_id": activity["id"], "reason": reason}
