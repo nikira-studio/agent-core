@@ -431,6 +431,12 @@ class AddKeyRequest(BaseModel):
     label: str
 
 
+class RenameKeyRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    label: str
+
+
 def _manageable_agent(agent_id: str, session: dict):
     agent = agent_service.get_agent_by_id(agent_id)
     if not agent:
@@ -472,6 +478,31 @@ def add_key(agent_id: str, body: AddKeyRequest, session: dict = Depends(get_curr
         details={"record_id": record["id"], "label": record["label"]},
     )
     return success_response({"key": _public_key(record), "api_key": plaintext}, status_code=201)
+
+
+@router.patch("/{agent_id}/keys/{key_id}")
+def rename_key(agent_id: str, key_id: str, body: RenameKeyRequest, session: dict = Depends(get_current_session)):
+    """Change a key's label. Only the label changes; the key keeps working as before."""
+    _, error = _manageable_agent(agent_id, session)
+    if error:
+        return error
+    label = body.label.strip()
+    if not label:
+        return error_response("INVALID_LABEL", "Give the key a label, such as the machine or tool that uses it", 400)
+    existing = agent_service.get_agent_key(agent_id, key_id)
+    record = agent_service.rename_agent_key(agent_id, key_id, label)
+    if not record:
+        return error_response("NOT_FOUND", "No such key, or it is revoked", 404)
+    audit_service.write_event(
+        actor_type="user",
+        actor_id=session["user_id"],
+        action="agent_key_renamed",
+        resource_type="agent",
+        resource_id=agent_id,
+        result="success",
+        details={"record_id": key_id, "label": record["label"], "previous_label": (existing or {}).get("label")},
+    )
+    return success_response({"key": _public_key(record)})
 
 
 @router.delete("/{agent_id}/keys/{key_id}")

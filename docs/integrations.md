@@ -898,7 +898,7 @@ If `workspace` is supplied on `activity.create`, Agent Core stores it as optiona
 
 ### Agent keys
 
-An agent can hold several keys, each with a label (the machine or tool that uses it). Open **Agents > More > Keys** to see them with when each was created and last used, to add one, or to revoke one. A new key is shown once. Revoking a key stops it working at once and leaves the agent's other keys alone. An agent can hold up to 20 live keys. The Connect page's **Generate One-Time Key** adds a key named after the tool and the date.
+An agent can hold several keys, each with a label (the machine or tool that uses it). Open **Agents**, then click the **N keys** text on the agent's row (or **More > Keys**) to see them with when each was created and last used, to add one, to rename one, or to revoke one. The label is your note about what the key is for, and you can change it later without replacing the key. A new key is shown once. Revoking a key stops it working at once and leaves the agent's other keys alone. An agent can hold up to 20 live keys. The Connect page's **Generate One-Time Key** adds a key named after the tool and the date.
 
 To replace every key at once (for example after a leak), call `POST /api/agents/{agent_id}/rotate_key`: it revokes all live keys and returns one new key.
 

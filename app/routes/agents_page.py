@@ -240,7 +240,14 @@ def agents_page(request: Request, session: dict = Depends(require_auth)):
         key_count_text = ""
         if is_admin or a.get("owner_user_id") == session["user_id"]:
             key_total = len(agent_service.list_agent_keys(a["id"]))
-            key_count_text = " · " + ("no keys" if key_total == 0 else ("1 key" if key_total == 1 else f"{key_total} keys"))
+            key_count_label = "no keys" if key_total == 0 else ("1 key" if key_total == 1 else f"{key_total} keys")
+            # The count is a button: the keys are one click away, without hunting for More.
+            key_count_text = (
+                " · <button type='button' class='link-button' "
+                f"data-agent-keys='{escape_html(a['id'])}' "
+                "title='See, add, rename and revoke this agent&#39;s keys'>"
+                f"{escape_html(key_count_label)}</button>"
+            )
         owner_id = a.get("owner_user_id", "")
         default_user_id = a.get("default_user_id", "") or owner_id
         if can_manage:
@@ -329,6 +336,12 @@ def agents_page(request: Request, session: dict = Depends(require_auth)):
       if (keys) { ev.preventDefault(); openKeys(keys.dataset.agentKeys); return; }
       const revoke = ev.target.closest('[data-key-revoke]');
       if (revoke) { ev.preventDefault(); revokeKey(revoke.dataset.keyAgent, revoke.dataset.keyRevoke, revoke.dataset.keyLabel); return; }
+      const rename = ev.target.closest('[data-key-rename]');
+      if (rename) { ev.preventDefault(); startKeyRename(rename); return; }
+      const renameSave = ev.target.closest('[data-key-rename-save]');
+      if (renameSave) { ev.preventDefault(); saveKeyRename(); return; }
+      const renameCancel = ev.target.closest('[data-key-rename-cancel]');
+      if (renameCancel) { ev.preventDefault(); cancelKeyRename(); return; }
       const purge = ev.target.closest('[data-agent-purge]');
       if (purge) { ev.preventDefault(); purgeAgent(purge.dataset.agentPurge); }
     });
@@ -367,6 +380,7 @@ def agents_page(request: Request, session: dict = Depends(require_auth)):
       }
     }
     let keysAgent = null;
+    let keyRename = null;
     function keyTime(value) { return value ? new Date(value).toLocaleString() : 'never'; }
     async function openKeys(id, justAdded) {
       keysAgent = id;
@@ -377,7 +391,9 @@ def agents_page(request: Request, session: dict = Depends(require_auth)):
           (k.key_hint ? '<br><code>ac_sk_…' + escapeHtml(k.key_hint) + '</code>' : '') + '</td>' +
           '<td data-label="Created">' + escapeHtml(keyTime(k.created_at)) + '</td>' +
           '<td data-label="Last used">' + escapeHtml(keyTime(k.last_used_at)) + '</td>' +
-          '<td><button type="button" class="btn btn-sm btn-danger" data-key-agent="' + escapeHtml(id) + '" data-key-revoke="' + escapeHtml(k.id) +
+          '<td><button type="button" class="btn btn-sm btn-secondary" data-key-rename="' + escapeHtml(k.id) +
+          '" data-key-agent="' + escapeHtml(id) + '" data-key-label="' + escapeHtml(k.label) + '">Edit</button> ' +
+          '<button type="button" class="btn btn-sm btn-danger" data-key-agent="' + escapeHtml(id) + '" data-key-revoke="' + escapeHtml(k.id) +
           '" data-key-label="' + escapeHtml(k.label) + '">Revoke</button></td></tr>';
       }).join('');
       const added = justAdded
@@ -387,7 +403,7 @@ def agents_page(request: Request, session: dict = Depends(require_auth)):
         : '';
       document.getElementById('keys-modal-title').textContent = 'Keys for ' + id;
       document.getElementById('keys-modal-body').innerHTML = added +
-        '<p class="text-muted">Each tool or machine can have its own key. Revoking one does not affect the others.</p>' +
+        '<p class="text-muted">Each tool or machine can have its own key. The label is your note about what the key is for; you can change it later. Revoking one key does not affect the others.</p>' +
         (rows
           ? '<table class="data-table"><thead><tr><th>Label</th><th>Created</th><th>Last used</th><th></th></tr></thead><tbody>' + rows + '</tbody></table>'
           : '<p>This agent has no keys yet. Add one below, or generate one on the Connect page.</p>') +
@@ -409,6 +425,48 @@ def agents_page(request: Request, session: dict = Depends(require_auth)):
       const j = await apiFetch('/api/agents/' + encodeURIComponent(agentId) + '/keys/' + encodeURIComponent(keyId), { method: 'DELETE' });
       if (j.ok) { showToast('Key revoked'); openKeys(agentId); }
       else { showToast((j.error && j.error.message) || 'Could not revoke the key', 'danger'); }
+    }
+    function startKeyRename(button) {
+      const row = button.closest('tr');
+      if (!row) return;
+      if (keyRename) cancelKeyRename();  // only one label is edited at a time
+      const cell = row.cells[0];
+      const label = button.dataset.keyLabel || '';
+      keyRename = { cell: cell, button: button, agentId: button.dataset.keyAgent, keyId: button.dataset.keyRename, html: cell.innerHTML };
+      button.style.display = 'none';
+      cell.innerHTML =
+        '<input type="text" class="form-input" maxlength="60" value="' + escapeHtml(label) + '" data-key-rename-input>' +
+        '<div style="margin-top:6px">' +
+        '<button type="button" class="btn btn-sm" data-key-rename-save>Save</button> ' +
+        '<button type="button" class="btn btn-sm btn-secondary" data-key-rename-cancel>Cancel</button></div>';
+      const input = cell.querySelector('[data-key-rename-input]');
+      input.focus();
+      input.select();
+      input.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter') { e.preventDefault(); saveKeyRename(); }
+        else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); cancelKeyRename(); }
+      });
+    }
+    function cancelKeyRename() {
+      if (!keyRename) return;
+      const state = keyRename;
+      keyRename = null;
+      state.cell.innerHTML = state.html;
+      state.button.style.display = '';
+    }
+    async function saveKeyRename() {
+      if (!keyRename) return;
+      const state = keyRename;
+      const input = state.cell.querySelector('[data-key-rename-input]');
+      const label = (input.value || '').trim();
+      if (!label) { showToast('Give the key a label, such as the machine or tool that uses it', 'danger'); return; }
+      const j = await apiFetch('/api/agents/' + encodeURIComponent(state.agentId) + '/keys/' + encodeURIComponent(state.keyId), { method: 'PATCH', body: JSON.stringify({ label: label }) });
+      if (!j.ok) { showToast((j.error && j.error.message) || 'Could not save the label', 'danger'); return; }
+      keyRename = null;
+      const overlay = document.getElementById('keys-modal');
+      if (overlay) overlay.dataset.dirty = '';
+      showToast('Key label saved');
+      openKeys(state.agentId);
     }
     function setAgentModalReadOnly(readOnly) {
       agentModalReadOnly = Boolean(readOnly);

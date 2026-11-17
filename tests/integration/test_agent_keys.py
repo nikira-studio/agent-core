@@ -282,6 +282,82 @@ def test_key_events_are_audited_without_the_key(test_client, admin_token, agent)
     assert "agent_key_created" in audit_service.AUDIT_ACTIONS and "agent_key_revoked" in audit_service.AUDIT_ACTIONS
 
 
+def rename(client, token, agent_id, key_id, label):
+    return client.patch(f"/api/agents/{agent_id}/keys/{key_id}", headers=auth(token), json={"label": label})
+
+
+def test_a_live_key_can_be_renamed_and_the_key_keeps_working(test_client, admin_token, agent):
+    record, key = add(test_client, admin_token, agent, "laptop")
+    r = rename(test_client, admin_token, agent, record["id"], "work laptop")
+    assert r.status_code == 200, r.text
+    changed = r.json()["data"]["key"]
+    assert changed["label"] == "work laptop" and changed["id"] == record["id"]
+    assert changed["key_hint"] == record["key_hint"]  # the key itself is untouched
+    assert alive(test_client, key)
+    listed = test_client.get(f"/api/agents/{agent}/keys", headers=auth(admin_token)).json()["data"]["keys"]
+    assert [k["label"] for k in listed] == ["work laptop"]
+
+
+def test_a_rename_is_audited_without_the_key(test_client, admin_token, agent):
+    from app.services import audit_service
+
+    record, key = add(test_client, admin_token, agent, "laptop")
+    assert rename(test_client, admin_token, agent, record["id"], "work laptop").status_code == 200
+    with get_db() as conn:
+        rows = conn.execute(
+            "SELECT action, details_json FROM audit_log WHERE action='agent_key_renamed'"
+        ).fetchall()
+    assert len(rows) == 1
+    assert record["id"] in rows[0]["details_json"]
+    assert key not in (rows[0]["details_json"] or "")
+    assert "agent_key_renamed" in audit_service.AUDIT_ACTIONS
+
+
+def test_a_blank_label_is_refused_when_renaming(test_client, admin_token, agent):
+    record, _ = add(test_client, admin_token, agent, "laptop")
+    for bad in ("", "   "):
+        r = rename(test_client, admin_token, agent, record["id"], bad)
+        assert r.status_code == 400 and r.json()["error"]["code"] == "INVALID_LABEL"
+    assert agent_service.get_agent_key(agent, record["id"])["label"] == "laptop"
+
+
+def test_a_long_label_is_trimmed_to_sixty_characters(test_client, admin_token, agent):
+    record, _ = add(test_client, admin_token, agent, "laptop")
+    r = rename(test_client, admin_token, agent, record["id"], "  " + "x" * 200)
+    assert r.status_code == 200, r.text
+    assert r.json()["data"]["key"]["label"] == "x" * 60
+
+
+def test_a_revoked_key_cannot_be_renamed(test_client, admin_token, agent):
+    record, _ = add(test_client, admin_token, agent, "laptop")
+    test_client.delete(f"/api/agents/{agent}/keys/{record['id']}", headers=auth(admin_token))
+    r = rename(test_client, admin_token, agent, record["id"], "too late")
+    assert r.status_code == 404, r.text
+
+
+def test_renaming_an_unknown_agent_or_key_is_a_404(test_client, admin_token, agent):
+    record, _ = add(test_client, admin_token, agent, "laptop")
+    assert rename(test_client, admin_token, agent, "nosuchkey", "x").status_code == 404
+    assert rename(test_client, admin_token, "nobody", record["id"], "x").status_code == 404
+
+
+def test_another_person_cannot_rename_a_key(test_client, admin_token, agent):
+    from app.services.auth_service import create_user
+
+    create_user("other", "other@test.local", "testpassword123", "Other", "user")
+    other = operator_token_for("other")
+    record, _ = add(test_client, admin_token, agent, "laptop")
+    assert rename(test_client, other, agent, record["id"], "not yours").status_code == 403
+    assert agent_service.get_agent_key(agent, record["id"])["label"] == "laptop"
+
+
+def test_an_agent_cannot_rename_its_own_keys(test_client, admin_token, agent):
+    record, key = add(test_client, admin_token, agent, "laptop")
+    r = rename(test_client, key, agent, record["id"], "sneaky")
+    assert r.status_code in (401, 403), r.status_code
+    assert agent_service.get_agent_key(agent, record["id"])["label"] == "laptop"
+
+
 def test_the_connect_dialog_no_longer_claims_to_replace_keys():
     import pathlib
 
@@ -295,3 +371,15 @@ def test_the_agents_page_lists_keys_and_offers_the_dialog(test_client, admin_tok
     page = test_client.get("/agents", headers=auth(admin_token))
     assert page.status_code == 200
     assert "2 keys" in page.text and "data-agent-keys='multi'" in page.text and 'id="keys-modal"' in page.text
+
+
+def test_the_key_count_on_a_row_is_a_button_that_opens_the_keys_panel(test_client, admin_token, agent):
+    page = test_client.get("/agents", headers=auth(admin_token)).text
+    assert "<button type='button' class='link-button' data-agent-keys='multi'" in page
+    assert "no keys</button>" in page
+    add(test_client, admin_token, agent)
+    add(test_client, admin_token, agent, "second")
+    page = test_client.get("/agents", headers=auth(admin_token)).text
+    assert "2 keys</button>" in page
+    # the panel can rename a label: the row has an Edit button that turns into a text field
+    assert "data-key-rename" in page and "data-key-rename-save" in page and "data-key-rename-cancel" in page

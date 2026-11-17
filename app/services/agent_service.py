@@ -343,6 +343,20 @@ def revoke_agent_key(agent_id: str, key_id: str, revoked_by: Optional[str] = Non
         return cursor.rowcount > 0
 
 
+def rename_agent_key(agent_id: str, key_id: str, label: str) -> Optional[dict]:
+    """Change the label of a live key: the note about what the key is for. The key itself is untouched.
+    None when there is no such live key."""
+    with get_db() as conn:
+        cursor = conn.execute(
+            "UPDATE agent_keys SET label = ? WHERE agent_id = ? AND id = ? AND revoked_at IS NULL",
+            (_clean_label(label), agent_id, key_id),
+        )
+        conn.commit()
+        if not cursor.rowcount:
+            return None
+    return get_agent_key(agent_id, key_id)
+
+
 def is_agent_shared(agent: dict) -> bool:
     read_scopes = parse_scopes(agent.get("read_scopes_json", "[]"))
     write_scopes = parse_scopes(agent.get("write_scopes_json", "[]"))

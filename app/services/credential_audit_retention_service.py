@@ -45,6 +45,7 @@ INDIVIDUAL_CREDENTIAL_ACTIONS = (
     "agent_key_rotated",
     "agent_key_created",
     "agent_key_revoked",
+    "agent_key_renamed",
     "inbound_key_generated",
     "inbound_key_rotated",
     "connector_binding_created",

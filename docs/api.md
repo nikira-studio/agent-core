@@ -130,6 +130,7 @@ Session required. Admins can manage all agents. Non-admin users can create and m
 | `POST` | `/api/agents/{agent_id}/purge` | Permanently delete agent record (admin only) |
 | `GET` | `/api/agents/{agent_id}/keys` | List the agent's live keys (label, last four characters, created, last used; never the key). `?include_revoked=true` adds revoked ones |
 | `POST` | `/api/agents/{agent_id}/keys` | Add a key. Body `{"label": "laptop"}`. Returns the key once as `api_key`. The agent's other keys keep working. Up to 20 live keys |
+| `PATCH` | `/api/agents/{agent_id}/keys/{key_id}` | Change a key's label. Body `{"label": "work laptop"}`. Only the label changes; the key keeps working. The label is trimmed to 60 characters |
 | `DELETE` | `/api/agents/{agent_id}/keys/{key_id}` | Revoke one key; the others keep working |
 | `POST` | `/api/agents/{agent_id}/rotate_key` | Revoke every live key and return one new key |
 
