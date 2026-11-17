@@ -2,7 +2,7 @@
 
 Notable changes to Agent Core are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow [Semantic Versioning](https://semver.org/).
 
-## [1.3.2] - 2026-11-15
+## [1.3.2] - 2026-11-17
 
 ### Added
 
@@ -26,6 +26,11 @@ Notable changes to Agent Core are documented here. The format follows [Keep a Ch
 - **Several sessions of one agent no longer end each other's activity records.** An `activity_update` sent without an `execution_id` used to take the agent's most recent open record in that scope and, if the new description looked like a different task, end that record as cancelled ("Ended without report: a new task began in this session…"). Sessions that share one agent id and do not send an execution id therefore cancelled each other's work (12 records on one install in three days). Now, without an execution id, an open record is never ended because of a different-looking description: the update continues the open record the description belongs to, or starts a new record and leaves the older one to the stale and abandoned rules (the response carries the warning `OTHER_OPEN_TASK_KEPT`, which says to pass the `execution_id` from `session_context`). With an execution id nothing changes.
 - **A wrong `memory_scope` can be fixed in one retry, and leaves a trace.** `activity_update` (and `session_context`, `workspace_sync`, `workspace_sync_ack`) now describe `memory_scope` in plain words: the form is `workspace:<name>` or `agent:<your own agent id>`, and what to leave out. When it is left out, `activity_update` uses the caller's private scope, or, if that is not writable for it but exactly one scope is, that one (never a guess among several). A refused scope names the scope that was sent and lists the scopes the caller may use (at most twelve, then a pointer to `effective_authority`), and writes an audit row `scope_denied` (result `blocked`) with the tool and the scope value that was sent; before, the refusal said only "Access denied to memory_scope" and left nothing to see. A wrong `execution_id` was already ignored with a warning rather than refused; the warning for a scope mismatch now also says what to do (use the one `session_context` returned for this scope, or leave it out).
 - **The services overview no longer calls a working plain web service unusable.** A plain web service declares no actions of its own (what it can do is the list of requests its connection allows), so the overview counted zero actions and showed `usable: false` for every caller although the connection ran fine. Its actions are now the connection's allowed requests ("N of M" for a read-only or chosen-actions connection), and whenever a connection is not usable the summary says why in one plain field, `not_usable_because` (switched off, credential missing, action list unreadable, no actions or allowed requests, or the connection allows none of the service's actions).
+
+### Upgrading
+
+- **Nothing to do.** On first start 1.3.2 adds the key table (schema revision 29) and carries every agent's existing key over as "Original key"; all keys keep working. Take a backup first, as for any upgrade (Settings > Data and backup).
+- **Going back to 1.3.1 after upgrading is possible, with one caution.** The older build knows only each agent's newest key, so older keys of an agent that holds several stop working there; keys revoked in 1.3.2 stay revoked. While running 1.3.1 do not add, revoke or rotate keys and do not create agents: 1.3.2 does not see those changes, so after you upgrade again a key you rotated away on 1.3.1 works again and its replacement does not. If that happens, rotate the agent's keys again in 1.3.2.
 
 ## [1.3.1] - 2026-11-14
 
