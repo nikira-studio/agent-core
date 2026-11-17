@@ -122,6 +122,9 @@ def _apply_current_schema(db_path: str) -> None:
     try:
         create_schema(con)
         con.commit()
+        # The caller reads this file's bytes: fold anything still in the write-ahead log into the file itself.
+        con.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        con.execute("PRAGMA journal_mode=DELETE")
     finally:
         con.close()
 
