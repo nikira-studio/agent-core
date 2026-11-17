@@ -180,3 +180,81 @@ def test_a_database_file_gets_a_copy_before_the_step(tmp_path):
     copies = list(tmp_path.glob("pre-migration-99-*.db"))
     assert len(copies) == 1 and oct(copies[0].stat().st_mode)[-3:] == "600"
     assert guard._database_file(conn) == path
+
+
+def test_a_step_that_adds_a_workspace_to_an_inactive_entry_is_refused():
+    """Dormant access counts: the matrices skip inactive entries, so their stored scopes are compared directly."""
+    conn = _before_kind_db()
+    conn.execute("UPDATE agents SET is_active = 0 WHERE id = 'builder'")
+    conn.commit()
+
+    def widens(c):
+        c.execute(
+            "UPDATE agents SET read_scopes_json = ? WHERE id = 'builder'",
+            (json.dumps(["agent:builder", "user:alex", "workspace:site", "workspace:vault"]),),
+        )
+
+    with pytest.raises(MigrationRefused) as refused:
+        run_guarded(conn, 99, "widens", widens, RevisionCheck())
+    assert "identities.builder.read_scopes" in str(refused.value) or "difference" in str(refused.value)
+    stored = json.loads(conn.execute("SELECT read_scopes_json FROM agents WHERE id = 'builder'").fetchone()[0])
+    assert "workspace:vault" not in stored
+
+
+def test_a_step_that_changes_write_or_recall_scopes_of_any_entry_is_refused():
+    conn = _before_kind_db()
+    with pytest.raises(MigrationRefused):
+        run_guarded(
+            conn, 99, "w", lambda c: c.execute("UPDATE agents SET write_scopes_json = '[\"agent:builder\", \"shared\"]' WHERE id = 'builder'"),
+            RevisionCheck(),
+        )
+    with pytest.raises(MigrationRefused):
+        run_guarded(
+            conn, 99, "r", lambda c: c.execute("UPDATE agents SET default_recall_scopes_json = '[\"agent:builder\"]' WHERE id = 'builder'"),
+            RevisionCheck(),
+        )
+
+
+@pytest.mark.parametrize(
+    "stored",
+    ['[["credentials_resolve"]]', '[{"a": 1}]', '"credentials_resolve"', "null", "5", "{", '["credentials_resolve", "credentials_resolve"]', '[1]'],
+)
+def test_a_malformed_permissions_row_is_an_agent_and_does_not_stop_the_upgrade(stored):
+    from app.schema import _apply_schema_migrations
+    from app.services import agent_kind
+
+    assert agent_kind.has_service_permissions(stored) is False
+    conn = _before_kind_db()
+    conn.execute("UPDATE agents SET capabilities_json = ? WHERE id = 'runtime-web'", (stored,))
+    conn.commit()
+    _apply_schema_migrations(conn)
+    assert conn.execute("SELECT kind FROM agents WHERE id = 'runtime-web'").fetchone()[0] == "agent"
+    assert conn.execute("SELECT kind FROM agents WHERE id = 'runtime-spaced'").fetchone()[0] == "service"
+
+
+def test_the_copy_and_the_report_are_owner_only_from_the_moment_they_exist(tmp_path, monkeypatch):
+    """With a wide umask and the after-the-fact chmod disabled, the files still end up 0600: they were created that way."""
+    import os
+
+    from app.access_check import guard
+
+    path = tmp_path / "core.db"
+    conn = sqlite3.connect(str(path))
+    conn.row_factory = sqlite3.Row
+    create_schema(conn)
+    conn.execute("INSERT INTO users (id, email, password_hash, display_name) VALUES ('alex', 'a@example.com', 'x', 'Alex')")
+    _agent(conn, "builder", DEFAULT)
+    conn.commit()
+    monkeypatch.setattr(guard.os, "chmod", lambda *a, **k: None)
+    old = os.umask(0)
+    try:
+        run_guarded(conn, 98, "noop", lambda c: None, RevisionCheck())
+        with pytest.raises(MigrationRefused):
+            run_guarded(conn, 99, "bad", lambda c: c.execute("UPDATE agents SET read_scopes_json = '[]'"), RevisionCheck())
+    finally:
+        os.umask(old)
+    copy = next(tmp_path.glob("pre-migration-98-*.db"))
+    report = next((tmp_path / "migration-reports").glob("revision-99-*.json"))
+    assert oct(copy.stat().st_mode)[-3:] == "600"
+    assert oct(report.stat().st_mode)[-3:] == "600"
+    assert oct((tmp_path / "migration-reports").stat().st_mode)[-3:] in ("700", "755", "775")  # folder made with 0700 (umask 0 here)

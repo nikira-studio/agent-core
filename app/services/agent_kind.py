@@ -19,12 +19,16 @@ SERVICE_PERMISSIONS = ["credentials_resolve"]
 
 
 def has_service_permissions(capabilities_json: Optional[str]) -> bool:
-    """True only when the stored permissions are exactly ``credentials_resolve`` (order and spacing do not matter)."""
+    """True only when the stored permissions are exactly ``credentials_resolve`` (order and spacing do not matter).
+
+    Anything that is not a list of text values (a malformed row) is not a service."""
     try:
         parsed = json.loads(capabilities_json or "[]")
     except (TypeError, ValueError):
         return False
-    return isinstance(parsed, list) and sorted(set(parsed)) == SERVICE_PERMISSIONS and len(parsed) == len(set(parsed))
+    if not isinstance(parsed, list) or not all(isinstance(item, str) for item in parsed):
+        return False
+    return len(parsed) == len(set(parsed)) and sorted(parsed) == SERVICE_PERMISSIONS
 
 
 def _scopes(value: Optional[str]) -> list[str]:

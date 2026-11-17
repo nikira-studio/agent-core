@@ -41,6 +41,8 @@ def parse_capabilities(value: Optional[str]) -> list[str]:
         parsed = json.loads(value or "[]")
     except (TypeError, json.JSONDecodeError):
         parsed = []
+    if not isinstance(parsed, list):  # a malformed row grants nothing (a bare string would match by substring)
+        return []
     return [capability for capability in ALL_CAPABILITIES if capability in parsed]
 
 

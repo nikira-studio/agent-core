@@ -51,12 +51,25 @@ def _database_file(conn) -> Path | None:
     return None
 
 
+def _new_private_file(folder: Path, stem: str, suffix: str) -> Path:
+    """Create an empty file that only its owner can read, and return its path. It exists with mode 0600 before any
+    content is written to it (a umask can only narrow that); a name already taken gets a counter."""
+    for attempt in range(100):
+        candidate = folder / (f"{stem}{suffix}" if attempt == 0 else f"{stem}-{attempt}{suffix}")
+        try:
+            os.close(os.open(candidate, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600))
+            return candidate
+        except FileExistsError:
+            continue
+    raise FileExistsError(f"no free name for {stem}{suffix}")
+
+
 def _backup_before(conn, revision: int) -> Path | None:
     """Copy the database aside before a guarded revision runs, if there is anything worth keeping."""
     path = _database_file(conn)
     if path is None or not conn.execute("SELECT 1 FROM agents LIMIT 1").fetchone():
         return None
-    target = path.with_name(f"pre-migration-{revision}-{time.strftime('%Y%m%d%H%M%S')}.db")
+    target = _new_private_file(path.parent, f"pre-migration-{revision}-{time.strftime('%Y%m%d%H%M%S')}", ".db")
     dest = sqlite3.connect(str(target))
     try:
         conn.backup(dest)
@@ -79,7 +92,7 @@ def _write_report(conn, revision: int, name: str, problems: list[str], diffs: li
     folder = path.parent / "migration-reports"
     try:
         folder.mkdir(parents=True, exist_ok=True, mode=0o700)
-        report = folder / f"revision-{revision}-{time.strftime('%Y%m%d%H%M%S')}.json"
+        report = _new_private_file(folder, f"revision-{revision}-{time.strftime('%Y%m%d%H%M%S')}", ".json")
         report.write_text(json.dumps({
             "revision": revision,
             "name": name,

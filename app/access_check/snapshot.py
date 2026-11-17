@@ -97,6 +97,10 @@ def _capture(conn) -> dict:
             "inherit_user_bindings": bool(agent.get("inherit_user_bindings")),
             "live_keys": len(live_keys.get(agent_id, [])),
             "keys_digest": _digest(live_keys.get(agent_id, [])),
+            # What the entry may reach through memory and shared areas, active or not.
+            "read_scopes": sorted(set(agent_kind._scopes(agent.get("read_scopes_json")))),
+            "write_scopes": sorted(set(agent_kind._scopes(agent.get("write_scopes_json")))),
+            "recall_scopes": sorted(set(agent_kind._scopes(agent.get("default_recall_scopes_json")))),
             "kind": agent.get("kind") if stored_kind else rule_kind,
             "kind_by_rule": rule_kind,
         }
