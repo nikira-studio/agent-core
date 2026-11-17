@@ -537,6 +537,9 @@ def create_schema(conn) -> None:
     _seed_connector_types(conn)
 
 
+_GUARDED_REVISIONS = frozenset({30})
+
+
 def _apply_schema_migrations(conn) -> None:
     migrations = (
         (1, "normalize-current-schema", _migrate_001_current_schema),
@@ -576,6 +579,7 @@ def _apply_schema_migrations(conn) -> None:
         (27, "binding-test-note", _migrate_027_binding_test_note),
         (28, "connection-action-limits", _migrate_028_connection_action_limits),
         (29, "several-keys-per-agent", _migrate_029_agent_keys),
+        (30, "agent-or-service-kind", _migrate_030_agent_kind),
     )
     applied = {
         row["revision"]
@@ -583,6 +587,14 @@ def _apply_schema_migrations(conn) -> None:
     }
     for revision, name, migrate in migrations:
         if revision in applied:
+            continue
+        if revision in _GUARDED_REVISIONS:
+            # Changes to who can reach what: applied in one transaction, compared before and after, refused on any
+            # difference that revision did not declare (see app/access_check/guard.py).
+            from app.access_check.guard import run_guarded
+            from app.access_check.revisions import CHECKS
+
+            run_guarded(conn, revision, name, migrate, CHECKS.get(revision))
             continue
         migrate(conn)
         conn.execute(
@@ -1638,6 +1650,27 @@ def _migrate_019_trusted_device_sessions(conn) -> None:
     )
     conn.execute("DROP TABLE sessions")
     conn.execute("ALTER TABLE sessions_rebuilt RENAME TO sessions")
+
+
+def _migrate_030_agent_kind(conn) -> None:
+    """Each entry on the Agents page is an agent or a service (1.4.0).
+
+    A service is a program that only fetches the secrets it was granted: its permissions are exactly
+    ``credentials_resolve``. The kind is decided once, here, by the same rule that creates new entries
+    (app/services/agent_kind.py): exactly those permissions and no recorded work, workspaces or credentials of its own.
+    Everything else is an agent, so no entry gains or loses anything: the column changes how entries are listed, not
+    what they may do. Runs under the access check (see ``_GUARDED_REVISIONS``)."""
+    from app.services import agent_kind
+
+    columns = {row["name"] for row in conn.execute("PRAGMA table_info(agents)").fetchall()}
+    if "kind" not in columns:
+        conn.execute(
+            "ALTER TABLE agents ADD COLUMN kind TEXT NOT NULL DEFAULT 'agent' CHECK (kind IN ('agent', 'service'))"
+        )
+    for row in conn.execute("SELECT * FROM agents").fetchall():
+        if agent_kind.classify(conn, dict(row)) == "service":
+            conn.execute("UPDATE agents SET kind = 'service' WHERE id = ?", (row["id"],))
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_agents_kind ON agents(kind)")
 
 
 def _migrate_029_agent_keys(conn) -> None:

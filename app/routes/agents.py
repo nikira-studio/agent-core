@@ -3,7 +3,7 @@ from pydantic import BaseModel, ConfigDict
 from typing import Optional
 
 from app.services import audit_service, workspace_service
-from app.services import agent_access_service, agent_service
+from app.services import agent_access_service, agent_kind, agent_service
 from app.security.dependencies import get_current_session
 from app.security.response_helpers import success_response, error_response
 from app.security.scope_utils import validate_scope_string, normalize_scope_string
@@ -26,6 +26,9 @@ class CreateAgentRequest(BaseModel):
     capabilities: Optional[list[str]] = None
     # Whether it may also run the services bound in its person's own scope.
     inherit_user_bindings: bool = False
+    # "agent" or "service" (a program that only fetches the secrets it is granted). Left out: a service when the
+    # permissions are exactly credentials_resolve (how such entries were always created), otherwise an agent.
+    kind: Optional[str] = None
 
 
 class UpdateAgentRequest(BaseModel):
@@ -43,6 +46,8 @@ class UpdateAgentRequest(BaseModel):
     reset_default_recall_scopes: bool = False
     capabilities: Optional[list[str]] = None
     inherit_user_bindings: Optional[bool] = None
+    # Change an entry between "agent" and "service" (see the rules in app/services/agent_kind.py).
+    kind: Optional[str] = None
 
 
 def _may_run_persons_services(session: dict, person_id: Optional[str]) -> bool:
@@ -124,15 +129,19 @@ def _authority_audit_details(agent: dict) -> dict:
         ),
         "capabilities": agent_service.parse_capabilities(agent.get("capabilities_json")),
         "inherit_user_bindings": bool(agent.get("inherit_user_bindings")),
+        "kind": agent.get("kind") or "agent",
     }
 
 
 @router.get("")
-def list_agents(session: dict = Depends(get_current_session)):
+def list_agents(kind: Optional[str] = None, session: dict = Depends(get_current_session)):
+    """Every entry by default; ``?kind=agent`` or ``?kind=service`` lists one kind."""
+    if kind is not None and kind not in agent_kind.KINDS:
+        return error_response("INVALID_KIND", "kind must be 'agent' or 'service'", 400)
     if _is_admin(session):
-        agents = agent_service.list_agents()
+        agents = agent_service.list_agents(kind=kind)
     else:
-        agents = agent_service.list_visible_agents(session["user_id"])
+        agents = agent_service.list_visible_agents(session["user_id"], kind=kind)
     safe_agents = []
     for agent in agents:
         safe_agents.append({
@@ -148,6 +157,7 @@ def list_agents(session: dict = Depends(get_current_session)):
             "is_active": agent["is_active"],
             "is_shared": agent_service.is_agent_shared(agent),
             "created_at": agent["created_at"],
+            "kind": agent.get("kind") or "agent",
         })
     return success_response({"agents": safe_agents})
 
@@ -203,7 +213,10 @@ def create_agent(
             capabilities=body.capabilities,
             inherit_user_bindings=body.inherit_user_bindings,
             issue_key=False,
+            kind=body.kind,
         )
+    except agent_kind.AgentKindError as exc:
+        return error_response("SERVICE_RULE", str(exc), 400)
     except ValueError as exc:
         return error_response("INVALID_CAPABILITIES", str(exc), 400)
 
@@ -229,6 +242,7 @@ def create_agent(
             "default_recall_scopes_json": agent.get("default_recall_scopes_json"),
             "capabilities": agent_service.parse_capabilities(agent.get("capabilities_json")),
             "is_active": agent["is_active"],
+            "kind": agent.get("kind") or "agent",
         },
         "next_step": "Generate a one-time connection key and config from the Connect page.",
     }, status_code=201)
@@ -258,6 +272,7 @@ def get_agent(agent_id: str, session: dict = Depends(get_current_session)):
             "created_at": agent["created_at"],
             "is_shared": agent_service.is_agent_shared(agent),
             "inherit_user_bindings": bool(agent.get("inherit_user_bindings")),
+            "kind": agent.get("kind") or "agent",
             # Workspaces in its lists that its person cannot reach, so they have no effect yet.
             "no_effect": agent_access_service.no_effect(agent),
         }
@@ -299,6 +314,7 @@ def update_agent(
         write_scopes=body.write_scopes,
         capabilities=body.capabilities,
         inherit_user_bindings=body.inherit_user_bindings,
+        kind=body.kind,
     )
     # reset flag clears back to default (fan all read_scopes); otherwise a
     # provided list narrows, and absence leaves it unchanged.
@@ -308,6 +324,8 @@ def update_agent(
         update_kwargs["default_recall_scopes"] = body.default_recall_scopes
     try:
         agent_service.update_agent(agent_id, **update_kwargs)
+    except agent_kind.AgentKindError as exc:
+        return error_response("SERVICE_RULE", str(exc), 400)
     except ValueError as exc:
         return error_response("INVALID_CAPABILITIES", str(exc), 400)
     updated_agent = agent_service.get_agent_by_id(agent_id)

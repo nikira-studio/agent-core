@@ -9,7 +9,7 @@ from app.database import get_db
 from app.models.enums import normalize_id
 from app.security.scope_utils import normalize_scope_string
 from app.config import settings
-from app.services import cleanup_service
+from app.services import agent_kind, cleanup_service
 
 
 def _normalize_scopes(scopes: list[str]) -> list[str]:
@@ -91,10 +91,25 @@ def create_agent(
     inherit_user_bindings: bool = False,
     issue_key: bool = True,
     key_label: str = "First key",
+    kind: Optional[str] = None,
 ) -> tuple[dict, str]:
     """Create an agent. With ``issue_key`` (the default) it also gets a first key, returned once; without it the agent
     has no key until a person adds one (the dashboard does this: creating an agent shows no key)."""
     normalized_id = normalize_id(agent_id)
+    if kind is None:
+        # How a fetch-only entry has always been created (the "Service agent" role): exactly this one permission.
+        only_own = not any(s_.startswith("workspace:") for s_ in (read_scopes or []) + (write_scopes or []))
+        kind = "service" if (
+            capabilities is not None and sorted(set(capabilities)) == agent_kind.SERVICE_PERMISSIONS and only_own
+        ) else "agent"
+    kind = agent_kind.normalize_kind(kind)
+    if kind == "service":
+        # A service fetches secrets and does nothing else: one permission, its own scope only.
+        agent_kind.check_service_shape(capabilities, read_scopes, write_scopes, normalized_id, inherit_user_bindings)
+        capabilities = list(agent_kind.SERVICE_PERMISSIONS)
+        read_scopes = [f"agent:{normalized_id}"]
+        write_scopes = [f"agent:{normalized_id}"]
+        default_recall_scopes = None
     api_key_plaintext, api_key_hash = generate_api_key()
 
     if default_user_id is None:
@@ -128,12 +143,12 @@ def create_agent(
             """
             INSERT INTO agents (id, display_name, description, owner_user_id, default_user_id,
                                read_scopes_json, write_scopes_json, default_recall_scopes_json,
-                               capabilities_json, api_key_hash, inherit_user_bindings)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                               capabilities_json, api_key_hash, inherit_user_bindings, kind)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (normalized_id, display_name, description, owner_user_id, default_user_id,
              read_scopes_json, write_scopes_json, default_recall_scopes_json,
-             json.dumps(normalize_capabilities(capabilities)), api_key_hash, int(bool(inherit_user_bindings))),
+             json.dumps(normalize_capabilities(capabilities)), api_key_hash, int(bool(inherit_user_bindings)), kind),
         )
         if issue_key:
             conn.execute(
@@ -162,6 +177,7 @@ def create_agent(
             "capabilities_json": json.dumps(normalize_capabilities(capabilities)),
             "is_active": True,
             "inherit_user_bindings": int(bool(inherit_user_bindings)),
+            "kind": kind,
         }
 
     return agent, (api_key_plaintext if issue_key else "")
@@ -173,7 +189,7 @@ def get_agent_by_id(agent_id: str) -> Optional[dict]:
             """
             SELECT id, display_name, description, owner_user_id, default_user_id,
                    read_scopes_json, write_scopes_json, default_recall_scopes_json, capabilities_json, is_active, created_at,
-                   inherit_user_bindings
+                   inherit_user_bindings, kind
             FROM agents WHERE id = ?
             """,
             (agent_id,),
@@ -363,11 +379,17 @@ def is_agent_shared(agent: dict) -> bool:
     return "shared" in read_scopes or "shared" in write_scopes
 
 
-def list_agents(owner_user_id: Optional[str] = None, is_active: Optional[bool] = None) -> list[dict]:
+def list_agents(
+    owner_user_id: Optional[str] = None, is_active: Optional[bool] = None, kind: Optional[str] = None
+) -> list[dict]:
+    """Entries on the Agents page. ``kind`` ('agent' or 'service') narrows the list; left out, everything is listed."""
     with get_db() as conn:
-        query = "SELECT id, display_name, description, owner_user_id, default_user_id, read_scopes_json, write_scopes_json, default_recall_scopes_json, capabilities_json, is_active, created_at, inherit_user_bindings FROM agents WHERE 1=1"
+        query = "SELECT id, display_name, description, owner_user_id, default_user_id, read_scopes_json, write_scopes_json, default_recall_scopes_json, capabilities_json, is_active, created_at, inherit_user_bindings, kind FROM agents WHERE 1=1"
         params = []
 
+        if kind is not None:
+            query += " AND kind = ?"
+            params.append(agent_kind.normalize_kind(kind))
         if owner_user_id:
             query += " AND owner_user_id = ?"
             params.append(owner_user_id)
@@ -380,8 +402,8 @@ def list_agents(owner_user_id: Optional[str] = None, is_active: Optional[bool] =
         return [dict(row) for row in cursor.fetchall()]
 
 
-def list_visible_agents(user_id: str, is_active: Optional[bool] = None) -> list[dict]:
-    agents = list_agents(is_active=is_active)
+def list_visible_agents(user_id: str, is_active: Optional[bool] = None, kind: Optional[str] = None) -> list[dict]:
+    agents = list_agents(is_active=is_active, kind=kind)
     visible_agents = []
     for agent in agents:
         if agent.get("owner_user_id") == user_id:
@@ -401,6 +423,7 @@ def update_agent(
     default_recall_scopes=_UNSET,
     capabilities: Optional[list[str]] = None,
     inherit_user_bindings: Optional[bool] = None,
+    kind: Optional[str] = None,
 ) -> bool:
     current = get_agent_by_id(agent_id)
     if current is None:
@@ -408,6 +431,30 @@ def update_agent(
 
     updates = []
     params = []
+
+    # The kind rules. A service keeps one permission and no scope beyond its own unless it is first changed to an
+    # agent; an agent becomes a service only when nothing says it does agent work, and the change itself writes the
+    # service's fixed permission and scope (an explicit, audited change by a person, never a side effect).
+    current_kind = current.get("kind") or "agent"
+    target_kind = agent_kind.normalize_kind(kind) if kind is not None else current_kind
+    if target_kind == "service":
+        if current_kind == "agent":
+            with get_db() as conn:
+                blockers = agent_kind.conflicts(conn, current)
+            if blockers:
+                raise agent_kind.AgentKindError(
+                    "This entry cannot become a service: " + "; ".join(blockers) + "."
+                )
+            capabilities = list(agent_kind.SERVICE_PERMISSIONS)
+            read_scopes = [f"agent:{normalize_id(agent_id)}"]
+            write_scopes = [f"agent:{normalize_id(agent_id)}"]
+            default_recall_scopes = None
+            inherit_user_bindings = False
+        else:
+            agent_kind.check_service_shape(capabilities, read_scopes, write_scopes, agent_id, inherit_user_bindings)
+    if target_kind != current_kind:
+        updates.append("kind = ?")
+        params.append(target_kind)
 
     if display_name is not None:
         updates.append("display_name = ?")
