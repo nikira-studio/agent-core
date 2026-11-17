@@ -111,6 +111,21 @@ def _ensure_agent_keys(db_path: str) -> None:
         con.close()
 
 
+def _apply_current_schema(db_path: str) -> None:
+    """Bring a restored database up to this build's schema before it goes live, under the same access check as the
+    startup migration. A step that would change who can reach what is refused (MigrationRefused) and the restore is
+    not carried out: the running installation is left as it was."""
+    from app.schema import create_schema
+
+    con = sqlite3.connect(db_path)
+    con.row_factory = sqlite3.Row
+    try:
+        create_schema(con)
+        con.commit()
+    finally:
+        con.close()
+
+
 def build_backup_manifest(
     db_path: str,
     credential_key_path: str,
@@ -455,6 +470,10 @@ def _restore_extracted(
             f.write(extracted[DB_FILENAME])
         _revoke_consumer_grants(inert_path)
         _ensure_agent_keys(inert_path)
+        try:
+            _apply_current_schema(inert_path)
+        except Exception as exc:  # including MigrationRefused: nothing has been replaced yet
+            return False, f"The backup could not be brought up to this version, so nothing was restored: {exc}", {}
         with open(inert_path, "rb") as f:
             extracted[DB_FILENAME] = f.read()
     finally:

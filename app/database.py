@@ -186,6 +186,25 @@ _shared_unit: "ContextVar[tuple[int, _SharedConnection] | None]" = ContextVar("s
 
 
 @contextmanager
+def adopt_connection(conn: sqlite3.Connection) -> Generator[None, None, None]:
+    """Make every get_db() in this thread use ``conn`` for the length of the block.
+
+    A schema revision that is checked before it commits has to read the services' own view of the data (what an
+    agent can reach) from the connection that holds the uncommitted change; the services open their own connection
+    otherwise and would see the old state. The caller owns the transaction: nothing is committed or closed here."""
+    import threading
+
+    if _shared_unit.get() is not None:
+        yield
+        return
+    token = _shared_unit.set((threading.get_ident(), _SharedConnection(conn)))
+    try:
+        yield
+    finally:
+        _shared_unit.reset(token)
+
+
+@contextmanager
 def all_or_nothing() -> Generator[None, None, None]:
     """Run a block whose database writes either all happen or none do.
 
