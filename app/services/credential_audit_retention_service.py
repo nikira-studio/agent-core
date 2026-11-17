@@ -43,6 +43,8 @@ INDIVIDUAL_CREDENTIAL_ACTIONS = (
     "credential_key_restored",
     "credential_resolution_retention_applied",
     "agent_key_rotated",
+    "agent_key_created",
+    "agent_key_revoked",
     "inbound_key_generated",
     "inbound_key_rotated",
     "connector_binding_created",

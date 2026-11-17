@@ -10,6 +10,7 @@ import contextvars
 import json
 from pathlib import Path
 
+from app.time_utils import utc_now_iso
 from app.services.auth_service import get_user_by_id
 from app.security.response_helpers import success_response, error_response
 from app.security.scope_enforcer import ScopeEnforcer
@@ -533,6 +534,7 @@ async def generate_agent_connection(
         agent_id: str
         target: str = "claude_code"
         output_type: str = "env"
+        key_label: str = ""
 
     body = GenerateConnectionBody.model_validate(await request.json())
     if body.output_type not in KNOWN_OUTPUT_TYPES:
@@ -580,18 +582,18 @@ async def generate_agent_connection(
             400,
         )
 
-    # Only rotate when the output actually carries a key. Rotating is
-    # destructive — it invalidates the key any running session is using — and it
-    # was happening for every output type, including AGENTS.md, which contains
-    # no agent-specific content at all. Generating a repo instruction file must
-    # not knock a working agent offline.
+    # Only add a key when the output actually carries one: generating a repo instruction file (AGENTS.md) must not
+    # leave a key nobody holds. The new key sits beside the agent's others, so a machine already connected keeps
+    # working; the person revokes what they no longer use on the Agents page.
     api_key = None
+    key_record = None
     if body.output_type in KEY_BEARING_OUTPUTS:
-        api_key = agent_service.rotate_agent_key(agent["id"])
-        if not api_key:
-            return error_response(
-                "AGENT_INACTIVE", "Cannot rotate key for inactive agent", 400
-            )
+        label = body.key_label.strip() or f"{_agent_setup_target_label(body.target)}, {utc_now_iso()[:10]}"
+        try:
+            key_record, shown_once = agent_service.add_agent_key(agent["id"], label, created_by=session["user_id"])
+            api_key = shown_once
+        except agent_service.AgentKeyError as exc:
+            return error_response(exc.code, str(exc), 404 if exc.code == "NOT_FOUND" else 400)
 
     output_label, output = _build_agent_setup_output(
         user=user,
@@ -606,11 +608,12 @@ async def generate_agent_connection(
     audit_service.write_event(
         actor_type="user",
         actor_id=session["user_id"],
-        action="agent_key_rotated" if api_key else "integration_output_generated",
+        action="agent_key_created" if api_key else "integration_output_generated",
         resource_type="agent",
         resource_id=agent["id"],
         result="success",
         details={
+            **({"record_id": key_record["id"], "label": key_record["label"]} if key_record else {}),
             "user_id": body.user_id,
             "workspace_id": body.workspace_id,
             "target": body.target,
@@ -634,7 +637,8 @@ async def generate_agent_connection(
             "filename": filename,
             "output": output,
             "api_key": api_key,
-            "warning": "This agent API key is shown once. Generating again rotates it and invalidates the previous one.",
+            "key_label": key_record["label"] if key_record else None,
+            "warning": "This key is shown once. It is a new key: the agent's other keys keep working. Revoke keys you no longer use on the Agents page.",
         }
     )
 
@@ -1096,7 +1100,7 @@ def integrations_page(
         )
         # Only an agent Core has already seen can be connected somewhere else; a new key would disconnect that machine.
         second_machine = (
-            "<p class='step-note'>Already connected on another machine? Copy that machine's entry instead of generating a key: a new key disconnects it. Change its address if it says localhost.</p>"
+            "<p class='step-note'>Already connected on another machine? Copy that machine's entry, or generate a key for this one: the other machine's key keeps working. Change its address if it says localhost.</p>"
             if seen_at
             else ""
         )
@@ -1150,7 +1154,7 @@ def integrations_page(
               {agent_options}
             </select>
             <p class="form-hint">The agent identity the tool signs in as. It decides what the tool may read and write.</p>
-            <p class="form-hint">Choosing here only updates the preview. Nothing is issued until you press <strong>Generate One-Time Key</strong>, which replaces that agent's old key. The instruction files and prompts are the same for every agent and safe to regenerate.</p>
+            <p class="form-hint">Choosing here only updates the preview. Nothing is issued until you press <strong>Generate One-Time Key</strong>, which adds a new key to that agent; its other keys keep working. The instruction files and prompts are the same for every agent and safe to regenerate.</p>
           </div>
         </div>
       </div>
@@ -1180,7 +1184,7 @@ def integrations_page(
 
       <details class="card fold-card" id="other-outputs" {other_open}>
         <summary><span class="fold-title">Other outputs</span><span class="fold-hint">Environment variables, session prompt, the full MCP config, files for other tools</span></summary>
-        <p class="form-hint">Only what the steps above do not already give you. Where a tab offers Generate One-Time Key, pressing it creates a new key and replaces the agent's old one.</p>
+        <p class="form-hint">Only what the steps above do not already give you. Where a tab offers Generate One-Time Key, pressing it adds a new key to the agent; its other keys keep working. Revoke keys you no longer use on the Agents page.</p>
         {destination_section}
         <div class="form-section" id="generated-output">
         <div class="setup-tabs">{other_tabs}</div>
@@ -1213,10 +1217,10 @@ def _agent_setup_extra_js(base_url):
         f"window._AC_MCP_URL = {json.dumps(f'{base_url}/mcp')};"
         "</script>"
     )
-    return constants + '<script src="/static/js/integrations.js?v=20261106"></script>'
+    return constants + '<script src="/static/js/integrations.js?v=20261117"></script>'
 
 
-# Outputs that embed the agent's API key, and therefore require rotating it.
+# Outputs that embed an agent key, and therefore add a new one.
 # Everything else — the repo instruction files and the prompts — is guidance
 # that carries no credential.
 # Every output type `_build_agent_setup_output` knows. An unknown name used to fall through to the
@@ -1457,8 +1461,8 @@ Prompts can steer behavior and verify connectivity. They cannot install MCP serv
 
 Click the one-time key button on `MCP Config` when you are ready to connect the tool.
 Use the one-time key button on `Environment Variables` only when you need shell or launcher environment variables.
-That rotates this agent's API key and inserts the new key into the generated output.
-The key is shown once. Generating again invalidates the previous key for this connection.
+That adds a new key for this agent and inserts it into the generated output.
+The key is shown once. The agent's other keys keep working; revoke keys you no longer use on the Agents page.
 The API key is the authoritative agent identity. {APP_NAME} identifies requests as `{agent_scope}` by looking up the bearer token; repo instruction files do not set identity.
 
 ## Where Things Go
@@ -1705,7 +1709,7 @@ def _hook_steps(client_key, base_url):
         )
         requirements = (
             "Python 3 (`python3`; on Windows `python` or `py -3`) and step a done. "
-            "The hook reads the key from the MCP entry, so a rotated key needs no change here."
+            "The hook reads the key from the MCP entry, so a new key in that entry needs no change here."
         )
         trust = None
         trust_windows = None
@@ -1733,7 +1737,7 @@ def _hook_steps(client_key, base_url):
         )
         requirements = (
             "Python 3.11 or newer (`python3`; on Windows `python` or `py -3`) and step a done. "
-            "The hook reads the key from `config.toml`, so a rotated key needs no change here."
+            "The hook reads the key from `config.toml`, so a new key in that entry needs no change here."
         )
         trust = (
             f"Codex skips a hook until you trust it. In the CLI, start Codex, type `/hooks` and trust the {APP_NAME} hook. "

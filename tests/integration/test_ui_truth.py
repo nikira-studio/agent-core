@@ -116,7 +116,8 @@ def test_the_new_agent_dialog_is_not_titled_new_api_key():
 
     source = pathlib.Path("app/routes/agents_page.py").read_text()
     assert "<h2>New API Key</h2>" not in source
-    assert "rotate-modal-title" in source and "'New agent API key'" in source and "'Agent created'" in source
+    assert "rotate-modal-title" in source and "'Agent created'" in source
+    assert "'New agent API key'" not in source  # a key is added from the Keys dialog, titled for the agent
 
 
 def test_scope_pickers_show_names_not_raw_scope_strings(test_client, admin_token):

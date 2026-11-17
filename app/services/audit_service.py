@@ -27,6 +27,8 @@ AUDIT_ACTIONS = (
     "agent_created",
     "agent_updated",
     "agent_key_rotated",
+    "agent_key_created",
+    "agent_key_revoked",
     "integration_output_generated",
     "agent_deactivated",
     "agent_reactivated",

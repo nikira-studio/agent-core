@@ -94,7 +94,7 @@ def test_integrations_keeps_connection_setup_separate_from_workspace_guidance(
 
     connection_page = integrations_client.get(common + "mcp_json")
     assert connection_page.status_code == 200
-    assert "creates a new key and replaces the agent's old one" in connection_page.text
+    assert "adds a new key to the agent; its other keys keep working" in connection_page.text
     assert "id='generate-connection-btn'" in connection_page.text
 
 
@@ -318,7 +318,8 @@ def test_generating_a_repo_instruction_file_does_not_rotate_the_key(test_client,
         json={"user_id": "admin", "agent_id": "rotation-probe", "output_type": "env"},
     )
     assert first.status_code == 200, first.json()
-    key_hash_before = agent_service.get_agent_by_id("rotation-probe")["api_key_hash"]
+    keys_before = [k["id"] for k in agent_service.list_agent_keys("rotation-probe")]
+    assert len(keys_before) == 1
 
     for output_type in ("agents_md", "claude_md", "instructions", "session"):
         r = test_client.post(
@@ -331,12 +332,13 @@ def test_generating_a_repo_instruction_file_does_not_rotate_the_key(test_client,
             },
         )
         assert r.status_code == 200, f"{output_type}: {r.json()}"
-        after = agent_service.get_agent_by_id("rotation-probe")["api_key_hash"]
-        assert after == key_hash_before, f"{output_type} rotated the agent's key"
+        after = [k["id"] for k in agent_service.list_agent_keys("rotation-probe")]
+        assert after == keys_before, f"{output_type} changed the agent's keys"
 
 
-def test_generating_a_connection_config_still_rotates(test_client, admin_token):
-    """The key-bearing outputs must still issue a fresh key."""
+def test_generating_a_connection_config_adds_a_key_and_keeps_the_others(test_client, admin_token):
+    """The key-bearing outputs issue a fresh, labelled key beside the agent's others: a machine already connected
+    keeps working."""
     from app.services import agent_service
 
     test_client.post(
@@ -349,7 +351,9 @@ def test_generating_a_connection_config_still_rotates(test_client, admin_token):
         headers={"Authorization": f"Bearer {admin_token}"},
         json={"user_id": "admin", "agent_id": "rotation-probe-2", "output_type": "env"},
     )
-    before = agent_service.get_agent_by_id("rotation-probe-2")["api_key_hash"]
+    first_keys = agent_service.list_agent_keys("rotation-probe-2")
+    assert len(first_keys) == 1 and "Claude Code" in first_keys[0]["label"]
+    count = 1
 
     for output_type in ("mcp_json", "env"):
         r = test_client.post(
@@ -362,9 +366,11 @@ def test_generating_a_connection_config_still_rotates(test_client, admin_token):
             },
         )
         assert r.status_code == 200, r.json()
-        after = agent_service.get_agent_by_id("rotation-probe-2")["api_key_hash"]
-        assert after != before, f"{output_type} should have issued a fresh key"
-        before = after
+        count += 1
+        keys = agent_service.list_agent_keys("rotation-probe-2")
+        assert len(keys) == count, f"{output_type} should add one key and revoke none"
+        assert r.json()["data"]["api_key"].startswith("ac_sk_")
+        assert first_keys[0]["id"] in [k["id"] for k in keys]
 
 
 def test_the_form_says_what_the_agent_choice_affects(test_client, admin_token):
@@ -375,7 +381,7 @@ def test_the_form_says_what_the_agent_choice_affects(test_client, admin_token):
     )
     assert r.status_code == 200
     assert "only updates the preview" in r.text
-    assert "replaces that agent's old key" in r.text
+    assert "adds a new key to that agent" in r.text
     assert "the same for every agent" in r.text
 
 
@@ -651,7 +657,7 @@ def test_step_a_says_to_copy_the_entry_on_a_second_machine_only_for_an_agent_alr
     audit_service.write_event(actor_type="agent", actor_id="claude-code", action="memory_search",
                               resource_type="memory", resource_id="x", result="success")
     _html, steps, _o = _steps(integrations_client, "claude_code")
-    assert "Already connected on another machine?" in steps and "a new key disconnects it" in steps
+    assert "Already connected on another machine?" in steps and "the other machine's key keeps working" in steps
 
 
 def test_the_by_hand_command_in_the_guide_pastes_and_runs(tmp_path):

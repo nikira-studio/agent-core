@@ -128,7 +128,10 @@ Session required. Admins can manage all agents. Non-admin users can create and m
 | `DELETE` | `/api/agents/{agent_id}` | Deactivate agent |
 | `POST` | `/api/agents/{agent_id}/activate` | Reactivate a deactivated agent |
 | `POST` | `/api/agents/{agent_id}/purge` | Permanently delete agent record (admin only) |
-| `POST` | `/api/agents/{agent_id}/rotate_key` | Rotate agent API key |
+| `GET` | `/api/agents/{agent_id}/keys` | List the agent's live keys (label, last four characters, created, last used; never the key). `?include_revoked=true` adds revoked ones |
+| `POST` | `/api/agents/{agent_id}/keys` | Add a key. Body `{"label": "laptop"}`. Returns the key once as `api_key`. The agent's other keys keep working. Up to 20 live keys |
+| `DELETE` | `/api/agents/{agent_id}/keys/{key_id}` | Revoke one key; the others keep working |
+| `POST` | `/api/agents/{agent_id}/rotate_key` | Revoke every live key and return one new key |
 
 Create:
 ```json

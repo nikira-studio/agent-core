@@ -237,6 +237,10 @@ def agents_page(request: Request, session: dict = Depends(require_auth)):
             toggle_btn = ""
         role = role_of(agent_service.parse_capabilities(a.get("capabilities_json")))
         role_badge = f"<span class='badge badge-info' title='What this agent may do. Open Edit to change it.'>{ROLE_NAMES[role]}</span>"
+        key_count_text = ""
+        if is_admin or a.get("owner_user_id") == session["user_id"]:
+            key_total = len(agent_service.list_agent_keys(a["id"]))
+            key_count_text = " · " + ("no keys" if key_total == 0 else ("1 key" if key_total == 1 else f"{key_total} keys"))
         owner_id = a.get("owner_user_id", "")
         default_user_id = a.get("default_user_id", "") or owner_id
         if can_manage:
@@ -251,9 +255,10 @@ def agents_page(request: Request, session: dict = Depends(require_auth)):
             action_buttons = (
                 f"<button type='button' class='btn btn-sm btn-secondary' data-agent-edit='{escape_html(a['id'])}'>Edit</button>"
                 f"<a class='btn btn-sm btn-secondary' href='/integrations?agent_id={quote(a['id'])}'>Connect</a>"
-                "<details class='row-more'><summary class='btn btn-sm btn-secondary' title='Credentials, deactivate, delete'>More</summary>"
+                "<details class='row-more'><summary class='btn btn-sm btn-secondary' title='Keys, credentials, deactivate, delete'>More</summary>"
                 "<div class='row-more-list'>"
                 f"{credentials_link}"
+                f"<button type='button' class='btn btn-sm btn-secondary' data-agent-keys='{escape_html(a['id'])}' title='See, add and revoke this agent&#39;s keys'>Keys</button>"
                 f"{toggle_btn}"
                 f"<button type='button' class='btn btn-sm btn-danger icon-delete-btn' data-agent-purge='{escape_html(a['id'])}' title='Permanently delete' aria-label='Permanently delete'>{get_icon('delete')} Delete</button>"
                 "</div></details>"
@@ -265,7 +270,7 @@ def agents_page(request: Request, session: dict = Depends(require_auth)):
         return (
             f"<tr>"
             f"<td><strong>{escape_html(a.get('display_name', ''))}</strong> {role_badge}<br><code>{escape_html(a['id'])}</code>"
-            f"<div class='text-muted'>Owner: {escape_html(owner_id)}</div></td>"
+            f"<div class='text-muted'>Owner: {escape_html(owner_id)}{key_count_text}</div></td>"
             f"<td data-label='Status'>{status_badge}</td>"
             f"<td data-label='Access'>{access_summary}{no_effect_html}</td>"
             f"<td class='hide-phone'>{local_dt(a.get('created_at'), style='date')}</td>"
@@ -320,6 +325,10 @@ def agents_page(request: Request, session: dict = Depends(require_auth)):
       if (deactivate) { ev.preventDefault(); deactivateAgent(deactivate.dataset.agentDeactivate); return; }
       const reactivate = ev.target.closest('[data-agent-reactivate]');
       if (reactivate) { ev.preventDefault(); reactivateAgent(reactivate.dataset.agentReactivate); return; }
+      const keys = ev.target.closest('[data-agent-keys]');
+      if (keys) { ev.preventDefault(); openKeys(keys.dataset.agentKeys); return; }
+      const revoke = ev.target.closest('[data-key-revoke]');
+      if (revoke) { ev.preventDefault(); revokeKey(revoke.dataset.keyAgent, revoke.dataset.keyRevoke, revoke.dataset.keyLabel); return; }
       const purge = ev.target.closest('[data-agent-purge]');
       if (purge) { ev.preventDefault(); purgeAgent(purge.dataset.agentPurge); }
     });
@@ -346,7 +355,7 @@ def agents_page(request: Request, session: dict = Depends(require_auth)):
       else { showToast(j.error.message || 'Failed', 'danger'); }
     }
     async function purgeAgent(id) {
-      const typed = prompt('PERMANENTLY DELETE the agent "' + id + '"? Its agent API key stops working, and its private memory, anything stored in its private workspace (credentials, service connections) and its tasks are deleted. This cannot be undone.\\n\\nType the agent ID to confirm:');
+      const typed = prompt('PERMANENTLY DELETE the agent "' + id + '"? Its keys stop working, and its private memory, anything stored in its private workspace (credentials, service connections) and its tasks are deleted. This cannot be undone.\\n\\nType the agent ID to confirm:');
       if (typed === null) return;
       if (typed.trim() !== id) { showToast('That is not the agent ID. Nothing was deleted.', 'warning'); return; }
       const j = await apiFetch('/api/agents/' + id + '/purge', { method: 'POST' });
@@ -357,16 +366,49 @@ def agents_page(request: Request, session: dict = Depends(require_auth)):
         showToast(j.error?.message || 'Failed to delete agent', 'danger'); 
       }
     }
-    async function rotateAgentKey(id) {
-      const j = await apiFetch('/api/agents/' + id + '/rotate_key', { method: 'POST' });
-      if (j.ok) {
-        document.getElementById('rotate-modal-title').textContent = 'New agent API key';
-        document.getElementById('rotate-modal-body').innerHTML =
-          '<div class="alert alert-danger"><strong>Save this agent API key now - it will not be shown again!</strong></div>' +
-          '<div class="api-key-display"><code>' + escapeHtml(j.data.api_key) + '</code></div>' +
-          '<button class="copy-btn" data-copy-value="' + escapeHtml(j.data.api_key) + '">Copy</button>';
-        openModal('rotate-modal');
-      } else { showToast(j.error.message || 'Failed', 'danger'); }
+    let keysAgent = null;
+    function keyTime(value) { return value ? new Date(value).toLocaleString() : 'never'; }
+    async function openKeys(id, justAdded) {
+      keysAgent = id;
+      const j = await apiFetch('/api/agents/' + encodeURIComponent(id) + '/keys');
+      if (!j.ok) { showToast((j.error && j.error.message) || 'Could not load the keys', 'danger'); return; }
+      const rows = j.data.keys.map(function(k) {
+        return '<tr><td data-label="Label"><strong>' + escapeHtml(k.label) + '</strong>' +
+          (k.key_hint ? '<br><code>ac_sk_…' + escapeHtml(k.key_hint) + '</code>' : '') + '</td>' +
+          '<td data-label="Created">' + escapeHtml(keyTime(k.created_at)) + '</td>' +
+          '<td data-label="Last used">' + escapeHtml(keyTime(k.last_used_at)) + '</td>' +
+          '<td><button type="button" class="btn btn-sm btn-danger" data-key-agent="' + escapeHtml(id) + '" data-key-revoke="' + escapeHtml(k.id) +
+          '" data-key-label="' + escapeHtml(k.label) + '">Revoke</button></td></tr>';
+      }).join('');
+      const added = justAdded
+        ? '<div class="alert alert-danger"><strong>Copy this key now: it is not shown again.</strong> (' + escapeHtml(justAdded.label) + ')</div>' +
+          '<div class="api-key-display"><code>' + escapeHtml(justAdded.key) + '</code></div>' +
+          '<button class="copy-btn" data-copy-value="' + escapeHtml(justAdded.key) + '">Copy</button>'
+        : '';
+      document.getElementById('keys-modal-title').textContent = 'Keys for ' + id;
+      document.getElementById('keys-modal-body').innerHTML = added +
+        '<p class="text-muted">Each tool or machine can have its own key. Revoking one does not affect the others.</p>' +
+        (rows
+          ? '<table class="data-table"><thead><tr><th>Label</th><th>Created</th><th>Last used</th><th></th></tr></thead><tbody>' + rows + '</tbody></table>'
+          : '<p>This agent has no keys yet. Add one below, or generate one on the Connect page.</p>') +
+        '<form id="add-key-form" class="form-row" style="margin-top:12px"><label for="add-key-label">New key label</label>' +
+        '<input id="add-key-label" class="form-input" maxlength="60" placeholder="Laptop, CI runner" required>' +
+        '<button type="submit" class="btn">Add key</button></form>';
+      document.getElementById('add-key-form').addEventListener('submit', async function(e) {
+        e.preventDefault();
+        const label = document.getElementById('add-key-label').value.trim();
+        if (!label) return;
+        const r = await apiFetch('/api/agents/' + encodeURIComponent(id) + '/keys', { method: 'POST', body: JSON.stringify({ label: label }) });
+        if (r.ok) { openKeys(id, { key: r.data.api_key, label: r.data.key.label }); }
+        else { showToast((r.error && r.error.message) || 'Could not add a key', 'danger'); }
+      });
+      openModal('keys-modal');
+    }
+    async function revokeKey(agentId, keyId, label) {
+      if (!await confirmDialog('Revoke the key "' + label + '"? Anything using it stops working. The other keys of this agent are not affected.')) return;
+      const j = await apiFetch('/api/agents/' + encodeURIComponent(agentId) + '/keys/' + encodeURIComponent(keyId), { method: 'DELETE' });
+      if (j.ok) { showToast('Key revoked'); openKeys(agentId); }
+      else { showToast((j.error && j.error.message) || 'Could not revoke the key', 'danger'); }
     }
     function setAgentModalReadOnly(readOnly) {
       agentModalReadOnly = Boolean(readOnly);
@@ -706,6 +748,17 @@ def agents_page(request: Request, session: dict = Depends(require_auth)):
             <button id="edit-agent-save" type="submit" class="btn">Save Changes</button>
           </div>
         </form>
+      </div>
+    </div>
+
+    <!-- Keys Modal -->
+    <div class="modal-overlay" id="keys-modal" style="display:none">
+      <div class="modal">
+        <h2 id="keys-modal-title">Keys</h2>
+        <div id="keys-modal-body"></div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" onclick="closeModal('keys-modal'); refreshAgents();">Done</button>
+        </div>
       </div>
     </div>
 

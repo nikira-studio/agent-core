@@ -61,10 +61,10 @@ Full backup exports are encrypted with a separate one-time backup key. The encry
 | Identity | Storage method |
 | --- | --- |
 | User passwords | bcrypt hash |
-| Agent API keys | SHA-256 hash only, shown once at creation and never stored |
+| Agent API keys | SHA-256 hash only (one row per key), shown once when the key is added and never stored |
 | Broker credentials | SHA-256 hash in the database; plaintext in `data/broker.credential` |
 
-If an API key or helper key is lost, rotate it. There's no way to recover the original.
+If an API key or helper key is lost, replace it. There's no way to recover the original. An agent can hold several keys: revoke the lost one (Agents > More > Keys) and add another, and the agent's other keys keep working.
 
 ---
 

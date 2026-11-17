@@ -6,6 +6,7 @@ import secrets
 from app.database import get_db
 from app.security.encryption import decrypt_value, encrypt_value, KEY_OPERATION_LOCK
 from app.security.exceptions import APIError
+from app.services import agent_service
 from app.services.credential_service import is_expired
 from app.time_utils import utc_now, parse_utc_datetime
 
@@ -157,9 +158,10 @@ def _resolve(api_key, entry_id, metadata_only=False):
     result = None
     with get_db() as conn:
         conn.execute("BEGIN IMMEDIATE")
-        agent = conn.execute("SELECT a.* FROM agents a JOIN users u ON u.id=a.owner_user_id WHERE a.api_key_hash=? AND u.is_active=1", (hashlib.sha256(api_key.encode()).hexdigest(),)).fetchone()
+        agent = conn.execute(agent_service.AGENT_ROW_BY_KEY_SQL, (hashlib.sha256(api_key.encode()).hexdigest(),)).fetchone()
         if not agent or not agent["is_active"]:
             raise APIError("INVALID_KEY", "Invalid or inactive agent API key", 401)
+        agent_service.note_key_use(conn, agent["key_id"], agent["key_last_used"], commit=False)
         try:
             caps = json.loads(agent["capabilities_json"])
         except (TypeError, ValueError):
@@ -217,9 +219,10 @@ def lease_status(api_key, entry_ids):
     result = []
     with KEY_OPERATION_LOCK, get_db() as conn:
         conn.execute("BEGIN IMMEDIATE")
-        agent = conn.execute("SELECT a.* FROM agents a JOIN users u ON u.id=a.owner_user_id WHERE a.api_key_hash=? AND u.is_active=1", (hashlib.sha256(api_key.encode()).hexdigest(),)).fetchone()
+        agent = conn.execute(agent_service.AGENT_ROW_BY_KEY_SQL, (hashlib.sha256(api_key.encode()).hexdigest(),)).fetchone()
         if not agent or not agent["is_active"]:
             raise APIError("INVALID_KEY", "Invalid or inactive agent API key", 401)
+        agent_service.note_key_use(conn, agent["key_id"], agent["key_last_used"], commit=False)
         try:
             caps = json.loads(agent["capabilities_json"])
         except (TypeError, ValueError):
@@ -265,9 +268,10 @@ def _write_blocked(entry):
 
 
 def _authenticate_writer(conn, api_key, entry_id):
-    agent = conn.execute("SELECT a.* FROM agents a JOIN users u ON u.id=a.owner_user_id WHERE a.api_key_hash=? AND u.is_active=1", (hashlib.sha256(api_key.encode()).hexdigest(),)).fetchone()
+    agent = conn.execute(agent_service.AGENT_ROW_BY_KEY_SQL, (hashlib.sha256(api_key.encode()).hexdigest(),)).fetchone()
     if not agent or not agent["is_active"]:
         raise APIError("INVALID_KEY", "Invalid or inactive agent API key", 401)
+    agent_service.note_key_use(conn, agent["key_id"], agent["key_last_used"], commit=False)
     try:
         caps = json.loads(agent["capabilities_json"])
     except (ValueError, TypeError):

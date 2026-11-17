@@ -94,6 +94,23 @@ def _revoke_consumer_grants(db_path: str) -> None:
         con.close()
 
 
+def _ensure_agent_keys(db_path: str) -> None:
+    """A database saved before agents could hold several keys has no agent_keys table, and authentication reads it:
+    add it, carrying each agent's key over, before the restored file goes live (the startup migration would only
+    run at the next restart, and every agent would be refused until then)."""
+    from app.schema import _migrate_029_agent_keys
+
+    con = sqlite3.connect(db_path)
+    con.row_factory = sqlite3.Row
+    try:
+        has = lambda name: con.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (name,)).fetchone()
+        if has("agents") and not has("agent_keys"):
+            _migrate_029_agent_keys(con)
+        con.commit()
+    finally:
+        con.close()
+
+
 def build_backup_manifest(
     db_path: str,
     credential_key_path: str,
@@ -437,6 +454,7 @@ def _restore_extracted(
         with open(inert_path, "wb") as f:
             f.write(extracted[DB_FILENAME])
         _revoke_consumer_grants(inert_path)
+        _ensure_agent_keys(inert_path)
         with open(inert_path, "rb") as f:
             extracted[DB_FILENAME] = f.read()
     finally:

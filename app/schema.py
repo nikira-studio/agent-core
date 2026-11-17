@@ -575,6 +575,7 @@ def _apply_schema_migrations(conn) -> None:
         (26, "drop-unused-settings-and-column", _migrate_026_drop_unused_settings_and_column),
         (27, "binding-test-note", _migrate_027_binding_test_note),
         (28, "connection-action-limits", _migrate_028_connection_action_limits),
+        (29, "several-keys-per-agent", _migrate_029_agent_keys),
     )
     applied = {
         row["revision"]
@@ -1637,6 +1638,43 @@ def _migrate_019_trusted_device_sessions(conn) -> None:
     )
     conn.execute("DROP TABLE sessions")
     conn.execute("ALTER TABLE sessions_rebuilt RENAME TO sessions")
+
+
+def _migrate_029_agent_keys(conn) -> None:
+    """An agent may hold several keys (1.3.2).
+
+    One row per key: its own label, created and revoked on its own. Every agent's existing key becomes a row labelled
+    "Original key", with the same hash, so nothing stops working and no operator step is needed. The old
+    ``agents.api_key_hash`` column stays (SQLite cannot drop a NOT NULL column cheaply); it now only mirrors the newest
+    active key, so an older build started against this database still accepts exactly the keys that are live and never
+    a revoked one. Authentication reads this table only.
+    """
+    import secrets
+
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS agent_keys (
+            id TEXT PRIMARY KEY,
+            agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+            label TEXT NOT NULL,
+            key_hash TEXT NOT NULL UNIQUE,
+            key_hint TEXT,
+            created_at TEXT NOT NULL,
+            created_by TEXT,
+            last_used_at TEXT,
+            revoked_at TEXT,
+            revoked_by TEXT
+        )
+        """
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_agent_keys_agent ON agent_keys(agent_id, revoked_at)")
+    rows = conn.execute("SELECT id, api_key_hash, created_at FROM agents WHERE api_key_hash IS NOT NULL").fetchall()
+    for row in rows:
+        conn.execute(
+            "INSERT OR IGNORE INTO agent_keys (id, agent_id, label, key_hash, created_at) VALUES (?, ?, ?, ?, ?)",
+            (secrets.token_urlsafe(9), row["id"], "Original key", row["api_key_hash"],
+             row["created_at"] or "1970-01-01T00:00:00+00:00"),
+        )
 
 
 def _migrate_028_connection_action_limits(conn) -> None:

@@ -1,6 +1,7 @@
 import secrets
 import hashlib
 import json
+from datetime import datetime, timezone
 from app.time_utils import utc_now_iso
 from typing import Optional
 
@@ -88,7 +89,11 @@ def create_agent(
     default_recall_scopes: Optional[list[str]] = None,
     capabilities: Optional[list[str]] = None,
     inherit_user_bindings: bool = False,
+    issue_key: bool = True,
+    key_label: str = "First key",
 ) -> tuple[dict, str]:
+    """Create an agent. With ``issue_key`` (the default) it also gets a first key, returned once; without it the agent
+    has no key until a person adds one (the dashboard does this: creating an agent shows no key)."""
     normalized_id = normalize_id(agent_id)
     api_key_plaintext, api_key_hash = generate_api_key()
 
@@ -130,6 +135,19 @@ def create_agent(
              read_scopes_json, write_scopes_json, default_recall_scopes_json,
              json.dumps(normalize_capabilities(capabilities)), api_key_hash, int(bool(inherit_user_bindings))),
         )
+        if issue_key:
+            conn.execute(
+                "INSERT INTO agent_keys (id, agent_id, label, key_hash, key_hint, created_at, created_by) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (secrets.token_urlsafe(9), normalized_id, _clean_label(key_label), api_key_hash,
+                 api_key_plaintext[-4:], utc_now_iso(), owner_user_id),
+            )
+        else:
+            # Nobody holds the key generated above: the old column gets a hash nothing can match, and no key row exists.
+            conn.execute(
+                "UPDATE agents SET api_key_hash = ? WHERE id = ?",
+                (hashlib.sha256(secrets.token_bytes(32)).hexdigest(), normalized_id),
+            )
         conn.commit()
 
         agent = {
@@ -146,7 +164,7 @@ def create_agent(
             "inherit_user_bindings": int(bool(inherit_user_bindings)),
         }
 
-    return agent, api_key_plaintext
+    return agent, (api_key_plaintext if issue_key else "")
 
 
 def get_agent_by_id(agent_id: str) -> Optional[dict]:
@@ -154,7 +172,7 @@ def get_agent_by_id(agent_id: str) -> Optional[dict]:
         cursor = conn.execute(
             """
             SELECT id, display_name, description, owner_user_id, default_user_id,
-                   read_scopes_json, write_scopes_json, default_recall_scopes_json, capabilities_json, api_key_hash, is_active, created_at,
+                   read_scopes_json, write_scopes_json, default_recall_scopes_json, capabilities_json, is_active, created_at,
                    inherit_user_bindings
             FROM agents WHERE id = ?
             """,
@@ -164,20 +182,165 @@ def get_agent_by_id(agent_id: str) -> Optional[dict]:
         return dict(row) if row else None
 
 
+LAST_USED_REFRESH_SECONDS = 600
+
+
 def get_agent_by_api_key(plaintext_key: str) -> Optional[dict]:
+    """The agent a live key belongs to, or None. A revoked key matches nothing."""
     key_hash = hashlib.sha256(plaintext_key.encode()).hexdigest()
     with get_db() as conn:
         cursor = conn.execute(
             """
-            SELECT id, display_name, description, owner_user_id, default_user_id,
-                   read_scopes_json, write_scopes_json, default_recall_scopes_json, capabilities_json, api_key_hash, is_active, created_at,
-                   inherit_user_bindings
-            FROM agents WHERE api_key_hash = ?
+            SELECT a.id, a.display_name, a.description, a.owner_user_id, a.default_user_id,
+                   a.read_scopes_json, a.write_scopes_json, a.default_recall_scopes_json, a.capabilities_json,
+                   a.is_active, a.created_at, a.inherit_user_bindings,
+                   k.id AS _key_id, k.last_used_at AS _last_used_at
+            FROM agent_keys k JOIN agents a ON a.id = k.agent_id
+            WHERE k.key_hash = ? AND k.revoked_at IS NULL
             """,
             (key_hash,),
         )
         row = cursor.fetchone()
-        return dict(row) if row else None
+        if not row:
+            return None
+        agent = dict(row)
+        key_id, last_used = agent.pop("_key_id"), agent.pop("_last_used_at")
+        if agent["is_active"]:
+            # Never wait for a lock for this note: the caller is the event loop.
+            note_key_use(conn, key_id, last_used, wait=False)
+        return agent
+
+
+def note_key_use(conn, key_id: str, last_used: Optional[str], wait: bool = True, commit: bool = True) -> None:
+    """Record that a key was used, at most once per LAST_USED_REFRESH_SECONDS. A note for the operator, never a reason
+    to refuse a request. ``wait`` False gives up at once when the database is busy; ``commit`` False leaves the caller's
+    transaction open (the credential paths authenticate inside one and must not end it early)."""
+    if not _stale(last_used):
+        return
+    try:
+        if not wait:
+            conn.execute("PRAGMA busy_timeout=0")
+        conn.execute("UPDATE agent_keys SET last_used_at = ? WHERE id = ?", (utc_now_iso(), key_id))
+        if commit:
+            conn.commit()
+    except Exception:
+        pass
+
+
+def _stale(last_used: Optional[str]) -> bool:
+    if not last_used:
+        return True
+    try:
+        then = datetime.fromisoformat(last_used)
+        if then.tzinfo is None:
+            then = then.replace(tzinfo=timezone.utc)
+        return (datetime.now(timezone.utc) - then).total_seconds() > LAST_USED_REFRESH_SECONDS
+    except ValueError:
+        return True
+
+
+# Where a service that authenticates a key itself (not through the request dependencies) finds the agent: one place,
+# so a revoked key cannot slip through any of them. Bind the key's sha256 hex digest.
+AGENT_ROW_BY_KEY_SQL = (
+    "SELECT a.*, k.id AS key_id, k.last_used_at AS key_last_used "
+    "FROM agent_keys k JOIN agents a ON a.id = k.agent_id JOIN users u ON u.id = a.owner_user_id "
+    "WHERE k.key_hash = ? AND k.revoked_at IS NULL AND u.is_active = 1"
+)
+
+
+MAX_ACTIVE_KEYS = 20
+MAX_LABEL_CHARS = 60
+
+
+class AgentKeyError(ValueError):
+    """A key request that cannot be honoured; ``code`` is the API error code."""
+
+    def __init__(self, code: str, message: str):
+        super().__init__(message)
+        self.code = code
+
+
+def _clean_label(label: Optional[str]) -> str:
+    text = "".join(ch for ch in (label or "") if ch.isprintable()).strip()
+    return text[:MAX_LABEL_CHARS] or "Unnamed key"
+
+
+def _sync_legacy_hash(conn, agent_id: str) -> None:
+    """Keep agents.api_key_hash equal to the newest live key (or a hash nothing matches), so a build from before
+    several keys, started against this database, never accepts a key that was revoked."""
+    row = conn.execute(
+        "SELECT key_hash FROM agent_keys WHERE agent_id = ? AND revoked_at IS NULL ORDER BY created_at DESC, rowid DESC LIMIT 1",
+        (agent_id,),
+    ).fetchone()
+    value = row["key_hash"] if row else hashlib.sha256(secrets.token_bytes(32)).hexdigest()
+    conn.execute("UPDATE agents SET api_key_hash = ? WHERE id = ?", (value, agent_id))
+
+
+def _insert_key(conn, agent_id: str, label: str, created_by: Optional[str]) -> tuple[str, str]:
+    plaintext, key_hash = generate_api_key()
+    key_id = secrets.token_urlsafe(9)
+    conn.execute(
+        "INSERT INTO agent_keys (id, agent_id, label, key_hash, key_hint, created_at, created_by) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (key_id, agent_id, _clean_label(label), key_hash, plaintext[-4:], utc_now_iso(), created_by),
+    )
+    return key_id, plaintext
+
+
+def add_agent_key(agent_id: str, label: str, created_by: Optional[str] = None) -> tuple[dict, str]:
+    """Give an active agent one more key. Its other keys are untouched. Returns (key record, plaintext shown once)."""
+    with get_db() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        agent = conn.execute("SELECT is_active FROM agents WHERE id = ?", (agent_id,)).fetchone()
+        if not agent:
+            raise AgentKeyError("NOT_FOUND", "Agent not found")
+        if not agent["is_active"]:
+            raise AgentKeyError("AGENT_INACTIVE", "Cannot add a key for an inactive agent")
+        active = conn.execute(
+            "SELECT COUNT(*) AS n FROM agent_keys WHERE agent_id = ? AND revoked_at IS NULL", (agent_id,)
+        ).fetchone()["n"]
+        if active >= MAX_ACTIVE_KEYS:
+            raise AgentKeyError("TOO_MANY_KEYS", f"An agent can hold {MAX_ACTIVE_KEYS} keys. Revoke one you no longer use.")
+        key_id, plaintext = _insert_key(conn, agent_id, label, created_by)
+        _sync_legacy_hash(conn, agent_id)
+        conn.commit()
+    return get_agent_key(agent_id, key_id), plaintext
+
+
+def get_agent_key(agent_id: str, key_id: str) -> Optional[dict]:
+    with get_db() as conn:
+        row = conn.execute(
+            "SELECT id, agent_id, label, key_hint, created_at, created_by, last_used_at, revoked_at, revoked_by "
+            "FROM agent_keys WHERE agent_id = ? AND id = ?",
+            (agent_id, key_id),
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def list_agent_keys(agent_id: str, include_revoked: bool = False) -> list[dict]:
+    """The agent's keys, oldest first. Never the key or its hash."""
+    query = (
+        "SELECT id, agent_id, label, key_hint, created_at, created_by, last_used_at, revoked_at, revoked_by "
+        "FROM agent_keys WHERE agent_id = ?"
+    )
+    if not include_revoked:
+        query += " AND revoked_at IS NULL"
+    with get_db() as conn:
+        rows = conn.execute(query + " ORDER BY created_at, rowid", (agent_id,)).fetchall()
+    return [dict(r) for r in rows]
+
+
+def revoke_agent_key(agent_id: str, key_id: str, revoked_by: Optional[str] = None) -> bool:
+    """Stop one key working. The agent's other keys are untouched. False when there is no such live key."""
+    with get_db() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        cursor = conn.execute(
+            "UPDATE agent_keys SET revoked_at = ?, revoked_by = ? WHERE agent_id = ? AND id = ? AND revoked_at IS NULL",
+            (utc_now_iso(), revoked_by, agent_id, key_id),
+        )
+        if cursor.rowcount:
+            _sync_legacy_hash(conn, agent_id)
+        conn.commit()
+        return cursor.rowcount > 0
 
 
 def is_agent_shared(agent: dict) -> bool:
@@ -310,17 +473,21 @@ def reactivate_agent(agent_id: str) -> bool:
         return cursor.rowcount > 0
 
 
-def rotate_agent_key(agent_id: str) -> Optional[str]:
-    new_plaintext, new_hash = generate_api_key()
+def rotate_agent_key(agent_id: str, created_by: Optional[str] = None, label: str = "Rotated key") -> Optional[str]:
+    """Replace every live key of an active agent with one new key (returned once). Use add_agent_key to keep the others."""
     with get_db() as conn:
-        cursor = conn.execute(
-            "UPDATE agents SET api_key_hash = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND is_active = 1",
-            (new_hash, agent_id),
-        )
-        conn.commit()
-        if cursor.rowcount == 0:
+        conn.execute("BEGIN IMMEDIATE")
+        agent = conn.execute("SELECT is_active FROM agents WHERE id = ?", (agent_id,)).fetchone()
+        if not agent or not agent["is_active"]:
             return None
-    return new_plaintext
+        conn.execute(
+            "UPDATE agent_keys SET revoked_at = ?, revoked_by = ? WHERE agent_id = ? AND revoked_at IS NULL",
+            (utc_now_iso(), created_by, agent_id),
+        )
+        _, plaintext = _insert_key(conn, agent_id, label, created_by)
+        _sync_legacy_hash(conn, agent_id)
+        conn.commit()
+    return plaintext
 
 
 def delete_agent_hard(agent_id: str) -> bool:
@@ -343,6 +510,7 @@ def delete_agent_hard(agent_id: str) -> bool:
             (utc_now_iso(), normalized_id),
         )
         conn.execute("DELETE FROM agent_executions WHERE agent_id = ?", (normalized_id,))
+        conn.execute("DELETE FROM agent_keys WHERE agent_id = ?", (normalized_id,))
         cursor = conn.execute("DELETE FROM agents WHERE id = ?", (normalized_id,))
         conn.commit()
         return cursor.rowcount > 0

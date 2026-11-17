@@ -647,7 +647,7 @@ The **Connect** page (`/integrations`) generates everything you need for a speci
 - Verification prompts to paste into the agent to confirm it's connected
 - A session start hook for Claude Code and for Codex, so a session begins with its workspace context already loaded
 
-The Connect page is three steps. **1. Who is connecting?** Pick the user, workspace and agent. **2. Which tool?** Pick Claude Code, Codex, Cursor, Windsurf, Antigravity or Other MCP tool; the page then shows what that tool needs, in order: **a** its MCP config (the **Generate One-Time Key** button makes a new key and replaces the agent's old one), **b** the file it reads (CLAUDE.md for Claude Code, AGENTS.md for Codex, the setup guide for the others), and for Claude Code and Codex **c** the session start hook, with commands for macOS, Linux and Windows. Do **a** and **c** yourself in a terminal: an agent usually cannot, because it runs in a sandbox without network access and cannot write to its own settings folder. **b** is a file in your project, so an agent can save it for you. Steps a and c show whether Agent Core has seen them work. **3. Check it works.** Test the connection address and run the Verification Prompt. Everything else is under **Other outputs**.
+The Connect page is three steps. **1. Who is connecting?** Pick the user, workspace and agent. **2. Which tool?** Pick Claude Code, Codex, Cursor, Windsurf, Antigravity or Other MCP tool; the page then shows what that tool needs, in order: **a** its MCP config (the **Generate One-Time Key** button adds a new key to the agent; its other keys keep working), **b** the file it reads (CLAUDE.md for Claude Code, AGENTS.md for Codex, the setup guide for the others), and for Claude Code and Codex **c** the session start hook, with commands for macOS, Linux and Windows. Do **a** and **c** yourself in a terminal: an agent usually cannot, because it runs in a sandbox without network access and cannot write to its own settings folder. **b** is a file in your project, so an agent can save it for you. Steps a and c show whether Agent Core has seen them work. **3. Check it works.** Test the connection address and run the Verification Prompt. Everything else is under **Other outputs**.
 
 **Other outputs** holds the outputs the steps above do not already show for the chosen tool, as tabs (with no tool chosen it lists all of them): the chosen tool's own instructions file, hook and the Verification Prompt are in the steps and not repeated. Each output type is available for every tool preset:
 
@@ -684,7 +684,7 @@ Where a hook does not run, the instructions file (CLAUDE.md or AGENTS.md) still 
 
 **Windows.** The steps use PowerShell to install the script and register it with the full path, written with forward slashes: Claude Code takes `python C:/Users/you/.claude/hooks/agent_core_hook.py`; Codex has a `commandWindows` entry, and the generated command creates `hooks.json` without overwriting one you have. The commands use the address you opened the dashboard at, so open it from an address the machine you are setting up can reach.
 
-**A second machine.** Copy the existing entry (URL and key) from the machine that already works; do not generate a key, because that replaces the agent's key and disconnects the first machine. The entry is in `~/.claude.json` or the project's `.mcp.json` for Claude Code, and `~/.codex/config.toml` for Codex. Change its address if it says `localhost`: the second machine needs one it can reach. Give each tool its own agent when you can, for the same reason.
+**A second machine.** Either copy the existing entry (URL and key) from the machine that already works, or generate a key for this machine: an agent can hold several keys, and a new one does not disconnect the first machine. The entry is in `~/.claude.json` or the project's `.mcp.json` for Claude Code, and `~/.codex/config.toml` for Codex. Change its address if it says `localhost`: the second machine needs one it can reach. Give each tool its own agent when you can, so each has its own access and its own record of work.
 
 **Checking it.** Step c on the Connect page reads "Hook working: context delivered 3 hours ago from Windows" once a session start made by the hook has arrived for the workspace you chose, and "No session start seen yet" until then. An agent loading its own context does not count. To run the hook yourself, from a project folder, feed it a start event (use `.codex` instead of `.claude` for Codex). On macOS or Linux:
 
@@ -896,9 +896,11 @@ Commands use dot notation and imperative form. They are not the same as outbound
 `activity.note` writes only to the audit log; it does not modify the activity record or agent memory.
 If `workspace` is supplied on `activity.create`, Agent Core stores it as optional metadata on the activity record for display and downstream automation.
 
-### Key rotation
+### Agent keys
 
-To rotate the key: click **Rotate Key** in the dashboard. The old key stops working immediately. The new key is shown once.
+An agent can hold several keys, each with a label (the machine or tool that uses it). Open **Agents > More > Keys** to see them with when each was created and last used, to add one, or to revoke one. A new key is shown once. Revoking a key stops it working at once and leaves the agent's other keys alone. An agent can hold up to 20 live keys. The Connect page's **Generate One-Time Key** adds a key named after the tool and the date.
+
+To replace every key at once (for example after a leak), call `POST /api/agents/{agent_id}/rotate_key`: it revokes all live keys and returns one new key.
 
 ### Common pattern: push work from an external pipeline
 

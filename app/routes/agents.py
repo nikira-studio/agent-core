@@ -191,7 +191,7 @@ def create_agent(
         return scope_error
 
     try:
-        agent, _api_key_plaintext = agent_service.create_agent(
+        agent, _ = agent_service.create_agent(
             agent_id=body.id,
             display_name=body.display_name,
             owner_user_id=session["user_id"],
@@ -202,6 +202,7 @@ def create_agent(
             default_recall_scopes=body.default_recall_scopes,
             capabilities=body.capabilities,
             inherit_user_bindings=body.inherit_user_bindings,
+            issue_key=False,
         )
     except ValueError as exc:
         return error_response("INVALID_CAPABILITIES", str(exc), 400)
@@ -402,7 +403,7 @@ def rotate_key(agent_id: str, session: dict = Depends(get_current_session)):
     if not _can_manage_agent(agent, session):
         return error_response("FORBIDDEN", "Access denied", 403)
 
-    new_key = agent_service.rotate_agent_key(agent_id)
+    new_key = agent_service.rotate_agent_key(agent_id, created_by=session["user_id"])
     if not new_key:
         return error_response("AGENT_INACTIVE", "Cannot rotate key for inactive agent", 400)
 
@@ -416,3 +417,79 @@ def rotate_key(agent_id: str, session: dict = Depends(get_current_session)):
     )
 
     return success_response({"api_key": new_key})
+
+
+def _public_key(record: dict) -> dict:
+    """A key as the dashboard and API show it: never the key itself or its hash."""
+    return {k: record.get(k) for k in (
+        "id", "label", "key_hint", "created_at", "created_by", "last_used_at", "revoked_at", "revoked_by")}
+
+
+class AddKeyRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    label: str
+
+
+def _manageable_agent(agent_id: str, session: dict):
+    agent = agent_service.get_agent_by_id(agent_id)
+    if not agent:
+        return None, error_response("NOT_FOUND", "Agent not found", 404)
+    if not _can_manage_agent(agent, session):
+        return None, error_response("FORBIDDEN", "Access denied", 403)
+    return agent, None
+
+
+@router.get("/{agent_id}/keys")
+def list_keys(agent_id: str, include_revoked: bool = False, session: dict = Depends(get_current_session)):
+    _, error = _manageable_agent(agent_id, session)
+    if error:
+        return error
+    keys = agent_service.list_agent_keys(agent_id, include_revoked=include_revoked)
+    return success_response({"keys": [_public_key(k) for k in keys]})
+
+
+@router.post("/{agent_id}/keys", status_code=201)
+def add_key(agent_id: str, body: AddKeyRequest, session: dict = Depends(get_current_session)):
+    """Add one more key to an agent; its other keys keep working. The key is returned once."""
+    _, error = _manageable_agent(agent_id, session)
+    if error:
+        return error
+    label = body.label.strip()
+    if not label:
+        return error_response("INVALID_LABEL", "Give the key a label, such as the machine or tool that will use it", 400)
+    try:
+        record, plaintext = agent_service.add_agent_key(agent_id, label, created_by=session["user_id"])
+    except agent_service.AgentKeyError as exc:
+        return error_response(exc.code, str(exc), 404 if exc.code == "NOT_FOUND" else 400)
+    audit_service.write_event(
+        actor_type="user",
+        actor_id=session["user_id"],
+        action="agent_key_created",
+        resource_type="agent",
+        resource_id=agent_id,
+        result="success",
+        details={"record_id": record["id"], "label": record["label"]},
+    )
+    return success_response({"key": _public_key(record), "api_key": plaintext}, status_code=201)
+
+
+@router.delete("/{agent_id}/keys/{key_id}")
+def revoke_key(agent_id: str, key_id: str, session: dict = Depends(get_current_session)):
+    """Revoke one key. The agent's other keys keep working."""
+    _, error = _manageable_agent(agent_id, session)
+    if error:
+        return error
+    existing = agent_service.get_agent_key(agent_id, key_id)
+    if not agent_service.revoke_agent_key(agent_id, key_id, revoked_by=session["user_id"]):
+        return error_response("NOT_FOUND", "No such key, or it is already revoked", 404)
+    audit_service.write_event(
+        actor_type="user",
+        actor_id=session["user_id"],
+        action="agent_key_revoked",
+        resource_type="agent",
+        resource_id=agent_id,
+        result="success",
+        details={"record_id": key_id, "label": (existing or {}).get("label")},
+    )
+    return success_response({"message": "Key revoked"})

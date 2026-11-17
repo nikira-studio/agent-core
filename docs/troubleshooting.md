@@ -70,7 +70,7 @@ Possible causes:
 - The agent record has been deactivated
 - The wrong value is in the `Authorization` header
 
-Rotate the key from the dashboard (**Agents → [agent] → Rotate Key**) to get a fresh one, then update wherever you've configured it.
+Add a new key from the dashboard (**Agents → More → Keys**, or generate one on the Connect page), revoke the old one there, then update wherever you've configured it.
 
 ### Admin routes return `403`
 
