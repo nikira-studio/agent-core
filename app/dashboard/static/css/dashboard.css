@@ -2198,6 +2198,12 @@ details.card-fold[open] > summary::before { content: "\25BE\00a0"; }
 .page-tabs a:hover { color: var(--text); }
 .page-tabs a.active { color: var(--text); border-bottom-color: var(--accent); }
 
+/* The switch above the Agents list: agents on one side, services on the other. */
+.agent-switch { display: inline-flex; gap: 4px; padding: 3px; margin: 0 0 12px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg); }
+.agent-switch-link { padding: 6px 14px; border-radius: 4px; color: var(--muted); text-decoration: none; font-size: 0.9rem; }
+.agent-switch-link:hover { color: var(--text); }
+.agent-switch-link.active { background: var(--accent-fill); color: #fff; }
+
 /* Phones: the navigation is behind a Menu button. */
 .nav-toggle { display: none; }
 @media (max-width: 768px) {

@@ -21,7 +21,7 @@ ROLE_PRESETS = {
     "service": ["credentials_resolve"],
     "proposer": ["coordination", "admin_propose"],
 }
-ROLE_NAMES = {"assistant": "Assistant", "service": "Service agent", "proposer": "Proposer", "custom": "Custom"}
+ROLE_NAMES = {"assistant": "Assistant", "service": "Service", "proposer": "Proposer", "custom": "Custom"}
 
 
 def role_of(capabilities) -> str:
@@ -35,11 +35,23 @@ def agents_page(request: Request, session: dict = Depends(require_auth)):
     from app.services import agent_access_service, agent_service, auth_service, workspace_service
 
     is_admin = session.get("role") == "admin"
-    agents = (
-        agent_service.list_agents()
-        if is_admin
-        else agent_service.list_visible_agents(session["user_id"])
-    )
+    # The page lists the agents that do work; ?show=services lists the programs that only fetch secrets.
+    show_services = request.query_params.get("show") == "services"
+
+    def entries(kind, active_only=False):
+        """The entries of one kind this viewer may see."""
+        is_active = True if active_only else None
+        if is_admin:
+            return agent_service.list_agents(is_active=is_active, kind=kind)
+        return agent_service.list_visible_agents(session["user_id"], is_active=is_active, kind=kind)
+
+    agents = entries("agent")
+    services = entries("service")
+    # The switch counts the entries that are switched on: an entry that is off is not on anyone's list.
+    agent_count = len(entries("agent", active_only=True))
+    service_count = len(entries("service", active_only=True))
+    listed = services if show_services else agents
+
     all_workspaces = (
         workspace_service.list_workspaces()
         if is_admin
@@ -91,8 +103,8 @@ def agents_page(request: Request, session: dict = Depends(require_auth)):
         roles = [
             ("assistant", "Assistant",
              "An AI assistant or coding agent. Remembers things, tracks its work and handoffs, and can use your connected services."),
-            ("service", "Service agent",
-             "A script or system that only fetches the specific stored credentials an admin has granted it. No memory, no services."),
+            ("service", "Service",
+             "A program or container that only fetches the specific stored secrets an admin has granted it. No memory, no workspaces."),
             ("proposer", "Proposer",
              "Suggests admin changes, such as a new agent or service. Nothing happens until a person approves it on the Approvals page."),
             ("custom", "Custom",
@@ -112,7 +124,7 @@ def agents_page(request: Request, session: dict = Depends(require_auth)):
             ]),
             ("Credentials", [
                 ("credentials", "Credential references", "List credentials and ask for the reference an agent uses (AC_SECRET_...). The agent never sees the secret value; Agent Core inserts it when a command or service runs.", True),
-                ("credentials_resolve", "Read credential values", "Fetch a stored value over HTTPS, one exact entry at a time, and only the entries an admin has granted it. For small service agents; leave off for assistants.", False),
+                ("credentials_resolve", "Read credential values", "Fetch a stored value over HTTPS, one exact entry at a time, and only the entries an admin has granted it. For small services; leave off for assistants.", False),
             ]),
             ("Services", [
                 ("connectors_read", "See services", "See which external services and actions are set up. Always on when Run service actions is on.", True),
@@ -235,8 +247,11 @@ def agents_page(request: Request, session: dict = Depends(require_auth)):
                 toggle_btn = f"<button type='button' class='btn btn-sm btn-secondary' data-agent-reactivate='{escape_html(a['id'])}'>Reactivate</button>"
         else:
             toggle_btn = ""
-        role = role_of(agent_service.parse_capabilities(a.get("capabilities_json")))
-        role_badge = f"<span class='badge badge-info' title='What this agent may do. Open Edit to change it.'>{ROLE_NAMES[role]}</span>"
+        # A service is one of the kinds now, so its row says so; an agent's row still shows the role
+        # its permissions match.
+        kind = a.get("kind") or "agent"
+        role = "service" if kind == "service" else role_of(agent_service.parse_capabilities(a.get("capabilities_json")))
+        role_badge = f"<span class='badge badge-info' title='What this {kind} may do. Open Edit to change it.'>{ROLE_NAMES[role]}</span>"
         key_count_text = ""
         if is_admin or a.get("owner_user_id") == session["user_id"]:
             key_total = len(agent_service.list_agent_keys(a["id"]))
@@ -257,11 +272,17 @@ def agents_page(request: Request, session: dict = Depends(require_auth)):
                     f"<a class='btn btn-sm btn-secondary' href='/credentials?agent={quote(a['id'])}'"
                     " title='Choose which stored credentials this agent can use'>Credentials</a>"
                 )
+            # The Connect page sets up an agent that does work; a service is set up with a key and a secret.
+            connect_link = (
+                ""
+                if kind == "service"
+                else f"<a class='btn btn-sm btn-secondary' href='/integrations?agent_id={quote(a['id'])}'>Connect</a>"
+            )
             # Edit and Connect are what people come for; the rest sit under More, so Delete is never
             # a neighbour of Deactivate.
             action_buttons = (
                 f"<button type='button' class='btn btn-sm btn-secondary' data-agent-edit='{escape_html(a['id'])}'>Edit</button>"
-                f"<a class='btn btn-sm btn-secondary' href='/integrations?agent_id={quote(a['id'])}'>Connect</a>"
+                f"{connect_link}"
                 "<details class='row-more'><summary class='btn btn-sm btn-secondary' title='Keys, credentials, deactivate, delete'>More</summary>"
                 "<div class='row-more-list'>"
                 f"{credentials_link}"
@@ -286,15 +307,96 @@ def agents_page(request: Request, session: dict = Depends(require_auth)):
             f"</div></td></tr>"
         )
 
-    rows = "".join(agent_row(a) for a in agents)
+    rows = "".join(agent_row(a) for a in listed)
+
+    # The switch above the list: agents on one side, services on the other, each with its own count.
+    agents_link_class = "agent-switch-link active" if not show_services else "agent-switch-link"
+    services_link_class = "agent-switch-link active" if show_services else "agent-switch-link"
+    agents_current = "" if show_services else ' aria-current="page"'
+    services_current = ' aria-current="page"' if show_services else ""
+    switch_html = (
+        '<nav class="agent-switch" aria-label="Agents or services">'
+        f'<a href="/agents" class="{agents_link_class}"{agents_current}>Agents ({agent_count})</a>'
+        f'<a href="/agents?show=services" class="{services_link_class}"{services_current}>Services ({service_count})</a>'
+        "</nav>"
+    )
+    services_note = (
+        '<p class="text-muted">Programs and containers that fetch secrets. Give one a secret from '
+        "Credentials, in the Used by column.</p>"
+        if show_services
+        else ""
+    )
+    list_title = "All Services" if show_services else "All Agents"
+    list_column = "Service" if show_services else "Agent"
+    empty_text = (
+        "No services yet. Create one with the Service role."
+        if show_services
+        else "No agents yet. Create one for each tool or script that should have its own key and history."
+    )
+    empty_row = f'<tr><td colspan=5 class=empty>{escape_html(empty_text)}</td></tr>'
+    # The rows the page shows, so the script knows what each one is without asking the server again.
+    # Only the id and the kind: a name is written into the page as text, never into a script.
+    row_data = json.dumps(
+        [
+            {
+                "id": a["id"],
+                "kind": a.get("kind") or "agent",
+            }
+            for a in listed
+        ]
+    ).replace("<", "\\u003c")
 
     js = """
     <script>
     const IS_ADMIN = __IS_ADMIN__;
+    const AGENT_ROWS = __AGENT_ROWS__;
     const CAPABILITY_NAMES = {memory: 'Memory', coordination: 'Coordination', credentials: 'Credential references', credentials_resolve: 'Read credential values', connectors_read: 'See services', connectors_execute: 'Run service actions', admin_propose: 'Propose admin changes'};
     let agentModalReadOnly = false;
+    let editEntryIsService = false;
     async function refreshAgents() { location.reload(); }
+    function rowKind(id) {
+      const row = AGENT_ROWS.find(function(r) { return r.id === id; });
+      return row ? row.kind : 'agent';
+    }
+    function selectedRole(prefix) {
+      const radio = document.querySelector('input[name="' + prefix + '-role"]:checked');
+      return radio ? radio.dataset.role : '';
+    }
+    // A service only fetches secrets, so the create form drops the memory, workspace and personal choices.
+    function setServiceChoice(isService) {
+      ['ca-access', 'ca-access-reset'].forEach(function(id) {
+        const el = document.getElementById(id);
+        if (el) el.hidden = isService;
+      });
+      const note = document.getElementById('ca-service-note');
+      if (note) note.hidden = !isService;
+      const preview = document.getElementById('ca-authority-preview');
+      if (!preview) return;
+      if (isService) {
+        preview.innerHTML = '<strong>What this service will be able to do</strong>' +
+          '<ul style="margin:6px 0 0 18px">' +
+          '<li>Fetch the secrets it is given, one entry at a time</li>' +
+          '</ul>';
+      } else {
+        createAuthorityPreview();
+      }
+    }
+    // The edit form of a service shows only its name and description, and the way to change it.
+    function setEditServiceMode(isService) {
+      ['edit-capability-controls', 'edit-access', 'edit-owner-line'].forEach(function(id) {
+        const el = document.getElementById(id);
+        if (el) el.hidden = isService;
+      });
+      const note = document.getElementById('edit-service-note');
+      if (note) note.hidden = !isService;
+    }
+    function showEditError(message) {
+      const errorBox = document.getElementById('edit-agent-error');
+      if (errorBox) { errorBox.textContent = message; errorBox.style.display = 'block'; }
+      showToast(message, 'danger');
+    }
     function createAuthorityPreview() {
+      if (selectedRole('ca') === 'service') return;  // a service has one permission and no scopes
       const agentId = normalizeAgentId(document.getElementById('ca-id')?.value);
       const ownScope = 'agent:' + (agentId || '<new-agent-id>');
       const read = [ownScope].concat(getSelectedScopes('ca-read-scopes'));
@@ -326,6 +428,8 @@ def agents_page(request: Request, session: dict = Depends(require_auth)):
     document.addEventListener('click', function(ev) {
       const edit = ev.target.closest('[data-agent-edit]');
       if (edit) { ev.preventDefault(); editAgent(edit.dataset.agentEdit); return; }
+      const toAgent = ev.target.closest('[data-agent-to-agent]');
+      if (toAgent) { ev.preventDefault(); changeToAgent(); return; }
       const view = ev.target.closest('[data-agent-view]');
       if (view) { ev.preventDefault(); viewAgent(view.dataset.agentView); return; }
       const deactivate = ev.target.closest('[data-agent-deactivate]');
@@ -474,10 +578,15 @@ def agents_page(request: Request, session: dict = Depends(require_auth)):
       const modalTitle = document.getElementById('edit-agent-modal-title');
       const form = document.getElementById('edit-agent-form');
       if (modalTitle) {
-        modalTitle.textContent = readOnly ? 'View Agent' : 'Edit Agent';
+        const what = editEntryIsService ? 'Service' : 'Agent';
+        modalTitle.textContent = readOnly ? 'View ' + what : 'Edit ' + what;
       }
       if (saveButton) {
         saveButton.style.display = readOnly ? 'none' : '';
+      }
+      const toAgentButton = document.getElementById('edit-to-agent');
+      if (toAgentButton) {
+        toAgentButton.style.display = readOnly ? 'none' : '';
       }
       if (form) {
         form.querySelectorAll('input, select, textarea').forEach(input => {
@@ -499,6 +608,8 @@ def agents_page(request: Request, session: dict = Depends(require_auth)):
       const j = await apiFetch('/api/agents/' + id, { method: 'GET' });
       if (!j.ok) { showToast(j.error.message || 'Error', 'danger'); return; }
       const a = j.data.agent;
+      editEntryIsService = (a.kind || rowKind(a.id)) === 'service';
+      setEditServiceMode(editEntryIsService);
       document.getElementById('edit-agent-id').textContent = a.id;
       document.getElementById('edit-display-name').value = a.display_name || '';
       document.getElementById('edit-description').value = a.description || '';
@@ -586,6 +697,7 @@ def agents_page(request: Request, session: dict = Depends(require_auth)):
         if (ROLE_PRESETS[role]) setSelectedCapabilities(prefix, ROLE_PRESETS[role]);
         const custom = document.getElementById(prefix + '-role-custom');
         if (custom) custom.hidden = role !== 'custom';
+        if (prefix === 'ca') setServiceChoice(role === 'service');
       }
       function syncRole(prefix) {
         const caps = getSelectedCapabilities(prefix).slice().sort().join(',');
@@ -626,28 +738,43 @@ def agents_page(request: Request, session: dict = Depends(require_auth)):
       e.preventDefault();
       if (agentModalReadOnly) return;
       const id = document.getElementById('edit-agent-id').textContent;
+        const errorBox = document.getElementById('edit-agent-error');
+        if (errorBox) { errorBox.style.display = 'none'; errorBox.textContent = ''; }
         const ownScope = 'agent:' + id;
         const body = {
           display_name: document.getElementById('edit-display-name').value,
           description: document.getElementById('edit-description').value,
-          read_scopes: getSelectedScopes('edit-read-scopes'),
-          write_scopes: getSelectedScopes('edit-write-scopes'),
-          capabilities: getSelectedCapabilities('edit'),
-          inherit_user_bindings: document.getElementById('edit-inherit-user-bindings').checked,
         };
-        body.read_scopes.push(ownScope);
-        body.write_scopes.push(ownScope);
-        const editRecallAll = document.getElementById('edit-recall-all');
-        if (editRecallAll && editRecallAll.checked) {
-          body.reset_default_recall_scopes = true;
-        } else {
-          const recall = getSelectedScopes('edit-recall-scopes');
-          recall.push(ownScope);
-          body.default_recall_scopes = recall;
+        if (!editEntryIsService) {
+          // A service has one permission and no workspaces, so only its name and description are sent.
+          body.read_scopes = getSelectedScopes('edit-read-scopes');
+          body.write_scopes = getSelectedScopes('edit-write-scopes');
+          body.capabilities = getSelectedCapabilities('edit');
+          body.inherit_user_bindings = document.getElementById('edit-inherit-user-bindings').checked;
+          body.read_scopes.push(ownScope);
+          body.write_scopes.push(ownScope);
+          const editRecallAll = document.getElementById('edit-recall-all');
+          if (editRecallAll && editRecallAll.checked) {
+            body.reset_default_recall_scopes = true;
+          } else {
+            const recall = getSelectedScopes('edit-recall-scopes');
+            recall.push(ownScope);
+            body.default_recall_scopes = recall;
+          }
         }
         const j = await apiFetch('/api/agents/' + id, { method: 'PUT', body: JSON.stringify(body) });
-        if (j.ok) { showToast('Agent updated'); closeModal('edit-agent-modal'); refreshAgents(); }
-        else { showToast(j.error.message || 'Failed', 'danger'); }
+        if (j.ok) { showToast(editEntryIsService ? 'Service updated' : 'Agent updated'); closeModal('edit-agent-modal'); refreshAgents(); }
+        else { showEditError(j.error.message || 'Failed'); }
+      }
+
+      // A service becomes an agent again: one change, nothing else to fill in.
+      async function changeToAgent() {
+        const id = document.getElementById('edit-agent-id').textContent;
+        const errorBox = document.getElementById('edit-agent-error');
+        if (errorBox) { errorBox.style.display = 'none'; errorBox.textContent = ''; }
+        const j = await apiFetch('/api/agents/' + id, { method: 'PUT', body: JSON.stringify({ kind: 'agent' }) });
+        if (j.ok) { location.href = '/agents'; return; }
+        showEditError((j.error && j.error.message) || 'Could not change this service to an agent');
       }
 
       async function createAgent(e) {
@@ -658,36 +785,45 @@ def agents_page(request: Request, session: dict = Depends(require_auth)):
             errorBox.textContent = '';
           }
         const agentId = normalizeAgentId(document.getElementById('ca-id').value);
+        const isService = selectedRole('ca') === 'service';
         const body = {
           id: agentId,
           display_name: document.getElementById('ca-display-name').value.trim(),
           description: document.getElementById('ca-description').value.trim(),
-          read_scopes: getSelectedScopes('ca-read-scopes'),
-          write_scopes: getSelectedScopes('ca-write-scopes'),
-          capabilities: getSelectedCapabilities('ca'),
-          inherit_user_bindings: document.getElementById('ca-inherit-user-bindings').checked,
+          capabilities: isService ? ['credentials_resolve'] : getSelectedCapabilities('ca'),
+          inherit_user_bindings: isService ? false : document.getElementById('ca-inherit-user-bindings').checked,
+          kind: isService ? 'service' : 'agent',
         };
-        document.querySelectorAll('#create-agent-form [data-simple-workspace]:checked').forEach(function(box) {
-          const scope = box.dataset.simpleWorkspace;
-          if (!body.read_scopes.includes(scope)) body.read_scopes.push(scope);
-          if (!body.write_scopes.includes(scope)) body.write_scopes.push(scope);
-        });
-        // Ensure private scope is added if not present (it's implicit in backend but good to show)
-        const privateScope = 'agent:' + agentId;
-        if (!body.read_scopes.includes(privateScope)) body.read_scopes.push(privateScope);
-        if (!body.write_scopes.includes(privateScope)) body.write_scopes.push(privateScope);
-        const caRecallAll = document.getElementById('ca-recall-all');
-        if (caRecallAll && !caRecallAll.checked) {
-          const recall = getSelectedScopes('ca-recall-scopes');
-          recall.push(privateScope);
-          body.default_recall_scopes = recall;
+        if (!isService) {
+          body.read_scopes = getSelectedScopes('ca-read-scopes');
+          body.write_scopes = getSelectedScopes('ca-write-scopes');
+          document.querySelectorAll('#create-agent-form [data-simple-workspace]:checked').forEach(function(box) {
+            const scope = box.dataset.simpleWorkspace;
+            if (!body.read_scopes.includes(scope)) body.read_scopes.push(scope);
+            if (!body.write_scopes.includes(scope)) body.write_scopes.push(scope);
+          });
+          // Ensure private scope is added if not present (it's implicit in backend but good to show)
+          const privateScope = 'agent:' + agentId;
+          if (!body.read_scopes.includes(privateScope)) body.read_scopes.push(privateScope);
+          if (!body.write_scopes.includes(privateScope)) body.write_scopes.push(privateScope);
+          const caRecallAll = document.getElementById('ca-recall-all');
+          if (caRecallAll && !caRecallAll.checked) {
+            const recall = getSelectedScopes('ca-recall-scopes');
+            recall.push(privateScope);
+            body.default_recall_scopes = recall;
+          }
         }
 
         try {
           const j = await apiFetch('/api/agents', { method: 'POST', body: JSON.stringify(body) });
           if (j.ok) {
-            showToast('Agent created');
             closeModal('create-agent-modal');
+            if (isService) {
+              // A service belongs with the other services, not with the agents.
+              location.href = '/agents?show=services';
+              return;
+            }
+            showToast('Agent created');
             document.getElementById('rotate-modal-title').textContent = 'Agent created';
             document.getElementById('rotate-modal-body').innerHTML =
               '<div class="alert alert-success">Agent created successfully.</div>' +
@@ -719,6 +855,7 @@ def agents_page(request: Request, session: dict = Depends(require_auth)):
       });
     </script>"""
     js = js.replace("__IS_ADMIN__", str(is_admin).lower()).replace("__ROLE_PRESETS__", json.dumps(ROLE_PRESETS))
+    js = js.replace("__AGENT_ROWS__", row_data)
 
     return render_page(
         "Agents",
@@ -731,10 +868,13 @@ def agents_page(request: Request, session: dict = Depends(require_auth)):
       <p class="text-muted access-summary">Each agent has its own private memory and can read its owner's. Add a workspace to share memory. Use <strong>Edit</strong> to give an agent more; create a new one only for a separate tool.</p>
     </div>
 
+    {switch_html}
+    {services_note}
+
     <div class="card">
-      <h2>All Agents</h2>
-<table class="stack-phone"><thead><tr><th>Agent</th><th>Status</th><th>Access</th><th>Created</th><th class="actions-cell">Actions</th></tr></thead>
-        <tbody>{rows or "<tr><td colspan=5 class=empty>No agents yet. Create one for each tool or script that should have its own key and history.</td></tr>"}</tbody></table>
+      <h2>{list_title}</h2>
+<table class="stack-phone"><thead><tr><th>{list_column}</th><th>Status</th><th>Access</th><th>Created</th><th class="actions-cell">Actions</th></tr></thead>
+        <tbody>{rows or empty_row}</tbody></table>
     </div>
 
     <!-- Create Agent Modal -->
@@ -763,8 +903,9 @@ def agents_page(request: Request, session: dict = Depends(require_auth)):
             </div>
           </div>
           <div id="ca-capability-controls">{capability_create_html}</div>
-          {create_access_html}
-          <div class="form-group">
+          <p id="ca-service-note" class="form-hint" hidden>A service only fetches secrets, so it has one permission and no workspaces.</p>
+          <div id="ca-access">{create_access_html}</div>
+          <div class="form-group" id="ca-access-reset">
             <button type="button" class="btn btn-sm btn-secondary" onclick="applyLeastPrivilegedPreset()">Reset to private access only</button>
             <span class="form-hint">Clears every extra workspace; the agent keeps its private memory and its owner's read access.</span>
           </div>
@@ -783,6 +924,7 @@ def agents_page(request: Request, session: dict = Depends(require_auth)):
       <div class="modal modal-wide">
         <h2><span id="edit-agent-modal-title">Edit Agent</span>: <span id="edit-agent-id"></span></h2>
         <div id="edit-no-effect" class="alert alert-warning" style="display:none"></div>
+        <div id="edit-agent-error" class="alert alert-danger" style="display:none"></div>
         <form id="edit-agent-form" onsubmit="submitEditAgent(event)">
           <div class="form-section">
             <div class="form-row">
@@ -797,10 +939,14 @@ def agents_page(request: Request, session: dict = Depends(require_auth)):
                 <p class="form-hint">A reminder of what this agent is for.</p>
               </div>
             </div>
-            <p class="form-hint">Owner: <span id="edit-owner"></span><span id="edit-default-user" hidden></span></p>
+            <p class="form-hint" id="edit-owner-line">Owner: <span id="edit-owner"></span><span id="edit-default-user" hidden></span></p>
           </div>
           <div id="edit-capability-controls">{capability_edit_html}</div>
-          {edit_access_html}
+          <div id="edit-access">{edit_access_html}</div>
+          <div id="edit-service-note" hidden>
+            <p class="form-hint">A service only fetches secrets, so it has one permission and no workspaces.</p>
+            <button type="button" class="btn btn-secondary" id="edit-to-agent" data-agent-to-agent="1">Change to agent</button>
+          </div>
           <div class="modal-footer">
             <button type="button" class="btn btn-secondary" onclick="closeModal('edit-agent-modal')">Cancel</button>
             <button id="edit-agent-save" type="submit" class="btn">Save Changes</button>

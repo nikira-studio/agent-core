@@ -121,7 +121,7 @@ Session required. Admins can manage all agents. Non-admin users can create and m
 
 | Method | Path | Description |
 | --- | --- | --- |
-| `GET` | `/api/agents` | List agents |
+| `GET` | `/api/agents` | List agents. `?kind=agent` or `?kind=service` lists one kind; without it, every entry |
 | `POST` | `/api/agents` | Create agent |
 | `GET` | `/api/agents/{agent_id}` | Get agent |
 | `PUT` | `/api/agents/{agent_id}` | Update metadata and scopes |
@@ -142,9 +142,26 @@ Create:
   "description": "Local coding assistant",
   "default_user_id": "admin",
   "read_scopes": ["agent:coding-agent", "user:admin", "workspace:my-workspace"],
-  "write_scopes": ["agent:coding-agent"]
+  "write_scopes": ["agent:coding-agent"],
+  "kind": "agent"
 }
 ```
+
+Update:
+```json
+{
+  "display_name": "Coding Agent",
+  "description": "Local coding assistant",
+  "capabilities": ["memory", "coordination"],
+  "kind": "agent"
+}
+```
+
+Every entry carries a `kind`: `agent` or `service`. Create and update take `kind`.
+
+An agent does work. A service only fetches the secrets it is given: its one permission is `credentials_resolve` and it has no workspaces. Creating an entry with exactly that permission and no workspace makes a service. Changing an entry to a service is refused while it has recorded tasks, sessions, memory, workspaces, credentials or connections of its own.
+
+Two error codes answer a change that does not fit: `INVALID_KIND` (400) when `kind` is neither `agent` nor `service`, and `SERVICE_RULE` (400) when the change would break the rules for services (a service may hold no other permission and belong to no workspace, or it still has work of its own).
 
 Agent IDs are lowercase slugs: `a-z`, `0-9`, hyphens, and underscores. Colons are reserved for scope strings and are not allowed in IDs.
 

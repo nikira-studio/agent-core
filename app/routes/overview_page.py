@@ -405,11 +405,11 @@ def dashboard_home(request: Request, session: dict = Depends(require_auth)):
     is_admin = session.get("role") == "admin"
 
     if is_admin:
-        agents = list_agents()
+        agents = list_agents(kind="agent")
         agent_count = len([a for a in agents if a.get("is_active")])
         recent_activity = activity_service.list_activities(limit=8)
     else:
-        agents = list_agents(owner_user_id=session["user_id"])
+        agents = list_agents(owner_user_id=session["user_id"], kind="agent")
         agent_count = len([a for a in agents if a.get("is_active")])
         recent_activity = activity_service.list_activities(
             user_id=session["user_id"], limit=8

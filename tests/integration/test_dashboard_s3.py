@@ -88,8 +88,11 @@ class TestAgentsPage:
         create_agent("odd", "Odd", "admin", capabilities=["memory"])
         create_agent("helper", "Helper", "admin")
         html = admin_client.get("/agents").text
-        for name in ("Service agent", "Proposer", "Custom", "Assistant"):
+        for name in ("Proposer", "Custom", "Assistant"):
             assert f">{name}</span>" in html, name
+        # An entry that only fetches secrets is a service, so it is listed with the other services.
+        services = admin_client.get("/agents?show=services").text
+        assert ">Service</span>" in services
 
     def test_agents_table_shows_owner_metadata(self, admin_client):
         from app.services.agent_service import create_agent

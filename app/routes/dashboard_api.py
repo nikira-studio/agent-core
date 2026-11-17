@@ -22,7 +22,7 @@ router = APIRouter(prefix="/api/dashboard", tags=["dashboard_api"])
 
 @router.get("/overview")
 def dashboard_overview(session: dict = Depends(require_admin)):
-    agent_count = len(agent_service.list_agents())
+    agent_count = len(agent_service.list_agents(kind="agent"))
     workspace_count = len(workspace_service.list_workspaces())
     recent_activity = activity_service.list_activities(limit=5)
     return success_response(

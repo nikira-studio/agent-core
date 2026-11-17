@@ -475,7 +475,7 @@ async def preview_agent_setup(
         if not is_admin and not workspace_service.can_user_read_workspace(current_user_id, body.workspace_id):
             return error_response("FORBIDDEN", "Access denied", 403)
 
-    agents = list_agents() if is_admin else list_agents(owner_user_id=current_user_id)
+    agents = list_agents(kind="agent") if is_admin else list_agents(owner_user_id=current_user_id, kind="agent")
     agent = next(
         (a for a in agents if a["id"] == body.agent_id and a.get("is_active")), None
     )
@@ -859,7 +859,7 @@ def integrations_page(
         for p in workspaces
     )
 
-    agents = list_agents() if is_admin else list_agents(owner_user_id=current_user_id)
+    agents = list_agents(kind="agent") if is_admin else list_agents(owner_user_id=current_user_id, kind="agent")
     visible_agents = {a["id"]: a for a in agents if a.get("is_active")}
     agent_options = "".join(
         f'<option value="{a["id"]}" {"selected" if a["id"] == agent_id else ""}>{escape_html(a.get("display_name", a["id"]))}</option>'

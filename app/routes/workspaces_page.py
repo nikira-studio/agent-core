@@ -24,9 +24,9 @@ def workspaces_page(request: Request, session: dict = Depends(require_auth)):
         else workspace_service.list_workspaces(owner_user_id=session["user_id"])
     )
     all_agents = (
-        agent_service.list_agents()
+        agent_service.list_agents(kind="agent")
         if session.get("role") == "admin"
-        else agent_service.list_agents(owner_user_id=session["user_id"])
+        else agent_service.list_agents(owner_user_id=session["user_id"], kind="agent")
     )
     workspace_agent_access_data = [
         {

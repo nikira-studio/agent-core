@@ -74,9 +74,9 @@ def memory_page(request: Request, session: dict = Depends(require_auth)):
 
     is_admin = session.get("role") == "admin"
     agents = (
-        list_agents()
+        list_agents(kind="agent")
         if session.get("role") == "admin"
-        else list_agents(owner_user_id=session["user_id"])
+        else list_agents(owner_user_id=session["user_id"], kind="agent")
     )
     agent_options = "".join(
         f'<option value="agent:{a["id"]}">Agent: {escape_html(a.get("display_name") or a["id"])} (private)</option>'
