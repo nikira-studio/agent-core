@@ -1722,18 +1722,21 @@ def _hook_steps(client_key, base_url):
                         "type": "command", "command": unix_command, "timeout": 15,
                         "statusMessage": f"Loading {APP_NAME} context", "additionalContextLimit": 4000,
                     }],
-                }]
+                }],
+                # Stop ignores a matcher. The nudge blocks a stop at most once per task.
+                "Stop": [{"hooks": [{"type": "command", "command": unix_command, "timeout": 10}]}],
             }
         }
         # `commandWindows` is Codex's documented Windows-only override; the POSIX command stays beside it.
         win_hook = json.loads(json.dumps(unix_hook))
-        win_hook["hooks"]["SessionStart"][0]["hooks"][0]["commandWindows"] = f'python "{win_script}"'
+        for event_name in ("SessionStart", "Stop"):
+            win_hook["hooks"][event_name][0]["hooks"][0]["commandWindows"] = f'python "{win_script}"'
         unix_where = (
-            f"Save this as `~/{dot}/hooks.json`. If the file already exists, add the SessionStart entry to it instead of replacing it."
+            f"Save this as `~/{dot}/hooks.json`. If the file already exists, add the SessionStart and Stop entries to it instead of replacing it."
         )
         win_where = (
             f"The command creates `hooks.json` in the `{dot}` folder of your user folder if there is none. "
-            "If you already have one, copy the SessionStart entry from the command into it instead."
+            "If you already have one, copy the SessionStart and Stop entries from the command into it instead."
         )
         requirements = (
             "Python 3.11 or newer (`python3`; on Windows `python` or `py -3`) and step a done. "
@@ -1756,7 +1759,7 @@ def _hook_steps(client_key, base_url):
             f'$f = "{win_env_hooks}"\n'
             "$json = @'\n" + json.dumps(win_hook, indent=2) + "\n'@\n"
             f"$json = $json.Replace('{_WINDOWS_USER_FOLDER}', ($env:USERPROFILE -replace '\\\\', '/'))\n"
-            'if (Test-Path $f) { Write-Host "hooks.json already exists: add the SessionStart entry to it by hand" } '
+            'if (Test-Path $f) { Write-Host "hooks.json already exists: add the SessionStart and Stop entries to it by hand" } '
             "else { [IO.File]::WriteAllText($f, $json) }"
         )
     unix_install = f"mkdir -p ~/{dot}/hooks\ncurl -fsSL {script_url} -o {unix_script}"
@@ -1791,7 +1794,7 @@ def _hook_steps(client_key, base_url):
         "intro": (
             f"Loads the agent's {APP_NAME} context when a {name} session starts: open work, recent results with their next steps, "
             "changes since its last session, key records."
-            + (" It also asks the agent once to record a handoff if a task is left open." if client_key == "claude_code" else "")
+            + " It also asks the agent once to record a handoff if a task is left open."
         ),
         "requirements": requirements,
         "install": {"unix": ("bash", unix_install), "windows": ("powershell", win_install)},

@@ -1,16 +1,23 @@
 #!/usr/bin/env python3
-"""Codex hook for Agent Core: session context in.
+"""Codex hook for Agent Core: session context in, handoff out.
 
-Register it for the SessionStart event (see the Codex Hook output on the
-Integrations page). It asks Agent Core for one budgeted block (standing rules,
-work waiting on a person, unfinished and handed-off work, recent results, changes
-since the agent's last session, an index of key records) and hands it to Codex as
+Register it for two events (see the Codex Hook output on the Integrations page);
+it reads hook_event_name from the event on stdin.
+
+SessionStart: asks Agent Core for one budgeted block (standing rules, work waiting
+on a person, unfinished and handed-off work, recent results, changes since the
+agent's last session, an index of key records) and hands it to Codex as
 additionalContext, so the agent does not have to remember a startup routine.
 
+Stop: when the session has an open activity without a structured handoff, it
+blocks the stop once with a request to record one (Codex continues with that text
+as its next prompt). Agent Core remembers that it asked, so a task costs at most
+one extra turn, however many replies end.
+
 It is the sibling of integrations/claude-code/agent_core_hook.py and sends the
-same request to the same endpoint (/api/session-context); the context itself is
-built by Agent Core, so nothing here decides what an agent sees. It has no Stop
-handler: Codex does not need the Claude Code handoff nudge to use this.
+same requests to the same endpoints (/api/session-context and
+/api/session-context/handoff-check); what the context says and when to nudge are
+decided by Agent Core, not here.
 
 Configuration, first match wins. Only the user's own files and environment are
 read, never a repository's, so a cloned project can neither redirect the key nor
@@ -24,6 +31,7 @@ name an environment variable to send:
   AGENT_CORE_SCOPE     workspace scope; otherwise the server matches the cwd
                        against its configured workspace repo roots
   AGENT_CORE_CONTEXT_CHARS  session-start budget (default 9000)
+  AGENT_CORE_HANDOFF_NUDGE=0  turn the Stop nudge off
   AGENT_CORE_NOTICES=0  turn off the one-line notices about a folder with no
                        workspace and a project with no Agent Core connection
 
@@ -224,6 +232,26 @@ def session_start(event, base_url, api_key, env):
     return {"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": data["context"]}}
 
 
+def stop(event, base_url, api_key, env):
+    if event.get("stop_hook_active") or env.get("AGENT_CORE_HANDOFF_NUDGE") == "0":
+        return None  # already continuing because of a stop hook: never loop
+    if not event.get("session_id"):
+        return None
+    try:
+        data = post(
+            base_url, api_key, "/api/session-context/handoff-check",
+            {"host_session_ref": event["session_id"]},
+        )
+    except NETWORK_ERRORS:
+        return None  # a stop must never fail because Agent Core is unreachable
+    if not data.get("nudge") or not isinstance(data.get("reason"), str):
+        return None
+    return {"decision": "block", "reason": data["reason"]}
+
+
+HANDLERS = {"SessionStart": session_start, "Stop": stop}
+
+
 def main(stdin=sys.stdin, stdout=sys.stdout, env=os.environ):
     try:
         return _run(stdin, stdout, env)
@@ -246,20 +274,24 @@ def _run(stdin, stdout, env):
         event = json.loads(raw)
     except ValueError:
         return 0
-    if not isinstance(event, dict) or event.get("hook_event_name", "SessionStart") != "SessionStart":
+    if not isinstance(event, dict):
+        return 0
+    handler = HANDLERS.get(event.get("hook_event_name", "SessionStart"))
+    if handler is None:
         return 0
     cwd = event.get("cwd") or os.getcwd()
     base_url, bearer = resolve_connection(cwd, env)
     if not base_url:
         # Silent unless a session starts in a project folder: there the person expects shared context.
         if (
-            event.get("source", "startup") == "startup"  # not again on every clear, compact or resume
+            handler is session_start
+            and event.get("source", "startup") == "startup"  # not again on every clear, compact or resume
             and env.get("AGENT_CORE_NOTICES") != "0"
             and _looks_like_project(cwd)
         ):
             json.dump({"systemMessage": no_connection_notice(env)}, stdout)
         return 0
-    output = session_start(event, base_url, bearer, env)
+    output = handler(event, base_url, bearer, env)
     if output:
         json.dump(output, stdout)
     return 0

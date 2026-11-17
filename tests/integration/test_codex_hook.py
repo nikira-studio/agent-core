@@ -1,4 +1,4 @@
-"""The Codex SessionStart hook: reads Codex's own MCP config, sends what the Claude Code hook sends, never breaks a session."""
+"""The Codex hook (SessionStart and Stop): reads Codex's own MCP config, sends what the Claude Code hook sends, never breaks a session."""
 
 import platform
 import importlib.util
@@ -219,6 +219,8 @@ def test_the_script_is_served_and_the_output_has_no_key(test_client):
     registered = json.loads(text.split("```json\n", 1)[1].split("\n```", 1)[0])
     handler = registered["hooks"]["SessionStart"][0]["hooks"][0]
     assert handler["command"] == "python3 ~/.codex/hooks/agent_core_hook.py" and handler["timeout"] == 15
+    stop = registered["hooks"]["Stop"][0]["hooks"][0]
+    assert stop["command"] == handler["command"] and stop["timeout"] == 10 and "matcher" not in registered["hooks"]["Stop"][0]
 
 
 def _serve(handler_cls):
@@ -445,3 +447,64 @@ def test_the_claude_hook_names_both_files_it_read_and_the_codex_hook_its_config(
     # With a connection (even one that then fails to answer) the missing-connection line is never shown.
     out = _run(codex, monkeypatch, project, {"memory_scope": "workspace:p", "resolved_by": "cwd", "context": "# ctx"})
     assert list(out) == ["hookSpecificOutput"]
+
+
+def _stop_event(**extra):
+    return json.dumps({"session_id": "s1", "cwd": "/repo", "hook_event_name": "Stop", "turn_id": "t1",
+                       "stop_hook_active": False, "last_assistant_message": "done", **extra})
+
+
+def test_stop_asks_for_a_handoff_once_and_blocks_with_the_servers_reason(monkeypatch):
+    hook = _codex()
+    env = {"AGENT_CORE_URL": "http://core", "AGENT_CORE_API_KEY": "k"}
+    sent = []
+
+    def fake_post(base_url, api_key, path, payload):
+        assert (base_url, api_key, path) == ("http://core", "k", "/api/session-context/handoff-check")
+        sent.append(payload)
+        return {"nudge": True, "reason": "Record a handoff."}
+
+    monkeypatch.setattr(hook, "post", fake_post)
+    out = io.StringIO()
+    assert hook.main(io.StringIO(_stop_event()), out, env) == 0
+    assert json.loads(out.getvalue()) == {"decision": "block", "reason": "Record a handoff."}
+    assert sent == [{"host_session_ref": "s1"}]
+
+
+def test_stop_stays_quiet_when_it_should(monkeypatch):
+    hook = _codex()
+    env = {"AGENT_CORE_URL": "http://core", "AGENT_CORE_API_KEY": "k"}
+    calls = []
+    monkeypatch.setattr(hook, "post", lambda *a: calls.append(a) or {"nudge": False})
+
+    def quiet(event_json, environment=env):
+        out = io.StringIO()
+        assert hook.main(io.StringIO(event_json), out, environment) == 0
+        return out.getvalue()
+
+    assert quiet(_stop_event()) == ""  # Core says no nudge
+    assert len(calls) == 1
+    assert quiet(_stop_event(stop_hook_active=True)) == "" and len(calls) == 1  # already continuing: never loop
+    assert quiet(_stop_event(), {**env, "AGENT_CORE_HANDOFF_NUDGE": "0"}) == "" and len(calls) == 1
+    assert quiet(json.dumps({"hook_event_name": "Stop", "cwd": "/repo"})) == "" and len(calls) == 1  # no session id
+    monkeypatch.setattr(hook, "post", lambda *a: {"nudge": True})  # a nudge without a reason is ignored
+    assert quiet(_stop_event()) == ""
+
+
+def test_stop_never_fails_a_stop_when_core_is_unreachable_or_unconfigured(monkeypatch, tmp_path):
+    import urllib.error
+
+    hook = _codex()
+
+    def down(*args):
+        raise urllib.error.URLError("refused")
+
+    monkeypatch.setattr(hook, "post", down)
+    out = io.StringIO()
+    assert hook.main(io.StringIO(_stop_event()), out, {"AGENT_CORE_URL": "http://core", "AGENT_CORE_API_KEY": "k"}) == 0
+    assert out.getvalue() == ""
+    # no connection at all: silent on Stop (the "no connection" notice belongs to a session start)
+    out = io.StringIO()
+    monkeypatch.setattr(hook.os.path, "expanduser", lambda p: str(tmp_path))
+    assert hook.main(io.StringIO(_stop_event(cwd=str(tmp_path / "proj"))), out, {}) == 0
+    assert out.getvalue() == ""
