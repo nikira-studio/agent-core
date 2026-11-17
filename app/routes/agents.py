@@ -180,7 +180,11 @@ def create_agent(
         return error_response("FORBIDDEN", "Cannot assign another user's context", 403)
 
     owner_user_id = session["user_id"]
-    if body.read_scopes is None and body.write_scopes is None:
+    # A service fetches secrets and belongs to no workspace, so the one-workspace default below does not apply to it.
+    makes_service = body.kind == "service" or (
+        body.kind is None and sorted(set(body.capabilities or [])) == agent_kind.SERVICE_PERMISSIONS
+    )
+    if body.read_scopes is None and body.write_scopes is None and not makes_service:
         # An install with exactly one workspace: an agent created with defaults works in it, so two such agents
         # share something without anyone ticking boxes. With more than one, the person chooses.
         from app.services import workspace_service

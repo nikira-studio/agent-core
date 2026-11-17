@@ -2,6 +2,19 @@
 
 Notable changes to Agent Core are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow [Semantic Versioning](https://semver.org/).
 
+## [1.4.0] - Unreleased
+
+### Added
+
+- **Agents and services are told apart.** Entries that only fetch secrets for a program or container (26 of 38 on one install) are now marked as services and shown under Agents > Services, so the Agents page lists the agents that do work. Upgrading marks an entry as a service only when its one permission is `credentials_resolve` and it has no recorded work, workspaces, credentials or connections of its own; nothing else about any entry changes, and the upgrade checks that before it commits (see Upgrading). A service keeps that one permission and no workspaces until it is changed to an agent. `GET /api/agents` lists everything as before and takes `?kind=agent` or `?kind=service`; entries carry `kind`; create and update take `kind`.
+
+- **Upgrade steps that touch access are checked before they are kept.** A step that changes how agents, services, connections or credentials are stored runs in one transaction. Agent Core records who can run which connection, who can get a reference to which credential (through the MCP tools and through the local credential helper), what each service may fetch (read or write, expiry), each key's hash, and each credential's owner, name and a hash of its stored value, applies the step, records it again, and compares. Any difference the step did not declare rolls everything back and the application does not start; the database is exactly as it was, a copy of it is kept beside it (`pre-migration-*.db`), and a report with ids and names only is written to `migration-reports/`. A restored backup from an older version is brought up to date under the same check before it replaces the live database. `python -m app.access_check <database>` shows what an upgrade would do, on a read-only copy. See `docs/upgrading.md`, which also has the recovery procedure.
+
+### Upgrading
+
+- Nothing to do. Existing entries keep every permission, workspace, key and secret they had; the upgrade only adds the `kind` column and checks that access is identical afterwards.
+- Going back to 1.3.2: that build ignores `kind`, so a service created while it runs is stored as an agent and is not reclassified on the next upgrade (change it to a service from its Edit dialog).
+
 ## [1.3.2] - 2026-11-17
 
 ### Added
