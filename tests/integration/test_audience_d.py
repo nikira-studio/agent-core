@@ -248,3 +248,20 @@ def test_no_use_check_reads_a_connections_scope_directly():
     # Allowed: the person-level read inside can_use_binding itself (a signed-in person is not an agent) and the two
     # dashboard pages that filter for a signed-in person.
     assert all(o.startswith(("routes/overview_page.py", "routes/connectors_page.py", "security/effective_authority.py")) for o in offenders), offenders
+
+
+def test_an_agent_cannot_choose_an_audience_and_its_connection_gets_the_scope_meaning(test_client, admin_token, agent_token):
+    """Only an administrator sets who may use a connection; an agent that creates one gets what its scope always meant."""
+    connector_service.create_connector_type(
+        connector_type_id="aud-cap2", display_name="Audience capability 2", auth_type="none", provider_type="builtin",
+        supported_actions=["ping"], backend_type="http",
+        backend_json=json.dumps({"type": "http", "base_url": {"from": "config", "field": "base_url"}, "requests": {}}),
+    )
+    body = {"connector_type_id": "aud-cap2", "name": "Mine", "scope": "agent:testagent", "config_json": '{"base_url": "http://example.test"}'}
+    headers = {"Authorization": f"Bearer {agent_token}"}
+    refused = test_client.post("/api/connector-bindings", headers=headers, json={**body, "audience": [{"kind": "agent", "ref": "testagent"}]})
+    assert refused.status_code == 403 and refused.json()["error"]["code"] == "FORBIDDEN"
+    made = test_client.post("/api/connector-bindings", headers=headers, json=body)
+    assert made.status_code == 201, made.text
+    assert "audience" not in made.json()["data"]["binding"]  # an agent's answers never carry an audience
+    assert _entries(made.json()["data"]["binding"]["id"]) == [("agent", "testagent", False)]
