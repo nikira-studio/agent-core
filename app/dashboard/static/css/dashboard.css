@@ -2219,9 +2219,14 @@ details.card-fold[open] > summary::before { content: "\25BE\00a0"; }
 .card input,
 .card textarea {
   max-width: 100%;
-  min-width: 0;
   box-sizing: border-box;
   text-overflow: ellipsis;
+}
+/* Only on a phone may a control shrink below its own minimum: at desktop width a field keeps the width its page gave it. */
+@media (max-width: 768px) {
+  .card select,
+  .card input,
+  .card textarea { min-width: 0; }
 }
 .card .filter-bar > .form-group {
   min-width: 0;

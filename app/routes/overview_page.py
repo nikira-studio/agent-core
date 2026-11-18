@@ -357,9 +357,14 @@ def _health_items(is_admin: bool) -> list[tuple[str, str, str, bool]]:
 
     cutoff = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
     with get_db() as conn:
-        failing = conn.execute(
-            "SELECT COUNT(*) FROM connector_bindings WHERE enabled = 1 AND COALESCE(last_error, '') != ''"
-        ).fetchone()[0]
+        # A connection is failing when its last check failed or when recent runs of one of its actions keep failing:
+        # the same two things the Capabilities page's Connections table shows, so the two always agree.
+        check_failed = {
+            r[0] for r in conn.execute(
+                "SELECT id FROM connector_bindings WHERE enabled = 1 AND COALESCE(last_error, '') != ''"
+            ).fetchall()
+        }
+        enabled_ids = {r[0] for r in conn.execute("SELECT id FROM connector_bindings WHERE enabled = 1").fetchall()}
         total_bindings = conn.execute("SELECT COUNT(*) FROM connector_bindings WHERE enabled = 1").fetchone()[0]
         checked = conn.execute(
             "SELECT COUNT(*) FROM connector_bindings WHERE enabled = 1 AND last_tested_at IS NOT NULL"
@@ -368,6 +373,10 @@ def _health_items(is_admin: bool) -> list[tuple[str, str, str, bool]]:
             "SELECT COUNT(*) FROM webhook_delivery_log WHERE status = 'dead' AND COALESCE(last_attempt_at, created_at) >= ?",
             (cutoff,),
         ).fetchone()[0]
+    from app.services import connector_service
+
+    actions_failing = {bid for bid, actions in connector_service.failing_actions_by_binding().items() if actions}
+    failing = len(check_failed | (actions_failing & enabled_ids))
     broker = broker_service.get_broker_credential_hash() is not None
     # "All working" is a claim about checks: every enabled connection's last check passed (or could not be run), and
     # at least one has been checked. A connection whose check failed is "failing".
