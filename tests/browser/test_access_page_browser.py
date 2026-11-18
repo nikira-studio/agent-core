@@ -49,15 +49,16 @@ def access_page(instance, admin_page):
 def test_the_page_lists_what_reaches_what(access_page):
     page = access_page
     assert page.locator("main h1").all_inner_texts() == ["Access"]
-    rows = page.locator("#access-rows tr")
+    rows = page.locator("#access-rows tr.access-group-row")
     assert rows.count() >= 2
     text = page.locator("#access-rows").text_content()
     assert "Worker A" in text and "Worker B" in text
     assert "seed-key" in text
     # the sentence the server words for each kind of assignment
     assert "An agent can reach a credential" in text
+    groups = page.locator("#access-rows tr.access-group-head").count()
     count = page.locator("#access-row-count").text_content()
-    assert count in (f"{rows.count()} rows", f"{rows.count()} row")
+    assert count == f"{rows.count()} rows in {groups} groups"
 
 
 def test_the_agent_filter_keeps_only_that_agents_rows(access_page):
@@ -182,5 +183,98 @@ def test_the_other_pages_keep_their_controls_inside_their_cards(browser, instanc
             page.wait_for_load_state("load")
             outside = page.evaluate(CONTROLS_OUTSIDE_THEIR_CARD)
             assert not outside, (path, outside)
+    finally:
+        context.close()
+
+
+# ---- the rows are grouped under one header for each "Who or what" -----------------------------------------------
+
+@pytest.fixture
+def grouped_page(instance, access_page):
+    """The page loaded afresh: an earlier test may have left it on a held or failed answer."""
+    page = access_page
+    page.goto(instance + "/access")
+    page.wait_for_load_state("load")
+    page.wait_for_selector("#access-rows tr.access-group-head")
+    return page
+
+
+def _open_headers(page):
+    return page.locator("#access-rows .access-group-toggle[aria-expanded=true]").count()
+
+
+def _visible_rows(page):
+    return page.locator("#access-rows tr.access-group-row:visible").count()
+
+
+def _reset(page):
+    page.select_option("#access-show", "")
+    page.fill("#access-filter-name", "")
+    page.select_option("#access-filter-agent", "")
+    page.wait_for_function("document.querySelectorAll('#access-rows .access-group-toggle[aria-expanded=true]').length === 0")
+
+
+def test_every_group_is_closed_at_first_and_its_header_says_who_what_kind_and_how_many(grouped_page):
+    page = grouped_page
+    _reset(page)
+    assert page.locator("#access-rows tr.access-group-head").count() >= 2
+    assert _open_headers(page) == 0 and _visible_rows(page) == 0
+    head = page.locator("#access-rows .access-group-toggle", has_text="Worker A").first
+    text = head.text_content()
+    assert "Worker A" in text and "agent" in text and "rows" in text or "row" in text
+    assert head.get_attribute("aria-expanded") == "false"
+    # the Unused card is still the first card on the page
+    first_card = page.locator("main .card").first
+    assert "Unused" in first_card.locator("h2").first.text_content()
+
+
+def test_a_header_opens_and_closes_its_rows_by_click_and_by_keyboard(grouped_page):
+    page = grouped_page
+    _reset(page)
+    head = page.locator("#access-rows .access-group-toggle", has_text="Worker A").first
+    head.click()
+    assert head.get_attribute("aria-expanded") == "true" and _visible_rows(page) >= 1
+    head.click()
+    assert head.get_attribute("aria-expanded") == "false" and _visible_rows(page) == 0
+    head.focus()
+    page.keyboard.press("Enter")
+    assert head.get_attribute("aria-expanded") == "true" and _visible_rows(page) >= 1
+    page.keyboard.press("Space")
+    assert head.get_attribute("aria-expanded") == "false" and _visible_rows(page) == 0
+
+
+def test_a_filter_finds_rows_inside_closed_groups_and_opens_the_groups_that_match(grouped_page):
+    page = grouped_page
+    _reset(page)
+    page.fill("#access-filter-name", "seed-key")
+    page.wait_for_function("document.querySelectorAll('#access-rows .access-group-toggle[aria-expanded=true]').length > 0")
+    visible = page.locator("#access-rows tr.access-group-row:visible").all_text_contents()
+    assert visible and all("seed-key" in text for text in visible)
+    # a group a person closed by hand stays closed until the filter changes again
+    while _open_headers(page):
+        page.locator("#access-rows .access-group-toggle[aria-expanded=true]").first.click()
+    assert _visible_rows(page) == 0
+    page.fill("#access-filter-name", "seed-ke")
+    page.wait_for_function("document.querySelectorAll('#access-rows tr.access-group-row:not(.is-closed)').length > 0")
+    # clearing the filter puts every group back to closed
+    page.fill("#access-filter-name", "")
+    page.wait_for_function("document.querySelectorAll('#access-rows .access-group-toggle[aria-expanded=true]').length === 0")
+
+
+def test_the_groups_work_on_a_phone(browser, instance, access_page):
+    context = browser.new_context(viewport={"width": 390, "height": 844})
+    page = context.new_page()
+    try:
+        sign_in(page, instance, "owner@example.com")
+        page.goto(instance + "/access")
+        page.wait_for_load_state("load")
+        page.wait_for_selector("#access-rows tr.access-group-head")
+        assert _visible_rows(page) == 0
+        head = page.locator("#access-rows .access-group-toggle").first
+        box = head.bounding_box()
+        assert box["x"] >= 0 and box["x"] + box["width"] <= 391 and box["height"] >= 40
+        head.click()
+        assert _visible_rows(page) >= 1
+        assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
     finally:
         context.close()

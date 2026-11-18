@@ -2354,3 +2354,19 @@ details.fold-card[open]:not(.row-more):not(.card-fold):not(.activity-more) > sum
 /* Edit Workspace: one row per repository folder. */
 .repo-root-row { display: flex; gap: 8px; margin-bottom: 6px; }
 .repo-root-row input { flex: 1; min-width: 0; }
+
+/* The Access table: one header row for each "Who or what", closed until it is opened. */
+.access-group-head td { padding: 0; }
+.access-group-toggle { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 44px; padding: 8px 6px; background: none; border: 0; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.access-group-toggle:hover { background: rgba(127, 127, 127, 0.08); }
+.access-group-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.access-group-count { margin-left: auto; white-space: nowrap; }
+.access-chevron { display: inline-block; width: 1em; color: var(--muted); transition: transform 0.12s; }
+.access-group-toggle[aria-expanded="true"] .access-chevron { transform: rotate(90deg); }
+tr.access-group-row.is-closed { display: none !important; }
+@media (min-width: 769px) {
+  .access-group-row td:first-child { padding-left: 28px; }
+}
+
+/* The dialog's Close bar covers the bottom of what is scrolled to: bring the owner panel to rest above it. */
+#access-owner-panel { scroll-margin-bottom: 96px; }

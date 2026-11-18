@@ -223,3 +223,12 @@ def test_a_decided_request_links_back_and_says_so_with_a_message(test_client, ad
     html = test_client.get(f"/approvals/{approval_id}").text
     assert 'href="/#overview-waiting"' in html and "Back to Waiting on you" in html
     assert "approvalFlash" in html and "'Approved: '" in html and "'Rejected: '" in html
+
+
+def test_the_detail_page_names_the_workspace_not_its_scope(test_client, admin_token):
+    approval_id = _proposal(test_client, admin_token)
+    _browser_admin(test_client)
+
+    html = test_client.get(f"/approvals/{approval_id}").text
+    assert "<tr><td>Workspace</td><td>Ops</td></tr>" in html
+    assert "<code>workspace:ops</code>" not in html

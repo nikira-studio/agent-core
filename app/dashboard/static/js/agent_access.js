@@ -150,18 +150,25 @@ function accessOthersNoticeText(label) {
 
 // Turn one permission on for every row of a group that needs it, then show the list again.
 async function accessTurnOnGroup(group, who, reload) {
-  var names = [];
+  // The people this button reaches, each once: a list can hold many rows for the same agent.
+  var people = [];
+  var seen = {};
+  group.rows.forEach(function (row) {
+    var person = who(row);
+    if (!seen[person.id]) {
+      seen[person.id] = true;
+      people.push(person);
+    }
+  });
   // One button can reach several agents: say which, and ask first.
-  if (group.rows.length > 1) {
-    var everyone = group.rows.map(function (row) { return who(row).name; }).join(', ');
+  if (people.length > 1) {
+    var everyone = people.map(function (person) { return person.name; }).join(', ');
     if (!await confirmDialog('Turn on ' + group.label + ' for ' + everyone + '?')) return;
   }
-  for (var i = 0; i < group.rows.length; i++) {
-    var person = who(group.rows[i]);
-    if (!await accessTurnOnPermission(person.id, group.permission)) return;
-    names.push(person.name);
+  for (var i = 0; i < people.length; i++) {
+    if (!await accessTurnOnPermission(people[i].id, group.permission)) return;
   }
-  showToast(group.label + ' turned on for ' + names.join(', '));
+  showToast(group.label + ' turned on for ' + people.map(function (person) { return person.name; }).join(', '));
   await reload();
 }
 

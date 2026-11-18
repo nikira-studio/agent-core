@@ -244,7 +244,26 @@ def _param_row(key: str, value: Any) -> str:
     return "<tr><td><code>" + escape_html(key) + "</code></td><td style='overflow-wrap:anywhere'>" + escape_html(shown) + "</td></tr>"
 
 
-def _connector_request_cards(row: dict, view: dict) -> str:
+def _owners_for(session: dict) -> Owners:
+    """The names the page shows for owners, looked up once: every admin sees every workspace and agent, anyone else their own."""
+    from app.services import agent_service, workspace_service
+
+    is_admin = session.get("role") == "admin"
+    return Owners(
+        workspaces=(
+            workspace_service.list_workspaces()
+            if is_admin
+            else workspace_service.list_workspaces(owner_user_id=session["user_id"])
+        ),
+        agents=(
+            agent_service.list_agents()
+            if is_admin
+            else agent_service.list_agents(owner_user_id=session["user_id"])
+        ),
+    )
+
+
+def _connector_request_cards(row: dict, view: dict, owners: Owners | None = None) -> str:
     """A held service action in plain words: who wants to do what, to which service, and exactly what it will send."""
     from app.services import connector_approval_service, connector_service
 
@@ -270,7 +289,7 @@ def _connector_request_cards(row: dict, view: dict) -> str:
         "<tr><td style='width:9rem'>Capability</td><td>" + escape_html((connector_type or {}).get("display_name") or "") + "</td></tr>"
         "<tr><td>Action</td><td><code>" + escape_html(payload["action"]) + "</code></td></tr>"
         "<tr><td>Binding</td><td>" + escape_html((binding or {}).get("name") or payload["binding_id"]) + "</td></tr>"
-        "<tr><td>Workspace</td><td>" + escape_html(row["scope"].replace("workspace:", "")) + "</td></tr>"
+        "<tr><td>Workspace</td><td>" + escape_html(owners.short(row["scope"]) if owners else row["scope"]) + "</td></tr>"
         + request_table +
         "</tbody></table></div></div>"
     )
@@ -309,7 +328,7 @@ def _not_found_page(session: dict):
 
 @router.get("/approvals")
 def approvals_page(request: Request, session: dict = Depends(require_auth)):
-    from app.services import agent_service, approval_service, workspace_service
+    from app.services import approval_service
 
     scopes = _read_scopes(session)
     pending = approval_service.list_for_scopes(scopes, "pending", PENDING_LIMIT)
@@ -320,19 +339,7 @@ def approvals_page(request: Request, session: dict = Depends(require_auth)):
     decided = decided[:DECIDED_LIMIT]
 
     # The owners, in plain words: the names are looked up once, so every row says the same words.
-    is_admin = session.get("role") == "admin"
-    owners = Owners(
-        workspaces=(
-            workspace_service.list_workspaces()
-            if is_admin
-            else workspace_service.list_workspaces(owner_user_id=session["user_id"])
-        ),
-        agents=(
-            agent_service.list_agents()
-            if is_admin
-            else agent_service.list_agents(owner_user_id=session["user_id"])
-        ),
-    )
+    owners = _owners_for(session)
 
     pending_rows = _list_rows(pending, None, owners)
     from app.database import get_db
@@ -383,7 +390,7 @@ def approval_detail_page(
         from app.services import connector_approval_service
 
         can_decide = view.get("status") == "pending" and connector_approval_service.can_decide(session, row["scope"])
-        operation_cards = _connector_request_cards(row, view)
+        operation_cards = _connector_request_cards(row, view, _owners_for(session))
     else:
         can_decide = is_admin and view.get("status") == "pending"
         operation_cards = "".join(
@@ -392,7 +399,8 @@ def approval_detail_page(
         )
 
     title = escape_html(view.get("title") or "Approval")
-    scope = escape_html(view.get("scope") or "")
+    # The workspace in its own name, not the scope string it is stored under.
+    scope = escape_html(_owners_for(session).short(view.get("scope") or ""))
     proposed_by = escape_html(view.get("proposed_by") or "")
     note = escape_html(view.get("note") or "") or "—"
     status_badge = _status_badge(view.get("status") or "")
@@ -406,7 +414,7 @@ def approval_detail_page(
 <div class="card">
   <table><tbody>
     <tr><td style="width:180px">Status</td><td>""" + status_badge + """</td></tr>
-    <tr><td>Workspace</td><td><code>""" + scope + """</code></td></tr>
+    <tr><td>Workspace</td><td>""" + scope + """</td></tr>
     <tr><td>Asked by</td><td>""" + proposed_by + """</td></tr>
     <tr><td>Created</td><td>""" + created + """</td></tr>
     <tr><td>Expires</td><td>""" + expires + """</td></tr>

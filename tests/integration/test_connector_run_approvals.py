@@ -284,6 +284,7 @@ def test_the_approval_page_says_it_in_plain_words_and_hides_anything_secret_look
     assert "<code>title</code>" in html and "hello" in html
     assert "sk-live-123" not in html and "Bearer abc" not in html and html.count("[hidden]") == 2
     assert "Approve and run" in html and "data-approval-reject=" in html
+    assert "<td>Workspace</td><td>workspace:" not in html and "<td>Workspace</td><td>ops</td>" not in html  # a name, not the scope
     # A GET only shows the request; it never decides.
     from app.services import approval_service
 

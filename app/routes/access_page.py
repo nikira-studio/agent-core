@@ -100,5 +100,5 @@ def access_page(request: Request, session: dict = Depends(require_auth)):
 </div>
 """
 
-    js = '<script src="/static/js/access_page.js?v=20261118c"></script>'
+    js = '<script src="/static/js/access_page.js?v=20261118d"></script>'
     return render_page("Access", body, "/access", js, session=session)

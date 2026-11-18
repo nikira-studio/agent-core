@@ -29,7 +29,13 @@
 
   var MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
-  var state = { rows: [], assignments: {}, unused: {}, kindOrder: KIND_ORDER.slice() };
+  // What kind of thing a group header names, in the order the groups are shown.
+  var GROUP_ORDER = ['agent', 'service', 'connection'];
+  var GROUP_KIND = { agent: 'agent', service: 'service', connection: 'connection' };
+
+  // open: the groups a person opened or closed by hand (key -> true or false). Until then every group is closed,
+  // unless a filter is on: then the groups that hold a match are open.
+  var state = { rows: [], assignments: {}, unused: {}, kindOrder: KIND_ORDER.slice(), open: {} };
 
   // ── small helpers ───────────────────────────────────────────────────────────
 
@@ -117,20 +123,92 @@
     return tr;
   }
 
-  // Assignment kind first, then the name of the party that reaches.
+  // Inside a group: the kind of assignment first, then the name of what it reaches.
   function sortedRows(rows) {
     return rows.slice().sort(function (a, b) {
       var left = kindIndex(a.assignment);
       var right = kindIndex(b.assignment);
       if (left !== right) return left - right;
-      var from = nameOf(a.from).toLowerCase();
-      var other = nameOf(b.from).toLowerCase();
-      if (from !== other) return from < other ? -1 : 1;
       var to = nameOf(a.to).toLowerCase();
       var reach = nameOf(b.to).toLowerCase();
       if (to !== reach) return to < reach ? -1 : 1;
       return 0;
     });
+  }
+
+  // ── the groups: one header for each "Who or what" ───────────────────────────
+
+  function groupKey(party) {
+    return (party && party.type ? party.type : '') + ':' + (party && party.id ? party.id : nameOf(party));
+  }
+
+  function groupRank(type) {
+    var index = GROUP_ORDER.indexOf(type);
+    return index < 0 ? GROUP_ORDER.length : index;
+  }
+
+  // The rows a filter let through, split into one group for each party that reaches, in a fixed order.
+  function groupRows(rows) {
+    var groups = {};
+    var list = [];
+    rows.forEach(function (row) {
+      var key = groupKey(row.from);
+      if (!groups[key]) {
+        groups[key] = { key: key, party: row.from || {}, rows: [] };
+        list.push(groups[key]);
+      }
+      groups[key].rows.push(row);
+    });
+    list.sort(function (a, b) {
+      var left = groupRank(a.party.type);
+      var right = groupRank(b.party.type);
+      if (left !== right) return left - right;
+      var from = nameOf(a.party).toLowerCase();
+      var other = nameOf(b.party).toLowerCase();
+      if (from !== other) return from < other ? -1 : 1;
+      return 0;
+    });
+    list.forEach(function (group) {
+      group.rows = sortedRows(group.rows);
+    });
+    return list;
+  }
+
+  function filtersAreOn(filters) {
+    return !!(filters.kind || filters.name || filters.agent || filters.capability || filters.service);
+  }
+
+  // Show or hide the rows under one header, and say so for anyone who cannot see the arrow.
+  function setGroupOpen(head, open) {
+    var button = head.querySelector('button');
+    button.setAttribute('aria-expanded', open ? 'true' : 'false');
+    head._rows.forEach(function (tr) {
+      if (open) tr.classList.remove('is-closed');
+      else tr.classList.add('is-closed');
+    });
+  }
+
+  function groupHead(group, open) {
+    var tr = el('tr', null, 'access-group-head');
+    var cell = el('td');
+    cell.colSpan = 5;
+    var button = el('button', null, 'access-group-toggle');
+    button.type = 'button';
+    button.appendChild(el('span', '\u25B8', 'access-chevron'));
+    button.lastChild.setAttribute('aria-hidden', 'true');
+    button.appendChild(el('strong', nameOf(group.party) || 'Unnamed'));
+    button.appendChild(el('span', GROUP_KIND[group.party.type] || '', 'text-muted'));
+    var count = group.rows.length + (group.rows.length === 1 ? ' row' : ' rows');
+    button.appendChild(el('span', count, 'text-muted access-group-count'));
+    cell.appendChild(button);
+    tr.appendChild(cell);
+    tr._rows = [];
+    button.addEventListener('click', function () {
+      var now = button.getAttribute('aria-expanded') === 'true';
+      state.open[group.key] = !now;
+      setGroupOpen(tr, !now);
+    });
+    return tr;
   }
 
   // ── the filters ─────────────────────────────────────────────────────────────
@@ -217,18 +295,31 @@
 
   function renderRows() {
     var filters = currentFilters();
-    var rows = sortedRows(state.rows.filter(function (row) {
+    var rows = state.rows.filter(function (row) {
       return matches(row, filters);
-    }));
+    });
+    var groups = groupRows(rows);
+    var searching = filtersAreOn(filters);
 
     var body = byId('access-rows');
     body.textContent = '';
-    rows.forEach(function (row) {
-      body.appendChild(buildRow(row));
+    groups.forEach(function (group) {
+      // A group is closed until a person opens it; a filter opens the groups that hold a match.
+      var open = state.open[group.key] !== undefined ? state.open[group.key] : searching;
+      var head = groupHead(group, open);
+      body.appendChild(head);
+      group.rows.forEach(function (row) {
+        var tr = buildRow(row);
+        tr.classList.add('access-group-row');
+        head._rows.push(tr);
+        body.appendChild(tr);
+      });
+      setGroupOpen(head, open);
     });
 
     var count = byId('access-row-count');
-    count.textContent = rows.length + (rows.length === 1 ? ' row' : ' rows');
+    count.textContent = rows.length + (rows.length === 1 ? ' row' : ' rows')
+      + ' in ' + groups.length + (groups.length === 1 ? ' group' : ' groups');
 
     var empty = byId('access-empty');
     var none = byId('access-no-rows');
@@ -316,11 +407,17 @@
     renderUnused();
   }
 
+  // A new filter starts over: the groups that hold a match open by themselves, and nothing a person closed hides it.
+  function filtersChanged() {
+    state.open = {};
+    renderRows();
+  }
+
   function start() {
-    byId('access-show').addEventListener('change', renderRows);
-    byId('access-filter-name').addEventListener('input', renderRows);
+    byId('access-show').addEventListener('change', filtersChanged);
+    byId('access-filter-name').addEventListener('input', filtersChanged);
     PICKERS.forEach(function (picker) {
-      byId(picker.id).addEventListener('change', renderRows);
+      byId(picker.id).addEventListener('change', filtersChanged);
     });
     loadAccess();
   }

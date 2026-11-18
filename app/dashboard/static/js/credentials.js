@@ -343,17 +343,20 @@ function accessPermissionNotice(groups, turnOn) {
 
 // Turn one permission on for every row of a group that needs it, then show the list again.
 async function turnOnForRows(group, reload) {
-  const names = [];
+  // The agents this button reaches, each once.
+  const people = [];
+  for (const row of group.rows) {
+    if (!people.some(function (p) { return p.agent_id === row.agent_id; })) people.push(row);
+  }
   // One button can reach several agents: say which, and ask first. A permission is only ever turned on by a person who saw who gets it.
-  if (group.rows.length > 1) {
-    const who = group.rows.map(function (row) { return row.display_name; }).join(', ');
+  if (people.length > 1) {
+    const who = people.map(function (row) { return row.display_name; }).join(', ');
     if (!await confirmDialog('Turn on ' + group.label + ' for ' + who + '?')) return;
   }
-  for (const row of group.rows) {
+  for (const row of people) {
     if (!await turnOnPermission(row.agent_id, group.permission)) return;
-    names.push(row.display_name);
   }
-  showToast(group.label + ' turned on for ' + names.join(', '), 'success');
+  showToast(group.label + ' turned on for ' + people.map(function (row) { return row.display_name; }).join(', '), 'success');
   await reload();
 }
 
@@ -546,22 +549,11 @@ async function openOwnerPanel() {
   showOwnerPanel(panel);
 }
 
-// The panel is inside a dialog whose footer sits over the content: scroll the panel into view and give
-// the body room under the footer, so it is never hidden behind it on a phone.
+// The panel is inside a dialog whose Close bar sticks to the bottom of the sheet. The panel carries a scroll margin
+// the height of that bar (see dashboard.css), so scrolling it into view leaves it clear of the bar; nothing is
+// added to the body, because padding there would lift the bar off the bottom of the sheet.
 function showOwnerPanel(panel) {
-  const overlay = document.getElementById('access-modal');
-  const scroller = overlay ? overlay.querySelector('.modal-scroll') : null;
-  const footer = overlay ? overlay.querySelector('.modal-footer') : null;
-  if (scroller && footer) {
-    const height = Math.round(footer.getBoundingClientRect().height);
-    if (height) scroller.style.paddingBottom = (height + 16) + 'px';
-  }
   panel.scrollIntoView({ block: 'nearest' });
-  if (scroller && footer) {
-    const panelBottom = panel.getBoundingClientRect().bottom;
-    const footerTop = footer.getBoundingClientRect().top;
-    if (panelBottom > footerTop) scroller.scrollTop += (panelBottom - footerTop) + 8;
-  }
 }
 
 // The owner it has now: the scope the credential lives under.
@@ -592,6 +584,9 @@ async function previewOwner() {
   box.append(accessEl('p', 'Gains access: ' + ownerNames(p.gain)));
   box.append(accessEl('p', 'Loses access: ' + ownerNames(p.lose)));
   box.append(accessEl('p', p.unchanged + (p.unchanged === 1 ? ' agent keeps access' : ' agents keep access'), 'text-muted'));
+  // The preview made the panel taller: bring Save and Cancel back into view, clear of the Close bar.
+  const panel = document.getElementById('access-owner-panel');
+  if (panel) panel.scrollIntoView({ block: 'nearest' });
 }
 
 function ownerNames(agents) {

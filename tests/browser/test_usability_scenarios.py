@@ -140,4 +140,7 @@ def test_5_find_out_who_can_reach_a_credential(site):
     page.goto(base + "/access")
     page.wait_for_load_state("load")
     page.wait_for_function("document.body.innerText.includes('Worker A')")
+    # the rows are grouped and closed; asking for the credential by name opens the groups that hold it
+    page.fill("#access-filter-name", "database-password")
+    page.wait_for_function("document.querySelectorAll('#access-rows tr.access-group-row:not(.is-closed)').length > 0")
     assert "database-password" in page.inner_text("body")
