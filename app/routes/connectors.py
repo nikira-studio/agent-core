@@ -203,6 +203,20 @@ def _missing_base_url(ct: dict, config_json) -> str | None:
     return "This service needs a Base URL: the address it is reached at, such as https://api.example.com"
 
 
+def _service_owner_problem(scope: Optional[str]) -> Optional[str]:
+    """A service can never use a connection (it has no See or Run capabilities permission), so a connection owned by one
+    could never be used by anyone: refuse it by name rather than create a connection nobody can use."""
+    kind, _, ident = (scope or "").partition(":")
+    if kind != "agent" or not ident:
+        return None
+    from app.services import agent_service
+
+    owner = agent_service.get_agent_by_id(ident)
+    if owner and (owner.get("kind") or "agent") == "service":
+        return "A service cannot own a connection. Choose a person, a workspace or an agent."
+    return None
+
+
 def _checked_audience(entries, ctx):
     """An audience sent with a connection: administrators only, every entry valid. Returns (clean list or None, an
     error response or None)."""
@@ -274,6 +288,9 @@ def create_binding(
     enforcer = ctx.connector_enforcer()
     if not enforcer.can_write(body.scope):
         return error_response("SCOPE_DENIED", "Access denied to this scope", 403)
+    owner_problem = _service_owner_problem(body.scope)
+    if owner_problem:
+        return error_response("SERVICE_CANNOT_OWN", owner_problem, 400)
     ct = connector_service.get_connector_type(body.connector_type_id)
     if not ct:
         return error_response("NOT_FOUND", "Capability not found", 404)
@@ -480,6 +497,10 @@ def update_binding(
         return error_response("SCOPE_DENIED", "Access denied to this connection", 403)
     if body.scope and not enforcer.can_write(body.scope):
         return error_response("SCOPE_DENIED", "Access denied to new scope", 403)
+    if body.scope and body.scope != binding["scope"]:
+        owner_problem = _service_owner_problem(body.scope)
+        if owner_problem:
+            return error_response("SERVICE_CANNOT_OWN", owner_problem, 400)
     if body.credential_id:
         credential = credential_service.get_credential(body.credential_id)
         if not credential:

@@ -19,17 +19,22 @@ if (typeof window.accessEl === 'undefined') {
 
 // ── small helpers ───────────────────────────────────────────────────────────
 
-// The capability name is worth showing next to a connection's own name only when the name does not already start
-// with it: "Context7" needs no second "Context7".
+// The capability name is worth showing next to a connection's own name only when the name does not already contain it
+// or its first word: "Context7" and "UniFi read-only" need no second mention.
 function accessCapabilityNote(capability, name) {
   var cap = (capability || '').trim();
-  if (!cap || String(name || '').trim().toLowerCase().indexOf(cap.toLowerCase()) === 0) return '';
+  if (!cap) return '';
+  var lowered = String(name || '').toLowerCase();
+  var wanted = cap.toLowerCase();
+  if (lowered.indexOf(wanted) >= 0 || lowered.indexOf(wanted.split(/\s+/)[0]) >= 0) return '';
   return cap;
 }
 
+// A name with brackets of its own gets the capability after a dot, so two brackets never follow each other.
 function accessConnectionLabel(capability, name) {
   var note = accessCapabilityNote(capability, name);
-  return note ? name + ' (' + note + ')' : name;
+  if (!note) return name;
+  return String(name).indexOf('(') >= 0 ? name + ' \u00b7 ' + note : name + ' (' + note + ')';
 }
 
 // A date input yields YYYY-MM-DD with no timezone. The person means the end of that day where they are, so the

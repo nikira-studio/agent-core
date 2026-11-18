@@ -167,13 +167,17 @@ function accessDate(value) {
   return when.toLocaleDateString('en-GB', { timeZone: 'UTC', day: 'numeric', month: 'short', year: 'numeric' });
 }
 
-// A connection is shown by its own name; the capability goes in brackets only when the name does not already start
-// with it: "Context7" stays "Context7", "Work account" becomes "Work account (GitHub)".
+// A connection is shown by its own name; the capability is added only when the name does not already contain it or
+// its first word: "Context7" and "UniFi read-only" stay as they are, "Work account" becomes "Work account (GitHub)".
+// A name with brackets of its own gets the capability after a dot, so two brackets never follow each other.
 function connectionLabel(connection) {
   var name = connection.name || '';
   var capability = (connection.capability || '').trim();
-  if (!capability || name.trim().toLowerCase().indexOf(capability.toLowerCase()) === 0) return name;
-  return name + ' (' + capability + ')';
+  if (!capability) return name;
+  var lowered = name.toLowerCase();
+  var wanted = capability.toLowerCase();
+  if (lowered.indexOf(wanted) >= 0 || lowered.indexOf(wanted.split(/\s+/)[0]) >= 0) return name;
+  return name.indexOf('(') >= 0 ? name + ' \u00b7 ' + capability : name + ' (' + capability + ')';
 }
 
 // The connections this page knows about, by id. A credential that belongs to a connection is shown with its name.
@@ -329,6 +333,16 @@ function connectionUsers(connection) {
 async function addAccessConnection() {
   const binding = document.getElementById('access-connection-pick').value;
   if (!binding) return;
+  // A connection signs in with one credential: adding this one replaces the one it has now, so say so first.
+  const chosen = ((accessData && accessData.connections_to_add) || []).find(c => c.id === binding);
+  if (chosen && chosen.signs_in_with) {
+    const ok = await confirmDialog(
+      connectionLabel(chosen) + ' signs in with ' + chosen.signs_in_with.name + ' now. Adding this credential '
+      + 'replaces it. ' + chosen.signs_in_with.name + ' stays stored and can be added back.',
+      { title: 'Replace the credential ' + connectionLabel(chosen) + ' signs in with?', confirmLabel: 'Replace credential', danger: false }
+    );
+    if (!ok) return;
+  }
   const r = await apiFetch('/api/connector-bindings/' + encodeURIComponent(binding), {
     method: 'PUT', body: JSON.stringify({ credential_id: accessEntryId }),
   });

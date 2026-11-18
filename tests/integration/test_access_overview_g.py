@@ -162,10 +162,14 @@ def test_the_overview_is_for_an_admin_session_only_and_shows_no_secret(world, te
 def test_a_connection_is_shown_by_its_own_name_and_the_capability_only_when_the_name_does_not_start_with_it(world):
     connector_service.create_binding("ov-cap", "Overview capability for the team", SCOPE, config_json='{"base_url": "http://example.test"}')
     connector_service.create_binding("ov-cap", "OVERVIEW CAPABILITY", SCOPE, config_json='{"base_url": "http://example.test"}')
+    connector_service.create_binding("ov-cap", "Read-only overview", SCOPE, config_json='{"base_url": "http://example.test"}')
+    connector_service.create_binding("ov-cap", "Team data (read only)", SCOPE, config_json='{"base_url": "http://example.test"}')
     names = {r["to"]["name"] for r in _rows(_overview(world["client"]), "agent_capability")}
-    assert "Main (Overview capability)" in names
+    assert "Main (Overview capability)" in names  # nothing of the capability in the name: bracketed
     assert "Overview capability for the team" in names
     assert "OVERVIEW CAPABILITY" in names
+    assert "Read-only overview" in names  # holds the capability's first word
+    assert "Team data (read only) \u00b7 Overview capability" in names  # no two brackets in a row
     assert not any(", " in n for n in names)
 
 

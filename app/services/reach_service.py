@@ -42,13 +42,18 @@ def active_agents() -> list[dict]:
 
 
 def connection_label(capability: Optional[str], name: str) -> str:
-    """How a connection is shown: its own name, with the capability name in brackets only when the name does not already
-    start with it (so "Context7" stays "Context7", and "Work account" becomes "Work account (GitHub)")."""
+    """How a connection is shown: its own name, with the capability name added only when the name does not already
+    contain it or its first word (so "Context7" and "UniFi read-only" stay as they are, and "Work account" becomes
+    "Work account (GitHub)"). A name that has brackets of its own gets the capability after a dot instead, so two
+    brackets never follow each other."""
     name = name or ""
     capability = (capability or "").strip()
-    if not capability or name.strip().lower().startswith(capability.lower()):
+    if not capability:
         return name
-    return f"{name} ({capability})"
+    lowered, wanted = name.lower(), capability.lower()
+    if wanted in lowered or wanted.split()[0] in lowered:
+        return name
+    return f"{name} · {capability}" if "(" in name else f"{name} ({capability})"
 
 
 def agent_contexts() -> list[tuple[dict, object]]:
@@ -479,8 +484,19 @@ def credential_access(entry: dict) -> dict:
         for a in all_entries.values()
         if (a.get("kind") == "service") and a["id"] not in held
     ]
+    from app.services import credential_service
+
+    credential_names = {c["id"]: c["name"] for c in credential_service.list_credentials(limit=100000)}
+    # Each connection says what it signs in with now, so adding this credential to one that has another can say
+    # that it replaces it, before anything is saved.
     can_sign_in = [
-        {"id": b["id"], "name": b["name"], "capability": b.get("connector_display_name")}
+        {
+            "id": b["id"], "name": b["name"], "capability": b.get("connector_display_name"),
+            "signs_in_with": (
+                {"id": b["credential_id"], "name": credential_names.get(b["credential_id"], "another credential")}
+                if b.get("credential_id") else None
+            ),
+        }
         for b in bindings if b.get("credential_id") != entry["id"]
     ]
     return {
