@@ -41,7 +41,7 @@ def test_the_dialog_says_what_the_agent_can_do_and_reach(agents):
     page = agents
     _open_access(page)
     dialog = page.locator("#access-agent-modal")
-    text = dialog.inner_text()
+    text = dialog.text_content()  # not inner_text: headings are shown in capitals by CSS
     assert "What Worker A can do and reach" in text
     assert "Workspaces" in text and "Main Place" in text
     assert "reads" in text
@@ -50,6 +50,7 @@ def test_the_dialog_says_what_the_agent_can_do_and_reach(agents):
     assert "Keys" in text and "Permissions" in text
     assert "Add, rename or revoke keys under More > Keys." in text
     assert "workspace:" not in text  # plain words, not scope syntax
+    page.locator("#access-agent-cancel").click()
 
 
 def test_adding_a_workspace_is_previewed_before_it_is_saved(agents):
