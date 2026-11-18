@@ -187,4 +187,6 @@ def counts(snapshot: dict) -> dict:
         "bindings": len(snapshot["bindings"]),
         "credentials": len(snapshot["credentials"]),
         "grants": sum(len(v) for v in snapshot["fetch"].values()),
+        "see_cells": sum(len(v) for v in snapshot["see"].values()),
+        "run_cells": sum(len(v) for v in snapshot["run"].values()),
     }

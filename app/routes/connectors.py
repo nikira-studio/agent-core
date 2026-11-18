@@ -111,6 +111,9 @@ class CreateBindingRequest(BaseModel):
     # turns off. A connection can only narrow its service; it can never switch on what the service switched off.
     actions_mode: Optional[str] = None
     disabled_actions: Optional[list[str]] = None
+    # Who may use the connection, when not what its scope has always meant: a list of {kind, ref, exclude}
+    # (kind: agent, workspace or person_agents). An administrator only.
+    audience: Optional[list[dict]] = None
 
 
 class UpdateBindingRequest(BaseModel):
@@ -130,6 +133,9 @@ class UpdateBindingRequest(BaseModel):
     reset_credential: bool = False
     actions_mode: Optional[str] = None
     disabled_actions: Optional[list[str]] = None
+    # Replace who may use the connection (see CreateBindingRequest). Sending only a new `scope` gives the connection
+    # the audience that scope has always meant. An administrator only.
+    audience: Optional[list[dict]] = None
 
 
 class ActionSettingsRequest(BaseModel):
@@ -192,6 +198,38 @@ def _missing_base_url(ct: dict, config_json) -> str | None:
     return "This service needs a Base URL: the address it is reached at, such as https://api.example.com"
 
 
+def _checked_audience(entries, ctx):
+    """An audience sent with a connection: administrators only, every entry valid. Returns (clean list or None, an
+    error response or None)."""
+    if entries is None:
+        return None, None
+    if not ctx.is_admin:
+        return None, error_response("FORBIDDEN", "Only an administrator may choose who can use a connection", 403)
+    from app.database import get_db
+    from app.services import audience_service
+
+    with get_db() as conn:
+        clean, problems = audience_service.validate(conn, entries)
+    if problems:
+        return None, error_response("INVALID_AUDIENCE", " ".join(problems), 400)
+    return clean, None
+
+
+def audience_service_entries(binding_id: str) -> list[dict]:
+    from app.services import audience_service
+
+    return audience_service.entries_for(binding_id)
+
+
+def _with_audience(binding: dict, ctx) -> dict:
+    """An administrator's answers carry the audience list; an agent's never name other agents."""
+    if binding and ctx.is_admin:
+        from app.services import audience_service
+
+        return {**binding, "audience": audience_service.entries_for(binding["id"])}
+    return binding
+
+
 @router.get("")
 def list_bindings(
     scope: Optional[str] = None,
@@ -207,6 +245,7 @@ def list_bindings(
     allowed = [b for b in bindings if ctx.can_use_binding(b)]
     if scope and not allowed and not ctx.connector_enforcer().can_read(scope):
         return error_response("SCOPE_DENIED", "Access denied to this scope", 403)
+    allowed = [_with_audience(b, ctx) for b in allowed]
     return success_response({"bindings": allowed, "total": len(allowed)})
 
 
@@ -247,6 +286,9 @@ def create_binding(
     problem = _private_address_problem(body.config_json, body.endpoint_url_override)
     if problem:
         return error_response("PRIVATE_ADDRESS", problem, 400)
+    audience, audience_error = _checked_audience(body.audience, ctx)
+    if audience_error:
+        return audience_error
     actions_mode, disabled_actions = body.actions_mode, body.disabled_actions
     if ctx.actor_type == "agent":
         # What a connection allows is a person's decision. An agent cannot choose it, and a connection an agent makes
@@ -271,9 +313,11 @@ def create_binding(
             endpoint_url_override=body.endpoint_url_override,
             actions_mode=actions_mode,
             disabled_actions=disabled_actions,
+            audience=audience,
         )
     except ValueError as e:
         return error_response("INVALID_CONFIG", str(e), 400)
+    binding = _with_audience(binding, ctx)
     audit_service.write_event(
         actor_type=ctx.actor_type,
         actor_id=ctx.actor_id,
@@ -350,7 +394,7 @@ def get_binding(
         return error_response("NOT_FOUND", "Connection not found", 404)
     if not ctx.can_use_binding(binding):
         return error_response("SCOPE_DENIED", "Access denied to this connection", 403)
-    return success_response({"binding": binding})
+    return success_response({"binding": _with_audience(binding, ctx)})
 
 
 @router.get("/{binding_id}/credential-reach")
@@ -398,8 +442,13 @@ def update_binding(
             )
     if (body.actions_mode is not None or body.disabled_actions is not None) and ctx.actor_type == "agent":
         return error_response("ACTIONS_NOT_FOR_AGENTS", "Only a person can choose what a connection allows", 403)
+    audience, audience_error = _checked_audience(body.audience, ctx)
+    if audience_error:
+        return audience_error
+    audience_before = audience_service_entries(binding_id) if audience is not None or body.scope else None
     try:
         update_fields = dict(
+            audience=audience,
             actions_mode=body.actions_mode,
             disabled_actions=body.disabled_actions,
             name=body.name,
@@ -432,6 +481,12 @@ def update_binding(
     if not ok:
         return error_response("UPDATE_FAILED", "No valid fields to update", 400)
     updated_binding = connector_service.get_binding(binding_id)
+    if audience_before is not None and audience_service_entries(binding_id) != audience_before:
+        audit_service.write_event(
+            actor_type=ctx.actor_type, actor_id=ctx.actor_id, action="connector_audience_changed",
+            resource_type="connector_binding", resource_id=binding_id, result="success",
+            details={"before": audience_before, "after": audience_service_entries(binding_id), "via": "connection update"},
+        )
     if body.credential_id is not None or body.reset_credential:
         audit_service.write_event(
             actor_type=ctx.actor_type,
@@ -459,7 +514,7 @@ def update_binding(
                 "disabled_actions": updated_binding.get("disabled_actions"),
             },
         )
-    return success_response({"binding": updated_binding})
+    return success_response({"binding": _with_audience(updated_binding, ctx)})
 
 
 @router.delete("/{binding_id}")

@@ -80,6 +80,7 @@ def test_the_step_changes_no_access_and_keeps_keys_credentials_and_grants():
     assert compare.differences(before, after) == []
     assert snapshot.counts(after) == {
         "identities": 5, "agents": 3, "services": 2, "bindings": 0, "credentials": 1, "grants": 1,
+        "see_cells": 0, "run_cells": 0,
     }
     assert after["fetch"] == {"runtime-web": {"c1": {"write": True, "expires_at": None}}}
     assert after["identities"]["runtime-web"]["live_keys"] == 1

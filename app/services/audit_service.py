@@ -44,6 +44,7 @@ AUDIT_ACTIONS = (
     "credential_key_restored",
     "broker_resolve",
     "broker_resolve_denied",
+    "connector_audience_changed",
     "agent_permission_turned_on",
     "broker_credential_rotated",
     "credential_consumer_grant_created",

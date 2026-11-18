@@ -69,6 +69,14 @@ def main(argv: list[str] | None = None) -> int:
         conn = sqlite3.connect(str(copy))
         conn.row_factory = sqlite3.Row
         try:
+            has_audience = conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='connector_binding_audience'"
+            ).fetchone()
+            if has_audience:
+                rows = conn.execute(
+                    "SELECT kind, exclude, COUNT(*) AS n FROM connector_binding_audience GROUP BY kind, exclude ORDER BY kind, exclude"
+                ).fetchall()
+                print("  audience rows: " + ", ".join(f"{r['n']} {r['kind']}{' (excluded)' if r['exclude'] else ''}" for r in rows))
             for row in conn.execute("SELECT kind, id FROM agents ORDER BY kind, id"):
                 print(f"  {row['kind']:8} {row['id']}")
         finally:

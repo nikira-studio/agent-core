@@ -200,6 +200,10 @@ def _unused(agents, credentials, bindings, connection_users, grants, use) -> dic
             idle.append({"id": a["id"], "name": a.get("display_name") or a["id"], "last_signed_in": last,
                          "why": "It may fetch no secret."})
     left_behind = []
+    from app.services import audience_service
+
+    with get_db() as conn:
+        audiences = audience_service.all_entries(conn)
     for a in agents.values():
         if a.get("is_active"):
             continue  # a retired agent or a retired service
@@ -207,7 +211,11 @@ def _unused(agents, credentials, bindings, connection_users, grants, use) -> dic
         held = [g for g in live if g["consumer_agent_id"] == a["id"]]
         owned_credentials = [c["name"] for c in credentials.values() if c["scope"] == own]
         owned_connections = [b["name"] for b in bindings if b["scope"] == own]
-        if held or owned_credentials or owned_connections:
+        named_on = [
+            b["name"] for b in bindings
+            if any(e["kind"] == "agent" and e["ref"] == a["id"] and not e["exclude"] for e in audiences.get(b["id"], []))
+        ]
+        if held or owned_credentials or owned_connections or named_on:
             parts = []
             if held:
                 parts.append(f"{len(held)} secret{'s' if len(held) != 1 else ''} it may still fetch")
@@ -215,6 +223,8 @@ def _unused(agents, credentials, bindings, connection_users, grants, use) -> dic
                 parts.append(f"credentials it owns: {', '.join(owned_credentials)}")
             if owned_connections:
                 parts.append(f"connections it owns: {', '.join(owned_connections)}")
+            if named_on:
+                parts.append(f"named as a user of: {', '.join(named_on)}")
             left_behind.append({"id": a["id"], "name": a.get("display_name") or a["id"], "why": "; ".join(parts)})
     return {
         "credentials": sorted(unused_credentials, key=lambda r: r["name"].lower()),

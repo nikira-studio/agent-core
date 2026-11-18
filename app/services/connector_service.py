@@ -862,6 +862,10 @@ def update_binding(binding_id: str, **fields) -> bool:
     """Update a connection. Changing ``scope`` (the owner) without an ``audience`` gives it the audience that scope has
     always meant, as when it was created; an explicit ``audience`` (already validated) replaces the list."""
     audience = fields.pop("audience", None)
+    scope_changed = False
+    if fields.get("scope") is not None:
+        current_binding = get_binding(binding_id)
+        scope_changed = bool(current_binding) and _normalize_scope(fields["scope"]) != current_binding["scope"]
     allowed = (
         "name",
         "scope",
@@ -965,7 +969,8 @@ def update_binding(binding_id: str, **fields) -> bool:
                 if audience_service.table_exists(conn):
                     audience_service.replace(conn, binding_id, audience)
                     changed = True
-            elif fields.get("scope") is not None:
+            elif scope_changed:
+                # A new owner given as a bare scope means what it always meant: the audience that scope gives.
                 audience_service.seed(conn, binding_id, _normalize_scope(fields["scope"]))
         conn.commit()
         return changed

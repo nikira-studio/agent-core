@@ -469,3 +469,20 @@ def credential_access(entry: dict) -> dict:
         # A grant held by an entry that is not a service (kept from before): listed so nobody is surprised.
         "held_by_agents": [g["display_name"] for g in granted if g["kind"] != "service"],
     }
+
+
+def audience_options() -> dict:
+    """What can be added to an audience: the agents (never services), the workspaces and the people, by plain name."""
+    from app.services import auth_service, workspace_service
+
+    return {
+        "agents": [{"id": a["id"], "name": a.get("display_name") or a["id"]} for a in active_agents()],
+        "workspaces": [
+            {"id": w["id"], "name": w.get("name") or w["id"]}
+            for w in (workspace_service.list_workspaces() or []) if w.get("is_active", True)
+        ],
+        "people": [
+            {"id": u["id"], "name": u.get("display_name") or u["id"]}
+            for u in auth_service.list_users() if u.get("is_active", True)
+        ],
+    }
