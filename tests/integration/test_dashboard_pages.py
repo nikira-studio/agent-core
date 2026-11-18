@@ -234,13 +234,14 @@ def test_connectors_directory_page_surfaces_mcp_import(authenticated_client):
     assert "import-spec-import-btn" in html
 
 
-def test_dashboard_has_six_entries_in_two_groups_and_the_rest_are_tabs(authenticated_client):
+def test_dashboard_has_seven_entries_in_one_group_and_the_rest_are_tabs(authenticated_client):
     html = authenticated_client.get("/").text
     nav = html.split('<nav aria-label="Main" id="main-nav">', 1)[1].split("</nav>", 1)[0]
     entries = re.findall(r'<a href="([^"]+)" class="[^"]*"[^>]*><span>([^<]+)</span>', nav)
     assert entries == [
         ("/", "Needs you"), ("/activity", "Activity"), ("/memory", "Memory"),
-        ("/agents", "Agents"), ("/connectors", "Services"), ("/settings", "Settings"),
+        ("/agents", "Agents"), ("/connectors", "Capabilities"), ("/credentials", "Credentials"),
+        ("/settings", "Settings"),
     ]
     assert "Handle exceptions" not in nav and "Set up" not in nav and "nav-heading" not in nav  # one plain list
     # The other pages are tabs inside their entry, with the right tab and entry highlighted.
@@ -261,12 +262,15 @@ def test_dashboard_has_six_entries_in_two_groups_and_the_rest_are_tabs(authentic
         assert 'aria-label="In this section"' not in page  # no second bar above the heading
     # Same place on every page: the heading first, then the one row of tabs under it.
     for route in ("/", "/approvals", "/activity", "/audit", "/agents", "/integrations", "/workspaces",
-                  "/connectors", "/credentials", "/settings", "/users", "/webhooks"):
+                  "/credentials", "/services", "/settings", "/users", "/webhooks"):
         page = authenticated_client.get(route).text
         assert page.count('class="page-tabs"') == 1, route
         assert page.index("<h1>") < page.index('class="page-tabs"'), route
     assert 'href="/audit" class="page-tab' in authenticated_client.get("/activity").text
-    assert 'href="/credentials" class="page-tab' in authenticated_client.get("/connectors").text
+    assert 'href="/services" class="page-tab' in authenticated_client.get("/credentials").text
+    # Capabilities is a page of its own: no row of tabs above it.
+    connectors = authenticated_client.get("/connectors").text
+    assert 'class="page-tabs"' not in connectors
 
 
 def test_dashboard_shared_accessibility_behaviour(authenticated_client):
@@ -328,7 +332,7 @@ def test_overview_says_so_when_nothing_is_waiting_and_shows_health(authenticated
     html = authenticated_client.get("/").text
     assert "Nothing needs you" in html
     health = html.split('id="overview-health"', 1)[1]
-    for label in ("Agent Core", "Services", "Webhooks", "Local credential helper"):
+    for label in ("Agent Core", "Capabilities", "Webhooks", "Local credential helper"):
         assert label in health
 
 
@@ -352,18 +356,18 @@ def test_a_fresh_install_shows_getting_started(authenticated_client):
     assert "Add an agent" in html and "Connect its tool" in html
 
 
-def test_services_page_has_one_add_entry_and_explains_itself(authenticated_client):
+def test_capabilities_page_has_one_add_entry_and_explains_itself(authenticated_client):
     html = authenticated_client.get("/connectors").text
-    assert html.count("Add a service") >= 2  # the button, and the quick-start step
+    assert html.count("Add a capability") >= 2  # the button, and the quick-start step
     header = html.split('class="page-actions"', 1)[1].split("stat-grid", 1)[0]
-    for way in ("From an API spec", "From an MCP server", "A plain web service"):
+    for way in ("From an API spec", "From an MCP server", "A plain web capability"):
         assert way in header
     assert "+ New Credential" not in header and "Browse Adapters" not in header
-    assert "No connections yet." in html  # built-in services exist, connections do not
-    assert "Getting a service working" in html  # nothing is bound yet
+    assert "No connections yet." in html  # built-in capabilities exist, connections do not
+    assert "Getting a capability working" in html  # nothing is bound yet
 
 
-def test_services_page_tucks_expert_fields_under_advanced(authenticated_client):
+def test_capabilities_page_tucks_expert_fields_under_advanced(authenticated_client):
     html = authenticated_client.get("/connectors").text
     create = html.split('id="create-binding-modal"', 1)[1].split('id="edit-binding-modal"', 1)[0]
     advanced = create.split("<summary>Advanced</summary>", 1)[1].split("</details>", 1)[0]
@@ -373,7 +377,7 @@ def test_services_page_tucks_expert_fields_under_advanced(authenticated_client):
     assert 'id="edit-binding-config"' in advanced and 'id="edit-binding-mcp-endpoint"' in advanced
 
 
-def test_services_page_run_history_is_collapsed(authenticated_client):
+def test_capabilities_page_run_history_is_collapsed(authenticated_client):
     html = authenticated_client.get("/connectors").text
     assert '<details class="card fold-card" id="executions">' in html
     assert 'id="executions" open' not in html

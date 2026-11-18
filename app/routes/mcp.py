@@ -2617,7 +2617,7 @@ async def _run_custom_mcp_tool(body: dict, ctx: EffectiveAuthority):
 
         ct = connector_service.get_connector_type(params["connector_type_id"])
         if not ct:
-            return _mcp_error("NOT_FOUND", "Service not found", 404)
+            return _mcp_error("NOT_FOUND", "Capability not found", 404)
         wanted = params.get("action")
         view = "full" if wanted else params.get("view", "compact")
         if view not in ("compact", "full"):

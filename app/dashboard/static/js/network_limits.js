@@ -60,7 +60,7 @@ function initNetworkLimits() {
     const mode = document.getElementById('nl-internal-mode');
     if (!mode.disabled) changes.internal_mode = mode.value;
     save(changes, 'nl-internal-note', mode.value === 'block'
-      ? 'Block private addresses? Services, webhooks and imports at addresses like 192.168.x.x stop working unless they are in the allowed list.' : null);
+      ? 'Block private addresses? Capabilities, webhooks and imports at addresses like 192.168.x.x stop working unless they are in the allowed list.' : null);
   });
   document.getElementById('nl-save-broker').addEventListener('click', function() {
     const changes = { broker_allowed: lines('nl-broker-allowed') };

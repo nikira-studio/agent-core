@@ -27,7 +27,7 @@ _SCOPE_KIND_TAG = {"workspace": "workspace", "user": "personal", "agent": "agent
 
 
 REFERENCE_NOTE = (
-    "They can see its name (its reference) and use it wherever Agent Core connects a service to it. "
+    "They can see its name (its reference) and use it wherever Agent Core makes a connection with it. "
     "Agent Core does not show them the secret itself."
 )
 
@@ -139,7 +139,7 @@ def credentials_page(request: Request, session: dict = Depends(require_auth)):
     scope_by_entry = {e["id"]: e.get("scope", "") for e in credential_entries}
 
     def used_by_cell(entry_id: str) -> str:
-        """Always the same parts, in the same order: who was given the secret, who else can see its name, services.
+        """Always the same parts, in the same order: who was given the secret, who else can see its name, connections.
 
         The dialog shows the same two groups under the same labels (credentials.js renderUsedBy mirrors this)."""
         names = holders.get(entry_id, [])
@@ -163,9 +163,9 @@ def credentials_page(request: Request, session: dict = Depends(require_auth)):
                 f"<div class='text-muted used-by-seen' style='font-size:0.8rem' title='{escape_html(', '.join(others))}. {escape_html(REFERENCE_NOTE)}'>"
                 f"{len(others)} other{'s' if len(others) != 1 else ''} can see its name</div>"
             )
-        n_services = service_counts.get(entry_id, 0)
-        services = f"<div class='text-muted' style='font-size:0.8rem'>{n_services} service{'s' if n_services != 1 else ''}</div>" if n_services else ""
-        return f"{given}{seen}{services}"
+        n_connections = service_counts.get(entry_id, 0)
+        connections = f"<div class='text-muted' style='font-size:0.8rem'>{n_connections} connection{'s' if n_connections != 1 else ''}</div>" if n_connections else ""
+        return f"{given}{seen}{connections}"
 
     credential_rows = ""
     for e in credential_entries:
@@ -260,7 +260,7 @@ def credentials_page(request: Request, session: dict = Depends(require_auth)):
     <div class="modal-overlay" id="access-modal" style="display:none">
       <div class="modal modal-wide">
         <h2>Who can use <span id="access-name"></span></h2>
-        <p class="form-hint" style="margin-bottom:12px">One credential per service: give it to each agent that needs it instead of storing it again. Use a separate credential only for a different account or an outside service.</p>
+        <p class="form-hint" style="margin-bottom:12px">One credential per capability: give it to each agent that needs it instead of storing it again. Use a separate credential only for a different account or a different capability.</p>
         <h3 class="sub-heading form-section-title">Given the secret</h3>
         <div id="access-grants"></div>
         <div class="form-group">
@@ -269,10 +269,10 @@ def credentials_page(request: Request, session: dict = Depends(require_auth)):
             <select id="access-agent" style="flex:1"></select>
             <button type="button" class="btn btn-sm" id="access-add">Add</button>
           </div>
-          <p class="form-hint">An agent can be given a credential when its role includes reading credential values (the Service agent role).</p>
+          <p class="form-hint">An agent can be given a credential when it has the Fetch secrets permission (the Service role).</p>
           <details id="access-cannot" style="display:none"><summary class="text-muted">Can't receive it yet (<span id="access-cannot-count"></span>)</summary><div id="access-cannot-list"></div></details>
         </div>
-        <h3 class="sub-heading form-section-title">Services using it</h3>
+        <h3 class="sub-heading form-section-title">Connections using it</h3>
         <div id="access-services"></div>
         <h3 class="sub-heading form-section-title" id="access-others-title">Others who can see its name</h3>
         <div id="access-scope-readers"></div>
@@ -356,7 +356,7 @@ def credentials_page(request: Request, session: dict = Depends(require_auth)):
           <div class="form-group">
             <label>Expires</label>
             <input type="date" id="credential-expires">
-            <p class="form-hint">Optional. Set it when the secret itself has an end date, so the dashboard can warn you before a service starts failing.</p>
+            <p class="form-hint">Optional. Set it when the secret itself has an end date, so the dashboard can warn you before a connection or service using it starts failing.</p>
           </div>
           <button type="submit" class="btn btn-primary">Create Credential</button>
           <button type="button" class="btn btn-secondary" onclick="closeModal('create-credential-modal')">Cancel</button>

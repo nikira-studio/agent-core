@@ -265,7 +265,7 @@ def _connector_request_cards(row: dict, view: dict) -> str:
         "<h2>What it will send</h2>"
         "<p class='text-muted' style='font-size:0.85rem'>Exactly this, once, if you approve. Anything that looks like a key or password is hidden.</p>"
         "<div class='table-scroll' style='overflow-x:auto'><table><tbody>"
-        "<tr><td style='width:9rem'>Service</td><td>" + escape_html((connector_type or {}).get("display_name") or "") + "</td></tr>"
+        "<tr><td style='width:9rem'>Capability</td><td>" + escape_html((connector_type or {}).get("display_name") or "") + "</td></tr>"
         "<tr><td>Action</td><td><code>" + escape_html(payload["action"]) + "</code></td></tr>"
         "<tr><td>Binding</td><td>" + escape_html((binding or {}).get("name") or payload["binding_id"]) + "</td></tr>"
         "<tr><td>Workspace</td><td>" + escape_html(row["scope"].replace("workspace:", "")) + "</td></tr>"

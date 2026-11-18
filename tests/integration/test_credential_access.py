@@ -90,7 +90,7 @@ def test_the_credentials_page_shows_who_uses_each_one_to_an_admin(admin):
     assert "<th class='col-used'>Used by</th>" in html and f"data-credential-access='{entry['id']}'" in html
     assert "SVC-A" in html
     dialog = html.split('id="access-modal"', 1)[1]
-    assert "One credential per service" in dialog and "Use a separate credential only for a different account" in dialog
+    assert "One credential per capability" in dialog and "Use a separate credential only for a different account" in dialog
     assert "<summary>Advanced</summary>" in dialog  # expiry and write stay out of the first view
     assert 'id="access-expires"' in dialog.split("<summary>Advanced</summary>", 1)[1]
 

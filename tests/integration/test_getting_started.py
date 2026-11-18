@@ -82,17 +82,17 @@ def test_when_every_step_is_done_it_disappears_by_itself(authenticated_client, m
     assert 'id="overview-getting-started"' not in authenticated_client.get("/").text
 
 
-def test_give_it_a_service_counts_any_enabled_connection(authenticated_client):
+def test_give_it_a_capability_counts_any_enabled_connection(authenticated_client):
     owner = _owner()
     html = authenticated_client.get("/").text
-    step = re.search(r"<li( style='opacity:\.6')?><a href='/connectors'>Give it a service", html)
+    step = re.search(r"<li( style='opacity:\.6')?><a href='/connectors'>Give it a capability", html)
     assert step and step.group(1) is None  # nothing bound: not done
     binding = _bind_a_service(owner)
     html = authenticated_client.get("/").text
-    step = re.search(r"<li( style='opacity:\.6')?><a href='/connectors'>Give it a service", html)
+    step = re.search(r"<li( style='opacity:\.6')?><a href='/connectors'>Give it a capability", html)
     assert step and step.group(1)  # an enabled connection exists: done
     connector_service.update_binding(binding["id"], enabled=False)
-    step = re.search(r"<li( style='opacity:\.6')?><a href='/connectors'>Give it a service", authenticated_client.get("/").text)
+    step = re.search(r"<li( style='opacity:\.6')?><a href='/connectors'>Give it a capability", authenticated_client.get("/").text)
     assert step and step.group(1) is None  # a disabled one does not count
 
 

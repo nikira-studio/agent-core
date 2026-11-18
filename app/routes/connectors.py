@@ -231,7 +231,7 @@ def create_binding(
         return error_response("SCOPE_DENIED", "Access denied to this scope", 403)
     ct = connector_service.get_connector_type(body.connector_type_id)
     if not ct:
-        return error_response("NOT_FOUND", "Service not found", 404)
+        return error_response("NOT_FOUND", "Capability not found", 404)
     if body.credential_id:
         credential = credential_service.get_credential(body.credential_id)
         if not credential:
@@ -286,7 +286,7 @@ def create_binding(
     if ctx.actor_type == "agent":
         payload["note"] = (
             "This connection allows nothing yet because an agent created it. A person chooses what it can do under "
-            "Services > Edit connection."
+            "Capabilities > Edit connection."
         )
     return success_response(payload, status_code=201)
 
@@ -700,7 +700,7 @@ async def get_connector_type_tools(
 ):
     ct = connector_service.get_connector_type(connector_type_id)
     if not ct:
-        return error_response("NOT_FOUND", "Service not found", 404)
+        return error_response("NOT_FOUND", "Capability not found", 404)
     disabled = ct.get("disabled_actions") or []
     if binding_id:
         # One connection's own menu: what it allows (its service's switches and its own narrowing).
@@ -742,7 +742,7 @@ def update_connector_type_actions(
         return error_response("FORBIDDEN", "Admin access required", 403)
     ct = connector_service.get_connector_type(connector_type_id)
     if not ct:
-        return error_response("NOT_FOUND", "Service not found", 404)
+        return error_response("NOT_FOUND", "Capability not found", 404)
 
     valid_actions = set(
         connector_service.normalize_action_names(ct.get("supported_actions"))
@@ -798,7 +798,7 @@ def list_action_gates(connector_type_id: str):
     from app.services import action_gate_service
 
     if not connector_service.get_connector_type(connector_type_id):
-        return error_response("NOT_FOUND", "Service not found", 404)
+        return error_response("NOT_FOUND", "Capability not found", 404)
     return success_response({"gates": action_gate_service.list_gates(connector_type_id)})
 
 
@@ -825,7 +825,7 @@ def set_action_gate(
         return error_response("FORBIDDEN", "Admin access required", 403)
     ct = connector_service.get_connector_type(connector_type_id)
     if not ct:
-        return error_response("NOT_FOUND", "Service not found", 404)
+        return error_response("NOT_FOUND", "Capability not found", 404)
     if action not in set(connector_service.normalize_action_names(ct.get("supported_actions"))):
         return error_response("INVALID_ACTION", f"Unknown action for this service: {action}", 400)
     actors = "all" if body.actors == "all" else body.actors
@@ -1276,7 +1276,7 @@ def create_http_connector(
     connector_type_id = openapi_service.generate_connector_id(body.display_name)
     existing = connector_service.get_connector_type(connector_type_id)
     if existing:
-        return error_response("CONFLICT", f"A service named '{body.display_name}' already exists", 409)
+        return error_response("CONFLICT", f"A capability named '{body.display_name}' already exists", 409)
 
     ct = connector_service.create_connector_type(
         connector_type_id=connector_type_id,
@@ -1462,7 +1462,7 @@ async def preview_mcp_tool_changes(
         return error_response("FORBIDDEN", "Admin access required", 403)
     ct = connector_service.get_connector_type(connector_type_id)
     if not ct:
-        return error_response("NOT_FOUND", "Service not found", 404)
+        return error_response("NOT_FOUND", "Capability not found", 404)
     if ct.get("provider_type") != "mcp":
         return error_response("INVALID_REQUEST", "This service is not an MCP server", 400)
     if not body.binding_id and not body.headers_json:
@@ -1499,7 +1499,7 @@ async def refresh_mcp_connector_type(
         return error_response("FORBIDDEN", "Admin access required", 403)
     ct = connector_service.get_connector_type(connector_type_id)
     if not ct:
-        return error_response("NOT_FOUND", "Service not found", 404)
+        return error_response("NOT_FOUND", "Capability not found", 404)
     if ct.get("provider_type") != "mcp":
         return error_response("INVALID_REQUEST", "This service is not an MCP server", 400)
     endpoint_url = ct.get("endpoint_url")
@@ -1589,7 +1589,7 @@ async def delete_connector_type(
         return error_response("FORBIDDEN", "Admin access required", 403)
     ct = connector_service.get_connector_type(connector_type_id)
     if not ct:
-        return error_response("NOT_FOUND", "Service not found", 404)
+        return error_response("NOT_FOUND", "Capability not found", 404)
 
     # Adapter-backed connector types should behave like uninstall, not a raw
     # catalog delete, so the Browse Adapters page and service catalog stay in

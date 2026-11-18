@@ -144,7 +144,7 @@ def test_the_agents_page_lists_the_agents_and_the_services_apart(test_client, ad
     assert "Services (1)" in page.text
     assert 'aria-current="page"' in page.text
 
-    services = test_client.get("/agents?show=services", headers=auth(admin_token))
+    services = test_client.get("/services", headers=auth(admin_token))
     assert services.status_code == 200, services.text
     assert "Batch Reader" in services.text
     assert "Programs and containers that fetch secrets." in services.text
@@ -153,10 +153,12 @@ def test_the_agents_page_lists_the_agents_and_the_services_apart(test_client, ad
 
 
 def test_the_agents_page_says_when_there_are_no_services(test_client, admin_token):
-    page = test_client.get("/agents?show=services", headers=auth(admin_token))
+    page = test_client.get("/services", headers=auth(admin_token))
     assert page.status_code == 200, page.text
     assert "No services yet. Create one with the Service role." in page.text
-    assert "Services (0)" in page.text
+    # The switch on the Agents page carries the count.
+    agents = test_client.get("/agents", headers=auth(admin_token))
+    assert "Services (0)" in agents.text
 
 
 def test_the_connect_page_offers_agents_only(test_client, admin_token, one_of_each):

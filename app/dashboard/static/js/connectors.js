@@ -60,7 +60,7 @@ function renderActionsChoices(prefix) {
     return '<label class="checkbox-label" for="' + id + '"' + (blocked ? ' style="opacity:.6"' : '') + '>' +
       '<input type="checkbox" id="' + id + '" data-action="' + escapeHtml(t.action) + '"' +
       (blocked ? ' disabled' : (off.indexOf(t.action) === -1 ? ' checked' : '')) + '> ' + escapeHtml(t.action) +
-      (blocked ? ' <span class="form-hint">switched off for everyone on the service</span>' : '') + '</label>';
+      (blocked ? ' <span class="form-hint">switched off for everyone on the capability</span>' : '') + '</label>';
   }).join('');
   list.style.display = '';
   updateAllTickedOffer(prefix);
@@ -85,11 +85,11 @@ function updateAllTickedOffer(prefix) {
   offer.replaceChildren();
   offer.style.display = everyOneTicked ? '' : 'none';
   if (!everyOneTicked) return;
-  offer.append(document.createTextNode('Every action is ticked. Actions the service adds later would stay off. '));
+  offer.append(document.createTextNode('Every action is ticked. Actions the capability adds later would stay off. '));
   const button = document.createElement('button');
   button.type = 'button';
   button.className = 'btn btn-sm btn-secondary';
-  button.textContent = 'Use "Everything the service allows"';
+  button.textContent = 'Use "Everything the capability allows"';
   button.addEventListener('click', function() {
     const all = group.querySelector('input[type=radio][value=all]');
     if (all) { all.checked = true; all.dispatchEvent(new Event('change', { bubbles: true })); }
@@ -239,7 +239,7 @@ function resetCreateBindingForm() {
   const setupEl = document.getElementById('binding-setup');
   if (setupEl) setupEl.innerHTML = '';
   const recipe = document.getElementById('binding-recipe');
-  if (recipe) recipe.textContent = 'Choose a service to see the credential and settings it needs.';
+  if (recipe) recipe.textContent = 'Choose a capability to see the credential and settings it needs.';
   const credentialMode = document.getElementById('binding-credential-mode');
   if (credentialMode) credentialMode.value = 'none';
   toggleBindingCredentialMode(false);
@@ -280,7 +280,7 @@ function renderBindingCredentialEditor(guidance) {
         '<div class="form-hint">This credential is optional. Leave credential mode set to No credential for public or unauthenticated access.</div>';
       return;
     }
-    wrap.innerHTML = '<div class="form-hint">This service does not say which credential fields it needs.</div>';
+    wrap.innerHTML = '<div class="form-hint">This capability does not say which credential fields it needs.</div>';
     return;
   }
 
@@ -487,7 +487,7 @@ async function createBinding(e) {
   }
 
   if (credentialRequired && !credentialId) {
-    showToast('This service needs a credential for: ' + requiredCredentialFields.join(', '), 'danger');
+    showToast('This capability needs a credential for: ' + requiredCredentialFields.join(', '), 'danger');
     return;
   }
 
@@ -495,7 +495,7 @@ async function createBinding(e) {
   const baseUrlValue = baseUrlGroup && baseUrlGroup.style.display !== 'none'
     ? (document.getElementById('binding-base-url').value || '').trim() : '';
   if (baseUrlGroup && baseUrlGroup.style.display !== 'none' && !baseUrlValue) {
-    showToast('Enter the address this service is reached at', 'danger');
+    showToast('Enter the address this capability is reached at', 'danger');
     return;
   }
   const configFields = (guidance.config_fields || []).filter(function(field) {
@@ -505,7 +505,7 @@ async function createBinding(e) {
     const configEl = document.getElementById('binding-config');
     let configValue = (configEl && configEl.value ? configEl.value.trim() : '');
     if (!configValue) {
-      showToast('This service needs connection config JSON with: ' + configFields.join(', '), 'danger');
+      showToast('This capability needs connection config JSON with: ' + configFields.join(', '), 'danger');
       return;
     }
     let parsedConfig = null;
@@ -626,9 +626,9 @@ async function deleteConnectorType(id) {
   const card = document.querySelector('[data-connector-type-delete="' + id + '"]');
   const nameEl = card && card.closest('.connector-type-card') && card.closest('.connector-type-card').querySelector('.connector-type-name');
   const svc = nameEl ? nameEl.textContent.trim() : '';
-  if (!await confirmDialog('Delete the service' + (svc ? ' "' + svc + '"' : '') + ' and all its connections? Their recent-runs lists go with them (the audit log keeps the record of what ran). This cannot be undone.')) return;
+  if (!await confirmDialog('Delete the capability' + (svc ? ' "' + svc + '"' : '') + ' and all its connections? Their recent-runs lists go with them (the audit log keeps the record of what ran). This cannot be undone.')) return;
   const j = await apiFetch('/api/connector-types/' + id, { method: 'DELETE' });
-  if (j.ok) { showToast('Service deleted', 'success'); location.reload(); }
+  if (j.ok) { showToast('Capability deleted', 'success'); location.reload(); }
   else { showToast(j.error?.message || 'Failed', 'danger'); }
 }
 
@@ -695,7 +695,7 @@ async function openToolUpdate(typeId, bindingId) {
     content.innerHTML = '<div class="alert alert-success">The tool list is up to date (' + d.tool_count + ' tools).</div>';
     save.style.display = 'none';
   } else {
-    content.innerHTML = '<p>The service now lists these differences from what was saved. Nothing changes until you save.</p><ul>' + toolChangeLines(d.changes) + '</ul>';
+    content.innerHTML = '<p>The capability now lists these differences from what was saved. Nothing changes until you save.</p><ul>' + toolChangeLines(d.changes) + '</ul>';
     save.style.display = '';
   }
   reloadAfterTestResult = false;
@@ -810,7 +810,7 @@ async function checkHealth(btn) {
     showToast(j.error?.message || 'Health check failed', 'danger');
     return;
   }
-  // Persist the result and reload so the Service Catalog health badges reflect the
+  // Persist the result and reload so the Capability Catalog health badges reflect the
   // freshly stored test state; the result modal is shown again after reload.
   sessionStorage.setItem('connectorHealthResult', JSON.stringify(j.data));
   location.reload();
@@ -954,7 +954,7 @@ async function previewSpec(e) {
       '<h3 style="margin-top:0" class="sub-heading">Preview</h3>' +
       '<table style="width:100%">' +
         '<tr><td style="padding:4px 8px 4px 0;color:var(--muted)">Name</td><td>' + escapeHtml(preview.display_name || preview.connector_type_id || 'API') + '</td></tr>' +
-        '<tr><td style="padding:4px 8px 4px 0;color:var(--muted)">Service ID</td><td><code>' + escapeHtml(preview.connector_type_id || '-') + '</code></td></tr>' +
+        '<tr><td style="padding:4px 8px 4px 0;color:var(--muted)">Capability ID</td><td><code>' + escapeHtml(preview.connector_type_id || '-') + '</code></td></tr>' +
         '<tr><td style="padding:4px 8px 4px 0;color:var(--muted)">Auth</td><td>' + escapeHtml(preview.auth_type || 'none') + '</td></tr>' +
         '<tr><td style="padding:4px 8px 4px 0;color:var(--muted)">Servers</td><td style="word-break:break-word">' + (servers || '<em>none</em>') + '</td></tr>' +
         '<tr><td style="padding:4px 8px 4px 0;color:var(--muted)">Actions</td><td>' + escapeHtml(String(preview.operation_count || 0)) + '</td></tr>' +
@@ -1087,7 +1087,7 @@ async function addHttpConnector(e) {
 
   const j = await apiFetch('/api/connector-types/create-http', { method: 'POST', body: JSON.stringify(body) });
   if (!j.ok) {
-    showToast(j.error?.message || 'Failed to add the service', 'danger');
+    showToast(j.error?.message || 'Failed to add the capability', 'danger');
     return;
   }
 

@@ -189,7 +189,7 @@ async def update_dashboard_system_settings(
         settings_to_save["episodic_memory_ttl_days"] = str(episodic_ttl)
 
     for key, label in (
-        ("execution_log_retention_days", "Service run log retention"),
+        ("execution_log_retention_days", "Capability run log retention"),
         ("webhook_log_retention_days", "Webhook delivery log retention"),
     ):
         if key in body:
@@ -855,7 +855,7 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
       <div class="form-group">
         <button class="btn btn-secondary" onclick="runMaintenance()">Run Maintenance</button>
       </div>
-      <p class="form-hint">Maintenance marks tasks stale after the idle limit, deletes temporary scratchpad notes and permanently deletes retracted or replaced memories past the retention limits above. It does not touch credentials or service connections. {schedule_line}</p>
+      <p class="form-hint">Maintenance marks tasks stale after the idle limit, deletes temporary scratchpad notes and permanently deletes retracted or replaced memories past the retention limits above. It does not touch credentials or connections. {schedule_line}</p>
       <p class="form-hint" id="maintenance-last-run">{last_run_line}</p>
       </details>
       <hr class=divider>
@@ -891,7 +891,7 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
       <p class="text-muted" style="margin-bottom:12px">Two limits you can turn up in steps. Start with <strong>report only</strong>: it lists what would be refused and refuses nothing, so you can allow what you expect before you enforce.</p>
       <h3 class="sub-heading section-title">Private addresses</h3>
       <div class="form-group">
-        <label for="nl-internal-mode">Services, webhooks and imports reaching private addresses (like 192.168.x.x)</label>
+        <label for="nl-internal-mode">Capabilities, webhooks and imports reaching private addresses (like 192.168.x.x)</label>
         <select id="nl-internal-mode">
           <option value="allow">Allow</option>
           <option value="report">Report only</option>
@@ -969,7 +969,7 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
         retention_html = f"""
     <div class="card">
       <h2>How long things are kept</h2>
-      <p class="form-hint" style="margin-top:0;margin-bottom:14px">Run Maintenance (below) deletes anything older than these limits. Nothing here touches credentials or service connections.</p>
+      <p class="form-hint" style="margin-top:0;margin-bottom:14px">Run Maintenance (below) deletes anything older than these limits. Nothing here touches credentials or connections.</p>
       <form onsubmit="saveSystemSettings(event)">
         <div class="form-group">
           <label>Scratchpad notes (days)</label>
@@ -982,9 +982,9 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
           <p class="form-hint">Counted from when the memory stopped being active, so you have time to notice and restore a mistaken retraction.</p>
         </div>
         <div class="form-group">
-          <label>Service call log (days)</label>
+          <label>Capability call log (days)</label>
           {_number("execution-log-retention-days", execution_log_retention_days, 0, 365)}
-          <p class="form-hint">Records of calls agents made through Services. Diagnostics only. 0 keeps them forever.</p>
+          <p class="form-hint">Records of calls agents made through capabilities. Diagnostics only. 0 keeps them forever.</p>
         </div>
         <div class="form-group">
           <label>Webhook delivery log (days)</label>
@@ -1024,7 +1024,7 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
         vector_settings_html = f"""
     <div class="card">
       <h2>Search by meaning (vector search)</h2>
-      <p class="text-muted" style="margin-bottom:12px">Enable semantic search using an embedding endpoint: Ollama, or any service with an OpenAI-compatible embeddings API. Save the settings to turn it on immediately when the backend is healthy. Disable to use plain text search only.</p>
+      <p class="text-muted" style="margin-bottom:12px">Enable semantic search using an embedding endpoint: Ollama, or any provider with an OpenAI-compatible embeddings API. Save the settings to turn it on immediately when the backend is healthy. Disable to use plain text search only.</p>
       <form id="vector-settings-form" onsubmit="saveVectorSettings(event)">
         <label class="checkbox-label" style="margin-bottom:16px">
           <input type="checkbox" id="vector-search-enabled" {vector_checked}>
@@ -1036,7 +1036,7 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
             <option value="ollama" {"selected" if vector_provider == "ollama" else ""}>Ollama</option>
             <option value="openai" {"selected" if vector_provider == "openai" else ""}>OpenAI-compatible</option>
           </select>
-          <p class="form-hint">Where embeddings come from: a local Ollama server, or any service with an OpenAI-style API.</p>
+          <p class="form-hint">Where embeddings come from: a local Ollama server, or any provider with an OpenAI-style API.</p>
         </div>
         <div class="form-group">
           <label>Model</label>
@@ -1495,7 +1495,7 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
     function onProviderChange(provider) {{
       const hint = document.getElementById('vector-url-hint');
       if (provider === 'openai') {{
-        hint.innerHTML = 'Base URL of the OpenAI-compatible API, usually ending in <code>/v1</code>, for example <code>https://api.openai.com/v1</code>. Most hosted services need an API key with Bearer auth.';
+        hint.innerHTML = 'Base URL of the OpenAI-compatible API, usually ending in <code>/v1</code>, for example <code>https://api.openai.com/v1</code>. Most hosted providers need an API key with Bearer auth.';
       }} else {{
         hint.innerHTML = 'Base URL of the Ollama server, for example <code>http://localhost:11434</code>.';
       }}

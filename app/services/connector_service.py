@@ -609,7 +609,7 @@ def connection_refusal(binding: dict, action: str) -> dict:
     why = "is read-only" if mode == "read_only" else ("allows nothing yet" if mode == "none" else "does not allow it")
     return {
         "success": False,
-        "error": f"This connection {why}: {action}. Ask a person to open Services > Edit connection and change what it can do.",
+        "error": f"This connection {why}: {action}. Ask a person to open Capabilities > Edit connection and change what it can do.",
         "error_code": "CONNECTION_DISABLED_ACTION",
     }
 
@@ -1327,7 +1327,7 @@ def test_binding(binding_id: str) -> dict:
 
     connector_type = get_connector_type(binding["connector_type_id"])
     if not connector_type:
-        return {"success": False, "error": "Service not found"}
+        return {"success": False, "error": "Capability not found"}
 
     cred = binding.get("credential")
     try:
@@ -1544,7 +1544,7 @@ def build_capability_summary(
             elif binding_action_count == 0:
                 not_usable_because = "The service lists no actions and this connection lists no allowed requests."
             else:
-                not_usable_because = "This connection allows none of the service's actions (a person changes that under Services > Edit connection)."
+                not_usable_because = "This connection allows none of the capability's actions (a person changes that under Capabilities > Edit connection)."
             if usable:
                 usable_total += 1
 
@@ -1743,7 +1743,7 @@ def execute_binding_action(
 
     connector_type = get_connector_type(binding["connector_type_id"])
     if not connector_type:
-        return {"success": False, "error": "Service not found"}
+        return {"success": False, "error": "Capability not found"}
 
     action_error = _validate_action_for_connector(connector_type, action)
     if action_error:

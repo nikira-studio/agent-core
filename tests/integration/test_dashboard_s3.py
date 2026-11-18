@@ -91,7 +91,7 @@ class TestAgentsPage:
         for name in ("Proposer", "Custom", "Assistant"):
             assert f">{name}</span>" in html, name
         # An entry that only fetches secrets is a service, so it is listed with the other services.
-        services = admin_client.get("/agents?show=services").text
+        services = admin_client.get("/services").text
         assert ">Service</span>" in services
 
     def test_agents_table_shows_owner_metadata(self, admin_client):

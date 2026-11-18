@@ -189,7 +189,7 @@ async function renderAccess() {
   pick.replaceChildren();
   d.candidates.forEach(a => { const o = accessEl('option', a.display_name); o.value = a.id; pick.append(o); });
   document.getElementById('access-add').disabled = !d.candidates.length;
-  if (!d.candidates.length) { const o = accessEl('option', 'No agent has the Service agent role'); o.value = ''; pick.append(o); }
+  if (!d.candidates.length) { const o = accessEl('option', 'No agent has the Service role'); o.value = ''; pick.append(o); }
 
   const cannot = document.getElementById('access-cannot');
   const list = document.getElementById('access-cannot-list');
@@ -198,7 +198,7 @@ async function renderAccess() {
   document.getElementById('access-cannot-count').textContent = d.cannot_receive.length;
   d.cannot_receive.forEach(a => {
     const row = accessEl('div', null, 'access-row');
-    row.append(accessEl('span', a.display_name + ' needs the Service agent role or the Read credential values permission. '));
+    row.append(accessEl('span', a.display_name + ' needs the Service role or the Fetch secrets permission. '));
     const link = accessEl('a', 'Change its role');
     link.href = '/agents?edit=' + encodeURIComponent(a.id);
     row.append(link);
@@ -207,7 +207,7 @@ async function renderAccess() {
 
   const services = document.getElementById('access-services');
   services.replaceChildren();
-  if (!d.services.length) services.append(accessEl('p', 'None. A service uses a credential through a connection.', 'text-muted'));
+  if (!d.services.length) services.append(accessEl('p', 'None. No connection uses this credential yet.', 'text-muted'));
   d.services.forEach(sv => {
     const row = accessEl('div', null, 'access-row');
     const link = accessEl('a', sv.name + (sv.service ? ' (' + sv.service + ')' : ''));
@@ -235,7 +235,7 @@ function accessScopeName(entry) {
   return (cell && cell.textContent.trim()) || 'its scope';
 }
 
-const REFERENCE_NOTE = 'They can see its name (its reference) and use it wherever Agent Core connects a service to it. Agent Core does not show them the secret itself.';
+const REFERENCE_NOTE = 'They can see its name (its reference) and use it wherever Agent Core makes a connection with it. Agent Core does not show them the secret itself.';
 
 // The Used by cell in the list shows the same two groups under the same labels as this dialog, so it is rebuilt
 // from the dialog's data whenever access changes (the page is not reloaded). Mirrors used_by_cell in credentials_page.py.
@@ -261,7 +261,7 @@ function renderUsedBy(d) {
     cell.append(seen);
   }
   if (d.services.length) {
-    const sv = accessEl('div', d.services.length + ' service' + (d.services.length === 1 ? '' : 's'), 'text-muted');
+    const sv = accessEl('div', d.services.length + ' connection' + (d.services.length === 1 ? '' : 's'), 'text-muted');
     sv.style.fontSize = '0.8rem';
     cell.append(sv);
   }

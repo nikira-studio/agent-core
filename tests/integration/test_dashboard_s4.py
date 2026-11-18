@@ -56,7 +56,7 @@ def test_overview_page_has_operational_search(admin_client):
     html = r.text
     assert "<h2>Search</h2>" in html
     assert 'id="dashboard-search-query"' in html
-    assert "Find a memory, a task or a service." in html
+    assert "Find a memory, a task or a capability." in html
 
 
 def test_legacy_integrations_wizard_is_removed(admin_client):

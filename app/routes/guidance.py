@@ -22,7 +22,7 @@ def _setup_markdown(request: Request) -> str:
 
 Connect an MCP client to `{base_url}/mcp` with a bearer API key. Create the key from the dashboard's Connect page. Keep it in the client's secret store, never in a prompt or project file.
 
-The server filters tools by the agent's standing capabilities. Capability changes apply to the next request. Reconnect the MCP client to refresh any cached tool list.
+The server filters tools by the agent's permissions. Permission changes apply to the next request. Reconnect the MCP client to refresh any cached tool list.
 
 Read `{base_url}/llms.txt` for a compact service overview. Playbooks live at `{base_url}/skills/`.
 """

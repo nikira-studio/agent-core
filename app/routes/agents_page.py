@@ -4,6 +4,7 @@ import json
 from urllib.parse import quote
 
 from fastapi import APIRouter, Request, Depends
+from fastapi.responses import RedirectResponse
 
 from app.routes.dashboard_shared import (
     escape_html,
@@ -32,11 +33,22 @@ def role_of(capabilities) -> str:
 
 @router.get("/agents")
 def agents_page(request: Request, session: dict = Depends(require_auth)):
+    if request.query_params.get("show") == "services":
+        return RedirectResponse("/services", status_code=302)  # the old address of the Services list
+    return _agents_view(request, session, show_services=False)
+
+
+@router.get("/services")
+def services_page(request: Request, session: dict = Depends(require_auth)):
+    """The programs and containers that only fetch secrets: a tab under Credentials."""
+    return _agents_view(request, session, show_services=True)
+
+
+def _agents_view(request: Request, session: dict, show_services: bool):
     from app.services import agent_access_service, agent_service, auth_service, workspace_service
 
     is_admin = session.get("role") == "admin"
-    # The page lists the agents that do work; ?show=services lists the programs that only fetch secrets.
-    show_services = request.query_params.get("show") == "services"
+    # /agents lists the agents that do work; /services lists the programs that only fetch secrets.
 
     def entries(kind, active_only=False):
         """The entries of one kind this viewer may see."""
@@ -102,7 +114,7 @@ def agents_page(request: Request, session: dict = Depends(require_auth)):
     def capability_controls(prefix):
         roles = [
             ("assistant", "Assistant",
-             "An AI assistant or coding agent. Remembers things, tracks its work and handoffs, and can use your connected services."),
+             "An AI assistant or coding agent. Remembers things, tracks its work and handoffs, and can use your connected capabilities."),
             ("service", "Service",
              "A program or container that only fetches the specific stored secrets an admin has granted it. No memory, no workspaces."),
             ("proposer", "Proposer",
@@ -119,16 +131,16 @@ def agents_page(request: Request, session: dict = Depends(require_auth)):
         # (key, name, what it lets the agent do, starts checked on the create form)
         groups = [
             ("Everyday work", [
-                ("memory", "Memory", "Search, read and write memories in the workspaces below.", True),
-                ("coordination", "Coordination", "Track its own tasks, handoffs, the session briefing, workspace sync and approval status.", True),
+                ("memory", "Use memory", "Search, read and write memories in the workspaces below.", True),
+                ("coordination", "Coordinate tasks", "Track its own tasks, handoffs, the session briefing, workspace sync and approval status.", True),
             ]),
             ("Credentials", [
-                ("credentials", "Credential references", "List credentials and ask for the reference an agent uses (AC_SECRET_...). The agent never sees the secret value; Agent Core inserts it when a command or service runs.", True),
-                ("credentials_resolve", "Read credential values", "Fetch a stored value over HTTPS, one exact entry at a time, and only the entries an admin has granted it. For small services; leave off for assistants.", False),
+                ("credentials", "Reference credentials", "List credentials and ask for the reference an agent uses (AC_SECRET_...). The agent never sees the secret value; Agent Core inserts it when a command or service runs.", True),
+                ("credentials_resolve", "Fetch secrets", "Fetch a stored value over HTTPS, one exact entry at a time, and only the entries an admin has granted it. For small services; leave off for assistants.", False),
             ]),
-            ("Services", [
-                ("connectors_read", "See services", "See which external services and actions are set up. Always on when Run service actions is on.", True),
-                ("connectors_execute", "Run service actions", "Have Agent Core perform actions in external services for it, using the credentials in your connections.", True),
+            ("Capabilities", [
+                ("connectors_read", "See capabilities", "See which external capabilities and actions are set up. Always on when Run capabilities is on.", True),
+                ("connectors_execute", "Run capabilities", "Have Agent Core perform actions in external capabilities for it, using the credentials in your connections.", True),
             ]),
             ("Administration", [
                 ("admin_propose", "Propose admin changes", "Ask for changes such as new agents, grants or connections. Nothing happens until a person approves it on the Approvals page.", False),
@@ -146,9 +158,11 @@ def agents_page(request: Request, session: dict = Depends(require_auth)):
         return (
             '<div class="form-section"><h3 class="sub-heading form-section-title">What will this agent do?</h3>'
             f'<div class="role-cards">{cards}</div>'
-            f'<div class="role-custom" id="{prefix}-role-custom" hidden>{controls}</div>'
+            f'<div class="role-custom" id="{prefix}-role-custom" hidden>'
+            '<h3 class="sub-heading form-section-title">Permissions</h3>'
+            f'{controls}</div>'
             f'<label class="checkbox-label" style="margin-top:12px"><input type="checkbox" id="{prefix}-inherit-user-bindings"> '
-            '<span><strong>Run its person\'s own services</strong><br><small class="form-hint">Lets this agent also run the services '
+            '<span><strong>Run its person\'s own capabilities</strong><br><small class="form-hint">Lets this agent also run the capabilities '
             'bound in its person\'s personal scope, not only those in workspaces it is given. Off by default; turn it on for an agent '
             'that acts as that person.</small></span></label>'
             '<p class="form-hint">Workspace access decides which data an agent can reach; this decides which kinds of action it may attempt. '
@@ -224,7 +238,7 @@ def agents_page(request: Request, session: dict = Depends(require_auth)):
             else ""
         )
         personal_badge = (
-            "<span class='badge badge-info' title='May run the services set up in its owner&#39;s personal space'>runs personal services</span>"
+            "<span class='badge badge-info' title='May run the capabilities set up in its owner&#39;s personal space'>runs personal capabilities</span>"
             if a.get("inherit_user_bindings")
             else ""
         )
@@ -317,7 +331,7 @@ def agents_page(request: Request, session: dict = Depends(require_auth)):
     switch_html = (
         '<nav class="agent-switch" aria-label="Agents or services">'
         f'<a href="/agents" class="{agents_link_class}"{agents_current}>Agents ({agent_count})</a>'
-        f'<a href="/agents?show=services" class="{services_link_class}"{services_current}>Services ({service_count})</a>'
+        f'<a href="/services" class="{services_link_class}"{services_current}>Services ({service_count})</a>'
         "</nav>"
     )
     services_note = (
@@ -350,10 +364,16 @@ def agents_page(request: Request, session: dict = Depends(require_auth)):
     <script>
     const IS_ADMIN = __IS_ADMIN__;
     const AGENT_ROWS = __AGENT_ROWS__;
-    const CAPABILITY_NAMES = {memory: 'Memory', coordination: 'Coordination', credentials: 'Credential references', credentials_resolve: 'Read credential values', connectors_read: 'See services', connectors_execute: 'Run service actions', admin_propose: 'Propose admin changes'};
+    const CAPABILITY_NAMES = {memory: 'Use memory', coordination: 'Coordinate tasks', credentials: 'Reference credentials', credentials_resolve: 'Fetch secrets', connectors_read: 'See capabilities', connectors_execute: 'Run capabilities', admin_propose: 'Propose admin changes'};
     let agentModalReadOnly = false;
     let editEntryIsService = false;
     async function refreshAgents() { location.reload(); }
+    // The Services list opens the create dialog with the Service role already chosen.
+    function openCreateService() {
+      const radio = document.querySelector('input[name="ca-role"][data-role="service"]');
+      if (radio) { radio.checked = true; applyRole('ca', 'service'); }
+      openModal('create-agent-modal');
+    }
     function rowKind(id) {
       const row = AGENT_ROWS.find(function(r) { return r.id === id; });
       return row ? row.kind : 'agent';
@@ -411,7 +431,7 @@ def agents_page(request: Request, session: dict = Depends(require_auth)):
         '<li>Read: <code>' + escapeHtml(read.join(', ')) + '</code></li>' +
         '<li>Write: <code>' + escapeHtml(write.join(', ')) + '</code></li>' +
         '<li>Searches by default: <code>' + escapeHtml(recall.join(', ')) + '</code></li>' +
-        '<li>Can use: ' + (capabilities.length ? escapeHtml(capabilities.map(function(c) { return CAPABILITY_NAMES[c] || c; }).join(', ')) : 'nothing yet') + '</li>' +
+        '<li>Permissions: ' + (capabilities.length ? escapeHtml(capabilities.map(function(c) { return CAPABILITY_NAMES[c] || c; }).join(', ')) : 'none yet') + '</li>' +
         '</ul>';
     }
     function applyLeastPrivilegedPreset() {
@@ -472,7 +492,7 @@ def agents_page(request: Request, session: dict = Depends(require_auth)):
       else { showToast(j.error.message || 'Failed', 'danger'); }
     }
     async function purgeAgent(id) {
-      const typed = prompt('PERMANENTLY DELETE the agent "' + id + '"? Its keys stop working, and its private memory, anything stored in its private workspace (credentials, service connections) and its tasks are deleted. This cannot be undone.\\n\\nType the agent ID to confirm:');
+      const typed = prompt('PERMANENTLY DELETE the agent "' + id + '"? Its keys stop working, and its private memory, anything stored in its private workspace (credentials, connections) and its tasks are deleted. This cannot be undone.\\n\\nType the agent ID to confirm:');
       if (typed === null) return;
       if (typed.trim() !== id) { showToast('That is not the agent ID. Nothing was deleted.', 'warning'); return; }
       const j = await apiFetch('/api/agents/' + id + '/purge', { method: 'POST' });
@@ -820,7 +840,7 @@ def agents_page(request: Request, session: dict = Depends(require_auth)):
             closeModal('create-agent-modal');
             if (isService) {
               // A service belongs with the other services, not with the agents.
-              location.href = '/agents?show=services';
+              location.href = '/services';
               return;
             }
             showToast('Agent created');
@@ -857,18 +877,31 @@ def agents_page(request: Request, session: dict = Depends(require_auth)):
     js = js.replace("__IS_ADMIN__", str(is_admin).lower()).replace("__ROLE_PRESETS__", json.dumps(ROLE_PRESETS))
     js = js.replace("__AGENT_ROWS__", row_data)
 
-    return render_page(
-        "Agents",
-        f"""
-    <div class="page-header"><h1>Agents</h1><div class="page-actions">
-        <button class="btn" onclick="openModal('create-agent-modal')">+ Create Agent</button>
-    </div></div>
-    <div class="card">
-      <h2>Agent Access</h2>
-      <p class="text-muted access-summary">Each agent has its own private memory and can read its owner's. Add a workspace to share memory. Use <strong>Edit</strong> to give an agent more; create a new one only for a separate tool.</p>
-    </div>
+    page_title = "Services" if show_services else "Agents"
+    create_button = (
+        '<button class="btn" onclick="openCreateService()">+ Create service</button>'
+        if show_services
+        else '<button class="btn" onclick="openModal(\'create-agent-modal\')">+ Create Agent</button>'
+    )
+    access_card = (
+        ""
+        if show_services
+        else (
+            '<div class="card"><h2>Agent Access</h2><p class="text-muted access-summary">Each agent has its own private '
+            "memory and can read its owner's. Add a workspace to share memory. Use <strong>Edit</strong> to give an "
+            "agent more; create a new one only for a separate tool.</p></div>"
+        )
+    )
 
-    {switch_html}
+    return render_page(
+        page_title,
+        f"""
+    <div class="page-header"><h1>{page_title}</h1><div class="page-actions">
+        {create_button}
+    </div></div>
+    {access_card}
+
+    {"" if show_services else switch_html}
     {services_note}
 
     <div class="card">
@@ -977,7 +1010,7 @@ def agents_page(request: Request, session: dict = Depends(require_auth)):
       </div>
     </div>
     """,
-        "/agents",
+        "/services" if show_services else "/agents",
         js,
         session=session,
     )

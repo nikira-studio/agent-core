@@ -57,7 +57,7 @@ def run_connector_action(
         return ConnectorActionOutcome(
             binding=binding,
             error_code="NOT_FOUND",
-            error_message="Service not found",
+            error_message="Capability not found",
             status_code=404,
         )
 

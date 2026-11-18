@@ -298,7 +298,7 @@ def test_an_agent_cannot_choose_what_a_connection_allows_and_a_connection_it_mak
     refused_write = world["client"].post("/mcp", headers=_bearer(world["key"]), json={"tool": "connectors_run", "params": {
         "binding_id": made.json()["data"]["binding"]["id"], "action": "create_thing", "params": {}}}).json()
     assert refused_write["error"]["code"] == "CONNECTION_DISABLED_ACTION"
-    assert "Ask a person to open Services > Edit connection" in refused_write["error"]["message"]  # says what to do
+    assert "Ask a person to open Capabilities > Edit connection" in refused_write["error"]["message"]  # says what to do
     ro = world["binding"]("Read only", "read_only")
     widen = client.put(f"/api/connector-bindings/{ro['id']}", headers=_bearer(world["key"]), json={"actions_mode": "all"})
     assert widen.status_code == 403
@@ -324,9 +324,9 @@ def test_the_dialogs_offer_the_choice_and_the_table_says_what_a_connection_allow
     page = client.get("/connectors").text
     for prefix in ("binding", "edit-binding"):
         assert f'id="{prefix}-actions-group"' in page
-    assert "Everything the service allows" in page and "Read-only" in page and "Choose actions" in page
+    assert "Everything the capability allows" in page and "Read-only" in page and "Choose actions" in page
     assert "Read-only &middot; 2 of 4 actions" in page and "Chosen actions &middot; 3 of 4 actions" in page
-    assert page.count("Everything the service allows") == 2  # the label text; the plain connection adds no note
+    assert page.count("Everything the capability allows") == 2  # the label text; the plain connection adds no note
 
 
 # ---- found by the independent review ----------------------------------------------------------------------------------
@@ -543,7 +543,7 @@ def test_a_read_only_plain_web_connection_shows_n_of_m_and_none_allowed_says_why
     only_writes = cs.update_binding(binding["id"], config_json=json.dumps({"allowed": ["POST /c"]}))
     _, row = _summary_row(world, cs.get_binding(binding["id"]))
     assert row["usable_by_caller"] is False and row["actions"]["allowed"] == 0
-    assert row["not_usable_because"].startswith("This connection allows none of the service's actions")
+    assert row["not_usable_because"].startswith("This connection allows none of the capability's actions")
 
 
 def test_not_usable_always_says_why(world):

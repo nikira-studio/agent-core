@@ -262,7 +262,7 @@ def _getting_started_html(session, is_admin, agent_count, recent_activity, otp_i
         ("Watch it work", "/activity", has_activity, "Its tasks and handoffs appear here."),
     ]
     optional = [
-        ("Give it a service", "/connectors", has_service, "Optional: let it act in an outside system, such as GitHub."),
+        ("Give it a capability", "/connectors", has_service, "Optional: let it act in an outside system, such as GitHub."),
     ]
     two_step_done = not otp_item
     optional_left = len([1 for _, _, done, _ in optional if not done]) + (0 if two_step_done else 1)
@@ -383,7 +383,7 @@ def _health_items(is_admin: bool) -> list[tuple[str, str, str, bool]]:
         services_value = "all working"
     return [
         ("Agent Core", f"version {APP_VERSION}, running", "", True),
-        ("Services", services_value, "/connectors", not failing),
+        ("Capabilities", services_value, "/connectors", not failing),
         ("Webhooks", "no failures in 24 hours" if not dead else f"{dead} failed in 24 hours", "/webhooks", not dead),
         ("Local credential helper", "ready" if broker else "not set up", "/settings#security", broker),
     ]
@@ -509,15 +509,15 @@ def dashboard_home(request: Request, session: dict = Depends(require_auth)):
     <div class="card">
       <div class="section-header">
         <h2>Search</h2>
-        <div class="section-note">Find a memory, a task or a service.</div>
+        <div class="section-note">Find a memory, a task or a capability.</div>
       </div>
       <form onsubmit="runDashboardSearch(event)" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-        <input type="text" id="dashboard-search-query" class="search-input" placeholder="Search memories, tasks and services..." style="min-width:260px;flex:1" autocomplete="off">
+        <input type="text" id="dashboard-search-query" class="search-input" placeholder="Search memories, tasks and capabilities..." style="min-width:260px;flex:1" autocomplete="off">
         <button type="submit" class="btn">Search</button>
         <button type="button" class="btn btn-secondary" onclick="clearDashboardSearch()">Clear</button>
       </form>
       <div id="dashboard-search-results" style="margin-top:14px">
-        <div class="empty">Type a word to search memories, tasks and services.</div>
+        <div class="empty">Type a word to search memories, tasks and capabilities.</div>
       </div>
     </div>"""
 
@@ -545,7 +545,7 @@ def dashboard_home(request: Request, session: dict = Depends(require_auth)):
     <div class="page-header">
       <h1>Needs you</h1>
       <p class="text-muted" style="max-width:760px;margin-top:8px">
-        {APP_NAME} gives your AI agents shared memory, a record of their work, and safe access to your services and credentials. Start with what is waiting on you.
+        {APP_NAME} gives your AI agents shared memory, a record of their work, and safe access to your capabilities and credentials. Start with what is waiting on you.
       </p>
     </div>
     {attention_html}
@@ -668,8 +668,8 @@ def dashboard_home(request: Request, session: dict = Depends(require_auth)):
       const sections = [
         renderSection('Memory', data.memory || []),
         renderSection('Activities', data.activities || []),
-        renderSection('Connector Types', data.connector_types || []),
-        renderSection('Bindings', data.bindings || [])
+        renderSection('Capabilities', data.connector_types || []),
+        renderSection('Connections', data.bindings || [])
       ].filter(Boolean);
       results.innerHTML = sections.length
         ? sections.join('')
@@ -679,7 +679,7 @@ def dashboard_home(request: Request, session: dict = Depends(require_auth)):
       const input = document.getElementById('dashboard-search-query');
       const results = document.getElementById('dashboard-search-results');
       input.value = '';
-      results.innerHTML = '<div class="empty">Type a word to search memories, tasks and services.</div>';
+      results.innerHTML = '<div class="empty">Type a word to search memories, tasks and capabilities.</div>';
       input.focus();
     }}
     </script>

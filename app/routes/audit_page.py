@@ -161,7 +161,7 @@ def audit_page(request: Request, session: dict = Depends(require_auth)):
     rows = "".join(audit_row(e) for e in all_events)
 
     def plain_label(value):
-        text = str(value).replace("connector_binding", "connection").replace("connector_type", "service")
+        text = str(value).replace("connector_binding", "connection").replace("connector_type", "capability")
         return text.replace("_", " ")
 
     def build_options(items, selected):

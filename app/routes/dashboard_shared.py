@@ -121,7 +121,8 @@ _SECTION_TABS = {
     "/activity": [("/activity", "Tasks"), ("/audit", "Audit log")],
     "/memory": [("/memory", "Memory")],
     "/agents": [("/agents", "Agents"), ("/workspaces", "Workspaces"), ("/integrations", "Connect")],
-    "/connectors": [("/connectors", "Services"), ("/credentials", "Credentials")],
+    "/connectors": [("/connectors", "Capabilities")],
+    "/credentials": [("/credentials", "Credentials"), ("/services", "Services")],
     "/settings": [("/settings", "Settings"), ("/users", "Users"), ("/webhooks", "Webhooks")],
 }
 _SECTION_OF = {tab: entry for entry, tabs in _SECTION_TABS.items() for tab, _ in tabs}
@@ -220,11 +221,12 @@ def render_page(
 ) -> HTMLResponse:
     is_admin = bool(session and session.get("role") == "admin")
     extra_js = extra_js.replace("{{", "{").replace("}}", "}")
-    # Routes keep their old paths when a page is renamed. Six entries in one plain list, no headings or dividers;
+    # Routes keep their old paths when a page is renamed. Seven entries in one plain list, no headings or dividers;
     # the other pages are tabs inside their entry (see _SECTION_TABS).
     nav_groups = [
         ("", [("/", "Needs you"), ("/activity", "Activity"), ("/memory", "Memory"),
-              ("/agents", "Agents"), ("/connectors", "Services"), ("/settings", "Settings")]),
+              ("/agents", "Agents"), ("/connectors", "Capabilities"), ("/credentials", "Credentials"),
+              ("/settings", "Settings")]),
     ]
     admin_only = {"/users", "/audit", "/webhooks"}
     section = _SECTION_OF.get(nav_active, nav_active)

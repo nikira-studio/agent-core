@@ -311,7 +311,7 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
             binding_counts[b["connector_type_id"]] += 1
 
     # Per connector-type health, derived from the last stored test result on each
-    # visible enabled connection. Surfaced as a badge on the Service Catalog card and
+    # visible enabled connection. Surfaced as a badge on the Capability Catalog card and
     # refreshed when the operator runs Check Health.
     ct_health = {}
     ct_last_check = {}
@@ -376,7 +376,7 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
                 f"{worst['action']} failing {worst['failures']}/{worst['calls']}"
                 + (f" (+{len(failing) - 1} more)" if len(failing) > 1 else "")
             )
-        # A connection that allows less than its service says so under the service's name.
+        # A connection that allows less than its capability says so under the capability's name.
         actions_note = ""
         if ct and (b.get("actions_mode") or "all") != "all":
             allowed_n = len(connector_service.effective_actions(ct, b))
@@ -401,7 +401,7 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
         bindings_rows += f"""
         <tr data-binding-id="{b["id"]}" data-connector-type-id="{escape_html(b.get("connector_type_id", ""))}" data-provider-type="{escape_html(ct.get("provider_type", "") if ct else "")}">
           <td style="{text_style}">{escape_html(b.get("name", ""))}</td>
-          <td data-label="Service" style="{text_style}">{escape_html(ct.get("display_name", "") if ct else b.get("connector_type_id", ""))}{actions_note}</td>
+          <td data-label="Capability" style="{text_style}">{escape_html(ct.get("display_name", "") if ct else b.get("connector_type_id", ""))}{actions_note}</td>
           <td data-label="Workspace" style="{text_style}" title="{escape_html(b.get("scope", ""))}">{escape_html(scope_names.get(b.get("scope", ""), b.get("scope", "")))}</td>
           <td data-label="Status" class="{status_cls}" style="{text_style}"{(' title="' + escape_html(b["last_test_note"]) + '"') if (b.get("last_test_note") and not b.get("last_error")) else ((' title="' + escape_html(b["last_error"]) + '"') if b.get("last_error") else "")}>{escape_html(status_text)}</td>
           <td class='actions-cell'>
@@ -417,11 +417,11 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
 
     if visible_bindings:
         bindings_html = f"""
-        <table class="stack-phone"><thead><tr><th>Name</th><th>Service</th><th>Workspace</th><th>Status</th><th class='actions-cell'>Actions</th></tr></thead>
+        <table class="stack-phone"><thead><tr><th>Name</th><th>Capability</th><th>Workspace</th><th>Status</th><th class='actions-cell'>Actions</th></tr></thead>
         <tbody>{bindings_rows}</tbody></table>"""
     else:
         bindings_html = (
-            "<div class='empty'>No connections yet. Use <strong>Add Connection</strong> on a service above to let agents use it.</div>"
+            "<div class='empty'>No connections yet. Use <strong>Add Connection</strong> on a capability above to let agents use it.</div>"
         )
 
     execution_rows_html = ""
@@ -519,7 +519,7 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
         elif health_state == "untested":
             health_badge = f'<span class="badge badge-warning" title="Enabled connections not yet health-checked">{health_n} untested</span>'
         elif health_state == "cannot_test":
-            health_badge = '<span class="badge" title="This service has no read-only action to try. It is checked when it is next used.">Can\'t be tested</span>'
+            health_badge = '<span class="badge" title="This capability has no read-only action to try. It is checked when it is next used.">Can\'t be tested</span>'
         else:
             health_badge = ""
         last_check_line = ""
@@ -543,7 +543,7 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
             adapter_badges = '<span class="badge badge-warning">Update available</span>'
         tools_btn = (
             f"<button type='button' class='btn btn-sm btn-secondary' data-tools-update-card=\"{escape_html(ct['id'])}\" "
-            f"title='Read this service&#39;s tool list again and review what changed'>Update tool list</button>"
+            f"title='Read this capability&#39;s tool list again and review what changed'>Update tool list</button>"
             if ct.get("provider_type") == "mcp" and ctx.is_admin and binding_count
             else ""
         )
@@ -568,20 +568,20 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
               <button type='button' class='btn btn-sm btn-secondary' data-newbinding-type-id="{escape_html(ct["id"])}" data-newbinding-name="{escape_html(ct["display_name"])}">Add Connection</button>
               {update_btn}
               {tools_btn}
-              <button type='button' class='btn btn-sm btn-danger icon-delete-btn' data-connector-type-delete="{escape_html(ct["id"])}" title='{ "Uninstall adapter" if adapter_installed else "Delete service" }' aria-label='{ "Uninstall adapter" if adapter_installed else "Delete service" }'>{get_icon("delete")} Delete</button>
+              <button type='button' class='btn btn-sm btn-danger icon-delete-btn' data-connector-type-delete="{escape_html(ct["id"])}" title='{ "Uninstall adapter" if adapter_installed else "Delete capability" }' aria-label='{ "Uninstall adapter" if adapter_installed else "Delete capability" }'>{get_icon("delete")} Delete</button>
             </div>
           </div>
         </div>"""
 
     quick_start_html = "" if visible_binding_count else """<div class="card">
       <div class="section-header">
-        <h2>Getting a service working</h2>
+        <h2>Getting a capability working</h2>
         <div class="section-note">Four steps, shown until the first connection exists.</div>
       </div>
       <ol style="margin:0;padding-left:20px;line-height:1.6">
-        <li>Add the service with the <strong>Add a service</strong> button above.</li>
+        <li>Add the capability with the <strong>Add a capability</strong> button above.</li>
         <li>Store its key or token on the <a href="/credentials">Credentials</a> page.</li>
-        <li>Create a connection: it says which workspace may use the service, and with which credential.</li>
+        <li>Create a connection: it says which workspace may use the capability, and with which credential.</li>
         <li>Test the connection, then ask an agent to use it.</li>
       </ol>
     </div>"""
@@ -589,43 +589,45 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
     body = f"""
     <div class="page-header">
       <div>
-        <h1>Services</h1>
+        <h1>Capabilities</h1>
+        <!-- remove after one release -->
+        <p class="text-muted" style="margin:4px 0 0">Previously called Services.</p>
         <p class="text-muted" style="max-width:760px;margin-top:8px">
-          The outside services agents can use. Add a service, then create a connection to say who may
+          What agents can do in outside systems. Add a capability, then create a connection to say who may
           use it and with which credential.
         </p>
       </div>
       <div class="page-actions">
         <div class="dropdown" style="display:inline-block;position:relative">
-          <button class="btn btn-primary" onclick="toggleDropdown(this)" type="button">Add a service <span style="font-size:0.875em">&#9662;</span></button>
+          <button class="btn btn-primary" onclick="toggleDropdown(this)" type="button">Add a capability <span style="font-size:0.875em">&#9662;</span></button>
           <div class="dropdown-menu" style="display:none;position:absolute;right:0;top:100%;background:#fff;border:1px solid #ddd;border-radius:4px;box-shadow:0 2px 8px rgba(0,0,0,0.15);z-index:1000;min-width:280px;text-align:left">
-            <button class="dropdown-item" style="display:block;width:100%;padding:10px 16px;border:none;background:none;text-align:left;cursor:pointer;font-size:14px" onclick="resetImportPreview();openModal('import-spec-modal');closeAllDropdowns()">From an API spec<br><small class="text-muted">Most web services publish one (an OpenAPI file).</small></button>
+            <button class="dropdown-item" style="display:block;width:100%;padding:10px 16px;border:none;background:none;text-align:left;cursor:pointer;font-size:14px" onclick="resetImportPreview();openModal('import-spec-modal');closeAllDropdowns()">From an API spec<br><small class="text-muted">Most web APIs publish one (an OpenAPI file).</small></button>
             <button class="dropdown-item" style="display:block;width:100%;padding:10px 16px;border:none;background:none;text-align:left;cursor:pointer;font-size:14px" onclick="openModal('import-mcp-modal');closeAllDropdowns()">From an MCP server<br><small class="text-muted">A tool server that already speaks MCP.</small></button>
-            <button class="dropdown-item" style="display:block;width:100%;padding:10px 16px;border:none;background:none;text-align:left;cursor:pointer;font-size:14px" onclick="openModal('add-http-modal');closeAllDropdowns()">A plain web service<br><small class="text-muted">Just a web address and how to sign in.</small></button>
+            <button class="dropdown-item" style="display:block;width:100%;padding:10px 16px;border:none;background:none;text-align:left;cursor:pointer;font-size:14px" onclick="openModal('add-http-modal');closeAllDropdowns()">A plain web capability<br><small class="text-muted">Just a web address and how to sign in.</small></button>
           </div>
         </div>
       </div>
     </div>
 
-    <p class="text-muted" id="services-summary" style="margin:0 0 12px">{connector_type_count} service{"" if connector_type_count == 1 else "s"}, {visible_binding_count} connection{"" if visible_binding_count == 1 else "s"}{(", <strong style='color:var(--danger)'>" + str(failed_binding_count) + " with errors</strong>") if failed_binding_count else ""}</p>
+    <p class="text-muted" id="services-summary" style="margin:0 0 12px">{connector_type_count} capabilit{"" if connector_type_count == 1 else "ies"}, {visible_binding_count} connection{"" if visible_binding_count == 1 else "s"}{(", <strong style='color:var(--danger)'>" + str(failed_binding_count) + " with errors</strong>") if failed_binding_count else ""}</p>
 
     {quick_start_html}
 
      <div class="card" id="service-catalog">
       <div class="section-header" style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px">
         <div>
-          <h2>Service Catalog</h2>
-          <div class="section-note">Built-in and added services, shared across this install. Ready-made ones are in the <a href="/connectors/directory">service directory</a> and <a href="/connectors/adapters">ready-made services</a>.</div>
+          <h2>Capability Catalog</h2>
+          <div class="section-note">Built-in and added capabilities, shared across this install. Ready-made ones are in the <a href="/connectors/directory">capability directory</a> and <a href="/connectors/adapters">ready-made capabilities</a>.</div>
         </div>
         <button type="button" class="btn btn-sm btn-secondary" onclick="checkHealth(this)" title="Test every enabled connection now">Check Health</button>
       </div>
-      <div class="connector-types-grid">{ct_cards or "<div class='empty'>No services yet. Add one so agents can act in an outside system, or browse the <a href='/connectors/directory'>service directory</a>.</div>"}</div>
+      <div class="connector-types-grid">{ct_cards or "<div class='empty'>No capabilities yet. Add one so agents can act in an outside system, or browse the <a href='/connectors/directory'>capability directory</a>.</div>"}</div>
     </div>
 
     <div class="card" id="bindings">
       <div class="section-header">
         <h2>Connections</h2>
-        <div class="section-note">A connection says which workspace may use a service, and with which credential.</div>
+        <div class="section-note">A connection says which workspace may use a capability, and with which credential.</div>
       </div>
       <div id="bindings-list">{bindings_html}</div>
     </div>
@@ -639,17 +641,17 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
     <div class="modal-overlay" id="create-binding-modal" style="display:none">
       <div class="modal">
         <h2>New Connection</h2>
-        <p class="form-hint" style="margin-bottom:12px">A connection lets agents in one workspace use a service with one credential.</p>
+        <p class="form-hint" style="margin-bottom:12px">A connection lets agents in one workspace use a capability with one credential.</p>
         <form id="create-binding-form" onsubmit="createBinding(event)">
           <div class="form-group">
-            <label>Service *</label>
+            <label>Capability *</label>
             <select id="binding-connector-type" required onchange="bindingConnectorTypeChanged()">
               <option value="">-- Select --</option>
               {connector_type_opts}
             </select>
           </div>
           <div class="form-group">
-            <div id="binding-recipe" class="form-hint">Choose a service to see which credential it needs.</div>
+            <div id="binding-recipe" class="form-hint">Choose a capability to see which credential it needs.</div>
           </div>
           <div class="form-group" id="binding-setup-group" style="display:none">
             <label>Setup Instructions</label>
@@ -670,7 +672,7 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
           </div>
           <div class="form-group">
             <label>Credential</label>
-            <div class="form-hint">The key or token Core uses for this service. Agents never see it.</div>
+            <div class="form-hint">The key or token Core uses for this capability. Agents never see it.</div>
             <select id="binding-credential-mode" onchange="toggleBindingCredentialMode()">
               <option value="none">No credential</option>
               <option value="existing">Use stored credential</option>
@@ -683,41 +685,41 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
               <option value="">-- Select stored credential --</option>
               {credential_opts}
             </select>
-            <div class="form-hint">The stored credential Core uses when it calls this service.</div>
+            <div class="form-hint">The stored credential Core uses when it calls this capability.</div>
           </div>
           <div id="binding-new-credential-fields" style="display:none">
             <div class="form-group">
               <label>Credential Name *</label>
-              <input type="text" id="binding-new-credential-name" placeholder="e.g. service-token" autocomplete="off">
+              <input type="text" id="binding-new-credential-name" placeholder="e.g. capability-token" autocomplete="off">
               <div class="form-hint">A name for the new credential, so you can find it on the Credentials page.</div>
             </div>
             <div id="binding-new-credential-editor"></div>
           </div>
           <div class="form-group" id="binding-base-url-group" style="display:none">
-            <label for="binding-base-url">Service address *</label>
+            <label for="binding-base-url">Capability address *</label>
             <input type="url" id="binding-base-url" placeholder="https://api.example.com" autocomplete="off">
-            <div class="form-hint">The address Core calls for this service. It is tested as soon as the connection is created.</div>
+            <div class="form-hint">The address Core calls for this capability. It is tested as soon as the connection is created.</div>
           </div>
           <details class="access-details">
             <summary>Advanced</summary>
             <div class="form-group">
               <label>Extra settings (JSON, optional)</label>
               <textarea id="binding-config" rows="2" placeholder='{{"repo": "owner/name"}}'></textarea>
-              <div class="form-hint">Non-secret settings such as <code>base_url</code> or <code>default_params</code>. Leave blank unless the service's setup notes ask for them. A service that signs in with a username and password, or has a self-signed certificate, is set up here too: see "A service that signs in first" in the integrations guide.</div>
+              <div class="form-hint">Non-secret settings such as <code>base_url</code> or <code>default_params</code>. Leave blank unless the capability's setup notes ask for them. A capability that signs in with a username and password, or has a self-signed certificate, is set up here too: see the integrations guide for the sign-in steps.</div>
             </div>
             <div class="form-group" id="binding-mcp-endpoint-group" style="display:none">
               <label>Different MCP server address</label>
               <input type="url" id="binding-mcp-endpoint" placeholder="https://instance.example/mcp" autocomplete="off">
-              <div class="form-hint">Use another server for this connection only. It must offer the same tools, or add it as a separate service.</div>
+              <div class="form-hint">Use another server for this connection only. It must offer the same tools, or add it as a separate capability.</div>
             </div>
           </details>
           <div class="form-group actions-group" id="binding-actions-group">
             <label>What this connection can do</label>
-            <label class="checkbox-label"><input type="radio" name="binding-actions-mode" value="all" checked> Everything the service allows</label>
+            <label class="checkbox-label"><input type="radio" name="binding-actions-mode" value="all" checked> Everything the capability allows</label>
             <label class="checkbox-label"><input type="radio" name="binding-actions-mode" value="read_only"> Read-only <span class="form-hint">(only actions that say they change nothing)</span></label>
             <span data-actions-choose-wrap><label class="checkbox-label"><input type="radio" name="binding-actions-mode" value="custom"> Choose actions</label></span>
             <div class="actions-pick" id="binding-actions-list" style="display:none"></div>
-            <div class="form-hint">A connection can only narrow what its service allows. Switching an action off for everyone is done on the service card (View Actions).</div>
+            <div class="form-hint">A connection can only narrow what its capability allows. Switching an action off for everyone is done on the capability card (View Actions).</div>
           </div>
           <div class="form-group">
             <label class="checkbox-label">
@@ -754,28 +756,28 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
               <option value="">-- Select --</option>
               {credential_opts}
             </select>
-            <div class="form-hint">The stored credential Core uses when it calls this service.</div>
+            <div class="form-hint">The stored credential Core uses when it calls this capability.</div>
           </div>
           <details class="access-details">
             <summary>Advanced</summary>
             <div class="form-group">
               <label>Extra settings (JSON)</label>
               <textarea id="edit-binding-config" rows="2"></textarea>
-              <div class="form-hint">Non-secret settings such as <code>base_url</code> or <code>default_params</code>. Leave blank unless the service's setup notes ask for them. A service that signs in with a username and password, or has a self-signed certificate, is set up here too: see "A service that signs in first" in the integrations guide.</div>
+              <div class="form-hint">Non-secret settings such as <code>base_url</code> or <code>default_params</code>. Leave blank unless the capability's setup notes ask for them. A capability that signs in with a username and password, or has a self-signed certificate, is set up here too: see the integrations guide for the sign-in steps.</div>
             </div>
             <div class="form-group" id="edit-binding-mcp-endpoint-group" style="display:none">
               <label>Different MCP server address</label>
               <input type="url" id="edit-binding-mcp-endpoint" placeholder="https://instance.example/mcp" autocomplete="off">
-              <div class="form-hint">Leave blank to use the service's own address. A different one must offer the same tools.</div>
+              <div class="form-hint">Leave blank to use the capability's own address. A different one must offer the same tools.</div>
             </div>
           </details>
           <div class="form-group actions-group" id="edit-binding-actions-group">
             <label>What this connection can do</label>
-            <label class="checkbox-label"><input type="radio" name="edit-binding-actions-mode" value="all" checked> Everything the service allows</label>
+            <label class="checkbox-label"><input type="radio" name="edit-binding-actions-mode" value="all" checked> Everything the capability allows</label>
             <label class="checkbox-label"><input type="radio" name="edit-binding-actions-mode" value="read_only"> Read-only <span class="form-hint">(only actions that say they change nothing)</span></label>
             <span data-actions-choose-wrap><label class="checkbox-label"><input type="radio" name="edit-binding-actions-mode" value="custom"> Choose actions</label></span>
             <div class="actions-pick" id="edit-binding-actions-list" style="display:none"></div>
-            <div class="form-hint">A connection can only narrow what its service allows. Switching an action off for everyone is done on the service card (View Actions).</div>
+            <div class="form-hint">A connection can only narrow what its capability allows. Switching an action off for everyone is done on the capability card (View Actions).</div>
             <div class="form-hint credential-reach" id="edit-binding-credential-reach" style="display:none"></div>
           </div>
           <div class="form-group">
@@ -832,7 +834,7 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
         <div style="background:var(--bg-secondary);border-left:3px solid var(--warning-color);padding:0.6rem 0.85rem;border-radius:4px;margin-bottom:1rem;font-size:0.875em">
           <strong>HTTP transport only.</strong> {APP_NAME} connects to MCP servers over HTTP — it cannot launch local processes.
           Servers configured with <code>command</code>/<code>args</code> (stdio) are not supported here.
-          Use <strong>Add a service → A plain web service</strong> for REST APIs, or run a stdio server behind an HTTP bridge first.
+          Use <strong>Add a capability → A plain web capability</strong> for REST APIs, or run a stdio server behind an HTTP bridge first.
         </div>
         <form id="import-mcp-form" onsubmit="importMcpServer(event)">
           <div class="form-group">
@@ -882,7 +884,7 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
     <!-- Add HTTP Connector Modal -->
     <div class="modal-overlay" id="add-http-modal" style="display:none">
       <div class="modal">
-        <h2>Add a plain web service</h2>
+        <h2>Add a plain web capability</h2>
         <form id="add-http-form" onsubmit="addHttpConnector(event)">
           <div class="form-group">
             <label>Display Name</label>
@@ -902,7 +904,7 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
               <option value="query">Query parameter</option>
               <option value="none">None</option>
             </select>
-            <div class="form-hint">How the service expects its key. Choose Bearer unless its documentation says otherwise.</div>
+            <div class="form-hint">How the capability expects its key. Choose Bearer unless its documentation says otherwise.</div>
           </div>
           <div class="form-group" id="http-auth-header-group">
             <label>Auth Header Name</label>
@@ -919,7 +921,7 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
             <textarea id="http-extra-headers" rows="3" placeholder='{{"X-Custom-Header":"value"}}'></textarea>
             <div class="form-hint">Headers sent with every call, as JSON. Keep secrets out of here; store them as a credential.</div>
           </div>
-          <button type="submit" class="btn btn-primary">Add service</button>
+          <button type="submit" class="btn btn-primary">Add capability</button>
           <button type="button" class="btn btn-secondary" onclick="closeModal('add-http-modal')">Cancel</button>
         </form>
       </div>
@@ -995,7 +997,7 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
         '<script src="/static/js/adapter-actions.js?v=20260902"></script>'
         '<script src="/static/js/connectors.js?v=20261113a"></script>'
     )
-    return render_page("Services", body, "/connectors", extra_js, session=session)
+    return render_page("Capabilities", body, "/connectors", extra_js, session=session)
 
 
 @router.get("/connectors/adapters")
@@ -1010,22 +1012,22 @@ async def connectors_adapters_page(
     body = f"""
     <div class="page-header">
       <div>
-        <h1>Ready-made services</h1>
+        <h1>Ready-made capabilities</h1>
         <p class="text-muted" style="max-width:760px;margin-top:8px">
-          Ready-made services, built in or kept in a local folder, that you can install into the
-          service catalog.
+          Ready-made capabilities, built in or kept in a local folder, that you can install into the
+          capability catalog.
         </p>
       </div>
       <div class="page-actions">
-        <a class="btn btn-secondary" href="/connectors">&larr; Back to Services</a>
+        <a class="btn btn-secondary" href="/connectors">&larr; Back to Capabilities</a>
       </div>
     </div>
 
     <div class="card">
       <div class="section-header" style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px">
         <div>
-          <h2>Ready-made services</h2>
-          <div class="section-note">Install one into the service catalog, then add a connection for it like any other service.</div>
+          <h2>Ready-made capabilities</h2>
+          <div class="section-note">Install one into the capability catalog, then add a connection for it like any other capability.</div>
         </div>
         <div class="section-note">{len(adapter_entries)} available</div>
       </div>
@@ -1040,13 +1042,13 @@ async def connectors_adapters_page(
         '<script src="/static/js/adapter-actions.js?v=20260902"></script>'
         '<script src="/static/js/connectors-adapters.js?v=20260902"></script>'
     )
-    return render_page("Ready-made services", body, "/connectors", extra_js, session=session)
+    return render_page("Ready-made capabilities", body, "/connectors", extra_js, session=session)
 
 
 @router.get("/connectors/help")
 def connectors_help_page(request: Request, session: dict = Depends(require_auth)):
     body = """
-    <div class="page-header"><h1>Services help</h1></div>
+    <div class="page-header"><h1>Capabilities help</h1></div>
 
     <div class="card">
       <h2>What is an OpenAPI Spec?</h2>
@@ -1066,7 +1068,7 @@ def connectors_help_page(request: Request, session: dict = Depends(require_auth)
         <tbody>
           <tr><td>Common paths</td><td>Append <code>/openapi.json</code>, <code>/swagger.json</code>, or <code>/api-docs</code> to the API's base URL</td></tr>
           <tr><td>API documentation</td><td>Look for a "Download OpenAPI spec" or "Export" link in the docs</td></tr>
-          <tr><td>GitHub repositories</td><td>Many vendors publish specs in public GitHub orgs or release repos. Search for the service name plus <code>openapi</code> or <code>swagger</code>.</td></tr>
+          <tr><td>GitHub repositories</td><td>Many vendors publish specs in public GitHub orgs or release repos. Search for the capability name plus <code>openapi</code> or <code>swagger</code>.</td></tr>
           <tr><td>apis.guru</td><td>Search <a href="https://apis.guru" target="_blank">apis.guru</a> for 2,000+ public specs</td></tr>
         </tbody>
       </table>
@@ -1077,7 +1079,7 @@ def connectors_help_page(request: Request, session: dict = Depends(require_auth)
       <p>Once you import a spec, the workflow is:</p>
       <ol>
         <li><strong>Create a credential</strong> — store your API key or token (a personal access token, for example)</li>
-        <li><strong>Create a connection</strong> — link the service to your credential and choose a workspace</li>
+        <li><strong>Create a connection</strong> — link the capability to your credential and choose a workspace</li>
         <li><strong>Test the connection</strong> — click Test to verify the credential works</li>
         <li><strong>Use it</strong> — AI agents discover available actions via MCP and execute them through <code>connectors_run</code></li>
       </ol>
@@ -1108,11 +1110,11 @@ def connectors_help_page(request: Request, session: dict = Depends(require_auth)
     </div>
 
     <div style="margin-top:16px">
-      <a href="/connectors" class="btn btn-secondary">Back to Services</a>
+      <a href="/connectors" class="btn btn-secondary">Back to Capabilities</a>
     </div>
     """
     body = body.replace("Agent Core", APP_NAME)
-    return render_page("Services help", body, "/connectors", session=session)
+    return render_page("Capabilities help", body, "/connectors", session=session)
 
 
 @router.get("/connectors/directory")
@@ -1122,11 +1124,11 @@ def connectors_directory_page(
 ):
     body = """
     <div class="page-header">
-      <h1>Service directory</h1>
+      <h1>Capability directory</h1>
         <div class="page-actions">
-        <a class="btn btn-secondary" href="/connectors">&larr; Back to Services</a>
+        <a class="btn btn-secondary" href="/connectors">&larr; Back to Capabilities</a>
         <div class="dropdown" style="display:inline-block;position:relative">
-          <button class="btn btn-secondary" onclick="toggleDropdown(this)" type="button">Add a service <span style="font-size:0.875em">&#9662;</span></button>
+          <button class="btn btn-secondary" onclick="toggleDropdown(this)" type="button">Add a capability <span style="font-size:0.875em">&#9662;</span></button>
           <div class="dropdown-menu" style="display:none;position:absolute;right:0;top:100%;background:#fff;border:1px solid #ddd;border-radius:4px;box-shadow:0 2px 8px rgba(0,0,0,0.15);z-index:1000;min-width:200px;text-align:left">
             <button class="dropdown-item" style="display:block;width:100%;padding:10px 16px;border:none;background:none;text-align:left;cursor:pointer;font-size:14px" onclick="resetImportPreview();openModal('import-spec-modal');closeAllDropdowns()">From an API spec</button>
             <button class="dropdown-item" style="display:block;width:100%;padding:10px 16px;border:none;background:none;text-align:left;cursor:pointer;font-size:14px" onclick="openModal('directory-import-mcp-modal');closeAllDropdowns()">From an MCP server</button>
@@ -1224,4 +1226,4 @@ def connectors_directory_page(
     <script src="/static/js/connectors-directory.js?v=20260626"></script>
     """
     body = body.replace("Agent Core", APP_NAME)
-    return render_page("Service directory", body, "/connectors", session=session)
+    return render_page("Capability directory", body, "/connectors", session=session)

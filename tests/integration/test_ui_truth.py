@@ -24,7 +24,7 @@ def _bound_service():
 
 def _services_tile(test_client, admin_token):
     html = test_client.get("/", headers=_admin(admin_token)).text
-    tile = html.split("Services</div>", 1)[1].split("</a>", 1)[0]
+    tile = html.split("Capabilities</div>", 1)[1].split("</a>", 1)[0]
     return tile
 
 
@@ -70,7 +70,7 @@ def test_the_used_by_cell_always_says_who_was_given_the_secret_and_who_else_can_
     assert "Given the secret:" in cell and "no one" in cell
     assert "3 others can see its name" in cell
     assert "Ref Reader" in cell.split("title='", 1)[1].split("'", 1)[0]  # the names are on hover
-    assert "use it wherever Agent Core connects a service" in cell and "does not show them the secret" in cell
+    assert "use it wherever Agent Core makes a connection" in cell and "does not show them the secret" in cell
     assert "secret-value" not in html and "can get its reference" not in html
 
 

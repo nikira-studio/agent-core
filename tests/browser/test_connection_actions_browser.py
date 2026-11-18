@@ -136,7 +136,7 @@ def test_the_dialog_says_whether_the_limit_holds_whenever_the_choice_is_not_ever
     connections.locator("#edit-binding-actions-group").get_by_label("Read-only").check()
     connections.wait_for_selector("#edit-binding-credential-reach", state="visible")
     assert "no credential" in box.inner_text() and "this limit holds" in box.inner_text()
-    connections.locator("#edit-binding-actions-group").get_by_label("Everything the service allows").check()
+    connections.locator("#edit-binding-actions-group").get_by_label("Everything the capability allows").check()
     assert not box.is_visible()
     connections.keyboard.press("Escape")
 

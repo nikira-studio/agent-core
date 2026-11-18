@@ -148,7 +148,7 @@ def workspaces_page(request: Request, session: dict = Depends(require_auth)):
       else { showToast(j.error.message || 'Failed', 'danger'); }
     }
     async function purgeProject(id, counts) {
-      const typed = await promptDialog('This also deletes its ' + (counts.memories || 0) + ' memories (retracted ones included), ' + (counts.credentials || 0) + ' stored credentials and ' + (counts.bindings || 0) + ' service bindings. Its ' + (counts.tasks || 0) + ' tasks are kept but no longer belong to a workspace. This cannot be undone.', { title: 'Permanently delete the workspace "' + id + '"?', input: { label: 'Type the workspace ID to confirm', placeholder: id }, confirmLabel: 'Delete', danger: true });
+      const typed = await promptDialog('This also deletes its ' + (counts.memories || 0) + ' memories (retracted ones included), ' + (counts.credentials || 0) + ' stored credentials and ' + (counts.bindings || 0) + ' connections. Its ' + (counts.tasks || 0) + ' tasks are kept but no longer belong to a workspace. This cannot be undone.', { title: 'Permanently delete the workspace "' + id + '"?', input: { label: 'Type the workspace ID to confirm', placeholder: id }, confirmLabel: 'Delete', danger: true });
       if (typed === null) return;
       if (typed.trim() !== id) { showToast('That is not the workspace ID. Nothing was deleted.', 'warning'); return; }
       const j = await apiFetch('/api/workspaces/' + id + '/purge', { method: 'POST' });
