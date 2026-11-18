@@ -398,6 +398,13 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
                 f"<button type='button' class='btn btn-sm btn-primary' "
                 f'data-binding-oauth="{escape_html(b["id"])}">{escape_html(oauth_label)}</button>'
             )
+        # Who may use this connection: an admin-only answer, so only an admin is offered the button.
+        users_button = ""
+        if ctx.is_admin:
+            users_button = (
+                f"<button type='button' class='btn btn-sm btn-secondary' data-binding-users='{escape_html(b["id"])}' "
+                "title='Who can use this connection'>Who can use it</button>"
+            )
         bindings_rows += f"""
         <tr data-binding-id="{b["id"]}" data-connector-type-id="{escape_html(b.get("connector_type_id", ""))}" data-provider-type="{escape_html(ct.get("provider_type", "") if ct else "")}">
           <td style="{text_style}">{escape_html(b.get("name", ""))}</td>
@@ -408,6 +415,7 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
             {oauth_button}
             <button type='button' class='btn btn-sm btn-secondary' data-binding-edit="{escape_html(b["id"])}">Edit</button>
             <button type='button' class='btn btn-sm btn-secondary' data-binding-test="{escape_html(b["id"])}">Test</button>
+            {users_button}
             <details class='row-more'><summary class='btn btn-sm btn-secondary' title='History, delete'>More</summary><div class='row-more-list'>
               <button type='button' class='btn btn-sm btn-secondary' data-binding-history="{escape_html(b["id"])}">History</button>
               <button type='button' class='btn btn-sm btn-danger icon-delete-btn' data-binding-delete="{escape_html(b["id"])}" title='Delete connection' aria-label='Delete connection'>{get_icon("delete")} Delete</button>
@@ -991,11 +999,30 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
         <button type="button" class="btn" onclick="closeModal('executions-modal')">Close</button>
       </div>
     </div>
+
+    <!-- Access Modal: who can use one connection -->
+    <div class="modal-overlay" id="access-connection-modal" style="display:none">
+      <div class="modal modal-wide">
+        <h2 id="access-connection-title">Who can use <span id="access-connection-name"></span></h2>
+        <div class="form-section">
+          <h3 class="sub-heading form-section-title">The credential it signs in with</h3>
+          <div id="access-connection-credential" class="form-hint"></div>
+        </div>
+        <div class="form-section">
+          <h3 class="sub-heading form-section-title">The agents that can use it</h3>
+          <div id="access-connection-users"></div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" onclick="closeModal('access-connection-modal')">Close</button>
+        </div>
+      </div>
+    </div>
     """
 
     extra_js = (
         '<script src="/static/js/adapter-actions.js?v=20260902"></script>'
         '<script src="/static/js/connectors.js?v=20261113a"></script>'
+        '<script src="/static/js/agent_access.js?v=20261117a"></script>'
     )
     return render_page("Capabilities", body, "/connectors", extra_js, session=session)
 

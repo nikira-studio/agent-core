@@ -278,13 +278,20 @@ def _agents_view(request: Request, session: dict, show_services: bool):
                 f"{escape_html(key_count_label)}</button>"
             )
         owner_id = a.get("owner_user_id", "")
-        default_user_id = a.get("default_user_id", "") or owner_id
         if can_manage:
-            credentials_link = ""
-            if is_admin and "credentials_resolve" in agent_service.parse_capabilities(a.get("capabilities_json")):
-                credentials_link = (
-                    f"<a class='btn btn-sm btn-secondary' href='/credentials?agent={quote(a['id'])}'"
-                    " title='Choose which stored credentials this one can fetch'>Credentials</a>"
+            # What this entry can reach is one dialog: an agent's workspaces, capabilities and credentials; a
+            # service's secrets. Only an admin may open it, so only an admin is offered it.
+            access_button = ""
+            if is_admin:
+                if kind == "service":
+                    access_hook = "service"
+                    access_title = "What this service can fetch"
+                else:
+                    access_hook = "agent"
+                    access_title = "What this agent can do and reach"
+                access_button = (
+                    f"<button type='button' class='btn btn-sm btn-secondary' data-{access_hook}-access='{escape_html(a['id'])}'"
+                    f" title='{access_title}'>Access</button>"
                 )
             # The Connect page sets up an agent that does work; a service is set up with a key and a secret.
             connect_link = (
@@ -297,9 +304,9 @@ def _agents_view(request: Request, session: dict, show_services: bool):
             action_buttons = (
                 f"<button type='button' class='btn btn-sm btn-secondary' data-agent-edit='{escape_html(a['id'])}'>Edit</button>"
                 f"{connect_link}"
-                "<details class='row-more'><summary class='btn btn-sm btn-secondary' title='Keys, credentials, deactivate, delete'>More</summary>"
+                "<details class='row-more'><summary class='btn btn-sm btn-secondary' title='Access, keys, deactivate, delete'>More</summary>"
                 "<div class='row-more-list'>"
-                f"{credentials_link}"
+                f"{access_button}"
                 f"<button type='button' class='btn btn-sm btn-secondary' data-agent-keys='{escape_html(a['id'])}' title='See, add and revoke this agent&#39;s keys'>Keys</button>"
                 f"{toggle_btn}"
                 f"<button type='button' class='btn btn-sm btn-danger icon-delete-btn' data-agent-purge='{escape_html(a['id'])}' title='Permanently delete' aria-label='Permanently delete'>{get_icon('delete')} Delete</button>"
@@ -360,10 +367,17 @@ def _agents_view(request: Request, session: dict, show_services: bool):
         ]
     ).replace("<", "\\u003c")
 
+    # The workspaces the page's own forms offer, so the Access dialog can offer the ones that are not listed yet.
+    workspace_data = json.dumps(
+        [{"id": p["id"], "name": p.get("name") or p["id"]} for p in all_workspaces]
+    ).replace("<", "\\u003c")
+
     js = """
     <script>
     const IS_ADMIN = __IS_ADMIN__;
     const AGENT_ROWS = __AGENT_ROWS__;
+    // The workspaces this page already knows, so the Access dialog can offer the ones that are not listed yet.
+    const ACCESS_WORKSPACES = __ACCESS_WORKSPACES__;
     const CAPABILITY_NAMES = {memory: 'Use memory', coordination: 'Coordinate tasks', credentials: 'Reference credentials', credentials_resolve: 'Fetch secrets', connectors_read: 'See capabilities', connectors_execute: 'Run capabilities', admin_propose: 'Propose admin changes'};
     let agentModalReadOnly = false;
     let editEntryIsService = false;
@@ -876,6 +890,9 @@ def _agents_view(request: Request, session: dict, show_services: bool):
     </script>"""
     js = js.replace("__IS_ADMIN__", str(is_admin).lower()).replace("__ROLE_PRESETS__", json.dumps(ROLE_PRESETS))
     js = js.replace("__AGENT_ROWS__", row_data)
+    js = js.replace("__ACCESS_WORKSPACES__", workspace_data)
+    # The Access dialogs live in their own file, loaded the same way as the page's other scripts.
+    js = js + '\n<script src="/static/js/agent_access.js?v=20261117a"></script>'
 
     page_title = "Services" if show_services else "Agents"
     create_button = (
@@ -892,6 +909,84 @@ def _agents_view(request: Request, session: dict, show_services: bool):
             "agent more; create a new one only for a separate tool.</p></div>"
         )
     )
+
+    # The Access dialog of the page: what one agent can do and reach, or what one service can fetch.
+    agent_access_dialog = """
+    <!-- Access Modal: what one agent can do and reach -->
+    <div class="modal-overlay" id="access-agent-modal" style="display:none">
+      <div class="modal modal-wide">
+        <h2 id="access-agent-title">What <span id="access-agent-name"></span> can do and reach</h2>
+        <div class="form-section">
+          <h3 class="sub-heading form-section-title">Workspaces</h3>
+          <p class="form-hint">The shared places this agent can read and write. Adding or removing one shows what it would open or close before anything is saved.</p>
+          <div id="access-agent-workspaces"></div>
+          <div id="access-agent-workspace-preview"></div>
+          <div class="form-group" style="margin-top:12px">
+            <label for="access-agent-workspace-pick">Add a workspace</label>
+            <select id="access-agent-workspace-pick"></select>
+            <label class="checkbox-label"><input type="checkbox" id="access-agent-workspace-read" checked> Read</label>
+            <label class="checkbox-label"><input type="checkbox" id="access-agent-workspace-write"> Write</label>
+            <button type="button" class="btn btn-sm btn-secondary" id="access-agent-workspace-add">Add</button>
+          </div>
+        </div>
+        <div class="form-section">
+          <h3 class="sub-heading form-section-title">Capabilities</h3>
+          <p class="form-hint">The connections this agent can reach, and whether it may run them.</p>
+          <div id="access-agent-capabilities"></div>
+        </div>
+        <div class="form-section">
+          <h3 class="sub-heading form-section-title">Credentials it can reference</h3>
+          <p class="form-hint">The stored secrets this agent may ask for by name. It never receives the value itself.</p>
+          <div id="access-agent-credentials"></div>
+        </div>
+        <div class="form-section">
+          <h3 class="sub-heading form-section-title">Keys</h3>
+          <div id="access-agent-keys"></div>
+        </div>
+        <div class="form-section">
+          <h3 class="sub-heading form-section-title">Permissions</h3>
+          <div id="access-agent-permissions"></div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" id="access-agent-cancel">Cancel</button>
+          <button type="button" class="btn" id="access-agent-save">Save</button>
+        </div>
+      </div>
+    </div>
+    """
+
+    service_access_dialog = """
+    <!-- Access Modal: what one service can fetch -->
+    <div class="modal-overlay" id="access-service-modal" style="display:none">
+      <div class="modal modal-wide">
+        <h2 id="access-service-title">What <span id="access-service-name"></span> can fetch</h2>
+        <div class="form-section">
+          <h3 class="sub-heading form-section-title">Secrets it can fetch</h3>
+          <p class="form-hint">A service receives the secret value itself.</p>
+          <div id="access-service-secrets"></div>
+          <div class="form-group" style="margin-top:12px">
+            <label for="access-service-secret-pick">Add a secret</label>
+            <select id="access-service-secret-pick"></select>
+            <label class="checkbox-label"><input type="checkbox" id="access-service-secret-write"> Allow it to write the value back</label>
+            <div class="form-group">
+              <label for="access-service-secret-expires">Access ends on</label>
+              <input type="date" id="access-service-secret-expires">
+            </div>
+            <button type="button" class="btn btn-sm btn-secondary" id="access-service-secret-add">Add</button>
+          </div>
+        </div>
+        <div class="form-section">
+          <h3 class="sub-heading form-section-title">Keys</h3>
+          <div id="access-service-keys"></div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" onclick="closeModal('access-service-modal')">Close</button>
+        </div>
+      </div>
+    </div>
+    """
+
+    access_dialog_html = service_access_dialog if show_services else agent_access_dialog
 
     return render_page(
         page_title,
@@ -1009,6 +1104,8 @@ def _agents_view(request: Request, session: dict, show_services: bool):
         </div>
       </div>
     </div>
+
+    {access_dialog_html}
     """,
         "/services" if show_services else "/agents",
         js,
