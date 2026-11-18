@@ -34,10 +34,10 @@ def _cell(page):
     return page.locator("tr[data-credential-id] td[data-label='Used by']").first
 
 
-def test_the_cell_says_who_was_given_the_secret_and_who_else_can_see_its_name(credentials):
+def test_the_cell_says_who_was_given_the_secret_and_who_else_can_reach_it(credentials):
     page = credentials
     before = _cell(page).inner_text()
-    assert "Given the secret: no one" in before and "2 others can see its name" in before
+    assert "Given the secret: no one" in before and "2 agents can reach it" in before
     assert "can get its reference" not in before
 
 
@@ -78,5 +78,25 @@ def test_the_dialog_is_one_list_in_three_groups_and_a_service_can_be_given_the_s
 
     page.locator("#access-services button", has_text="Remove").click()
     page.wait_for_function("document.querySelector(\"tr[data-credential-id] td[data-label='Used by']\").innerText.includes('no one')")
-    assert "2 others can see its name" in _cell(page).inner_text()
+    assert "2 agents can reach it" in _cell(page).inner_text()
     assert page.evaluate("window.__stillHere") is True  # closing does not reload either, so the cell is already right
+
+
+def test_the_pickers_ask_which_one_before_anything_is_added(credentials):
+    """Every Add picker starts on "Choose...", and its Add button opens only once something is chosen."""
+    page = credentials
+    page.reload()  # an earlier test leaves its dialog open
+    page.wait_for_load_state("load")
+    page.locator("[data-credential-access]").first.click()
+    page.wait_for_selector("#access-modal .modal", state="visible")
+    page.wait_for_function("document.querySelector('#access-services').innerText.includes('No service receives this yet.')")
+    for pick_id, add_id in (
+        ("#access-connection-pick", "#access-connection-add"),
+        ("#access-service-pick", "#access-service-add"),
+    ):
+        pick = page.locator(pick_id)
+        assert pick.locator("option").first.text_content() == "Choose..."
+        assert page.locator(add_id).is_disabled()
+    # Choosing a service opens the Add button.
+    page.locator("#access-service-pick").select_option(label="Worker A")
+    assert not page.locator("#access-service-add").is_disabled()

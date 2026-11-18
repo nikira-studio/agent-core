@@ -77,7 +77,7 @@ def test_the_agents_page_calls_the_flags_permissions(authenticated_client):
 
 def test_the_services_page_is_about_the_programs_that_fetch_secrets(authenticated_client):
     html = authenticated_client.get("/services").text
-    assert "Programs and containers that fetch secrets" in html
+    assert "Programs and containers that only fetch secrets" in html
     assert "+ Create service" in html
 
 

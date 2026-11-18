@@ -139,15 +139,16 @@ def test_the_agents_page_lists_the_agents_and_the_services_apart(test_client, ad
     assert page.status_code == 200, page.text
     assert "Worker A" in page.text
     assert "Batch Reader" not in page.text
-    # The switch shows both counts.
-    assert "Agents (1)" in page.text
-    assert "Services (1)" in page.text
-    assert 'aria-current="page"' in page.text
+    # There is no switch between the two lists: the Agents page says where the services are.
+    assert "agent-switch" not in page.text
+    assert 'href="/services"' in page.text
+    assert "Credentials &gt; Services" in page.text
 
     services = test_client.get("/services", headers=auth(admin_token))
     assert services.status_code == 200, services.text
     assert "Batch Reader" in services.text
-    assert "Programs and containers that fetch secrets." in services.text
+    assert "Programs and containers that only fetch secrets." in services.text
+    assert "agent-switch" not in services.text
     # The Connect page sets up an agent that does work; a service is set up with a key and a secret.
     assert "/integrations?agent_id=batch-reader" not in services.text
 
@@ -156,9 +157,10 @@ def test_the_agents_page_says_when_there_are_no_services(test_client, admin_toke
     page = test_client.get("/services", headers=auth(admin_token))
     assert page.status_code == 200, page.text
     assert "No services yet. Create one with the Service role." in page.text
-    # The switch on the Agents page carries the count.
+    # The Agents page points at the list of services; it does not carry a count of its own.
     agents = test_client.get("/agents", headers=auth(admin_token))
-    assert "Services (0)" in agents.text
+    assert 'href="/services"' in agents.text
+    assert "Services (0)" not in agents.text
 
 
 def test_the_connect_page_offers_agents_only(test_client, admin_token, one_of_each):
@@ -188,7 +190,8 @@ def test_another_person_sees_only_the_agents_of_their_own(test_client, admin_tok
     assert page.status_code == 200, page.text
     assert "Worker B" in page.text
     assert "Batch Reader" not in page.text
-    assert "Services (0)" in page.text
+    assert 'href="/services"' in page.text
+    assert "Services (0)" not in page.text
 
 
 def test_the_recorded_work_of_an_entry_is_what_keeps_it_an_agent(test_client, admin_token):

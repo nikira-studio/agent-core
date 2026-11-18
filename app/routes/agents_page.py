@@ -12,6 +12,7 @@ from app.routes.dashboard_shared import (
     require_auth,
     local_dt,
     get_icon,
+    Owners,
 )
 
 router = APIRouter()
@@ -50,18 +51,14 @@ def _agents_view(request: Request, session: dict, show_services: bool):
     is_admin = session.get("role") == "admin"
     # /agents lists the agents that do work; /services lists the programs that only fetch secrets.
 
-    def entries(kind, active_only=False):
+    def entries(kind):
         """The entries of one kind this viewer may see."""
-        is_active = True if active_only else None
         if is_admin:
-            return agent_service.list_agents(is_active=is_active, kind=kind)
-        return agent_service.list_visible_agents(session["user_id"], is_active=is_active, kind=kind)
+            return agent_service.list_agents(kind=kind)
+        return agent_service.list_visible_agents(session["user_id"], kind=kind)
 
     agents = entries("agent")
     services = entries("service")
-    # The switch counts the entries that are switched on: an entry that is off is not on anyone's list.
-    agent_count = len(entries("agent", active_only=True))
-    service_count = len(entries("service", active_only=True))
     listed = services if show_services else agents
 
     all_workspaces = (
@@ -72,6 +69,24 @@ def _agents_view(request: Request, session: dict, show_services: bool):
     selectable_users = auth_service.list_users() if is_admin else [
         {"id": session["user_id"], "display_name": "Your personal context"}
     ]
+    # The owners, in plain words: the workspaces, the people and the agents by name, never by id.
+    owners = Owners(workspaces=all_workspaces, agents=agents + services)
+
+    # What each service may fetch: its live, unexpired grants. One query for the whole page, not one per row.
+    service_secret_names: dict[str, list[str]] = {}
+    if show_services and services:
+        from app.database import get_db
+        from app.services.credential_consumer_service import is_expired
+
+        with get_db() as conn:
+            grant_rows = conn.execute(
+                "SELECT g.consumer_agent_id, g.expires_at, c.name FROM credential_consumer_grants g "
+                "JOIN credentials c ON c.id = g.entry_id WHERE g.revoked_at IS NULL"
+            ).fetchall()
+        for row in grant_rows:
+            if is_expired({"expires_at": row["expires_at"]}):
+                continue
+            service_secret_names.setdefault(row["consumer_agent_id"], []).append(row["name"])
 
     def build_scope_list(prefix):
         h = f'<div class="scope-selectors" id="{prefix}-scopes">'
@@ -223,15 +238,57 @@ def _agents_view(request: Request, session: dict, show_services: bool):
     create_access_html = access_section("ca", ca_read_html, ca_write_html, ca_recall_html, True)
     edit_access_html = access_section("edit", edit_read_html, edit_write_html, edit_recall_html, False)
 
+    def agent_access_summary(a):
+        """What this agent can reach, in plain words: its own private memory, the person it acts for, and the
+        workspaces it is given. The detail is under More > Access."""
+        read_scopes = agent_service.parse_scopes(a.get("read_scopes_json", "[]"))
+        write_scopes = agent_service.parse_scopes(a.get("write_scopes_json", "[]"))
+        person_id = a.get("default_user_id") or a.get("owner_user_id")
+        workspace_ids = []
+        for scope in list(read_scopes) + list(write_scopes):
+            if not scope.startswith("workspace:"):
+                continue
+            workspace_id = scope.split(":", 1)[1]
+            if workspace_id not in workspace_ids:
+                workspace_ids.append(workspace_id)
+        bits = [
+            "<span class='scope-tag' title='Its own private memory, which nobody else can read'>private memory</span>"
+        ]
+        if person_id:
+            bits.append(
+                "<span class='scope-tag' title='It acts for this person'>acts for "
+                + escape_html(owners.person(person_id))
+                + "</span>"
+            )
+        if workspace_ids:
+            names = ", ".join(owners.workspace(w) for w in workspace_ids)
+            bits.append(
+                "<span class='scope-tag' title='"
+                + escape_html(names)
+                + "'>"
+                + str(len(workspace_ids))
+                + (" workspace" if len(workspace_ids) == 1 else " workspaces")
+                + "</span>"
+            )
+        return "".join(bits)
+
+    def service_access_summary(a):
+        """What this service can fetch: how many secrets, and which ones."""
+        names = service_secret_names.get(a["id"], [])
+        if not names:
+            return "<span class='text-muted'>no secrets yet</span>"
+        return (
+            "<span class='scope-tag' title='"
+            + escape_html(", ".join(names))
+            + "'>"
+            + str(len(names))
+            + (" secret" if len(names) == 1 else " secrets")
+            + "</span>"
+        )
+
     def agent_row(a):
         active = a.get("is_active")
         status_badge = f"<span class='badge badge-{'active' if active else 'inactive'}'>{'active' if active else 'inactive'}</span>"
-        read_scopes = agent_service.parse_scopes(a.get("read_scopes_json", "[]"))
-        write_scopes = agent_service.parse_scopes(a.get("write_scopes_json", "[]"))
-        own_scope = f"agent:{a['id']}"
-        principal_scope = f"user:{a.get('default_user_id') or a.get('owner_user_id')}"
-        read_extra = [s for s in read_scopes if s not in (own_scope, principal_scope)]
-        write_extra = [s for s in write_scopes if s != own_scope]
         shared_badge = (
             "<span class='badge badge-info'>Shared</span>"
             if a.get("is_shared") or agent_service.is_agent_shared(a)
@@ -242,13 +299,16 @@ def _agents_view(request: Request, session: dict, show_services: bool):
             if a.get("inherit_user_bindings")
             else ""
         )
-        access_summary = (
-            f"<span class='scope-tag' title='Implicit private scope'>{escape_html(own_scope)}</span>"
-            f"<span class='scope-tag' title='Inherited from its owner'>{escape_html(principal_scope)}</span>"
-            f"{shared_badge}"
-            f"{personal_badge}"
-            f"<span class='text-muted'> + {len(read_extra)} read / {len(write_extra)} write grants</span>"
-        )
+        # A service only fetches secrets, so its row says how many; an agent's row says what it can reach.
+        kind = a.get("kind") or "agent"
+        if kind == "service":
+            access_summary = service_access_summary(a)
+        else:
+            access_summary = (
+                agent_access_summary(a)
+                + f"{shared_badge}"
+                + f"{personal_badge}"
+            )
         can_manage = is_admin or a.get("owner_user_id") == session["user_id"]
         no_effect_html = "".join(
             f"<div class='agent-no-effect' style='color:var(--warning-text,#8a5a0a);font-size:0.8rem;margin-top:4px'>{escape_html(n['message'])}</div>"
@@ -263,7 +323,6 @@ def _agents_view(request: Request, session: dict, show_services: bool):
             toggle_btn = ""
         # A service is one of the kinds now, so its row says so; an agent's row still shows the role
         # its permissions match.
-        kind = a.get("kind") or "agent"
         role = "service" if kind == "service" else role_of(agent_service.parse_capabilities(a.get("capabilities_json")))
         role_badge = f"<span class='badge badge-info' title='What this {kind} may do. Open Edit to change it.'>{ROLE_NAMES[role]}</span>"
         key_count_text = ""
@@ -330,20 +389,9 @@ def _agents_view(request: Request, session: dict, show_services: bool):
 
     rows = "".join(agent_row(a) for a in listed)
 
-    # The switch above the list: agents on one side, services on the other, each with its own count.
-    agents_link_class = "agent-switch-link active" if not show_services else "agent-switch-link"
-    services_link_class = "agent-switch-link active" if show_services else "agent-switch-link"
-    agents_current = "" if show_services else ' aria-current="page"'
-    services_current = ' aria-current="page"' if show_services else ""
-    switch_html = (
-        '<nav class="agent-switch" aria-label="Agents or services">'
-        f'<a href="/agents" class="{agents_link_class}"{agents_current}>Agents ({agent_count})</a>'
-        f'<a href="/services" class="{services_link_class}"{services_current}>Services ({service_count})</a>'
-        "</nav>"
-    )
     services_note = (
-        '<p class="text-muted">Programs and containers that fetch secrets. Give one a secret from '
-        "Credentials, in the Used by column.</p>"
+        "<p class=\"text-muted\">Programs and containers that only fetch secrets. Open a service's Access to "
+        "give it a secret, or open a credential's Access.</p>"
         if show_services
         else ""
     )
@@ -906,7 +954,9 @@ def _agents_view(request: Request, session: dict, show_services: bool):
         else (
             '<div class="card"><h2>Agent Access</h2><p class="text-muted access-summary">Each agent has its own private '
             "memory and can read its owner's. Add a workspace to share memory. Use <strong>Edit</strong> to give an "
-            "agent more; create a new one only for a separate tool.</p></div>"
+            "agent more; create a new one only for a separate tool.</p>"
+            '<p class="text-muted">Programs and containers that only fetch secrets are under '
+            '<a href="/services">Credentials &gt; Services</a>.</p></div>'
         )
     )
 
@@ -926,7 +976,7 @@ def _agents_view(request: Request, session: dict, show_services: bool):
             <select id="access-agent-workspace-pick"></select>
             <label class="checkbox-label"><input type="checkbox" id="access-agent-workspace-read" checked> Read</label>
             <label class="checkbox-label"><input type="checkbox" id="access-agent-workspace-write"> Write</label>
-            <button type="button" class="btn btn-sm btn-secondary" id="access-agent-workspace-add">Add</button>
+            <button type="button" class="btn btn-sm btn-secondary" id="access-agent-workspace-add" disabled>Add</button>
           </div>
         </div>
         <div class="form-section">
@@ -936,7 +986,7 @@ def _agents_view(request: Request, session: dict, show_services: bool):
           <div class="form-group" style="margin-top:12px">
             <label for="access-agent-capability-pick">Add a capability</label>
             <select id="access-agent-capability-pick"></select>
-            <button type="button" class="btn btn-sm btn-secondary" id="access-agent-capability-add">Add</button>
+            <button type="button" class="btn btn-sm btn-secondary" id="access-agent-capability-add" disabled>Add</button>
           </div>
           <div id="access-agent-capability-preview"></div>
         </div>
@@ -978,7 +1028,7 @@ def _agents_view(request: Request, session: dict, show_services: bool):
               <label for="access-service-secret-expires">Access ends on</label>
               <input type="date" id="access-service-secret-expires">
             </div>
-            <button type="button" class="btn btn-sm btn-secondary" id="access-service-secret-add">Add</button>
+            <button type="button" class="btn btn-sm btn-secondary" id="access-service-secret-add" disabled>Add</button>
           </div>
         </div>
         <div class="form-section">
@@ -1002,7 +1052,6 @@ def _agents_view(request: Request, session: dict, show_services: bool):
     </div></div>
     {access_card}
 
-    {"" if show_services else switch_html}
     {services_note}
 
     <div class="card">

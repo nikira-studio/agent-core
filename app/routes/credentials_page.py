@@ -6,7 +6,7 @@ from fastapi import APIRouter, Request, Depends
 
 from app.security.context import build_user_context
 from app.security.scope_enforcer import ScopeEnforcer
-from app.services import connector_service, credential_service, workspace_service
+from app.services import connector_service, credential_service, reach_service, workspace_service
 from app.services.agent_service import list_agents
 from app.routes.dashboard_shared import (
     render_page,
@@ -14,6 +14,7 @@ from app.routes.dashboard_shared import (
     escape_html,
     get_icon,
     local_dt,
+    Owners,
 )
 from app.database import get_db
 from app.services.credential_service import is_expired
@@ -29,7 +30,7 @@ _SCOPE_KIND_TAG = {"workspace": "workspace", "user": "personal", "agent": "agent
 
 
 REFERENCE_NOTE = (
-    "They can see its name (its reference) and use it wherever Agent Core makes a connection with it. "
+    "They can use it wherever Agent Core makes a connection with it. "
     "Agent Core does not show them the secret itself."
 )
 
@@ -45,10 +46,15 @@ def connection_owner_name(binding_id: str, connections: dict[str, str] | None) -
     return f"Connection {name}" if name else "A deleted connection"
 
 
-def scope_html(scope: str, connections: dict[str, str] | None = None) -> str:
-    """The workspace (or person, or agent, or connection) a credential lives in, with a small tag for which it is.
+def scope_html(
+    scope: str,
+    connections: dict[str, str] | None = None,
+    owners: Owners | None = None,
+) -> str:
+    """The owner of a credential, with a small tag for which kind of owner it is.
 
-    The name never splits inside itself (web-frontend stays whole); the tag sits beside or under it.
+    The name is a name, never an id, and it never splits inside itself (web-frontend stays whole); the tag sits
+    beside or under it.
     """
     kind, sep, name = scope.partition(":")
     if not sep:
@@ -57,9 +63,11 @@ def scope_html(scope: str, connections: dict[str, str] | None = None) -> str:
         # A credential that belongs to a connection: the connection's name, and no raw scope anywhere.
         return f"<span class='scope-name'>{escape_html(connection_owner_name(name, connections))}</span>"
     tag = _SCOPE_KIND_TAG.get(kind, kind)
+    display = owners.display_name(scope) if owners else name
+    title = owners.words(scope) if owners else scope
     return (
-        f"<span class='scope-name'>{escape_html(name)}</span> "
-        f"<span class='scope-kind' title='{escape_html(scope)}'>{escape_html(tag)}</span>"
+        f"<span class='scope-name'>{escape_html(display)}</span> "
+        f"<span class='scope-kind' title='{escape_html(title)}'>{escape_html(tag)}</span>"
     )
 
 
@@ -120,6 +128,8 @@ def credentials_page(request: Request, session: dict = Depends(require_auth)):
         else workspace_service.list_workspaces(owner_user_id=ctx.user_id)
     )
     agents = list_agents() if ctx.is_admin else list_agents(owner_user_id=ctx.user_id)
+    # The owners, in plain words: the workspaces, the people and the agents by name, never by id.
+    owners = Owners(workspaces=workspaces, agents=agents)
 
     user_scope = f"user:{session['user_id']}"
     workspace_scope_opts = "".join(
@@ -139,8 +149,10 @@ def credentials_page(request: Request, session: dict = Depends(require_auth)):
 
     # Who can use each credential, for admins: the grants are theirs to manage.
     holders: dict[str, list[str]] = {}
-    holder_ids: dict[str, set[str]] = {}
     service_counts: dict[str, int] = {}
+    # The agents that reach each credential, with the same answer the Access dialog gives: the agent contexts
+    # are built once for the page, not once per credential.
+    reaching: dict[str, list[dict]] = {}
     if ctx.is_admin:
         agent_names = {a["id"]: a.get("display_name") or a["id"] for a in agents}
         with get_db() as conn:
@@ -151,19 +163,17 @@ def credentials_page(request: Request, session: dict = Depends(require_auth)):
                     holders.setdefault(g["entry_id"], []).append(
                         agent_names.get(g["consumer_agent_id"], g["consumer_agent_id"])
                     )
-                    holder_ids.setdefault(g["entry_id"], set()).add(g["consumer_agent_id"])
             for r in conn.execute(
                 "SELECT credential_id, COUNT(*) AS n FROM connector_bindings WHERE credential_id IS NOT NULL GROUP BY credential_id"
             ).fetchall():
                 service_counts[r["credential_id"]] = r["n"]
-
-    from app.services.credential_consumer_service import can_read_reference
-
-    active_agents = [a for a in agents if a.get("is_active")] if ctx.is_admin else []
-    scope_by_entry = {e["id"]: e.get("scope", "") for e in credential_entries}
+        contexts = reach_service.agent_contexts()
+        reach_names = reach_service.Names()
+        for entry in credential_entries:
+            reaching[entry["id"]] = reach_service.agents_reaching_credential(entry, contexts, reach_names)
 
     def used_by_cell(entry_id: str) -> str:
-        """Always the same parts, in the same order: who was given the secret, who else can see its name, connections.
+        """Always the same parts, in the same order: who was given the secret, who can reach it, connections.
 
         The dialog shows the same two groups under the same labels (credentials.js renderUsedBy mirrors this)."""
         names = holders.get(entry_id, [])
@@ -176,16 +186,12 @@ def credentials_page(request: Request, session: dict = Depends(require_auth)):
             if names
             else "<div class='used-by-given'><span class='used-by-label'>Given the secret:</span> <span class='text-muted'>no one</span></div>"
         )
-        others = [
-            (a.get("display_name") or a["id"])
-            for a in active_agents
-            if a["id"] not in holder_ids.get(entry_id, set()) and can_read_reference(a, scope_by_entry.get(entry_id, ""))
-        ]
+        others = [a.get("display_name") or a.get("agent_id", "") for a in reaching.get(entry_id, [])]
         seen = ""
         if others:
             seen = (
                 f"<div class='text-muted used-by-seen' style='font-size:0.8rem' title='{escape_html(', '.join(others))}. {escape_html(REFERENCE_NOTE)}'>"
-                f"{len(others)} other{'s' if len(others) != 1 else ''} can see its name</div>"
+                f"{len(others)} agent{'s' if len(others) != 1 else ''} can reach it</div>"
             )
         n_connections = service_counts.get(entry_id, 0)
         connections = f"<div class='text-muted' style='font-size:0.8rem'>{n_connections} connection{'s' if n_connections != 1 else ''}</div>" if n_connections else ""
@@ -215,7 +221,7 @@ def credentials_page(request: Request, session: dict = Depends(require_auth)):
           <td>{escape_html(e.get("name", "")).replace("_", "_<wbr>")}
             <div class='text-muted' style='font-size:0.8rem'>{origin}</div>
             <button type='button' class='btn btn-sm btn-link' data-copy-reference="{escape_html(e.get("reference_name", ""))}" title="Copy {escape_html(e.get("reference_name", ""))}">Copy reference</button></td>
-          <td data-label='Scope'><code class='scope-code'>{scope_html(e.get("scope", ""), connections)}</code></td>
+          <td data-label='Owner'><code class='scope-code'>{scope_html(e.get("scope", ""), connections, owners)}</code></td>
           <td data-label='Expires'>{_expiry_cell(e.get("expires_at"))}</td>
           {used_cell}
           <td class='actions-cell'>
@@ -237,7 +243,7 @@ def credentials_page(request: Request, session: dict = Depends(require_auth)):
         <tr>
           <td>{escape_html(r["name"])}
             <div class='text-muted' style='font-size:0.8rem'>asked by {escape_html(r["requested_by_agent_id"])} · {local_dt(r["created_at"], style="date")}</div></td>
-          <td><code class='scope-code'>{scope_html(r["scope"], connections)}</code></td>
+          <td><code class='scope-code'>{scope_html(r["scope"], connections, owners)}</code></td>
           <td>{escape_html(r["purpose"])}</td>
           <td class='actions-cell'>
             <button type='button' class='btn btn-sm' data-request-fill="{escape_html(r["id"])}" data-request-name="{escape_html(r["name"])}">Provide secret</button>
@@ -250,14 +256,14 @@ def credentials_page(request: Request, session: dict = Depends(require_auth)):
     <div class="card" id="credential-requests">
       <h2>Requested by agents</h2>
       <p class="text-muted">An agent needs these to continue. The value is stored encrypted; the agent only ever receives the reference.</p>
-      <table><thead><tr><th>Name</th><th>Workspace</th><th>What it's for</th><th class='actions-cell'>Actions</th></tr></thead>
+      <table><thead><tr><th>Name</th><th>Owner</th><th>What it's for</th><th class='actions-cell'>Actions</th></tr></thead>
       <tbody>{request_rows}</tbody></table>
     </div>"""
 
     used_header = "<th class='col-used'>Used by</th>" if ctx.is_admin else ""
     if credential_entries:
         credentials_html = f"""
-        <table class='stack-table'><thead><tr><th>Name</th><th class='col-scope'>Workspace</th><th class='col-expires'>Expires</th>{used_header}<th class='actions-cell col-actions'>Actions</th></tr></thead>
+        <table class='stack-table'><thead><tr><th>Name</th><th class='col-scope'>Owner</th><th class='col-expires'>Expires</th>{used_header}<th class='actions-cell col-actions'>Actions</th></tr></thead>
         <tbody>{credential_rows}</tbody></table>"""
     else:
         credentials_html = "<div class='empty'>No credentials yet.</div>"
@@ -304,7 +310,7 @@ def credentials_page(request: Request, session: dict = Depends(require_auth)):
           <label for="access-connection-pick">Add a connection</label>
           <div style="display:flex;gap:8px;align-items:center">
             <select id="access-connection-pick" style="flex:1"></select>
-            <button type="button" class="btn btn-sm" id="access-connection-add">Add</button>
+            <button type="button" class="btn btn-sm" id="access-connection-add" disabled>Add</button>
           </div>
           <p id="access-connection-empty" class="text-muted" style="display:none">No connection to add yet. <a href="/connectors">Create one under Capabilities</a>.</p>
         </div>
@@ -342,7 +348,7 @@ def credentials_page(request: Request, session: dict = Depends(require_auth)):
           <label for="access-expires">Access ends on</label>
           <input type="date" id="access-expires" style="max-width:200px">
           <p class="form-hint">Optional. Leave empty for no end date.</p>
-          <button type="button" class="btn btn-sm" id="access-service-add">Add</button>
+          <button type="button" class="btn btn-sm" id="access-service-add" disabled>Add</button>
         </div>
 
         <div class="modal-footer"><button type="button" class="btn btn-secondary" onclick="closeAccess()">Close</button></div>
@@ -359,7 +365,7 @@ def credentials_page(request: Request, session: dict = Depends(require_auth)):
           <label for="agent-access-pick">Give access to</label>
           <div style="display:flex;gap:8px;align-items:center">
             <select id="agent-access-pick" style="flex:1"></select>
-            <button type="button" class="btn btn-sm" id="agent-access-add">Add</button>
+            <button type="button" class="btn btn-sm" id="agent-access-add" disabled>Add</button>
           </div>
         </div>
         <div class="modal-footer"><button type="button" class="btn btn-secondary" onclick="closeAgentAccess()">Close</button></div>

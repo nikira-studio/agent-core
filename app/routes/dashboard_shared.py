@@ -50,6 +50,75 @@ def escape_html(s):
     )
 
 
+class Owners:
+    """The owners of things, in plain words.
+
+    A person never reads a scope string: a workspace is its name, a person is their name and
+    "their personal space", an agent is its name and "its private space". The names are looked up
+    once, so every page says the same words for the same owner.
+    """
+
+    def __init__(self, workspaces=None, agents=None, users=None):
+        from app.services import agent_service, auth_service, workspace_service
+
+        self._workspaces = {
+            w["id"]: (w.get("name") or w["id"])
+            for w in (workspaces if workspaces is not None else workspace_service.list_workspaces() or [])
+        }
+        self._agents = {
+            a["id"]: (a.get("display_name") or a["id"])
+            for a in (agents if agents is not None else agent_service.list_agents() or [])
+        }
+        self._users = {
+            u["id"]: (u.get("display_name") or u["id"])
+            for u in (users if users is not None else auth_service.list_users() or [])
+        }
+
+    def workspace(self, workspace_id: str) -> str:
+        return self._workspaces.get(workspace_id, workspace_id)
+
+    def person(self, user_id: str) -> str:
+        return self._users.get(user_id, user_id)
+
+    def agent(self, agent_id: str) -> str:
+        return self._agents.get(agent_id, agent_id)
+
+    def display_name(self, scope: str) -> str:
+        """The owner's own name, never an id: a workspace's name, a person's name, an agent's name."""
+        kind, sep, ident = (scope or "").partition(":")
+        if not sep:
+            return scope or ""
+        if kind == "workspace":
+            return self.workspace(ident)
+        if kind == "user":
+            return self.person(ident)
+        if kind == "agent":
+            return self.agent(ident)
+        return scope
+
+    def short(self, scope: str) -> str:
+        """The owner in plain words, short: "Accounts", "Alex's personal space", "Worker's private space"."""
+        kind, sep, ident = (scope or "").partition(":")
+        if not sep:
+            return scope or ""
+        if kind == "workspace":
+            return self.workspace(ident)
+        if kind == "user":
+            return f"{self.person(ident)}'s personal space"
+        if kind == "agent":
+            return f"{self.agent(ident)}'s private space"
+        return scope
+
+    def words(self, scope: str) -> str:
+        """The owner in words: "workspace Accounts", "Alex's personal space", "Worker's private space"."""
+        kind, sep, ident = (scope or "").partition(":")
+        if not sep:
+            return scope or ""
+        if kind == "workspace":
+            return f"workspace {self.workspace(ident)}"
+        return self.short(scope)
+
+
 def local_dt(value, style: str = "datetime", empty: str = "—") -> str:
     """Render a stored UTC timestamp as a client-convertible element.
 

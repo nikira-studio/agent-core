@@ -17,6 +17,14 @@ if (typeof window.accessEl === 'undefined') {
   };
 }
 
+// Every "Add" picker starts on "Choose...", so nothing is added by accident: the Add button stays
+// disabled until a real option is picked.
+function accessChooseOption(text) {
+  var option = accessEl('option', text || 'Choose...');
+  option.value = '';
+  return option;
+}
+
 // ── small helpers ───────────────────────────────────────────────────────────
 
 // The capability name is worth showing next to a connection's own name only when the name does not already contain it
@@ -247,6 +255,7 @@ function renderAgentWorkspaces() {
   // The picker: the workspaces that are not listed yet.
   var pick = document.getElementById('access-agent-workspace-pick');
   pick.replaceChildren();
+  pick.append(accessChooseOption());
   var listed = {};
   shown.forEach(function (w) { listed[w.id] = true; });
   var offered = 0;
@@ -257,7 +266,8 @@ function renderAgentWorkspaces() {
     pick.append(option);
     offered += 1;
   });
-  document.getElementById('access-agent-workspace-add').disabled = !offered;
+  // Nothing is chosen yet, so nothing can be added yet.
+  document.getElementById('access-agent-workspace-add').disabled = true;
   if (!offered) {
     var none = accessEl('option', 'Every workspace is already listed');
     none.value = '';
@@ -381,6 +391,7 @@ function renderAgentCapabilityPick() {
   var pick = document.getElementById('access-agent-capability-pick');
   if (!pick) return;
   pick.replaceChildren();
+  pick.append(accessChooseOption());
   var shown = {};
   (accessAgentData.connections || []).forEach(function (c) { shown[c.id] = true; });
   var offered = 0;
@@ -393,7 +404,8 @@ function renderAgentCapabilityPick() {
     offered += 1;
   });
   var add = document.getElementById('access-agent-capability-add');
-  if (add) add.disabled = !offered;
+  // Nothing is chosen yet, so nothing can be added yet.
+  if (add) add.disabled = true;
   if (!offered) {
     var none = accessEl('option', 'This agent can already use every connection.');
     none.value = '';
@@ -634,6 +646,7 @@ function renderServiceAccess() {
   // The picker: the secrets this service does not have yet.
   var pick = document.getElementById('access-service-secret-pick');
   pick.replaceChildren();
+  pick.append(accessChooseOption());
   var held = {};
   grants.forEach(function (g) { held[g.credential_id] = true; });
   var offered = 0;
@@ -644,7 +657,8 @@ function renderServiceAccess() {
     pick.append(option);
     offered += 1;
   });
-  document.getElementById('access-service-secret-add').disabled = !offered;
+  // Nothing is chosen yet, so nothing can be added yet.
+  document.getElementById('access-service-secret-add').disabled = true;
   if (!offered) {
     var none = accessEl('option', 'Every secret is already listed');
     none.value = '';
@@ -746,6 +760,7 @@ function renderConnectionAddChoices() {
   var pick = document.getElementById('access-connection-add-ref');
   if (!pick) return;
   pick.replaceChildren();
+  pick.append(accessChooseOption());
   var options = (accessConnectionData.audience_options || {})[choice.list] || [];
   options.forEach(function (o) {
     var option = accessEl('option', o.name);
@@ -760,7 +775,8 @@ function renderConnectionAddChoices() {
     }
   }
   var add = document.getElementById('access-connection-add');
-  if (add) add.disabled = !options.length;
+  // Nothing is chosen yet, so nobody can be added yet.
+  if (add) add.disabled = true;
 }
 
 // Who uses it right now: the agents, why, and whether they may run it yet.
@@ -1000,4 +1016,18 @@ document.addEventListener('DOMContentLoaded', function () {
   if (connectionAdd) connectionAdd.addEventListener('click', accessPreviewAddEntry);
   var agentCapabilityAdd = document.getElementById('access-agent-capability-add');
   if (agentCapabilityAdd) agentCapabilityAdd.addEventListener('click', accessAgentAddCapability);
+});
+
+// An "Add" button opens only once a real option is chosen in the picker above it.
+document.addEventListener('change', function (ev) {
+  var addFor = {
+    'access-agent-workspace-pick': 'access-agent-workspace-add',
+    'access-agent-capability-pick': 'access-agent-capability-add',
+    'access-service-secret-pick': 'access-service-secret-add',
+    'access-connection-add-ref': 'access-connection-add',
+  };
+  var addId = addFor[ev.target.id];
+  if (!addId) return;
+  var add = document.getElementById(addId);
+  if (add) add.disabled = !ev.target.value;
 });

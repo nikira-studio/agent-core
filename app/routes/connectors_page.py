@@ -17,6 +17,7 @@ from app.routes.dashboard_shared import (
     require_auth,
     get_icon,
     local_dt,
+    Owners,
 )
 
 router = APIRouter()
@@ -82,16 +83,16 @@ def _binding_recipe_line(guidance: dict) -> str:
     return " · ".join([b for b in bits if b and b != "Suggested name: "])
 
 
-def _scope_words(scope: str, connections: dict[str, str]) -> str:
+def _scope_words(scope: str, connections: dict[str, str], owners: Owners) -> str:
     """A stored credential's owner in words, for the pickers: a credential that belongs to a connection is named
-    after that connection, never shown as a raw scope."""
+    after that connection, never shown as a raw scope. Every other owner is named in plain words too."""
     kind, sep, name = scope.partition(":")
     if not sep:
         return scope
     if kind == "capability":
         connection_name = connections.get(name)
         return f"Connection {connection_name}" if connection_name else "A deleted connection"
-    return scope
+    return owners.short(scope)
 
 
 def _render_adapter_cards(adapter_entries: list[dict], ctx) -> str:
@@ -281,17 +282,28 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
     ]
 
     user_scope = f"user:{session['user_id']}"
-    scope_names = {user_scope: "Just me (personal)"}
-    scope_names.update({f"workspace:{p['id']}": (p.get("name") or p["id"]) for p in workspaces})
-    scope_names.update({f"agent:{a['id']}": (a.get("display_name") or a["id"]) for a in agents})
+    owners = Owners(workspaces=workspaces, agents=agents)
+    # The owner of a connection: the person themselves, a workspace, or an agent that does work. A service only
+    # fetches secrets, so it is never an owner and is left out of the picker and of the names below.
+    owner_agents = [
+        a
+        for a in agents
+        if a.get("is_active") and (a.get("kind") or "agent") == "agent"
+    ]
+    scope_names = {user_scope: owners.short(user_scope)}
+    scope_names.update(
+        {f"workspace:{p['id']}": owners.short(f"workspace:{p['id']}") for p in workspaces}
+    )
+    scope_names.update(
+        {f"agent:{a['id']}": owners.short(f"agent:{a['id']}") for a in owner_agents}
+    )
     workspace_scope_opts = "".join(
         f'<option value="workspace:{p["id"]}">{escape_html(p.get("name") or p["id"])}</option>'
         for p in workspaces
     )
     agent_scope_opts = "".join(
         f'<option value="agent:{a["id"]}">{escape_html(a.get("display_name") or a["id"])}</option>'
-        for a in agents
-        if a.get("is_active")
+        for a in owner_agents
     )
     scope_options = (
         f'<optgroup label="You"><option value="{user_scope}">Just me (personal)</option></optgroup>\n'
@@ -313,7 +325,7 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
     )
     credential_opts = "".join(
         f'<option value="{e["id"]}" data-credential-name="{escape_html(e.get("name", e["id"]))}" data-credential-scope="{escape_html(e.get("scope", ""))}">'
-        f'{escape_html(e.get("name", e["id"]))} ({escape_html(_scope_words(e.get("scope", ""), connection_names))} / {escape_html(e.get("reference_name", ""))})'
+        f'{escape_html(e.get("name", e["id"]))} ({escape_html(_scope_words(e.get("scope", ""), connection_names, owners))} / {escape_html(e.get("reference_name", ""))})'
         f'</option>'
         for e in credential_entries
     )
@@ -419,11 +431,13 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
                 f"<button type='button' class='btn btn-sm btn-secondary' data-binding-users='{escape_html(b['id'])}' "
                 "title='Who can use this connection'>Who can use it</button>"
             )
+        # The owner of this connection, in plain words. The raw scope is never shown, not even on hover.
+        owner_words = scope_names.get(b.get("scope", "")) or owners.short(b.get("scope", ""))
         bindings_rows += f"""
         <tr data-binding-id="{b["id"]}" data-connector-type-id="{escape_html(b.get("connector_type_id", ""))}" data-provider-type="{escape_html(ct.get("provider_type", "") if ct else "")}">
           <td style="{text_style}">{escape_html(b.get("name", ""))}</td>
           <td data-label="Capability" style="{text_style}">{escape_html(ct.get("display_name", "") if ct else b.get("connector_type_id", ""))}{actions_note}</td>
-          <td data-label="Workspace" style="{text_style}" title="{escape_html(b.get("scope", ""))}">{escape_html(scope_names.get(b.get("scope", ""), b.get("scope", "")))}</td>
+          <td data-label="Owner" style="{text_style}" title="{escape_html(owner_words)}">{escape_html(owner_words)}</td>
           <td data-label="Status" class="{status_cls}" style="{text_style}"{(' title="' + escape_html(b["last_test_note"]) + '"') if (b.get("last_test_note") and not b.get("last_error")) else ((' title="' + escape_html(b["last_error"]) + '"') if b.get("last_error") else "")}>{escape_html(status_text)}</td>
           <td class='actions-cell'>
             {oauth_button}
@@ -439,7 +453,7 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
 
     if visible_bindings:
         bindings_html = f"""
-        <table class="stack-phone"><thead><tr><th>Name</th><th>Capability</th><th>Workspace</th><th>Status</th><th class='actions-cell'>Actions</th></tr></thead>
+        <table class="stack-phone"><thead><tr><th>Name</th><th>Capability</th><th>Owner</th><th>Status</th><th class='actions-cell'>Actions</th></tr></thead>
         <tbody>{bindings_rows}</tbody></table>"""
     else:
         bindings_html = (
@@ -603,7 +617,7 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
       <ol style="margin:0;padding-left:20px;line-height:1.6">
         <li>Add the capability with the <strong>Add a capability</strong> button above.</li>
         <li>Store its key or token on the <a href="/credentials">Credentials</a> page.</li>
-        <li>Create a connection: it says which workspace may use the capability, and with which credential.</li>
+        <li>Create a connection: it says who owns it, and with which credential.</li>
         <li>Test the connection, then ask an agent to use it.</li>
       </ol>
     </div>"""
@@ -649,7 +663,7 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
     <div class="card" id="bindings">
       <div class="section-header">
         <h2>Connections</h2>
-        <div class="section-note">A connection says which workspace may use a capability, and with which credential.</div>
+        <div class="section-note">A connection links a capability to a credential. Its owner can edit it; who can use it is set under Who can use it.</div>
       </div>
       <div id="bindings-list">{bindings_html}</div>
     </div>
@@ -663,7 +677,7 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
     <div class="modal-overlay" id="create-binding-modal" style="display:none">
       <div class="modal">
         <h2>New Connection</h2>
-        <p class="form-hint" style="margin-bottom:12px">A connection lets agents in one workspace use a capability with one credential.</p>
+        <p class="form-hint" style="margin-bottom:12px">A connection signs in to a capability with one credential. Its owner can change it. Who else can use it is set afterwards, under Who can use it.</p>
         <form id="create-binding-form" onsubmit="createBinding(event)">
           <div class="form-group">
             <label>Capability *</label>
@@ -685,12 +699,12 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
             <div class="form-hint">A label for this connection, such as the account or environment it covers.</div>
           </div>
           <div class="form-group">
-            <label>Who may use it *</label>
+            <label>Owner *</label>
             <select id="binding-scope" required>
-              <option value="">Select a workspace...</option>
+              <option value="">Choose an owner...</option>
               {scope_options}
             </select>
-            <div class="form-hint">Only agents that can reach this workspace may use the connection.</div>
+            <div class="form-hint">The owner can edit this connection. Choose who can use it afterwards, under Who can use it.</div>
           </div>
           <div class="form-group">
             <label>Credential</label>
@@ -772,11 +786,11 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
             <div class="form-hint">A label for this connection, such as the account or environment it covers.</div>
           </div>
           <div class="form-group">
-            <label>Who may use it</label>
+            <label>Owner</label>
             <select id="edit-binding-scope">
               {scope_options}
             </select>
-            <div class="form-hint">Only agents that can reach this workspace may use the connection.</div>
+            <div class="form-hint">The owner can edit this connection. Choose who can use it afterwards, under Who can use it.</div>
           </div>
           <div class="form-group">
             <label>Credential</label>
@@ -1067,7 +1081,7 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
             <label for="access-connection-add-ref">Which one</label>
             <select id="access-connection-add-ref"></select>
           </div>
-          <button type="button" class="btn btn-sm btn-secondary" id="access-connection-add">Add</button>
+          <button type="button" class="btn btn-sm btn-secondary" id="access-connection-add" disabled>Add</button>
           <div id="access-connection-add-preview"></div>
         </div>
         <div class="form-section">

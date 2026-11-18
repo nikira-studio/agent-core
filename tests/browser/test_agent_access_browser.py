@@ -53,6 +53,25 @@ def test_the_dialog_says_what_the_agent_can_do_and_reach(agents):
     page.locator("#access-agent-cancel").click()
 
 
+def test_the_pickers_ask_which_one_before_anything_is_added(agents):
+    """Every Add picker starts on "Choose...", and its Add button opens only once something is chosen.
+
+    This runs before the workspace is added below, so there is still a workspace to choose."""
+    page = agents
+    _open_access(page)
+    for pick_id, add_id in (
+        ("#access-agent-workspace-pick", "#access-agent-workspace-add"),
+        ("#access-agent-capability-pick", "#access-agent-capability-add"),
+    ):
+        pick = page.locator(pick_id)
+        assert pick.locator("option").first.text_content() == "Choose..."
+        assert page.locator(add_id).is_disabled()
+    # Choosing a workspace opens the Add button.
+    page.locator("#access-agent-workspace-pick").select_option(label="Other Place")
+    assert not page.locator("#access-agent-workspace-add").is_disabled()
+    page.locator("#access-agent-cancel").click()
+
+
 def test_adding_a_workspace_is_previewed_before_it_is_saved(agents):
     page = agents
     _open_access(page)

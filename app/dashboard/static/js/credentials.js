@@ -160,6 +160,14 @@ function accessEl(tag, text, cls) {
   return el;
 }
 
+// Every "Add" picker starts on "Choose...", so nothing is added by accident: the Add button stays
+// disabled until a real option is picked.
+function accessChooseOption(text) {
+  const option = accessEl('option', text || 'Choose...');
+  option.value = '';
+  return option;
+}
+
 // A date as a person reads it (30 Nov 2026). The stored instant is the end of that day, so it is read in UTC.
 function accessDate(value) {
   const when = new Date(value);
@@ -296,13 +304,15 @@ function renderAccessConnections(d) {
 
   const pick = document.getElementById('access-connection-pick');
   pick.replaceChildren();
+  pick.append(accessChooseOption());
   d.connections_to_add.forEach(connection => {
     const option = accessEl('option', connectionLabel(connection));
     option.value = connection.id;
     pick.append(option);
   });
   document.getElementById('access-connection-empty').style.display = d.connections_to_add.length ? 'none' : '';
-  document.getElementById('access-connection-add').disabled = !d.connections_to_add.length;
+  // Nothing is chosen yet, so nothing can be added yet.
+  document.getElementById('access-connection-add').disabled = true;
 }
 
 // Who can run a connection: the count opens the list, and each agent says why it can (or cannot yet).
@@ -491,13 +501,15 @@ function renderAccessServices(d) {
 
   const pick = document.getElementById('access-service-pick');
   pick.replaceChildren();
+  pick.append(accessChooseOption());
   d.services_to_add.forEach(service => {
     const option = accessEl('option', service.display_name);
     option.value = service.id;
     pick.append(option);
   });
   document.getElementById('access-service-empty').style.display = d.services_to_add.length ? 'none' : '';
-  document.getElementById('access-service-add').disabled = !d.services_to_add.length;
+  // Nothing is chosen yet, so nothing can be given yet.
+  document.getElementById('access-service-add').disabled = true;
 }
 
 async function addAccessService() {
@@ -547,11 +559,21 @@ document.addEventListener('click', async (ev) => {
 
 document.addEventListener('change', async (ev) => {
   if (ev.target.id === 'access-owner-pick') await previewOwner();
+  // An "Add" button opens only once a real option is chosen in the picker above it.
+  const addFor = {
+    'access-connection-pick': 'access-connection-add',
+    'access-service-pick': 'access-service-add',
+    'agent-access-pick': 'agent-access-add',
+  };
+  const addId = addFor[ev.target.id];
+  if (!addId) return;
+  const add = document.getElementById(addId);
+  if (add) add.disabled = !ev.target.value;
 });
 
-const REFERENCE_NOTE = 'They can see its name (its reference) and use it wherever Agent Core makes a connection with it. Agent Core does not show them the secret itself.';
+const REFERENCE_NOTE = 'They can use it wherever Agent Core makes a connection with it. Agent Core does not show them the secret itself.';
 
-// The Used by cell in the list says who was given the secret and who else can see its name. It is rebuilt
+// The Used by cell in the list says who was given the secret and who else can reach it. It is rebuilt
 // whenever the dialog changes something, so the row follows without a reload.
 // Mirrors used_by_cell in credentials_page.py.
 async function renderUsedBy() {
@@ -572,10 +594,13 @@ async function renderUsedBy() {
   });
   if (d.grants.length > 4) given.append(accessEl('span', '+' + (d.grants.length - 4) + ' more', 'text-muted'));
   cell.append(given);
-  if (d.scope_readers.length) {
-    const seen = accessEl('div', d.scope_readers.length + ' other' + (d.scope_readers.length === 1 ? '' : 's') + ' can see its name', 'text-muted used-by-seen');
+  // The same agents the Access dialog lists: the ones that reach this credential's owner scope.
+  const reaching = await accessAgentsReaching();
+  if (reaching.length) {
+    const names = reaching.map(function (a) { return a.display_name; });
+    const seen = accessEl('div', reaching.length + ' agent' + (reaching.length === 1 ? '' : 's') + ' can reach it', 'text-muted used-by-seen');
     seen.style.fontSize = '0.8rem';
-    seen.title = d.scope_readers.join(', ') + '. ' + REFERENCE_NOTE;
+    seen.title = names.join(', ') + '. ' + REFERENCE_NOTE;
     cell.append(seen);
   }
   if (d.services.length) {
@@ -583,6 +608,18 @@ async function renderUsedBy() {
     sv.style.fontSize = '0.8rem';
     cell.append(sv);
   }
+}
+
+// The agents that reach the open credential: the list the Access dialog already loaded. If it is not
+// there (the dialog was never opened), it is fetched once, so both places say the same number.
+async function accessAgentsReaching() {
+  if (accessData && accessData.credential && accessData.credential.id === accessEntryId) {
+    return accessData.agents || [];
+  }
+  const j = await apiFetch('/api/access/credentials/' + encodeURIComponent(accessEntryId));
+  if (!j.ok) return [];
+  accessData = j.data;
+  return accessData.agents || [];
 }
 
 // ── One agent's credentials (opened from the Agents page) ─────────────────
@@ -629,10 +666,12 @@ async function renderAgentAccess() {
   const held = new Set(active.map(g => g.entry_id));
   const pick = document.getElementById('agent-access-pick');
   pick.replaceChildren();
+  pick.append(accessChooseOption());
   Object.entries(names).filter(([id]) => !held.has(id)).forEach(([id, name]) => {
     const o = accessEl('option', name); o.value = id; pick.append(o);
   });
-  document.getElementById('agent-access-add').disabled = !pick.options.length;
+  // Nothing is chosen yet, so nothing can be given yet.
+  document.getElementById('agent-access-add').disabled = true;
 }
 
 document.addEventListener('click', async (ev) => {

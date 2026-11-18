@@ -6,7 +6,7 @@ Skipped when Playwright or its browser is not installed. Uses the shared throwaw
 
 import pytest
 
-from tests.browser.conftest import seed
+from tests.browser.conftest import seed, sign_in
 
 SEED = '''
 import json
@@ -119,3 +119,68 @@ def test_a_failed_answer_replaces_loading_with_the_error(instance, admin_page):
         assert not page.locator("#access-table-wrap").is_visible()
     finally:
         page.unroute("**/api/access/overview")
+
+
+CONTROLS_OUTSIDE_THEIR_CARD = """
+() => {
+  const bad = [];
+  document.querySelectorAll('.card select, .card input').forEach(function (el) {
+    const card = el.closest('.card');
+    if (!card) return;
+    const c = card.getBoundingClientRect();
+    const e = el.getBoundingClientRect();
+    if (e.right > c.right + 1 || e.left < c.left - 1) {
+      bad.push(el.id + ' (' + Math.round(e.left) + '-' + Math.round(e.right) + ') outside ('
+        + Math.round(c.left) + '-' + Math.round(c.right) + ')');
+    }
+  });
+  return bad;
+}
+"""
+
+
+def test_the_page_fits_a_phone(browser, instance, access_page):
+    """A narrow phone: the filter bar must not push the page sideways, and every filter stays in its card."""
+    context = browser.new_context(viewport={"width": 390, "height": 844})
+    page = context.new_page()
+    try:
+        sign_in(page, instance, "owner@example.com")
+        page.goto(instance + "/access")
+        page.wait_for_load_state("load")
+        page.wait_for_selector("#access-rows tr")
+        assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
+        # Each filter ends inside the card that holds it.
+        edges = page.evaluate(
+            """
+            () => {
+              const card = document.querySelector('#access-rows').closest('.card');
+              const right = card.getBoundingClientRect().right;
+              return Array.from(document.querySelectorAll(
+                '#access-show, #access-filter-name, #access-filter-agent, '
+                + '#access-filter-capability, #access-filter-service'
+              )).map(function (el) {
+                return { id: el.id, right: el.getBoundingClientRect().right, cardRight: right };
+              });
+            }
+            """
+        )
+        assert edges, "the page must have filters"
+        for edge in edges:
+            assert edge["right"] <= edge["cardRight"] + 1, edge
+    finally:
+        context.close()
+
+
+def test_the_other_pages_keep_their_controls_inside_their_cards(browser, instance, access_page):
+    """The same fault on the other pages: a select in a card must not run past the card's edge."""
+    context = browser.new_context(viewport={"width": 390, "height": 844})
+    page = context.new_page()
+    try:
+        sign_in(page, instance, "owner@example.com")
+        for path in ("/credentials", "/connectors"):
+            page.goto(instance + path)
+            page.wait_for_load_state("load")
+            outside = page.evaluate(CONTROLS_OUTSIDE_THEIR_CARD)
+            assert not outside, (path, outside)
+    finally:
+        context.close()

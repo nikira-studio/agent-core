@@ -2198,11 +2198,26 @@ details.card-fold[open] > summary::before { content: "\25BE\00a0"; }
 .page-tabs a:hover { color: var(--text); }
 .page-tabs a.active { color: var(--text); border-bottom-color: var(--accent); }
 
-/* The switch above the Agents list: agents on one side, services on the other. */
-.agent-switch { display: inline-flex; gap: 4px; padding: 3px; margin: 0 0 12px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg); }
-.agent-switch-link { padding: 6px 14px; border-radius: 4px; color: var(--muted); text-decoration: none; font-size: 0.9rem; }
-.agent-switch-link:hover { color: var(--text); }
-.agent-switch-link.active { background: var(--accent-fill); color: #fff; }
+/* A control inside a card never runs past the card's edge: on a narrow phone a long name in a select
+   would push the page sideways, so the name is cut instead. The filter bar wraps, so each of its groups
+   may shrink to the width of the card. */
+.card select,
+.card input,
+.card textarea {
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  text-overflow: ellipsis;
+}
+.card .filter-bar > .form-group {
+  min-width: 0;
+  max-width: 100%;
+}
+@media (max-width: 768px) {
+  .card .filter-bar .search-input { min-width: 0; }
+  /* On a phone each filter gets its own line, so a long name cannot push the page sideways. */
+  .card .filter-bar > .form-group { flex: 1 1 100%; }
+}
 
 /* Phones: the navigation is behind a Menu button. */
 .nav-toggle { display: none; }

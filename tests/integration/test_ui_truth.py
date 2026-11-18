@@ -61,14 +61,14 @@ def _ref_world():
     return owner_id
 
 
-def test_the_used_by_cell_always_says_who_was_given_the_secret_and_who_else_can_see_its_name(test_client, admin_token):
+def test_the_used_by_cell_always_says_who_was_given_the_secret_and_who_else_can_reach_it(test_client, admin_token):
     _ref_world()
     credential_service.create_credential("workspace:cred-ws", "api_token", "secret-value")
     html = test_client.get("/credentials", headers=_admin(admin_token)).text
     cell = _used_by(html, "api_token")
-    # nobody was given it, three agents can see its name: both facts are stated, in the same two lines
+    # nobody was given it, three agents can reach it: both facts are stated, in the same two lines
     assert "Given the secret:" in cell and "no one" in cell
-    assert "3 others can see its name" in cell
+    assert "3 agents can reach it" in cell
     assert "Ref Reader" in cell.split("title='", 1)[1].split("'", 1)[0]  # the names are on hover
     assert "use it wherever Agent Core makes a connection" in cell and "does not show them the secret" in cell
     assert "secret-value" not in html and "can get its reference" not in html
@@ -84,7 +84,8 @@ def test_a_grant_adds_a_chip_and_keeps_the_other_readers_fact(test_client, admin
         )
     cell = _used_by(test_client.get("/credentials", headers=_admin(admin_token)).text, "api_token")
     assert "Given the secret:" in cell and ">Holder<" in cell and "no one" not in cell
-    assert "2 others can see its name" in cell  # the holder is not counted twice
+    # The count is the one the Access dialog shows: the agents that reach the credential.
+    assert "3 agents can reach it" in cell
 
 
 def test_one_other_is_singular_and_nobody_else_leaves_no_line(test_client, admin_token):
@@ -97,10 +98,10 @@ def test_one_other_is_singular_and_nobody_else_leaves_no_line(test_client, admin
     )
     credential_service.create_credential("workspace:cred-ws", "api_token", "secret-value")
     cell = _used_by(test_client.get("/credentials", headers=_admin(admin_token)).text, "api_token")
-    assert "1 other can see its name" in cell
+    assert "1 agent can reach it" in cell
     credential_service.create_credential("workspace:nobody", "lonely_token", "secret-value")
     lonely = _used_by(test_client.get("/credentials", headers=_admin(admin_token)).text, "lonely_token")
-    assert "Given the secret:" in lonely and "no one" in lonely and "can see its name" not in lonely
+    assert "Given the secret:" in lonely and "no one" in lonely and "can reach it" not in lonely
 
 
 def test_the_dialog_says_which_capabilities_agents_and_services_use_a_credential(test_client, admin_token):

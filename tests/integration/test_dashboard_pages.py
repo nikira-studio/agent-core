@@ -463,11 +463,17 @@ def test_text_that_looks_like_an_asset_link_cannot_break_a_page(authenticated_cl
 
 
 def test_credential_row_buttons_share_a_line_and_scopes_break_only_at_the_colon(authenticated_client):
-    from app.services import credential_service
+    from app.services import credential_service, workspace_service
 
+    workspace_service.create_workspace("web-frontend", "Web Frontend", "admin")
     credential_service.create_credential("workspace:web-frontend", "a_long_credential_name", "not-shown")
     html = authenticated_client.get("/credentials").text
-    assert "<span class='scope-name'>web-frontend</span> <span class='scope-kind' title='workspace:web-frontend'>workspace</span>" in html
+    # The owner is a name, never an id: the workspace's own name, with the kind beside it.
+    assert (
+        "<span class='scope-name'>Web Frontend</span> "
+        "<span class='scope-kind' title='workspace Web Frontend'>workspace</span>"
+    ) in html
+    assert ">web-frontend</span>" not in html
     assert "a_<wbr>long_<wbr>credential_<wbr>name" in html
     css = open("app/dashboard/static/css/dashboard.css").read()
     assert ".actions-cell .btn { vertical-align: middle; }" in css  # text and icon buttons on one baseline
@@ -598,7 +604,7 @@ def test_retracted_memories_use_the_same_table_with_restore_and_say_who_retracte
 def test_new_binding_dialog_shows_one_credential_choice_at_a_time(authenticated_client):
     html = authenticated_client.get("/connectors").text
     assert 'id="binding-existing-credential-fields" class="form-group" style="display:none"' in html
-    assert "Who may use it" in html and "A connection lets agents in one workspace" in html
+    assert "<label>Owner *</label>" in html and "A connection signs in to a capability with one credential." in html
     assert "<label>Scope *</label>" not in html and "Just me (personal)" in html
 
 

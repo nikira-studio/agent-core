@@ -62,3 +62,16 @@ def test_adding_an_agent_is_previewed_and_then_saved(connections):
     assert "Worker B" in users and "named on it" in users
     # The list a person edits shows the entry too.
     assert "Worker B" in page.locator("#access-connection-allowed").inner_text()
+
+
+def test_the_picker_asks_which_one_before_anything_is_added(connections):
+    """The "Which one" picker starts on "Choose...", and Add opens only once something is chosen."""
+    page = connections
+    page.reload()  # an earlier test leaves its dialog open
+    page.wait_for_load_state("load")
+    _open_dialog(page)
+    pick = page.locator("#access-connection-add-ref")
+    assert pick.locator("option").first.text_content() == "Choose..."
+    assert page.locator("#access-connection-add").is_disabled()
+    pick.select_option(label="Worker B")
+    assert not page.locator("#access-connection-add").is_disabled()
