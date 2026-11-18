@@ -265,3 +265,22 @@ def test_an_agent_cannot_choose_an_audience_and_its_connection_gets_the_scope_me
     assert made.status_code == 201, made.text
     assert "audience" not in made.json()["data"]["binding"]  # an agent's answers never carry an audience
     assert _entries(made.json()["data"]["binding"]["id"]) == [("agent", "testagent", False)]
+
+
+def test_deleting_a_scope_removes_exactly_the_audience_of_the_connections_it_removes(world):
+    """cleanup_service deletes a scope's connections AND any connection (in another scope) that uses a credential stored
+    in it, because that connection could not sign in any more. The audience rows removed are those same connections'."""
+    victim_credential = credential_service.create_credential("workspace:other", "held-there", "not-shown")
+    uses_it = _make("workspace:acc", "Uses credential from other", credential_id=victim_credential["id"])
+    survivor = _make("workspace:acc", "Survivor")
+    owned = _make("workspace:other", "Owned by other")
+    with get_db() as conn:
+        for binding in (uses_it, survivor, owned):
+            audience_service.replace(conn, binding["id"], [{"kind": "agent", "ref": "off", "exclude": False}])
+        conn.commit()
+    assert workspace_service.delete_workspace_hard("other")
+    remaining = {b["name"] for b in connector_service.list_bindings()}
+    assert remaining == {"Survivor"}  # the one in the scope AND the one that used its credential are gone
+    with get_db() as conn:
+        left = {r["binding_id"] for r in conn.execute("SELECT binding_id FROM connector_binding_audience")}
+    assert left == {survivor["id"]}  # exactly the survivor's rows are still there; nothing is orphaned or lost
