@@ -415,15 +415,20 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
             )
         oauth_button = ""
         if ct and ct.get("auth_type") == "oauth2":
-            oauth_label = (
-                "Authorize Google"
-                if ct.get("id", "").startswith("google_")
-                else "Authorize OAuth"
-            )
-            oauth_button = (
-                f"<button type='button' class='btn btn-sm btn-primary' "
-                f'data-binding-oauth="{escape_html(b["id"])}">{escape_html(oauth_label)}</button>'
-            )
+            oauth_name = "Google" if ct.get("id", "").startswith("google_") else "OAuth"
+            # A connection that is not signed in yet needs the blue button; one that is signed in only needs
+            # the quiet way to sign in again.
+            signed_in = bool(b.get("enabled")) and not b.get("last_error") and bool(b.get("last_tested_at")) and not b.get("last_test_note")
+            if signed_in:
+                oauth_button = (
+                    f"<button type='button' class='btn btn-sm btn-secondary' "
+                    f'data-binding-oauth="{escape_html(b["id"])}">Re-authorize {oauth_name}</button>'
+                )
+            else:
+                oauth_button = (
+                    f"<button type='button' class='btn btn-sm btn-primary' "
+                    f'data-binding-oauth="{escape_html(b["id"])}">Authorize {oauth_name}</button>'
+                )
         # Who may use this connection: an admin-only answer, so only an admin is offered the button.
         users_button = ""
         if ctx.is_admin:
@@ -626,8 +631,6 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
     <div class="page-header">
       <div>
         <h1>Capabilities</h1>
-        <!-- remove after one release -->
-        <p class="text-muted" style="margin:4px 0 0">Previously called Services.</p>
         <p class="text-muted" style="max-width:760px;margin-top:8px">
           What agents can do in outside systems. Add a capability, then create a connection to say who may
           use it and with which credential.
@@ -1098,7 +1101,7 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
     extra_js = (
         '<script src="/static/js/adapter-actions.js?v=20260902"></script>'
         '<script src="/static/js/connectors.js?v=20261118b"></script>'
-        '<script src="/static/js/agent_access.js?v=20261118a"></script>'
+        '<script src="/static/js/agent_access.js?v=20261118d"></script>'
     )
     return render_page("Capabilities", body, "/connectors", extra_js, session=session)
 

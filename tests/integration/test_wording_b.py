@@ -54,11 +54,11 @@ def test_each_section_shows_its_own_row_of_tabs(authenticated_client):
     assert tab_labels(authenticated_client.get("/connectors").text) == []
 
 
-def test_the_capabilities_page_says_what_it_used_to_be_called(authenticated_client):
+def test_the_capabilities_page_no_longer_says_what_it_used_to_be_called(authenticated_client):
+    """The note that said the page used to be called Services has gone: it is not needed any more."""
     html = authenticated_client.get("/connectors").text
-    assert "Previously called Services" in html
-    # The note is marked so it can go after one release.
-    assert "<!-- remove after one release -->" in html
+    assert "Previously called Services" not in html
+    assert "remove after one release" not in html
 
 
 def test_the_old_services_address_points_at_the_services_page(authenticated_client):

@@ -132,7 +132,7 @@ def test_the_who_can_use_this_dialog_says_that_no_agent_can_reach_it():
 def test_the_three_groups_and_their_sentence_stay(world):
     html = world["client"].get("/credentials").text
     dialog = html.split('id="access-modal"', 1)[1].split('id="agent-access-modal"', 1)[0]
-    assert "Capabilities that sign in with this" in dialog
+    assert "Connections that sign in with this" in dialog
     assert "Agents that can reach this" in dialog
     assert "Services that receive this value" in dialog
     assert "A service receives the secret value itself. An agent using a capability does not." in dialog

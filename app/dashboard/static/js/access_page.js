@@ -65,8 +65,9 @@
   // ── the table ───────────────────────────────────────────────────────────────
 
   // The name of one party, linked to the page that shows it.
-  function partyCell(party) {
+  function partyCell(party, label) {
     var cell = el('td');
+    cell.setAttribute('data-label', label);
     var name = nameOf(party);
     if (!name) return cell;
     if (party.type && LINKS[party.type]) {
@@ -82,6 +83,7 @@
   // What the row says about itself: the reason, what it still waits for, and who owns it.
   function detailCell(row) {
     var cell = el('td');
+    cell.setAttribute('data-label', 'Detail');
     if (row.detail) cell.appendChild(el('div', row.detail));
     if (row.status === 'needs_permission' && row.needs_label) {
       var chip = el('span', 'needs permission: ' + row.needs_label, 'badge badge-warning');
@@ -102,12 +104,15 @@
 
   function buildRow(row) {
     var tr = el('tr');
-    tr.appendChild(partyCell(row.from));
-    tr.appendChild(partyCell(row.to));
-    tr.appendChild(el('td', state.assignments[row.assignment] || ''));
+    tr.appendChild(partyCell(row.from, 'Who or what'));
+    tr.appendChild(partyCell(row.to, 'Reaches'));
+    var how = el('td', state.assignments[row.assignment] || '');
+    how.setAttribute('data-label', 'How');
+    tr.appendChild(how);
     tr.appendChild(detailCell(row));
     var used = accessDate(row.last_used);
-    var when = el('td', used || 'never seen', used ? '' : 'text-muted');
+    var when = el('td', used || 'never', used ? 'access-last-used' : 'access-last-used text-muted');
+    when.setAttribute('data-label', 'Last used');
     tr.appendChild(when);
     return tr;
   }
@@ -259,39 +264,10 @@
   function renderUnused() {
     var unused = state.unused || {};
     var groups = [
-      {
-        id: 'access-unused-credentials',
-        items: unused.credentials || [],
-        href: '/credentials',
-        extra: function (item) {
-          return item.owner ? 'owned by ' + item.owner : '';
-        },
-      },
-      {
-        id: 'access-unused-connections',
-        items: unused.connections || [],
-        href: '/connectors',
-        extra: function () {
-          return '';
-        },
-      },
-      {
-        id: 'access-unused-services',
-        items: unused.services || [],
-        href: '/services',
-        extra: function (item) {
-          var last = accessDate(item.last_signed_in);
-          return last ? 'last signed in ' + last : 'never';
-        },
-      },
-      {
-        id: 'access-unused-left-behind',
-        items: unused.left_behind || [],
-        href: '/agents',
-        extra: function () {
-          return '';
-        },
-      },
+      { id: 'access-unused-credentials', items: unused.credentials || [], href: '/credentials' },
+      { id: 'access-unused-connections', items: unused.connections || [], href: '/connectors' },
+      { id: 'access-unused-services', items: unused.services || [], href: '/services' },
+      { id: 'access-unused-left-behind', items: unused.left_behind || [], href: '/agents' },
     ];
 
     var any = false;
@@ -308,10 +284,8 @@
       container.style.display = 'block';
       counter.textContent = '(' + group.items.length + ')';
       group.items.forEach(function (item) {
-        var lines = [];
-        var extra = group.extra(item);
-        if (extra) lines.push(extra);
-        if (item.why) lines.push(item.why);
+        // The name, then the one line the server writes about it: nothing else.
+        var lines = item.why ? [item.why] : [];
         list.appendChild(unusedItem(item.name || item.id, group.href, lines));
       });
     });

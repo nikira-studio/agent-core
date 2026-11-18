@@ -450,8 +450,8 @@ def dashboard_home(request: Request, session: dict = Depends(require_auth)):
                 + f"<p class='form-hint' style='margin:4px 0 0'>Your answer goes to {agent} the next time it works in {workspace}, and this closes.</p>"
             )
 
-        waiting_body = "<table><tbody>" + "".join(
-            "<tr><td class='waiting-what'>"
+        waiting_body = "<table class='stack-phone'><tbody>" + "".join(
+            "<tr><td class='waiting-what' data-label='Request'>"
             f"<strong>{escape_html(row['title'])}</strong>"
             f"<div class='text-muted' style='font-size:0.85rem'>{escape_html(row['sub'])}</div>"
             + (f"<div style='margin-top:4px'>{escape_html(row['text'])}</div>" if row.get("text") else "")
@@ -460,7 +460,7 @@ def dashboard_home(request: Request, session: dict = Depends(require_auth)):
                 if row["kind"] == "Question"
                 else ""
             )
-            + f"</td><td class='waiting-act'>{action_cell(row)}</td></tr>"
+            + f"</td><td class='waiting-act actions-cell' data-label='Action'>{action_cell(row)}</td></tr>"
             for row in waiting
         ) + "</tbody></table>"
     else:

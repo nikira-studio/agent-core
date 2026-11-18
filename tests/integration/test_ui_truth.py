@@ -107,7 +107,7 @@ def test_one_other_is_singular_and_nobody_else_leaves_no_line(test_client, admin
 def test_the_dialog_says_which_capabilities_agents_and_services_use_a_credential(test_client, admin_token):
     html = test_client.get("/credentials", headers=_admin(admin_token)).text
     dialog = html.split('id="access-modal"', 1)[1].split('id="agent-access-modal"', 1)[0]
-    assert "Capabilities that sign in with this" in dialog
+    assert "Connections that sign in with this" in dialog
     assert "Agents that can reach this" in dialog
     assert "Services that receive this value" in dialog
     assert "Agents with access" not in html

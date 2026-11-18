@@ -55,7 +55,7 @@ def test_2_connect_an_outside_system(site):
     page, base = site
     page.goto(base + "/connectors")
     page.wait_for_load_state("load")
-    assert "Previously called Services" in page.inner_text("body")
+    assert "Previously called Services" not in page.inner_text("body")  # the old name is gone
     page.locator("[data-newbinding-type-id='ledger-cap']").click()
     page.wait_for_selector("#create-binding-modal .modal", state="visible")
     page.fill("#binding-name", "Team ledger")

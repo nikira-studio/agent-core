@@ -37,15 +37,22 @@ def _ask_note_text(activity: dict) -> str:
 
 
 def _ask_note(activity: dict) -> str:
-    """One quiet line under the status when the task's question to a person is no longer waiting, and how it ended."""
+    """One quiet line under the task's title when its question to a person is no longer waiting, and how it ended.
+
+    It sits under the title, not under the status: the status column is narrow, and a line of words
+    that does not fit there runs over the columns next to it.
+    """
     text = _ask_note_text(activity)
-    return f"<br><span class='text-muted' style='font-size:0.75rem'>{escape_html(text)}</span>" if text else ""
+    return f"<div class='activity-ask-note'>{escape_html(text)}</div>" if text else ""
 
 
 def _task_cell(a: dict) -> str:
     """The task: its title on one or two lines. The full record opens in the shared detail dialog."""
     title = escape_html((a.get("task_description") or "")[:160])
-    return f"<a href='#' class='activity-title' data-activity-detail='{escape_html(a['id'])}'>{title}</a>"
+    return (
+        f"<a href='#' class='activity-title' data-activity-detail='{escape_html(a['id'])}'>{title}</a>"
+        f"{_ask_note(a)}"
+    )
 
 
 def _scope_words(scope: str, workspace_names: dict, agent_labels: dict) -> str:
@@ -169,26 +176,26 @@ def activity_page(request: Request, session: dict = Depends(require_auth)):
 
     waiting = waiting_service.waiting_on_person(user_id=scope_user_id, include=("handoffs",), limit=20)["handoffs"]
     waiting_rows = "".join(
-        f"<tr><td><div style='white-space:pre-line'>{escape_html(w.get('needs_human') or '')}</div>"
+        f"<tr><td data-label='Request'><div style='white-space:pre-line'>{escape_html(w.get('needs_human') or '')}</div>"
         f"<div class='text-muted' style='font-size:0.8rem'>From {escape_html(agent_labels.get(w['agent_id'], w['agent_id']))}"
         f" · {escape_html(w.get('task_description', '')[:100])}</div></td>"
-        f"<td>{escape_html(_scope_words(w.get('memory_scope') or '', workspace_names, agent_labels))}</td>"
-        f"<td>{local_dt(w.get('updated_at'), style='date')}</td>"
-        f"<td><button type='button' class='btn btn-sm' data-handoff-resolve='{escape_html(w['id'])}'>Mark resolved</button></td></tr>"
+        f"<td data-label='Scope'>{escape_html(_scope_words(w.get('memory_scope') or '', workspace_names, agent_labels))}</td>"
+        f"<td data-label='Since'>{local_dt(w.get('updated_at'), style='date')}</td>"
+        f"<td data-label='Action'><button type='button' class='btn btn-sm' data-handoff-resolve='{escape_html(w['id'])}'>Mark resolved</button></td></tr>"
         for w in waiting
     )
     superseded = activity_service.list_superseded_requests(user_id=scope_user_id)
     superseded_rows = "".join(
-        f"<tr><td><div style='white-space:pre-line'>{escape_html(w.get('needs_human') or '')}</div>"
+        f"<tr><td data-label='Request'><div style='white-space:pre-line'>{escape_html(w.get('needs_human') or '')}</div>"
         f"<div class='text-muted' style='font-size:0.8rem'>From {escape_html(agent_labels.get(w['agent_id'], w['agent_id']))}"
         f" · {escape_html((w.get('task_description') or '')[:100])}</div></td>"
-        f"<td>{escape_html(_scope_words(w.get('memory_scope') or '', workspace_names, agent_labels))}</td>"
-        f"<td><code>{escape_html(w.get('superseded_by') or '')}</code></td>"
-        f"<td>{local_dt(w.get('handoff_resolved_at'), style='date')}</td></tr>"
+        f"<td data-label='Scope'>{escape_html(_scope_words(w.get('memory_scope') or '', workspace_names, agent_labels))}</td>"
+        f"<td data-label='Replaced by'><code>{escape_html(w.get('superseded_by') or '')}</code></td>"
+        f"<td data-label='When'>{local_dt(w.get('handoff_resolved_at'), style='date')}</td></tr>"
         for w in superseded
     )
     waiting_table = (
-        "<div style='overflow-x:auto'><table><thead><tr><th>Request</th><th>Scope</th><th>Since</th><th></th></tr></thead>"
+        "<div style='overflow-x:auto'><table class='stack-phone'><thead><tr><th>Request</th><th>Scope</th><th>Since</th><th></th></tr></thead>"
         f"<tbody>{waiting_rows}</tbody></table></div>"
         if waiting
         else "<p class='text-muted' style='font-size:0.85rem'>Nothing is waiting on you.</p>"
@@ -198,7 +205,7 @@ def activity_page(request: Request, session: dict = Depends(require_auth)):
         f"<summary>Superseded by a later handoff ({len(superseded)})</summary>"
         "<p class='text-muted' style='font-size:0.85rem'>The agent that asked made a new request in a later session in the "
         "same workspace, which replaced these. It was shown them so it could restate any that still apply.</p>"
-        "<div style='overflow-x:auto'><table><thead><tr><th>Request</th><th>Scope</th><th>Replaced by</th><th>When</th></tr></thead>"
+        "<div style='overflow-x:auto'><table class='stack-phone'><thead><tr><th>Request</th><th>Scope</th><th>Replaced by</th><th>When</th></tr></thead>"
         f"<tbody>{superseded_rows}</tbody></table></div></details>"
         if superseded
         else ""
@@ -238,7 +245,7 @@ def activity_page(request: Request, session: dict = Depends(require_auth)):
             f"<tr class='activity-row' data-status='{escape_html(status)}'>"
             f"<td class='activity-task-cell'>{_task_cell(a)}</td>"
             f"<td class='activity-scope-cell' data-label='Workspace' title='{escape_html(a.get('memory_scope') or '')}'>{escape_html(_scope_words(a.get('memory_scope') or '', workspace_names, agent_labels))}</td>"
-            f"<td class='activity-status-cell' data-label='Status'><span class='badge badge-{escape_html(status or 'active')}'>{escape_html(status)}</span>{_ask_note(a)}</td>"
+            f"<td class='activity-status-cell' data-label='Status'><span class='badge badge-{escape_html(status or 'active')}'>{escape_html(status)}</span></td>"
             f"<td class='activity-agent-cell' data-label='Agent'>{escape_html(agent_labels.get(a.get('assigned_agent_id', ''), a.get('assigned_agent_id', '')))}</td>"
             f"<td class='activity-updated-cell' data-label='Updated'>{local_dt(a.get('updated_at'), style='date')}<br>{local_dt(a.get('updated_at'), style='time')}</td>"
             f"<td><div class='actions-cell activity-actions-cell'>"
@@ -256,7 +263,7 @@ def activity_page(request: Request, session: dict = Depends(require_auth)):
         if focus and (is_admin or focus.get("user_id") == session["user_id"]):
             focus_html = (
                 '<section class="card" id="activity-focus"><h2>This task</h2>'
-                '<table class="activity-table"><thead><tr><th>Task</th><th>Workspace</th><th>Status</th><th>Agent</th><th>Updated</th><th></th></tr></thead>'
+                '<table class="activity-table stack-phone"><thead><tr><th>Task</th><th>Workspace</th><th>Status</th><th>Agent</th><th>Updated</th><th></th></tr></thead>'
                 f"<tbody>{render_row(focus)}</tbody></table></section>"
             )
 

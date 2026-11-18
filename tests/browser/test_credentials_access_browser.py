@@ -14,6 +14,8 @@ workspace_service.create_workspace("shared-ws", "Shared Place", owner)
 for agent_id, name, caps in (
     ("reader-one", "Reader One", ["memory", "credentials"]),
     ("reader-two", "Reader Two", ["memory", "credentials"]),
+    # Reader Three may reach the credential but may not use it yet.
+    ("reader-three", "Reader Three", ["memory"]),
 ):
     agent_service.create_agent(agent_id=agent_id, display_name=name, owner_user_id=owner,
                                read_scopes=["workspace:shared-ws"], write_scopes=[], capabilities=caps)
@@ -37,7 +39,7 @@ def _cell(page):
 def test_the_cell_says_who_was_given_the_secret_and_who_else_can_reach_it(credentials):
     page = credentials
     before = _cell(page).inner_text()
-    assert "Given the secret: no one" in before and "2 agents can reach it" in before
+    assert "Given the secret: no one" in before and "3 agents can reach it" in before
     assert "can get its reference" not in before
 
 
@@ -47,7 +49,7 @@ def test_the_dialog_is_one_list_in_three_groups_and_a_service_can_be_given_the_s
     page.locator("[data-credential-access]").first.click()
     page.wait_for_selector("#access-modal .modal", state="visible")
     text = page.locator("#access-modal").text_content()  # the headings may be styled in capitals
-    assert "Capabilities that sign in with this" in text
+    assert "Connections that sign in with this" in text
     assert "Agents that can reach this" in text
     assert "Services that receive this value" in text
     assert "A service receives the secret value itself. An agent using a capability does not." in text
@@ -78,7 +80,7 @@ def test_the_dialog_is_one_list_in_three_groups_and_a_service_can_be_given_the_s
 
     page.locator("#access-services button", has_text="Remove").click()
     page.wait_for_function("document.querySelector(\"tr[data-credential-id] td[data-label='Used by']\").innerText.includes('no one')")
-    assert "2 agents can reach it" in _cell(page).inner_text()
+    assert "3 agents can reach it" in _cell(page).inner_text()
     assert page.evaluate("window.__stillHere") is True  # closing does not reload either, so the cell is already right
 
 
@@ -100,3 +102,42 @@ def test_the_pickers_ask_which_one_before_anything_is_added(credentials):
     # Choosing a service opens the Add button.
     page.locator("#access-service-pick").select_option(label="Worker A")
     assert not page.locator("#access-service-add").is_disabled()
+
+
+def test_the_agents_group_says_once_what_it_is_missing(credentials):
+    """One notice and one Turn on at the top of the group; the rows have no buttons of their own."""
+    page = credentials
+    page.reload()
+    page.wait_for_load_state("load")
+    page.locator("[data-credential-access]").first.click()
+    page.wait_for_selector("#access-modal .modal", state="visible")
+    page.wait_for_function("document.querySelector('#access-agents').innerText.includes('Reader Three')")
+    agents = page.locator("#access-agents")
+    text = agents.inner_text()
+    assert "Some of these need the Reference credentials permission before they can use it." in text
+    assert "Turn on Reference credentials" in text
+    assert agents.locator("button").count() == 1
+    assert "needs permission" in text
+
+
+def test_the_owner_panel_is_quiet_until_the_owner_changes(credentials):
+    """The panel opens on the owner it has now: nothing changes, and Save is off."""
+    page = credentials
+    page.reload()
+    page.wait_for_load_state("load")
+    page.locator("[data-credential-access]").first.click()
+    page.wait_for_selector("#access-modal .modal", state="visible")
+    page.locator("#access-owner-change").click()
+    page.wait_for_function("document.querySelector('#access-owner-preview').innerText.includes('Nothing changes.')")
+    assert page.locator("#access-owner-save").is_disabled()
+    # The panel is on the screen, not hidden behind the dialog's footer.
+    panel = page.locator("#access-owner-panel")
+    box = panel.bounding_box()
+    footer = page.locator("#access-modal .modal-footer").bounding_box()
+    assert box is not None and footer is not None
+    assert box["y"] + box["height"] <= footer["y"] + 1, (box, footer)
+    # Choosing another owner turns Save on; choosing this one again turns it off.
+    page.locator("#access-owner-pick").select_option(label="Just me (personal)")
+    page.wait_for_function("!document.getElementById('access-owner-save').disabled")
+    page.locator("#access-owner-pick").select_option(label="Shared Place")
+    page.wait_for_function("document.getElementById('access-owner-save').disabled")

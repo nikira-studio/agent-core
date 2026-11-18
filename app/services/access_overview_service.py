@@ -195,8 +195,8 @@ def _unused(agents, credentials, bindings, connection_users, grants, use, names,
             continue  # nothing is set up to use it, but something used it recently: it is in use
         unused_credentials.append({
             "id": c["id"], "name": c["name"], "owner": names.scope(c["scope"]), "last_referenced": seen,
-            "why": "No connection signs in with it and no service may fetch it. "
-                   + (f"Last referenced on {seen_at.strftime('%-d %b %Y')}." if seen_at else "Never referenced."),
+            "why": f"No capability signs in with it, no service may fetch it, and no agent has used it in {IDLE_SERVICE_DAYS} days. "
+                   + (f"Last used on {seen_at.strftime('%-d %b %Y')}." if seen_at else "It has never been used."),
         })
     unusable = [
         {"id": b["id"], "name": reach_service.connection_label(b.get("connector_display_name") or b["connector_type_id"], b["name"]),
@@ -205,15 +205,26 @@ def _unused(agents, credentials, bindings, connection_users, grants, use, names,
     ]
     holders = {g["consumer_agent_id"] for g in live}
     idle = []
+    # A service is in use when it signed in with its key or fetched a secret: the same two sources the table's
+    # "Last used" column reads, so the list and the table never disagree.
+    last_fetch: dict[str, str] = {}
+    for source in (use["audit"], use["rollup"]):
+        for (actor_id, _), when in source.items():
+            when_at = _parse(when)
+            if when_at and (actor_id not in last_fetch or when_at > _parse(last_fetch[actor_id])):
+                last_fetch[actor_id] = when
     for a in agents.values():
         if a.get("kind") != "service" or not a.get("is_active"):
             continue
-        last = use["keys"].get(a["id"])
+        last = _later(use["keys"].get(a["id"]), last_fetch.get(a["id"]))
         last_at = _parse(last)
         if last_at is None or last_at < cutoff_at:
             idle.append({
                 "id": a["id"], "name": a.get("display_name") or a["id"], "last_signed_in": last,
-                "why": f"It has not signed in for {IDLE_SERVICE_DAYS} days." if last else "It has never signed in.",
+                "why": (
+                    f"It was last used on {last_at.strftime('%-d %b %Y')}, more than {IDLE_SERVICE_DAYS} days ago."
+                    if last_at else "It has never been used."
+                ),
             })
         elif a["id"] not in holders:
             idle.append({"id": a["id"], "name": a.get("display_name") or a["id"], "last_signed_in": last,

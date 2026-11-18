@@ -52,7 +52,7 @@ def _words(html):
 
 def test_the_page_shows_one_list_of_who_can_use_this_in_three_groups(admin):
     dialog = _dialog(admin.get("/credentials").text)
-    assert "Capabilities that sign in with this" in dialog
+    assert "Connections that sign in with this" in dialog
     assert "Agents that can reach this" in dialog
     assert "Services that receive this value" in dialog
     # the one line that says what the list is for, unchanged

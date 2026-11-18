@@ -446,6 +446,7 @@ def _agents_view(request: Request, session: dict, show_services: bool):
     }
     // A service only fetches secrets, so the create form drops the memory, workspace and personal choices.
     function setServiceChoice(isService) {
+      setDescriptionHint('ca-description-hint', isService);
       ['ca-access', 'ca-access-reset'].forEach(function(id) {
         const el = document.getElementById(id);
         if (el) el.hidden = isService;
@@ -465,12 +466,20 @@ def _agents_view(request: Request, session: dict, show_services: bool):
     }
     // The edit form of a service shows only its name and description, and the way to change it.
     function setEditServiceMode(isService) {
+      setDescriptionHint('edit-description-hint', isService);
       ['edit-capability-controls', 'edit-access', 'edit-owner-line'].forEach(function(id) {
         const el = document.getElementById(id);
         if (el) el.hidden = isService;
       });
       const note = document.getElementById('edit-service-note');
       if (note) note.hidden = !isService;
+    }
+    // The description is a reminder of what the thing is for, so it says which thing it is.
+    function setDescriptionHint(id, isService) {
+      const hint = document.getElementById(id);
+      if (hint) hint.textContent = isService
+        ? 'A reminder of what this service is for.'
+        : 'A reminder of what this agent is for.';
     }
     function showEditError(message) {
       const errorBox = document.getElementById('edit-agent-error');
@@ -940,7 +949,7 @@ def _agents_view(request: Request, session: dict, show_services: bool):
     js = js.replace("__AGENT_ROWS__", row_data)
     js = js.replace("__ACCESS_WORKSPACES__", workspace_data)
     # The Access dialogs live in their own file, loaded the same way as the page's other scripts.
-    js = js + '\n<script src="/static/js/agent_access.js?v=20261118b"></script>'
+    js = js + '\n<script src="/static/js/agent_access.js?v=20261118d"></script>'
 
     page_title = "Services" if show_services else "Agents"
     create_button = (
@@ -1082,7 +1091,7 @@ def _agents_view(request: Request, session: dict, show_services: bool):
             <div class="form-group">
               <label>Description</label>
               <input type="text" id="ca-description" placeholder="What is this agent for?">
-              <p class="form-hint">A reminder of what this agent is for.</p>
+              <p class="form-hint" id="ca-description-hint">A reminder of what this agent is for.</p>
             </div>
           </div>
           <div id="ca-capability-controls">{capability_create_html}</div>
@@ -1119,7 +1128,7 @@ def _agents_view(request: Request, session: dict, show_services: bool):
               <div class="form-group">
                 <label>Description</label>
                 <input type="text" id="edit-description">
-                <p class="form-hint">A reminder of what this agent is for.</p>
+                <p class="form-hint" id="edit-description-hint">A reminder of what this agent is for.</p>
               </div>
             </div>
             <p class="form-hint" id="edit-owner-line">Owner: <span id="edit-owner"></span><span id="edit-default-user" hidden></span></p>

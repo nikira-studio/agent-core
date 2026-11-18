@@ -295,24 +295,66 @@ function accessScopeWords(scope) {
 }
 
 // Turning a permission on is one recorded action by a person. Nothing here ever turns one off.
-function turnOnButton(user) {
-  const button = accessEl('button', 'Turn on', 'btn btn-sm btn-secondary');
-  button.type = 'button';
-  button.addEventListener('click', async () => {
-    button.disabled = true;
-    const r = await apiFetch(
-      '/api/agents/' + encodeURIComponent(user.agent_id) + '/permissions/' + encodeURIComponent(user.needs) + '/turn-on',
-      { method: 'POST' }
-    );
-    if (r.ok) {
-      showToast(user.needs_label + ' turned on for ' + user.display_name, 'success');
-      await renderAccess();
-    } else {
-      showToast(r.error?.message || 'Could not turn it on', 'danger');
-      button.disabled = false;
+async function turnOnPermission(agentId, permission) {
+  const r = await apiFetch(
+    '/api/agents/' + encodeURIComponent(agentId) + '/permissions/' + encodeURIComponent(permission) + '/turn-on',
+    { method: 'POST' }
+  );
+  if (!r.ok) {
+    showToast((r.error && r.error.message) || 'Could not turn it on', 'danger');
+    return false;
+  }
+  return true;
+}
+
+// The rows of a list that are missing a permission, one group per permission.
+function accessMissingPermissions(items, fallbackPermission, fallbackLabel) {
+  const groups = [];
+  (items || []).forEach(function (item) {
+    if (!item || item.status !== 'needs_permission') return;
+    const permission = item.needs || fallbackPermission;
+    const label = item.needs_label || fallbackLabel;
+    let group = groups.find(function (g) { return g.permission === permission; });
+    if (!group) {
+      group = { permission: permission, label: label, rows: [] };
+      groups.push(group);
     }
+    group.rows.push(item);
   });
-  return button;
+  return groups;
+}
+
+// One notice above a list, and one button: the list says once what its rows are missing, and the button turns
+// that permission on for every row that needs it. The rows keep a quiet "needs permission" of their own.
+function accessPermissionNotice(groups, turnOn) {
+  if (!groups.length) return null;
+  const box = accessEl('div', null, 'access-permission-notice');
+  groups.forEach(function (group) {
+    const line = accessEl('div', null, 'access-permission-line');
+    line.append(accessEl('span', 'Some of these need the ' + group.label + ' permission before they can use it.'));
+    const button = accessEl('button', 'Turn on ' + group.label, 'btn btn-sm btn-secondary');
+    button.type = 'button';
+    button.addEventListener('click', () => turnOn(group));
+    line.append(button);
+    box.append(line);
+  });
+  return box;
+}
+
+// Turn one permission on for every row of a group that needs it, then show the list again.
+async function turnOnForRows(group, reload) {
+  const names = [];
+  // One button can reach several agents: say which, and ask first. A permission is only ever turned on by a person who saw who gets it.
+  if (group.rows.length > 1) {
+    const who = group.rows.map(function (row) { return row.display_name; }).join(', ');
+    if (!await confirmDialog('Turn on ' + group.label + ' for ' + who + '?')) return;
+  }
+  for (const row of group.rows) {
+    if (!await turnOnPermission(row.agent_id, group.permission)) return;
+    names.push(row.display_name);
+  }
+  showToast(group.label + ' turned on for ' + names.join(', '), 'success');
+  await reload();
 }
 
 async function openAccess(entryId) {
@@ -345,7 +387,7 @@ function renderAccessConnections(d) {
   const list = document.getElementById('access-connections');
   list.replaceChildren();
   if (!d.connections.length) {
-    list.append(accessEl('p', 'No capability signs in with this yet.', 'text-muted'));
+    list.append(accessEl('p', 'No connection signs in with this yet.', 'text-muted'));
   }
   d.connections.forEach(connection => {
     const box = accessEl('div', null, 'access-connection');
@@ -384,13 +426,18 @@ function connectionUsers(connection) {
     details.append(accessEl('p', 'No agent can use it.', 'text-muted'));
     return details;
   }
+  // The agents that may not run it yet say so once, above the list, with one button.
+  const notice = accessPermissionNotice(
+    accessMissingPermissions(connection.users, 'connectors_execute', 'Run capabilities'),
+    (group) => turnOnForRows(group, renderAccess)
+  );
+  if (notice) details.append(notice);
   connection.users.forEach(user => {
     const row = accessEl('div', null, 'access-row');
     row.append(accessEl('span', user.display_name));
     row.append(accessEl('span', user.reason, 'text-muted'));
     if (user.status === 'needs_permission') {
-      row.append(accessEl('span', 'needs permission: ' + user.needs_label, 'badge badge-warning'));
-      row.append(turnOnButton(user));
+      row.append(accessEl('span', 'needs permission', 'text-muted access-needs'));
     } else {
       row.append(accessEl('span', 'can use it', 'badge badge-success'));
     }
@@ -458,13 +505,18 @@ function renderAccessAgents(d) {
   if (!d.agents.length) {
     list.append(accessEl('p', 'No agent can reach this.', 'text-muted'));
   }
+  // The agents that may not use it yet say so once, above the list, with one button.
+  const notice = accessPermissionNotice(
+    accessMissingPermissions(d.agents, 'credentials', 'Reference credentials'),
+    (group) => turnOnForRows(group, renderAccess)
+  );
+  if (notice) list.append(notice);
   d.agents.forEach(agent => {
     const row = accessEl('div', null, 'access-row');
     row.append(accessEl('span', agent.display_name));
     row.append(accessEl('span', agent.reason, 'text-muted'));
     if (agent.status === 'needs_permission') {
-      row.append(accessEl('span', 'needs permission: ' + agent.needs_label, 'badge badge-warning'));
-      row.append(turnOnButton(agent));
+      row.append(accessEl('span', 'needs permission', 'text-muted access-needs'));
     } else {
       row.append(accessEl('span', 'can use its reference', 'text-muted'));
     }
@@ -488,15 +540,49 @@ async function openOwnerPanel() {
     accessOwnerExtra = option;
   }
   pick.value = ownedByConnection ? '' : accessData.credential.scope;
-  document.getElementById('access-owner-panel').style.display = '';
+  const panel = document.getElementById('access-owner-panel');
+  panel.style.display = '';
   await previewOwner();
+  showOwnerPanel(panel);
+}
+
+// The panel is inside a dialog whose footer sits over the content: scroll the panel into view and give
+// the body room under the footer, so it is never hidden behind it on a phone.
+function showOwnerPanel(panel) {
+  const overlay = document.getElementById('access-modal');
+  const scroller = overlay ? overlay.querySelector('.modal-scroll') : null;
+  const footer = overlay ? overlay.querySelector('.modal-footer') : null;
+  if (scroller && footer) {
+    const height = Math.round(footer.getBoundingClientRect().height);
+    if (height) scroller.style.paddingBottom = (height + 16) + 'px';
+  }
+  panel.scrollIntoView({ block: 'nearest' });
+  if (scroller && footer) {
+    const panelBottom = panel.getBoundingClientRect().bottom;
+    const footerTop = footer.getBoundingClientRect().top;
+    if (panelBottom > footerTop) scroller.scrollTop += (panelBottom - footerTop) + 8;
+  }
+}
+
+// The owner it has now: the scope the credential lives under.
+function currentOwnerScope() {
+  return accessData && accessData.credential ? (accessData.credential.scope || '') : '';
 }
 
 async function previewOwner() {
   const scope = document.getElementById('access-owner-pick').value;
   const box = document.getElementById('access-owner-preview');
+  const save = document.getElementById('access-owner-save');
   box.replaceChildren();
+  const current = currentOwnerScope();
+  const changed = !!scope && scope !== current;
+  // Nothing is saved until the chosen owner is not the one it has now.
+  if (save) save.disabled = !changed;
   if (!scope) return;
+  if (!changed) {
+    box.append(accessEl('p', 'Nothing changes.', 'text-muted'));
+    return;
+  }
   const j = await apiFetch('/api/access/preview/credential-owner', {
     method: 'POST', body: JSON.stringify({ entry_id: accessEntryId, scope }),
   });
@@ -532,6 +618,8 @@ function closeOwnerPanel() {
   if (panel) panel.style.display = 'none';
   const preview = document.getElementById('access-owner-preview');
   if (preview) preview.replaceChildren();
+  const save = document.getElementById('access-owner-save');
+  if (save) save.disabled = true;
 }
 
 // ── the services that receive its value ───────────────────────────────────

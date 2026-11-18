@@ -48,7 +48,9 @@ def test_the_list_shows_a_pending_proposal(test_client, admin_token):
     assert "Widen target-agent" in html
     assert f"/approvals/{approval_id}" in html
     assert "ops-agent" in html
-    assert "workspace:ops" in html
+    # The workspace's own name, not the scope string it is stored under.
+    assert ">Ops<" in html
+    assert "workspace:ops" not in html
     assert "pending" in html
 
 

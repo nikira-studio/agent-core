@@ -106,7 +106,7 @@ def test_the_unused_list_names_what_nothing_uses(world):
     unused = _overview(world["client"])["unused"]
     assert [c["name"] for c in unused["credentials"]] == ["orphan-key"]
     assert [s["name"] for s in unused["services"]] == ["Idle service"]
-    assert unused["services"][0]["why"] == "It has never signed in."
+    assert unused["services"][0]["why"] == "It has never been used."
     assert unused["connections"] == [] and unused["left_behind"] == []
 
 
@@ -123,7 +123,8 @@ def test_a_credential_an_agent_referenced_recently_is_in_use_even_with_nothing_s
         conn.commit()
     unused = _overview(world["client"])["unused"]["credentials"]
     assert [c["name"] for c in unused] == ["orphan-key"]
-    assert unused[0]["why"].endswith("Never referenced.")
+    assert unused[0]["why"].endswith("It has never been used.")
+    assert "no agent has used it in 90 days" in unused[0]["why"]
     assert unused[0]["last_referenced"] is None
 
 
@@ -137,7 +138,7 @@ def test_an_old_reference_does_not_keep_a_credential_off_the_list_and_the_list_s
         conn.commit()
     unused = _overview(world["client"])["unused"]["credentials"]
     assert [c["name"] for c in unused] == ["orphan-key"]
-    assert unused[0]["why"].endswith("Last referenced on 5 Jan 2026.")
+    assert unused[0]["why"].endswith("Last used on 5 Jan 2026.")
 
 
 def test_a_connection_nobody_can_use_and_what_a_retired_agent_leaves_behind_are_listed(world):
@@ -217,3 +218,32 @@ def test_the_overview_builds_each_agents_context_once(world, monkeypatch):
         credential_service.create_credential(SCOPE, f"extra-{n}", "not-shown")
     _overview(world["client"])
     assert sorted(calls) == ["asst"]  # one active agent (the services are not agents), once
+
+
+def _audit_fetch(actor, credential_id, when):
+    with get_db() as conn:
+        conn.execute(
+            "INSERT INTO audit_log (actor_type, actor_id, action, resource_type, resource_id, result, timestamp) "
+            "VALUES ('agent', ?, 'credential_consumer_resolved', 'credential', ?, 'success', ?)",
+            (actor, credential_id, when),
+        )
+        conn.commit()
+
+
+def test_a_service_that_fetched_a_secret_is_never_listed_as_never_used_and_the_table_agrees(world):
+    """The idle list and the table's Last used read the same sources (key sign-in and secret fetches)."""
+    from datetime import datetime, timedelta, timezone
+
+    recent = (datetime.now(timezone.utc) - timedelta(days=5)).strftime("%Y-%m-%d %H:%M:%S")
+    _audit_fetch("idle-svc", world["used"]["id"], recent)
+    data = _overview(world["client"])
+    idle = {s["id"]: s for s in data["unused"]["services"]}
+    assert "never" not in idle["idle-svc"]["why"].lower()
+    assert idle["idle-svc"]["last_signed_in"] == recent
+    assert idle["idle-svc"]["why"] == "It may fetch no secret."
+
+
+def test_a_service_last_used_long_ago_says_when(world):
+    _audit_fetch("idle-svc", world["used"]["id"], "2026-01-05 09:00:00")
+    idle = {s["id"]: s for s in _overview(world["client"])["unused"]["services"]}
+    assert idle["idle-svc"]["why"] == "It was last used on 5 Jan 2026, more than 90 days ago."

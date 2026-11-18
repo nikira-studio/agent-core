@@ -304,7 +304,7 @@ def credentials_page(request: Request, session: dict = Depends(require_auth)):
         <h2>Who can use <span id="access-name"></span></h2>
         <p class="form-hint" style="margin-bottom:12px">Store each secret once. Let every connection or service that needs it use the same credential. Use a separate credential only for a different account or a different permission level.</p>
 
-        <h3 class="sub-heading form-section-title">Capabilities that sign in with this</h3>
+        <h3 class="sub-heading form-section-title">Connections that sign in with this</h3>
         <div id="access-connections"></div>
         <div class="form-group">
           <label for="access-connection-pick">Add a connection</label>
@@ -331,7 +331,7 @@ def credentials_page(request: Request, session: dict = Depends(require_auth)):
           </div>
           <div id="access-owner-preview"></div>
           <div style="display:flex;gap:8px">
-            <button type="button" class="btn btn-primary" id="access-owner-save">Save</button>
+            <button type="button" class="btn btn-primary" id="access-owner-save" disabled>Save</button>
             <button type="button" class="btn btn-secondary" id="access-owner-cancel">Cancel</button>
           </div>
         </div>
@@ -474,6 +474,6 @@ def credentials_page(request: Request, session: dict = Depends(require_auth)):
     </div>
     """
 
-    extra_js = '<script src="/static/js/credentials.js?v=20261118c"></script>'
+    extra_js = '<script src="/static/js/credentials.js?v=20261118e"></script>'
 
     return render_page("Credentials", body, "/credentials", extra_js, session=session)

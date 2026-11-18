@@ -86,16 +86,82 @@ function accessStatusText(item) {
 
 // Switching a permission on is one recorded action, done by a person, one permission at a time. Nothing here ever
 // switches one off.
-async function accessTurnOn(agentId, permission, label, name, reload) {
+async function accessTurnOnPermission(agentId, permission) {
   var r = await apiFetch(
     '/api/agents/' + encodeURIComponent(agentId) + '/permissions/' + encodeURIComponent(permission) + '/turn-on',
     { method: 'POST' }
   );
   if (!r.ok) {
     showToast((r.error && r.error.message) || 'Could not turn that permission on', 'danger');
-    return;
+    return false;
   }
-  showToast((label || 'That permission') + ' turned on for ' + name);
+  return true;
+}
+
+// The rows of a list that are missing a permission, one group per permission: the rows that need it and the
+// label the person reads for it.
+function accessMissingPermissions(items, fallbackPermission, fallbackLabel) {
+  var groups = [];
+  (items || []).forEach(function (item) {
+    if (!item || item.status !== 'needs_permission') return;
+    var permission = item.needs || fallbackPermission;
+    var label = item.needs_label || fallbackLabel;
+    var group = null;
+    for (var i = 0; i < groups.length; i++) {
+      if (groups[i].permission === permission) { group = groups[i]; break; }
+    }
+    if (!group) {
+      group = { permission: permission, label: label, rows: [] };
+      groups.push(group);
+    }
+    group.rows.push(item);
+  });
+  return groups;
+}
+
+// One notice above a list, and one button: the list says once what its rows are missing, and the button turns
+// that permission on for every row that needs it. The rows keep a quiet "needs permission" of their own.
+function accessPermissionNotice(groups, noticeText, turnOn) {
+  if (!groups.length) return null;
+  var box = accessEl('div', null, 'access-permission-notice');
+  groups.forEach(function (group) {
+    var line = accessEl('div', null, 'access-permission-line');
+    line.append(accessEl('span', noticeText(group.label)));
+    var button = accessEl('button', 'Turn on ' + group.label, 'btn btn-sm btn-secondary');
+    button.type = 'button';
+    button.addEventListener('click', function () {
+      turnOn(group);
+    });
+    line.append(button);
+    box.append(line);
+  });
+  return box;
+}
+
+// The notice above the agent's own lists: the agent is the one who cannot use them yet.
+function accessAgentNoticeText(label) {
+  return 'Some of these need the ' + label + ' permission before this agent can use them.';
+}
+
+// The notice above a list of other people: they are the ones who cannot use it yet.
+function accessOthersNoticeText(label) {
+  return 'Some of these need the ' + label + ' permission before they can use it.';
+}
+
+// Turn one permission on for every row of a group that needs it, then show the list again.
+async function accessTurnOnGroup(group, who, reload) {
+  var names = [];
+  // One button can reach several agents: say which, and ask first.
+  if (group.rows.length > 1) {
+    var everyone = group.rows.map(function (row) { return who(row).name; }).join(', ');
+    if (!await confirmDialog('Turn on ' + group.label + ' for ' + everyone + '?')) return;
+  }
+  for (var i = 0; i < group.rows.length; i++) {
+    var person = who(group.rows[i]);
+    if (!await accessTurnOnPermission(person.id, group.permission)) return;
+    names.push(person.name);
+  }
+  showToast(group.label + ' turned on for ' + names.join(', '));
   await reload();
 }
 
@@ -357,26 +423,24 @@ function renderAgentCapabilities() {
       'text-muted'
     ));
   } else {
+    // The rows that cannot run it yet say so once, above the list, with one button.
+    var notice = accessPermissionNotice(
+      accessMissingPermissions(list, 'connectors_execute', 'Run capabilities'),
+      accessAgentNoticeText,
+      function (group) {
+        accessTurnOnGroup(group, function () {
+          return { id: accessAgentId, name: accessAgentData.agent.display_name || accessAgentId };
+        }, reloadAgentAccess);
+      }
+    );
+    if (notice) box.append(notice);
     list.forEach(function (c) {
       var row = accessEl('div', null, 'access-row');
       row.append(accessEl('strong', c.name));
       var note = accessCapabilityNote(c.capability, c.name);
       if (note) row.append(accessEl('span', note, 'text-muted'));
-      var chip = accessNeedsChip(c, 'Run capabilities');
-      if (chip) {
-        row.append(chip);
-        var turn = accessEl('button', 'Turn on', 'btn btn-sm btn-secondary');
-        turn.type = 'button';
-        turn.addEventListener('click', function () {
-          accessTurnOn(
-            accessAgentId,
-            'connectors_execute',
-            c.needs_label || 'Run capabilities',
-            accessAgentData.agent.display_name || accessAgentId,
-            reloadAgentAccess
-          );
-        });
-        row.append(turn);
+      if (c.status === 'needs_permission') {
+        row.append(accessEl('span', 'needs permission', 'text-muted access-needs'));
       } else {
         row.append(accessEl('span', 'can use', 'text-muted'));
       }
@@ -477,26 +541,27 @@ function renderAgentCredentials() {
     ));
     return;
   }
+  // The rows that cannot use it yet say so once, above the list, with one button.
+  var notice = accessPermissionNotice(
+    accessMissingPermissions(list, 'credentials', 'Reference credentials'),
+    accessAgentNoticeText,
+    function (group) {
+      accessTurnOnGroup(group, function () {
+        return { id: accessAgentId, name: accessAgentData.agent.display_name || accessAgentId };
+      }, reloadAgentAccess);
+    }
+  );
+  if (notice) box.append(notice);
   list.forEach(function (c) {
     var row = accessEl('div', null, 'access-row');
     row.append(accessEl('strong', c.name));
-    row.append(accessEl('span', c.owner, 'text-muted'));
+    // The owner is named once: when the reason already says "through <owner>", it says it again on its own.
+    if (c.reason !== 'through ' + c.owner) {
+      row.append(accessEl('span', c.owner, 'text-muted'));
+    }
     row.append(accessEl('span', c.reason, 'text-muted'));
-    var chip = accessNeedsChip(c, 'Reference credentials');
-    if (chip) {
-      row.append(chip);
-      var turn = accessEl('button', 'Turn on', 'btn btn-sm btn-secondary');
-      turn.type = 'button';
-      turn.addEventListener('click', function () {
-        accessTurnOn(
-          accessAgentId,
-          'credentials',
-          c.needs_label || 'Reference credentials',
-          accessAgentData.agent.display_name || accessAgentId,
-          reloadAgentAccess
-        );
-      });
-      row.append(turn);
+    if (c.status === 'needs_permission') {
+      row.append(accessEl('span', 'needs permission', 'text-muted access-needs'));
     } else {
       row.append(accessEl('span', 'can use its reference', 'text-muted'));
     }
@@ -788,25 +853,23 @@ function renderConnectionUsersNow() {
     box.append(accessEl('p', 'No agent can use it right now.', 'text-muted'));
     return;
   }
+  // The agents that may not run it yet say so once, above the list, with one button.
+  var notice = accessPermissionNotice(
+    accessMissingPermissions(users, 'connectors_execute', 'Run capabilities'),
+    accessOthersNoticeText,
+    function (group) {
+      accessTurnOnGroup(group, function (u) {
+        return { id: u.agent_id, name: u.display_name };
+      }, reloadConnectionUsers);
+    }
+  );
+  if (notice) box.append(notice);
   users.forEach(function (u) {
     var row = accessEl('div', null, 'access-row');
     row.append(accessEl('strong', u.display_name));
     row.append(accessEl('span', u.reason, 'text-muted'));
-    var chip = accessNeedsChip(u, 'Run capabilities');
-    if (chip) {
-      row.append(chip);
-      var turn = accessEl('button', 'Turn on', 'btn btn-sm btn-secondary');
-      turn.type = 'button';
-      turn.addEventListener('click', function () {
-        accessTurnOn(
-          u.agent_id,
-          u.needs || 'connectors_execute',
-          u.needs_label || 'Run capabilities',
-          u.display_name,
-          reloadConnectionUsers
-        );
-      });
-      row.append(turn);
+    if (u.status === 'needs_permission') {
+      row.append(accessEl('span', 'needs permission', 'text-muted access-needs'));
     } else {
       row.append(accessEl('span', 'can use', 'text-muted'));
     }

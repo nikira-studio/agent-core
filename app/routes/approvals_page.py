@@ -15,7 +15,7 @@ from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, Request
 
-from app.routes.dashboard_shared import escape_html, local_dt, render_page, require_auth
+from app.routes.dashboard_shared import Owners, escape_html, local_dt, render_page, require_auth
 
 router = APIRouter()
 
@@ -79,10 +79,12 @@ def _param_text(value: Any) -> str:
     return str(value)
 
 
-def _row(approval: dict, decided_names: dict | None = None) -> str:
+def _row(approval: dict, decided_names: dict | None = None, owners: Owners | None = None) -> str:
     approval_id = escape_html(approval.get("id") or "")
     title = escape_html(approval.get("title") or "")
-    scope = escape_html(approval.get("scope") or "")
+    # The owner in plain words: a workspace's own name, never the scope string it is stored under.
+    scope = approval.get("scope") or ""
+    workspace = escape_html(owners.short(scope) if owners else scope)
     proposed_by = escape_html(approval.get("proposed_by") or "")
     status_badge = _status_badge(approval.get("status") or "")
     created = local_dt(approval.get("created_at"))
@@ -91,21 +93,21 @@ def _row(approval: dict, decided_names: dict | None = None) -> str:
         who = approval.get("decided_by") or ""
         who = decided_names.get(who) or who
         when = local_dt(approval.get("decided_at")) if approval.get("decided_at") else ""
-        decided_cell = "<td>" + (escape_html(who) + (" · " if who and when else "") + when or "—") + "</td>"
+        decided_cell = "<td data-label='Decided'>" + (escape_html(who) + (" · " if who and when else "") + when or "—") + "</td>"
     return (
         "<tr>"
-        "<td><a href='/approvals/" + approval_id + "'>" + title + "</a></td>"
-        "<td><code>" + scope + "</code></td>"
-        "<td>" + proposed_by + "</td>"
-        "<td>" + status_badge + "</td>"
-        "<td>" + created + "</td>"
+        "<td data-label='Title'><a href='/approvals/" + approval_id + "'>" + title + "</a></td>"
+        "<td data-label='Workspace'>" + workspace + "</td>"
+        "<td data-label='Proposed by'>" + proposed_by + "</td>"
+        "<td data-label='Status'>" + status_badge + "</td>"
+        "<td data-label='Created'>" + created + "</td>"
         + decided_cell +
         "</tr>"
     )
 
 
-def _list_rows(approvals: list[dict], decided_names: dict | None = None) -> str:
-    return "".join(_row(a, decided_names) for a in approvals)
+def _list_rows(approvals: list[dict], decided_names: dict | None = None, owners: Owners | None = None) -> str:
+    return "".join(_row(a, decided_names, owners) for a in approvals)
 
 
 def _operation_card(index: int, operation: dict, can_decide: bool) -> str:
@@ -307,7 +309,7 @@ def _not_found_page(session: dict):
 
 @router.get("/approvals")
 def approvals_page(request: Request, session: dict = Depends(require_auth)):
-    from app.services import approval_service
+    from app.services import agent_service, approval_service, workspace_service
 
     scopes = _read_scopes(session)
     pending = approval_service.list_for_scopes(scopes, "pending", PENDING_LIMIT)
@@ -317,12 +319,27 @@ def approvals_page(request: Request, session: dict = Depends(require_auth)):
     decided.sort(key=lambda a: a.get("created_at") or "", reverse=True)
     decided = decided[:DECIDED_LIMIT]
 
-    pending_rows = _list_rows(pending)
+    # The owners, in plain words: the names are looked up once, so every row says the same words.
+    is_admin = session.get("role") == "admin"
+    owners = Owners(
+        workspaces=(
+            workspace_service.list_workspaces()
+            if is_admin
+            else workspace_service.list_workspaces(owner_user_id=session["user_id"])
+        ),
+        agents=(
+            agent_service.list_agents()
+            if is_admin
+            else agent_service.list_agents(owner_user_id=session["user_id"])
+        ),
+    )
+
+    pending_rows = _list_rows(pending, None, owners)
     from app.database import get_db
 
     with get_db() as conn:
         user_names = {r[0]: r[1] or r[0] for r in conn.execute("SELECT id, display_name FROM users")}
-    decided_rows = _list_rows(decided, user_names)
+    decided_rows = _list_rows(decided, user_names, owners)
 
     body = """
 <div class="page-header"><h1>Approvals</h1></div>
@@ -331,14 +348,14 @@ def approvals_page(request: Request, session: dict = Depends(require_auth)):
   <p class="text-muted" style="font-size:0.85rem">
     An agent proposed an admin change. Nothing runs until a person decides it.
   </p>
-  <div style="overflow-x:auto"><table>
+  <div style="overflow-x:auto"><table class="stack-phone">
     <thead><tr><th>Title</th><th>Workspace</th><th>Proposed by</th><th>Status</th><th>Created</th></tr></thead>
     <tbody>""" + (pending_rows or "<tr><td colspan='5' class='empty'>Nothing is waiting on you.</td></tr>") + """</tbody>
   </table></div>
 </div>
 <div class="card">
   <h2>Recently decided</h2>
-  <div style="overflow-x:auto"><table>
+  <div style="overflow-x:auto"><table class="stack-phone">
     <thead><tr><th>Title</th><th>Workspace</th><th>Proposed by</th><th>Outcome</th><th>Created</th><th>Decided</th></tr></thead>
     <tbody>""" + (decided_rows or "<tr><td colspan='6' class='empty'>Nothing has been decided yet.</td></tr>") + """</tbody>
   </table></div>
