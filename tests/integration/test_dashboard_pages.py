@@ -262,12 +262,13 @@ def test_dashboard_has_seven_entries_in_one_group_and_the_rest_are_tabs(authenti
         assert 'aria-label="In this section"' not in page  # no second bar above the heading
     # Same place on every page: the heading first, then the one row of tabs under it.
     for route in ("/", "/approvals", "/activity", "/audit", "/agents", "/integrations", "/workspaces",
-                  "/credentials", "/services", "/settings", "/users", "/webhooks"):
+                  "/credentials", "/services", "/access", "/settings", "/users", "/webhooks"):
         page = authenticated_client.get(route).text
         assert page.count('class="page-tabs"') == 1, route
         assert page.index("<h1>") < page.index('class="page-tabs"'), route
     assert 'href="/audit" class="page-tab' in authenticated_client.get("/activity").text
     assert 'href="/services" class="page-tab' in authenticated_client.get("/credentials").text
+    assert 'href="/access" class="page-tab' in authenticated_client.get("/credentials").text
     # Capabilities is a page of its own: no row of tabs above it.
     connectors = authenticated_client.get("/connectors").text
     assert 'class="page-tabs"' not in connectors

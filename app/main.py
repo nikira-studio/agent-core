@@ -15,6 +15,7 @@ from app.routes import (
     auth_router,
     agents_router,
     access_router,
+    access_page_router,
     workspaces_router,
     credentials_router,
     credential_consumers_router,
@@ -308,6 +309,7 @@ def create_app() -> FastAPI:
     app.include_router(activity_page_router, tags=["activity_page"])
     app.include_router(audit_page_router, tags=["audit_page"])
     app.include_router(agents_page_router, tags=["agents_page"])
+    app.include_router(access_page_router, tags=["access_page"])
     app.include_router(workspaces_page_router, tags=["workspaces_page"])
     app.include_router(memory_page_router, tags=["memory_page"])
     app.include_router(overview_page_router, tags=["overview_page"])

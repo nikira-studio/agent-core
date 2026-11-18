@@ -3,6 +3,7 @@ from app.routes.spec import router as spec_router
 from app.routes.auth import router as auth_router
 from app.routes.agents import router as agents_router
 from app.routes.access import router as access_router
+from app.routes.access_page import router as access_page_router
 from app.routes.workspaces import router as workspaces_router
 from app.routes.credentials import router as credentials_router
 from app.routes.internal import router as internal_router
@@ -45,6 +46,7 @@ __all__ = [
     "auth_router",
     "agents_router",
     "access_router",
+    "access_page_router",
     "workspaces_router",
     "credentials_router",
     "internal_router",

@@ -242,6 +242,8 @@ Prefer the capability path when both are available. The reference is what agents
 
 One credential, one list of who can use it, in three groups: the capabilities that sign in with it, the agents that can reach it, and the services that receive its value. Only the last group is given the value itself.
 
+The **Access** page (Credentials > Access) is that list for everything at once: every assignment there is, with when each was last used, any action that waits for a person, filters by agent, capability or service, and an **Unused** list of what nothing uses. It is for reading: anything is turned on or off where it belongs.
+
 ---
 
 ## 6. Capabilities: the hands

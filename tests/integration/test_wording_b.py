@@ -48,8 +48,8 @@ def test_the_sidebar_names_the_capabilities_page_and_keeps_the_seven_entries(aut
 
 
 def test_each_section_shows_its_own_row_of_tabs(authenticated_client):
-    assert tab_labels(authenticated_client.get("/credentials").text) == ["Credentials", "Services"]
-    assert tab_labels(authenticated_client.get("/services").text) == ["Credentials", "Services"]
+    assert tab_labels(authenticated_client.get("/credentials").text) == ["Credentials", "Services", "Access"]
+    assert tab_labels(authenticated_client.get("/services").text) == ["Credentials", "Services", "Access"]
     assert tab_labels(authenticated_client.get("/agents").text) == ["Agents", "Workspaces", "Connect"]
     assert tab_labels(authenticated_client.get("/connectors").text) == []
 

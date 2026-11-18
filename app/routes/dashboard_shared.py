@@ -122,7 +122,7 @@ _SECTION_TABS = {
     "/memory": [("/memory", "Memory")],
     "/agents": [("/agents", "Agents"), ("/workspaces", "Workspaces"), ("/integrations", "Connect")],
     "/connectors": [("/connectors", "Capabilities")],
-    "/credentials": [("/credentials", "Credentials"), ("/services", "Services")],
+    "/credentials": [("/credentials", "Credentials"), ("/services", "Services"), ("/access", "Access")],
     "/settings": [("/settings", "Settings"), ("/users", "Users"), ("/webhooks", "Webhooks")],
 }
 _SECTION_OF = {tab: entry for entry, tabs in _SECTION_TABS.items() for tab, _ in tabs}
