@@ -126,6 +126,8 @@ class UpdateBindingRequest(BaseModel):
     metadata_json: Optional[str] = None
     endpoint_url_override: Optional[str] = None
     reset_endpoint_url_override: bool = False
+    # Take the credential away from this connection (credential_id left out means "leave it as it is").
+    reset_credential: bool = False
     actions_mode: Optional[str] = None
     disabled_actions: Optional[list[str]] = None
 
@@ -413,6 +415,8 @@ def update_binding(
             description=body.description,
             metadata_json=body.metadata_json,
         )
+        if body.reset_credential:
+            update_fields["credential_id"] = ""  # the service layer reads "" as "none"
         if body.reset_endpoint_url_override:
             update_fields["endpoint_url_override"] = None
         elif body.endpoint_url_override is not None:
@@ -430,6 +434,19 @@ def update_binding(
     if not ok:
         return error_response("UPDATE_FAILED", "No valid fields to update", 400)
     updated_binding = connector_service.get_binding(binding_id)
+    if body.credential_id is not None or body.reset_credential:
+        audit_service.write_event(
+            actor_type=ctx.actor_type,
+            actor_id=ctx.actor_id,
+            action="connector_binding_updated",
+            resource_type="connector_binding",
+            resource_id=binding_id,
+            result="success",
+            details={
+                "entry_before": binding.get("credential_id"),
+                "entry_after": updated_binding.get("credential_id"),
+            },
+        )
     if body.actions_mode is not None or body.disabled_actions is not None:
         audit_service.write_event(
             actor_type=ctx.actor_type,

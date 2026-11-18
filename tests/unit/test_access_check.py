@@ -162,8 +162,17 @@ def test_the_comparison_reports_both_directions_and_honours_patterns():
     before = {"run": {"a": ["x"], "b": []}, "identities": {"a": {"kind": "agent"}}}
     after = {"run": {"a": [], "b": ["x"]}, "identities": {"a": {"kind": "service"}}}
     paths = {d["path"] for d in compare.differences(before, after)}
-    assert paths == {"run.a", "run.b", "identities.a.kind"}
-    assert {d["path"] for d in compare.differences(before, after, ["identities.*.kind"])} == {"run.a", "run.b"}
+    assert paths == {("run", "a"), ("run", "b"), ("identities", "a", "kind")}
+    assert {d["path"] for d in compare.differences(before, after, ["identities.*.kind"])} == {("run", "a"), ("run", "b")}
+
+
+def test_a_name_with_a_dot_is_one_segment_not_two():
+    before = {"run": {"a.b": ["x"], "a": {"b": ["x"]}}}
+    after = {"run": {"a.b": [], "a": {"b": ["x"]}}}
+    # the tuple pattern covers exactly the entry named "a.b", and nothing under "a" then "b"
+    assert compare.differences(before, after, [("run", "a.b")]) == []
+    after_other = {"run": {"a.b": ["x"], "a": {"b": []}}}
+    assert [d["path"] for d in compare.differences(before, after_other, [("run", "a.b")])] == [("run", "a", "b")]
 
 
 def test_a_database_file_gets_a_copy_before_the_step(tmp_path):

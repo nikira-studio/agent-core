@@ -516,6 +516,25 @@ def update_agent(
         return cursor.rowcount > 0
 
 
+def turn_on_permission(agent_id: str, permission: str) -> Optional[list[str]]:
+    """Add one permission to an agent that lacks it. Returns the permissions it holds afterwards, or None when the
+    entry does not exist. Never removes anything. A service keeps its one permission (see agent_kind)."""
+    current = get_agent_by_id(agent_id)
+    if current is None:
+        return None
+    if permission not in ALL_CAPABILITIES:
+        raise ValueError(f"Unknown permission: {permission}")
+    held = parse_capabilities(current.get("capabilities_json"))
+    if permission in held:
+        return held
+    if (current.get("kind") or "agent") == "service":
+        raise agent_kind.AgentKindError(
+            "A service only fetches secrets, so it has one permission. To give it more, change it to an agent first."
+        )
+    update_agent(agent_id, capabilities=[*held, permission])
+    return parse_capabilities((get_agent_by_id(agent_id) or {}).get("capabilities_json"))
+
+
 def deactivate_agent(agent_id: str) -> bool:
     with get_db() as conn:
         cursor = conn.execute(

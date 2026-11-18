@@ -19,9 +19,10 @@ def admin(test_client, clean_db):
         ("svc-b", ["credentials_resolve"]),
         ("asst", ["memory", "coordination", "credentials"]),
     ):
+        # A service has no workspace; the assistant reads the credential's scope.
+        scoped = {} if caps == ["credentials_resolve"] else {"read_scopes": [SCOPE], "write_scopes": []}
         agent_service.create_agent(
-            agent_id=agent_id, display_name=agent_id.upper(), owner_user_id="admin",
-            read_scopes=[SCOPE], write_scopes=[], capabilities=caps,
+            agent_id=agent_id, display_name=agent_id.upper(), owner_user_id="admin", capabilities=caps, **scoped,
         )
     return test_client
 
@@ -106,7 +107,7 @@ def test_a_regular_user_gets_no_access_controls_and_no_access_data(admin):
 
 
 def test_the_agents_page_links_service_agents_to_their_credentials_and_roles_deep_link(admin):
-    html = admin.get("/agents").text
+    html = admin.get("/services").text  # the services are listed under Credentials > Services
     assert "href='/credentials?agent=svc-a'" in html and "href='/credentials?agent=svc-b'" in html
     assert "href='/credentials?agent=asst'" not in html  # an assistant does not take grants
     assert "get('edit')" in html  # /agents?edit=<id> opens that agent's role

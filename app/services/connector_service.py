@@ -651,15 +651,16 @@ def connection_disabled_actions(connector_type: dict, binding: dict) -> list[str
 def credential_reach(binding: dict) -> dict:
     """Which agents use this connection, and which of them can fetch the credential it runs with.
 
-    "Use" = can read the connection's scope. "Can fetch" = the credential's scope is one of their read scopes: that
-    is what the local credential helper checks before it hands a value to a program holding the helper key (an agent
-    with the credentials capability can also get the reference through MCP). The helper trusts the agent id its
-    caller names, so this says what a named agent could get, not who is calling."""
+    "Use" = can read the connection's scope. "Can fetch" = the same rule as the MCP ``credential_get`` and the local
+    credential helper (reach_service.helper_decision): an agent with the Reference credentials permission whose scopes
+    reach the credential's owner. The helper trusts the agent id its caller names, so this says what a named agent
+    could get, not who is calling."""
     from app.security.effective_authority import EffectiveAuthority
-    from app.security.scope_enforcer import ScopeEnforcer, build_agent_context
-    from app.services import agent_service, credential_service
+    from app.security.scope_enforcer import build_agent_context
+    from app.services import agent_service, credential_service, reach_service
 
     credential_scope = None
+    entry = None
     if binding.get("credential_id"):
         entry = credential_service.get_credential(binding["credential_id"])
         credential_scope = (entry or {}).get("scope")
@@ -671,10 +672,7 @@ def credential_reach(binding: dict) -> dict:
             continue
         name = agent.get("display_name") or agent["id"]
         users.append(name)
-        if credential_scope and ScopeEnforcer(
-            context.read_scopes, context.write_scopes, context.agent_id,
-            is_admin=context.is_admin, active_workspace_ids=context.active_workspace_ids,
-        ).can_read(credential_scope):
+        if entry and reach_service.helper_decision(agent, context, entry)[0]:
             can_fetch.append(name)
     return {
         "has_credential": bool(credential_scope),
@@ -885,6 +883,9 @@ def update_binding(binding_id: str, **fields) -> bool:
             elif key == "scope":
                 updates.append("scope = ?")
                 params.append(_normalize_scope(val))
+            elif key == "credential_id":
+                updates.append("credential_id = ?")
+                params.append(val or None)  # "" takes the credential away
             elif key == "config_json":
                 config_data = _parse_json_object(val)
                 if val is not None and config_data is None:

@@ -39,6 +39,10 @@ def create_grant(consumer_id, entry_id, owner_id, expires_at=None, allow_write=F
             caps = []
         if not isinstance(caps, list) or "credentials_resolve" not in caps:
             raise APIError("CAPABILITY_DENIED", "Consumer requires credentials_resolve", 403)
+        if (agent["kind"] if "kind" in agent.keys() else "agent") != "service":
+            # Only a service receives a secret's value. Grants an agent already holds keep working and are listed
+            # on the Credential page; a new one goes to a service.
+            raise APIError("NOT_A_SERVICE", "Only a service can be given a secret's value. Create one under Credentials > Services.", 403)
         existing = conn.execute("SELECT id FROM credential_consumer_grants WHERE consumer_agent_id=? AND entry_id=? AND revoked_at IS NULL", (consumer_id, entry_id)).fetchone()
         if existing:
             raise APIError("GRANT_EXISTS", "Revoke the existing grant before changing entry authority", 409)
@@ -95,8 +99,12 @@ def entry_access(entry_id):
         caps = agent_service.parse_capabilities(a.get("capabilities_json"))
         row = {"id": a["id"], "display_name": names[a["id"]]}
         (candidates if "credentials_resolve" in caps else cannot).append(row)
-        if can_read_reference(a, entry["scope"]):
-            scope_readers.append(names[a["id"]])
+    # Who can reach the credential's owner scope, by the same rule the request path applies (reach_service): the
+    # names for the older dialog, the full list with reasons for the Credential page.
+    from app.services import reach_service
+
+    reaching = reach_service.agents_reaching_credential({"id": entry["id"], "scope": entry["scope"]})
+    scope_readers = [r["display_name"] for r in reaching if r["agent_id"] not in held and r["status"] == "can_reference"]
     return {
         "entry": {"id": entry["id"], "name": entry["name"], "scope": entry["scope"]},
         "grants": grants,
@@ -107,6 +115,7 @@ def entry_access(entry_id):
         "candidates": candidates,
         "cannot_receive": cannot,
         "scope_readers": scope_readers,
+        "agents_reaching": reaching,
     }
 
 

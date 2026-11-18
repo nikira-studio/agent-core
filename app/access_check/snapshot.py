@@ -27,16 +27,20 @@ def _columns(conn, table: str) -> set[str]:
     return {row[1] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
 
 
-def capture(conn) -> dict:
-    """Snapshot the installation as ``conn`` sees it (including uncommitted changes on that connection)."""
+def capture(conn, helper_rule: str = "current") -> dict:
+    """Snapshot the installation as ``conn`` sees it (including uncommitted changes on that connection).
+
+    ``helper_rule`` is the rule the local credential helper applied: ``"current"`` is this build's (the same rule as the
+    MCP ``credential_get``); ``"1.3"`` is the one before 1.4.0 (scope and expiry only), kept so a comparison across the
+    change can say exactly what it removed."""
     with adopt_connection(conn):
-        return _capture(conn)
+        return _capture(conn, helper_rule)
 
 
-def _capture(conn) -> dict:
+def _capture(conn, helper_rule: str = "current") -> dict:
     from app.security.effective_authority import EffectiveAuthority
     from app.security.scope_enforcer import ScopeEnforcer, build_agent_context
-    from app.services import agent_kind, agent_service, credential_service
+    from app.services import agent_kind, agent_service, credential_service, reach_service
 
     agent_columns = _columns(conn, "agents")
     stored_kind = "kind" in agent_columns
@@ -124,10 +128,18 @@ def _capture(conn) -> dict:
             cid for cid, c in credentials.items()
             if not c["expired"] and authority.can("credential", "reference", scope=c["scope"])
         )
-        # The local credential helper (/internal/credentials/resolve) checks scope and expiry only.
-        helper_fetch[agent_id] = sorted(
-            cid for cid, c in credentials.items() if not c["expired"] and enforcer.can_read(c["scope"])
-        )
+        if helper_rule == "1.3":
+            # Before 1.4.0 the helper checked scope and expiry only, for any entry it was told about.
+            helper_fetch[agent_id] = sorted(
+                cid for cid, c in credentials.items() if not c["expired"] and enforcer.can_read(c["scope"])
+            )
+        else:
+            helper_fetch[agent_id] = sorted(
+                cid for cid, c in credentials.items()
+                if reach_service.helper_decision(
+                    agent, context, {"id": cid, "scope": c["scope"], "expires_at": c["expires_at"]}
+                )[0]
+            )
 
     fetch: dict[str, dict] = {}
     if _has_table(conn, "credential_consumer_grants"):

@@ -53,7 +53,8 @@ async def resolve_variable(
     if not agent or not agent.get("is_active"):
         return error_response("AGENT_NOT_FOUND", "Agent not found or inactive", 404)
 
-    from app.security.scope_enforcer import ScopeEnforcer, build_agent_context
+    from app.security.scope_enforcer import build_agent_context
+    from app.services import reach_service
 
     ctx = build_agent_context(agent)
 
@@ -68,17 +69,28 @@ async def resolve_variable(
     if credential_service.is_expired(entry):
         return error_response("CREDENTIAL_EXPIRED", "Credential has expired", 410)
 
-    enforcer = ScopeEnforcer(
-        ctx.read_scopes,
-        ctx.write_scopes,
-        ctx.agent_id,
-        is_admin=ctx.is_admin,
-        active_workspace_ids=ctx.active_workspace_ids,
-    )
-    if not enforcer.can_read(entry["scope"]):
-        return error_response(
-            "SCOPE_DENIED", "Agent does not have access to this scope", 403
+    # The same rule as the MCP credential_get (app/services/reach_service.py): an active agent that holds the
+    # Reference credentials permission and whose scopes reach this credential. A service fetches through a grant.
+    allowed, reason = reach_service.helper_decision(agent, ctx, entry)
+    if not allowed:
+        audit_service.write_event(
+            actor_type="broker",
+            actor_id=str(body.agent_id)[:64],
+            action="broker_resolve_denied",
+            resource_type="credential",
+            resource_id=entry["id"],
+            result="blocked",
+            details={"reason": reason},
         )
+        if reason == "not_an_agent":
+            return error_response(
+                "NOT_AN_AGENT", "A service fetches its secrets with a grant, not through the local credential helper", 403
+            )
+        if reason == "needs_permission":
+            return error_response(
+                "PERMISSION_REQUIRED", "This agent does not have the Reference credentials permission", 403
+            )
+        return error_response("SCOPE_DENIED", "Agent does not have access to this scope", 403)
 
     plaintext = credential_service.resolve_reference(body.variable_name)
     if plaintext is None:

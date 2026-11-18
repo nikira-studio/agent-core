@@ -347,6 +347,34 @@ def update_agent(
     return success_response({"message": "Agent updated"})
 
 
+@router.post("/{agent_id}/permissions/{permission}/turn-on")
+def turn_on_permission(agent_id: str, permission: str, session: dict = Depends(get_current_session)):
+    """Switch one permission on, by a person, as one recorded action. Nothing switches a permission on by itself, and
+    nothing here ever switches one off."""
+    agent = agent_service.get_agent_by_id(agent_id)
+    if not agent:
+        return error_response("NOT_FOUND", "Agent not found", 404)
+    if not _can_manage_agent(agent, session):
+        return error_response("FORBIDDEN", "Access denied", 403)
+    before = agent_service.parse_capabilities(agent.get("capabilities_json"))
+    try:
+        after = agent_service.turn_on_permission(agent_id, permission)
+    except agent_kind.AgentKindError as exc:
+        return error_response("SERVICE_RULE", str(exc), 400)
+    except ValueError as exc:
+        return error_response("INVALID_PERMISSION", str(exc), 400)
+    audit_service.write_event(
+        actor_type="user",
+        actor_id=session["user_id"],
+        action="agent_permission_turned_on",
+        resource_type="agent",
+        resource_id=agent_id,
+        result="success",
+        details={"permission": permission, "permissions_before": before, "permissions_after": after},
+    )
+    return success_response({"permissions": after})
+
+
 @router.delete("/{agent_id}")
 def delete_agent(agent_id: str, session: dict = Depends(get_current_session)):
     agent = agent_service.get_agent_by_id(agent_id)

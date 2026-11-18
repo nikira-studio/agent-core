@@ -46,6 +46,8 @@ INDIVIDUAL_CREDENTIAL_ACTIONS = (
     "agent_key_created",
     "agent_key_revoked",
     "agent_key_renamed",
+    "broker_resolve_denied",
+    "agent_permission_turned_on",
     "inbound_key_generated",
     "inbound_key_rotated",
     "connector_binding_created",

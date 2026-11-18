@@ -44,7 +44,7 @@ class _FakeExecutor:
 @pytest.fixture
 def world(test_client, admin_token, monkeypatch):
     _workspace(test_client, admin_token)
-    caps = ["memory", "coordination", "connectors_read", "connectors_execute"]
+    caps = ["memory", "coordination", "credentials", "connectors_read", "connectors_execute"]
     agent_key = _agent(test_client, admin_token, "advisor", caps)
     cs.create_connector_type(
         connector_type_id=SERVICE, display_name="Limits Service", auth_type="none", provider_type="builtin",
@@ -554,3 +554,14 @@ def test_not_usable_always_says_why(world):
     cs.update_binding(nothing_listed["id"], config_json=json.dumps({"allowed": ["GET /a"]}), enabled=False)
     summary_off = _summary_row(world, cs.get_binding(nothing_listed["id"]))[1]
     assert summary_off["not_usable_because"] == "This connection is switched off."
+
+
+def test_an_agent_without_the_reference_credentials_permission_cannot_fetch_the_credential(world):
+    """"Can fetch" is the same rule as the MCP credential_get: scope reach and the permission, not scope alone."""
+    from app.services import agent_service
+
+    binding = _bind_with_credential(world, "workspace:ops", "No permission")
+    assert cs.credential_reach(binding)["can_fetch"] == ["advisor"]
+    agent_service.update_agent("advisor", capabilities=["memory", "coordination", "connectors_read", "connectors_execute"])
+    reach = cs.credential_reach(binding)
+    assert reach["agents"] == ["advisor"] and reach["can_fetch"] == []
