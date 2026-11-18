@@ -67,8 +67,8 @@ def test_the_unused_section_names_the_four_groups(admin):
     for heading in (
         "Credentials nothing uses",
         "Capabilities nobody can use",
-        "Services that have not signed in",
-        "Left behind by a retired agent",
+        "Services that look idle",
+        "Left behind by a retired agent or service",
     ):
         assert heading in html, heading
     # Nothing is offered to delete here: the list is there to read.

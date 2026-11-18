@@ -87,11 +87,11 @@ def access_page(request: Request, session: dict = Depends(require_auth)):
     <ul style="margin:0 0 12px;padding-left:18px" id="access-unused-connections-list"></ul>
   </div>
   <div id="access-unused-services" style="display:none">
-    <h3>Services that have not signed in <span class="text-muted" id="access-unused-services-count"></span></h3>
+    <h3>Services that look idle <span class="text-muted" id="access-unused-services-count"></span></h3>
     <ul style="margin:0 0 12px;padding-left:18px" id="access-unused-services-list"></ul>
   </div>
   <div id="access-unused-left-behind" style="display:none">
-    <h3>Left behind by a retired agent <span class="text-muted" id="access-unused-left-behind-count"></span></h3>
+    <h3>Left behind by a retired agent or service <span class="text-muted" id="access-unused-left-behind-count"></span></h3>
     <ul style="margin:0 0 12px;padding-left:18px" id="access-unused-left-behind-list"></ul>
   </div>
   <p class="empty" id="access-nothing-unused" style="display:none">Nothing is unused.</p>

@@ -110,6 +110,36 @@ def test_the_unused_list_names_what_nothing_uses(world):
     assert unused["connections"] == [] and unused["left_behind"] == []
 
 
+def test_a_credential_an_agent_referenced_recently_is_in_use_even_with_nothing_set_up_to_use_it(world):
+    from datetime import datetime, timezone
+
+    recent = credential_service.create_credential(SCOPE, "recent-key", "not-shown")
+    with get_db() as conn:
+        conn.execute(
+            "INSERT INTO audit_log (actor_type, actor_id, action, resource_type, resource_id, result, timestamp) "
+            "VALUES ('agent', 'asst', 'credential_reference', 'credential', ?, 'success', ?)",
+            (recent["id"], datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")),
+        )
+        conn.commit()
+    unused = _overview(world["client"])["unused"]["credentials"]
+    assert [c["name"] for c in unused] == ["orphan-key"]
+    assert unused[0]["why"].endswith("Never referenced.")
+    assert unused[0]["last_referenced"] is None
+
+
+def test_an_old_reference_does_not_keep_a_credential_off_the_list_and_the_list_says_when(world):
+    with get_db() as conn:
+        conn.execute(
+            "INSERT INTO audit_log (actor_type, actor_id, action, resource_type, resource_id, result, timestamp) "
+            "VALUES ('agent', 'asst', 'credential_reference', 'credential', ?, 'success', '2026-01-05 09:00:00')",
+            (world["orphan"]["id"],),
+        )
+        conn.commit()
+    unused = _overview(world["client"])["unused"]["credentials"]
+    assert [c["name"] for c in unused] == ["orphan-key"]
+    assert unused[0]["why"].endswith("Last referenced on 5 Jan 2026.")
+
+
 def test_a_connection_nobody_can_use_and_what_a_retired_agent_leaves_behind_are_listed(world):
     client = world["client"]
     connector_service.create_binding("ov-cap", "Nobody", "workspace:empty", config_json='{"base_url": "http://example.test"}')

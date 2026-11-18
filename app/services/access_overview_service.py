@@ -26,6 +26,20 @@ KINDS = {
 }
 
 
+def _parse(value: Optional[str]) -> Optional[datetime]:
+    """A stored time as an aware UTC instant. Stored times come in three shapes ("2026-11-02 09:00:00" in the audit log,
+    "2026-11-17T00:00:00+00:00" on keys, "2026-11-02" in the daily rollups); comparing them as text is wrong on the
+    boundary day."""
+    if not value:
+        return None
+    try:
+        text = str(value).strip().replace(" ", "T", 1) if len(str(value)) > 10 else str(value).strip() + "T00:00:00"
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+
 def _later(*values: Optional[str]) -> Optional[str]:
     present = [v for v in values if v]
     return max(present) if present else None
@@ -144,24 +158,40 @@ def _unused(agents, credentials, bindings, connection_users, grants, use) -> dic
     granted = {g["entry_id"] for g in live}
     signed_in = {b["credential_id"] for b in bindings if b.get("credential_id")}
     names = reach_service.Names()
-    unused_credentials = [
-        {"id": c["id"], "name": c["name"], "owner": names.scope(c["scope"]),
-         "why": "No connection signs in with it and no service may fetch it."}
-        for c in credentials.values() if c["id"] not in granted and c["id"] not in signed_in
-    ]
+    cutoff_at = datetime.now(timezone.utc) - timedelta(days=IDLE_SERVICE_DAYS)
+    # The latest recorded reference or fetch of each credential by anyone (the audit log and the daily rollups).
+    last_seen: dict[str, str] = {}
+    for source in (use["audit"], use["rollup"]):
+        for (_, credential_id), when in source.items():
+            when_at = _parse(when)
+            if when_at and (credential_id not in last_seen or when_at > _parse(last_seen[credential_id])):
+                last_seen[credential_id] = when
+    unused_credentials = []
+    for c in credentials.values():
+        if c["id"] in granted or c["id"] in signed_in:
+            continue
+        seen = last_seen.get(c["id"])
+        seen_at = _parse(seen)
+        if seen_at and seen_at >= cutoff_at:
+            continue  # nothing is set up to use it, but something used it recently: it is in use
+        unused_credentials.append({
+            "id": c["id"], "name": c["name"], "owner": names.scope(c["scope"]), "last_referenced": seen,
+            "why": "No connection signs in with it and no service may fetch it. "
+                   + (f"Last referenced on {seen_at.strftime('%-d %b %Y')}." if seen_at else "Never referenced."),
+        })
     unusable = [
         {"id": b["id"], "name": f"{b.get('connector_display_name') or b['connector_type_id']}, {b['name']}",
          "why": "It is switched off." if not b.get("enabled") else "No agent can use it."}
         for b in bindings if not b.get("enabled") or not connection_users.get(b["id"])
     ]
-    cutoff = (datetime.now(timezone.utc) - timedelta(days=IDLE_SERVICE_DAYS)).isoformat()
     holders = {g["consumer_agent_id"] for g in live}
     idle = []
     for a in agents.values():
         if a.get("kind") != "service" or not a.get("is_active"):
             continue
         last = use["keys"].get(a["id"])
-        if last is None or last < cutoff:
+        last_at = _parse(last)
+        if last_at is None or last_at < cutoff_at:
             idle.append({
                 "id": a["id"], "name": a.get("display_name") or a["id"], "last_signed_in": last,
                 "why": f"It has not signed in for {IDLE_SERVICE_DAYS} days." if last else "It has never signed in.",
@@ -172,7 +202,7 @@ def _unused(agents, credentials, bindings, connection_users, grants, use) -> dic
     left_behind = []
     for a in agents.values():
         if a.get("is_active"):
-            continue
+            continue  # a retired agent or a retired service
         own = f"agent:{a['id']}"
         held = [g for g in live if g["consumer_agent_id"] == a["id"]]
         owned_credentials = [c["name"] for c in credentials.values() if c["scope"] == own]
