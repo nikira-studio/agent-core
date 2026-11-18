@@ -1009,7 +1009,33 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
           <div id="access-connection-credential" class="form-hint"></div>
         </div>
         <div class="form-section">
-          <h3 class="sub-heading form-section-title">The agents that can use it</h3>
+          <h3 class="sub-heading form-section-title">Who can use it</h3>
+          <p class="form-hint">The list of who may use this connection. Take one off, or put one on below.</p>
+          <div id="access-connection-allowed"></div>
+          <div id="access-connection-remove-preview"></div>
+        </div>
+        <div class="form-section">
+          <h3 class="sub-heading form-section-title">Add</h3>
+          <p class="form-hint">Adding someone lets them use this connection. It does not give them memory or credential access.</p>
+          <div id="access-connection-add-note"></div>
+          <div class="form-group">
+            <label for="access-connection-add-kind">Who</label>
+            <select id="access-connection-add-kind">
+              <option value="agent">An agent</option>
+              <option value="workspace">A workspace</option>
+              <option value="person_agents">All of one person's agents</option>
+              <option value="agent_exclude">Exclude an agent</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="access-connection-add-ref">Which one</label>
+            <select id="access-connection-add-ref"></select>
+          </div>
+          <button type="button" class="btn btn-sm btn-secondary" id="access-connection-add">Add</button>
+          <div id="access-connection-add-preview"></div>
+        </div>
+        <div class="form-section">
+          <h3 class="sub-heading form-section-title">Using it now</h3>
           <div id="access-connection-users"></div>
         </div>
         <div class="modal-footer">
@@ -1022,7 +1048,7 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
     extra_js = (
         '<script src="/static/js/adapter-actions.js?v=20260902"></script>'
         '<script src="/static/js/connectors.js?v=20261113a"></script>'
-        '<script src="/static/js/agent_access.js?v=20261117a"></script>'
+        '<script src="/static/js/agent_access.js?v=20261118a"></script>'
     )
     return render_page("Capabilities", body, "/connectors", extra_js, session=session)
 

@@ -79,6 +79,7 @@ var accessAgentId = null;
 var accessAgentData = null;
 var accessAgentScopes = null;
 var accessAgentChanges = [];
+var accessAgentBindings = null;
 
 async function openAgentAccess(id) {
   accessAgentId = id;
@@ -101,6 +102,9 @@ async function openAgentAccess(id) {
     read: JSON.parse(agent.read_scopes_json || '[]'),
     write: JSON.parse(agent.write_scopes_json || '[]'),
   };
+  // Every connection on this install: the ones the agent cannot use yet are the ones it may be given.
+  var b = await apiFetch('/api/connector-bindings');
+  accessAgentBindings = b.ok ? (b.data.bindings || []) : [];
   renderAgentAccess();
   openModal('access-agent-modal');
 }
@@ -321,35 +325,115 @@ function renderAgentCapabilities() {
   if (!list.length) {
     box.append(accessEl(
       'p',
-      'No capabilities yet. A connection to a capability is what makes it reachable; add one on the Capabilities page.',
+      'No capabilities yet. A connection to a capability is what makes it reachable; add one below.',
       'text-muted'
     ));
+  } else {
+    list.forEach(function (c) {
+      var row = accessEl('div', null, 'access-row');
+      row.append(accessEl('strong', c.name));
+      if (c.capability) row.append(accessEl('span', c.capability, 'text-muted'));
+      var chip = accessNeedsChip(c, 'Run capabilities');
+      if (chip) {
+        row.append(chip);
+        var turn = accessEl('button', 'Turn on', 'btn btn-sm btn-secondary');
+        turn.type = 'button';
+        turn.addEventListener('click', function () {
+          accessTurnOn(
+            accessAgentId,
+            'connectors_execute',
+            c.needs_label || 'Run capabilities',
+            accessAgentData.agent.display_name || accessAgentId,
+            reloadAgentAccess
+          );
+        });
+        row.append(turn);
+      } else {
+        row.append(accessEl('span', 'can use', 'text-muted'));
+      }
+      box.append(row);
+    });
+  }
+  renderAgentCapabilityPick();
+}
+
+// The connections this agent cannot use yet, so one of them can be given to it from here.
+function renderAgentCapabilityPick() {
+  var pick = document.getElementById('access-agent-capability-pick');
+  if (!pick) return;
+  pick.replaceChildren();
+  var shown = {};
+  (accessAgentData.connections || []).forEach(function (c) { shown[c.id] = true; });
+  var offered = 0;
+  (accessAgentBindings || []).forEach(function (b) {
+    if (shown[b.id]) return;
+    var label = b.connector_display_name
+      ? (b.connector_display_name + ', ' + (b.name || b.id))
+      : (b.name || b.id);
+    var option = accessEl('option', label);
+    option.value = b.id;
+    pick.append(option);
+    offered += 1;
+  });
+  var add = document.getElementById('access-agent-capability-add');
+  if (add) add.disabled = !offered;
+  if (!offered) {
+    var none = accessEl('option', 'This agent can already use every connection.');
+    none.value = '';
+    pick.append(none);
+  }
+}
+
+// Adding a capability from the agent's side: who gains it is shown before anything is saved.
+async function accessAgentAddCapability() {
+  var pick = document.getElementById('access-agent-capability-pick');
+  var bindingId = pick ? pick.value : '';
+  if (!bindingId) return;
+  var box = document.getElementById('access-agent-capability-preview');
+  box.replaceChildren();
+  var j = await apiFetch('/api/access/connections/' + encodeURIComponent(bindingId));
+  if (!j.ok) {
+    showToast((j.error && j.error.message) || 'Could not load that connection', 'danger');
     return;
   }
-  list.forEach(function (c) {
-    var row = accessEl('div', null, 'access-row');
-    row.append(accessEl('strong', c.name));
-    if (c.capability) row.append(accessEl('span', c.capability, 'text-muted'));
-    var chip = accessNeedsChip(c, 'Run capabilities');
-    if (chip) {
-      row.append(chip);
-      var turn = accessEl('button', 'Turn on', 'btn btn-sm btn-secondary');
-      turn.type = 'button';
-      turn.addEventListener('click', function () {
-        accessTurnOn(
-          accessAgentId,
-          'connectors_execute',
-          c.needs_label || 'Run capabilities',
-          accessAgentData.agent.display_name || accessAgentId,
-          reloadAgentAccess
-        );
-      });
-      row.append(turn);
-    } else {
-      row.append(accessEl('span', 'can use', 'text-muted'));
-    }
-    box.append(row);
+  // The list as it is now, without this agent, plus this agent: an agent that was excluded becomes a named one.
+  var entries = (j.data.audience || []).filter(function (e) {
+    return !(e.kind === 'agent' && e.ref === accessAgentId);
+  }).map(function (e) {
+    return { kind: e.kind, ref: e.ref, exclude: !!e.exclude };
   });
+  entries.push({ kind: 'agent', ref: accessAgentId, exclude: false });
+  var preview = await accessAudiencePreview(bindingId, entries);
+  if (!preview) return;
+  box.append(accessPreviewGainLine(preview.gain || []));
+  box.append(accessPreviewLoseLine(preview.lose || []));
+  var save = accessEl('button', 'Save', 'btn btn-sm btn-primary');
+  save.type = 'button';
+  save.addEventListener('click', function () {
+    accessAgentSaveCapability(bindingId);
+  });
+  var cancel = accessEl('button', 'Cancel', 'btn btn-sm btn-secondary');
+  cancel.type = 'button';
+  cancel.addEventListener('click', function () {
+    box.replaceChildren();
+  });
+  box.append(save);
+  box.append(cancel);
+}
+
+async function accessAgentSaveCapability(bindingId) {
+  var r = await apiFetch('/api/access/connections/' + encodeURIComponent(bindingId) + '/audience', {
+    method: 'POST',
+    body: JSON.stringify({ kind: 'agent', ref: accessAgentId, exclude: false }),
+  });
+  if (!r.ok) {
+    showToast((r.error && r.error.message) || 'Could not add that capability', 'danger');
+    return;
+  }
+  showToast('Capability added');
+  var box = document.getElementById('access-agent-capability-preview');
+  if (box) box.replaceChildren();
+  await reloadAgentAccess();
 }
 
 function renderAgentCredentials() {
@@ -599,29 +683,76 @@ async function reloadConnectionUsers() {
   renderConnectionUsers();
 }
 
-function renderConnectionUsers() {
-  var data = accessConnectionData;
-  document.getElementById('access-connection-name').textContent = data.connection.name;
+// The four ways a person may name who uses a connection. Each one says which list of names it offers.
+function accessConnectionChoice() {
+  var select = document.getElementById('access-connection-add-kind');
+  var value = select ? select.value : 'agent';
+  if (value === 'workspace') return { kind: 'workspace', exclude: false, list: 'workspaces' };
+  if (value === 'person_agents') return { kind: 'person_agents', exclude: false, list: 'people' };
+  if (value === 'agent_exclude') return { kind: 'agent', exclude: true, list: 'agents' };
+  return { kind: 'agent', exclude: false, list: 'agents' };
+}
 
-  var signIn = document.getElementById('access-connection-credential');
-  signIn.replaceChildren();
-  if (data.credential) {
-    signIn.append(accessEl('span', 'Signs in with: '));
-    signIn.append(accessEl('strong', data.credential.name));
-  } else {
-    signIn.append(accessEl('span', 'No credential needed'));
+// The list as the server sends it, as the plain entries the preview takes.
+function accessConnectionEntries() {
+  return (accessConnectionData.audience || []).map(function (e) {
+    return { kind: e.kind, ref: e.ref, exclude: !!e.exclude };
+  });
+}
+
+// Who may use it: the list a person edits. Each line says who it names, in words, and can be taken off the list.
+function renderConnectionAudience() {
+  var box = document.getElementById('access-connection-allowed');
+  box.replaceChildren();
+  var entries = accessConnectionData.audience || [];
+  if (!entries.length) {
+    box.append(accessEl('p', 'Nobody can use this connection yet.', 'text-muted'));
+    return;
   }
+  entries.forEach(function (entry) {
+    var row = accessEl('div', null, 'access-row');
+    row.append(accessEl('strong', entry.text || entry.label || entry.ref));
+    var remove = accessEl('button', 'Remove', 'btn btn-sm btn-secondary');
+    remove.type = 'button';
+    remove.addEventListener('click', function () {
+      accessPreviewRemoveEntry(entry);
+    });
+    row.append(remove);
+    box.append(row);
+  });
+}
 
+// The names the pick offers, for the way the person chose.
+function renderConnectionAddChoices() {
+  if (!accessConnectionData) return;
+  var choice = accessConnectionChoice();
+  var pick = document.getElementById('access-connection-add-ref');
+  if (!pick) return;
+  pick.replaceChildren();
+  var options = (accessConnectionData.audience_options || {})[choice.list] || [];
+  options.forEach(function (o) {
+    var option = accessEl('option', o.name);
+    option.value = o.id;
+    pick.append(option);
+  });
+  var note = document.getElementById('access-connection-add-note');
+  if (note) {
+    note.replaceChildren();
+    if (choice.kind === 'person_agents') {
+      note.append(accessEl('span', 'A new agent of that person starts excluded; you can include it here.', 'form-hint'));
+    }
+  }
+  var add = document.getElementById('access-connection-add');
+  if (add) add.disabled = !options.length;
+}
+
+// Who uses it right now: the agents, why, and whether they may run it yet.
+function renderConnectionUsersNow() {
   var box = document.getElementById('access-connection-users');
   box.replaceChildren();
-  var users = data.users || [];
+  var users = accessConnectionData.users || [];
   if (!users.length) {
-    box.append(accessEl('p', 'No agent can use this connection yet.', 'text-muted'));
-    box.append(accessEl(
-      'p',
-      'A connection is used by the agents that can read its workspace or owner.',
-      'form-hint'
-    ));
+    box.append(accessEl('p', 'No agent can use it right now.', 'text-muted'));
     return;
   }
   users.forEach(function (u) {
@@ -648,6 +779,157 @@ function renderConnectionUsers() {
     }
     box.append(row);
   });
+}
+
+function renderConnectionUsers() {
+  var data = accessConnectionData;
+  document.getElementById('access-connection-name').textContent = data.connection.name;
+
+  var signIn = document.getElementById('access-connection-credential');
+  signIn.replaceChildren();
+  if (data.credential) {
+    signIn.append(accessEl('span', 'Signs in with: '));
+    signIn.append(accessEl('strong', data.credential.name));
+  } else {
+    signIn.append(accessEl('span', 'No credential needed'));
+  }
+
+  renderConnectionAudience();
+  renderConnectionAddChoices();
+  renderConnectionUsersNow();
+}
+
+// One line of a preview: the agents who gain it, each with what it means for them today.
+function accessPreviewGainLine(gain) {
+  var line = accessEl('div', null, 'form-hint');
+  line.append(accessEl('strong', 'Agents that gain it: '));
+  if (!gain.length) {
+    line.append(accessEl('span', 'nobody'));
+    return line;
+  }
+  gain.forEach(function (g, i) {
+    if (i) line.append(accessEl('span', ', '));
+    line.append(accessEl('span', g.display_name));
+    var chip = accessNeedsChip(g, 'Run capabilities');
+    if (chip) {
+      line.append(document.createTextNode(' '));
+      line.append(chip);
+    } else {
+      line.append(accessEl('span', ' can use'));
+    }
+  });
+  return line;
+}
+
+// One line of a preview: the agents who lose it.
+function accessPreviewLoseLine(lose) {
+  var line = accessEl('div', null, 'form-hint');
+  line.append(accessEl('strong', 'Agents that lose it: '));
+  if (!lose.length) {
+    line.append(accessEl('span', 'nobody'));
+    return line;
+  }
+  line.append(accessEl('span', lose.map(function (l) { return l.display_name; }).join(', ')));
+  return line;
+}
+
+// What the list would become if it were saved: who gains it, who loses it, who keeps it.
+async function accessAudiencePreview(bindingId, entries) {
+  var r = await apiFetch('/api/access/preview/audience', {
+    method: 'POST',
+    body: JSON.stringify({ binding_id: bindingId, audience: entries }),
+  });
+  if (!r.ok) {
+    showToast((r.error && r.error.message) || 'Could not work out what this would change', 'danger');
+    return null;
+  }
+  return r.data;
+}
+
+// Taking one off the list: it is shown first, with who would lose it.
+async function accessPreviewRemoveEntry(entry) {
+  var next = accessConnectionEntries().filter(function (e) {
+    return !(e.kind === entry.kind && e.ref === entry.ref);
+  });
+  var preview = await accessAudiencePreview(accessConnectionId, next);
+  if (!preview) return;
+  var box = document.getElementById('access-connection-remove-preview');
+  box.replaceChildren();
+  box.append(accessPreviewLoseLine(preview.lose || []));
+  var remove = accessEl('button', 'Remove', 'btn btn-sm btn-primary');
+  remove.type = 'button';
+  remove.addEventListener('click', function () {
+    accessRemoveEntry(entry);
+  });
+  var cancel = accessEl('button', 'Cancel', 'btn btn-sm btn-secondary');
+  cancel.type = 'button';
+  cancel.addEventListener('click', function () {
+    box.replaceChildren();
+  });
+  box.append(remove);
+  box.append(cancel);
+}
+
+async function accessRemoveEntry(entry) {
+  var r = await apiFetch(
+    '/api/access/connections/' + encodeURIComponent(accessConnectionId)
+      + '/audience/' + encodeURIComponent(entry.kind) + '/' + encodeURIComponent(entry.ref),
+    { method: 'DELETE' }
+  );
+  if (!r.ok) {
+    showToast((r.error && r.error.message) || 'Could not remove that', 'danger');
+    return;
+  }
+  showToast('Removed');
+  var preview = document.getElementById('access-connection-remove-preview');
+  if (preview) preview.replaceChildren();
+  await reloadConnectionUsers();
+}
+
+// Putting one on the list: it is shown first, with who gains it and who loses it.
+async function accessPreviewAddEntry() {
+  var choice = accessConnectionChoice();
+  var pick = document.getElementById('access-connection-add-ref');
+  var ref = pick ? pick.value : '';
+  if (!ref) return;
+  var next = accessConnectionEntries().filter(function (e) {
+    return !(e.kind === choice.kind && e.ref === ref);
+  });
+  next.push({ kind: choice.kind, ref: ref, exclude: choice.exclude });
+  var preview = await accessAudiencePreview(accessConnectionId, next);
+  if (!preview) return;
+  var box = document.getElementById('access-connection-add-preview');
+  box.replaceChildren();
+  box.append(accessPreviewGainLine(preview.gain || []));
+  box.append(accessPreviewLoseLine(preview.lose || []));
+  box.append(accessEl('div', (preview.unchanged || 0) + ' keep it', 'form-hint'));
+  var save = accessEl('button', 'Save', 'btn btn-sm btn-primary');
+  save.type = 'button';
+  save.addEventListener('click', function () {
+    accessSaveEntry({ kind: choice.kind, ref: ref, exclude: choice.exclude });
+  });
+  var cancel = accessEl('button', 'Cancel', 'btn btn-sm btn-secondary');
+  cancel.type = 'button';
+  cancel.addEventListener('click', function () {
+    box.replaceChildren();
+  });
+  box.append(save);
+  box.append(cancel);
+}
+
+async function accessSaveEntry(entry) {
+  var r = await apiFetch('/api/access/connections/' + encodeURIComponent(accessConnectionId) + '/audience', {
+    method: 'POST',
+    body: JSON.stringify({ kind: entry.kind, ref: entry.ref, exclude: entry.exclude }),
+  });
+  if (!r.ok) {
+    showToast((r.error && r.error.message) || 'Could not add that', 'danger');
+    return;
+  }
+  showToast('Added');
+  var preview = document.getElementById('access-connection-add-preview');
+  if (preview) preview.replaceChildren();
+  await reloadConnectionUsers();
 }
 
 // ── the buttons that open the dialogs ───────────────────────────────────────
@@ -694,4 +976,11 @@ document.addEventListener('DOMContentLoaded', function () {
 
   var addSecret = document.getElementById('access-service-secret-add');
   if (addSecret) addSecret.addEventListener('click', addServiceSecret);
+
+  var connectionKind = document.getElementById('access-connection-add-kind');
+  if (connectionKind) connectionKind.addEventListener('change', renderConnectionAddChoices);
+  var connectionAdd = document.getElementById('access-connection-add');
+  if (connectionAdd) connectionAdd.addEventListener('click', accessPreviewAddEntry);
+  var agentCapabilityAdd = document.getElementById('access-agent-capability-add');
+  if (agentCapabilityAdd) agentCapabilityAdd.addEventListener('click', accessAgentAddCapability);
 });

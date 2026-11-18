@@ -395,6 +395,15 @@ Restoration is rejected if any stored encrypted entry cannot be decrypted with t
 
 An agent calls the MCP `credential_request` tool. People see open requests at `GET /api/credentials/requests` and fill one with `POST /api/credentials/requests/{id}/fulfill` (`value`, optional `label` and `expires_at`) or decline it with `POST /api/credentials/requests/{id}/cancel`. Both need a human session with write access to the scope. The one exception: the agent that opened a request can take it back while it is unfilled with the same `POST /api/credentials/requests/{id}/cancel` call using its own key (the response status is `withdrawn` and the audit log records `credential_request_withdrawn`). Taking a request back is not a refusal, so the agent may ask again later; it cannot cancel another agent's request or a filled one.
 
+### Who can use a connection
+
+A connection has one **owner** (`scope`: who may edit it) and a list of who may **use** it. An entry is a named agent (`agent`), every agent that reaches a workspace (`workspace`), or all agents that act for one person (`person_agents`); an agent can also be excluded (`exclude: true`), which beats every other entry. Services are never on the list. Being on it lets an agent see and, with the Run capabilities permission, run the connection; it gives no memory or credential access.
+
+- `POST` / `PUT /api/connector-bindings` accept `audience: [{kind, ref, exclude?}]` (administrators only; `403 FORBIDDEN` for anyone else, `400 INVALID_AUDIENCE` with a plain message for a bad entry). Without it, creating a connection with a `scope` gives it the list that scope has always meant (a named agent for `agent:<id>`, the workspace for `workspace:<id>`, "all of the person's agents" for `user:<id>`, excluding that person's agents whose `inherit_user_bindings` is off), and changing the `scope` of an existing connection does the same; re-sending the current `scope` changes nothing. An administrator's answers carry `audience`; an agent's never do.
+- `inherit_user_bindings` on an agent is kept: turning it off excludes the agent from its person's "all agents" connections, turning it on removes that exclusion. A new agent starts excluded unless `inherit_user_bindings` is true.
+- Administrator session only: `PUT /api/access/connections/{id}/audience` (replace the list), `POST .../audience` (add an entry), `DELETE .../audience/{kind}/{ref}`, and `POST /api/access/preview/audience` with `{binding_id, audience}` (who gains and who loses the use of the connection; nothing is written). Every change is audited as `connector_audience_changed` with the list before and after.
+- Deleting an agent, a workspace or a person removes their entries; a retired agent's named entries are listed on the Access page under "Left behind".
+
 ### Who can reach what
 
 Admin session only. Names, ids and yes/no answers; never a secret value. Every answer comes from the same code that enforces access, so what a page shows is what the server allows.

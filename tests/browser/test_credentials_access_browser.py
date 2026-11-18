@@ -71,6 +71,8 @@ def test_the_dialog_is_one_list_in_three_groups_and_a_service_can_be_given_the_s
     page.wait_for_function("document.querySelector('#access-services').innerText.includes('Worker A')")
     services = page.locator("#access-services").inner_text()
     assert "read only" in services and "no end date" in services
+    # the table cell is refreshed after the dialog's own lists (a second request): wait for it, do not read at once
+    page.wait_for_function("document.querySelector(\"tr[data-credential-id] td[data-label='Used by']\").innerText.includes('Worker A')")
     assert "Given the secret: Worker A" in _cell(page).inner_text()
     assert page.evaluate("window.__stillHere") is True  # no reload
 

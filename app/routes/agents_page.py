@@ -892,7 +892,7 @@ def _agents_view(request: Request, session: dict, show_services: bool):
     js = js.replace("__AGENT_ROWS__", row_data)
     js = js.replace("__ACCESS_WORKSPACES__", workspace_data)
     # The Access dialogs live in their own file, loaded the same way as the page's other scripts.
-    js = js + '\n<script src="/static/js/agent_access.js?v=20261117a"></script>'
+    js = js + '\n<script src="/static/js/agent_access.js?v=20261118a"></script>'
 
     page_title = "Services" if show_services else "Agents"
     create_button = (
@@ -933,6 +933,12 @@ def _agents_view(request: Request, session: dict, show_services: bool):
           <h3 class="sub-heading form-section-title">Capabilities</h3>
           <p class="form-hint">The connections this agent can reach, and whether it may run them.</p>
           <div id="access-agent-capabilities"></div>
+          <div class="form-group" style="margin-top:12px">
+            <label for="access-agent-capability-pick">Add a capability</label>
+            <select id="access-agent-capability-pick"></select>
+            <button type="button" class="btn btn-sm btn-secondary" id="access-agent-capability-add">Add</button>
+          </div>
+          <div id="access-agent-capability-preview"></div>
         </div>
         <div class="form-section">
           <h3 class="sub-heading form-section-title">Credentials it can reference</h3>

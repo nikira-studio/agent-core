@@ -133,8 +133,7 @@ def test_the_access_script_parses_and_keeps_the_words_the_dialog_shows():
     script = JS_FILE.read_text()
     for phrase in (
         "Add, rename or revoke keys under More > Keys.",
-        "No agent can use this connection yet.",
-        "A connection is used by the agents that can read its workspace or owner.",
+        "No agent can use it right now.",
         "No credential needed",
         "Signs in with: ",
         "needs permission: ",
