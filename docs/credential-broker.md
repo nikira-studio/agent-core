@@ -135,16 +135,21 @@ curl -X POST http://localhost:3500/internal/credentials/resolve \
   }'
 ```
 
-Both conditions must be met for this to succeed:
+All of these must hold for it to succeed (the same rule as the MCP `credential_get` tool):
 - Valid helper key in the `Authorization` header
-- The specified `agent_id` must have read access to the credential entry's scope
+- The specified `agent_id` is an active **agent** (not a service) that holds the **Reference credentials** permission
+- That agent has read access to the credential entry's scope
+- The credential has not expired
 
+A service fetches its secrets with a grant through `/api/credential-consumers`, not through the helper. Every refusal writes an audit row, `broker_resolve_denied`, with the entry named by the caller and the reason (`not_an_agent`, `needs_permission`, `scope_denied`, `agent_not_found`).
 **Error responses:**
 
 | Status | Code | Meaning |
 | --- | --- | --- |
 | `401` | — | Missing or invalid helper key |
 | `403` | `SCOPE_DENIED` | The agent doesn't have read access to this credential's scope |
+| `403` | `PERMISSION_REQUIRED` | The agent doesn't hold the Reference credentials permission (switch it on under **Agents > Access**, with **Turn on**) |
+| `403` | `NOT_AN_AGENT` | The named entry is a service; it fetches with a grant |
 | `410` | `CREDENTIAL_EXPIRED` | The credential has a TTL and it's past |
 
 ---

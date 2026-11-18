@@ -395,6 +395,22 @@ Restoration is rejected if any stored encrypted entry cannot be decrypted with t
 
 An agent calls the MCP `credential_request` tool. People see open requests at `GET /api/credentials/requests` and fill one with `POST /api/credentials/requests/{id}/fulfill` (`value`, optional `label` and `expires_at`) or decline it with `POST /api/credentials/requests/{id}/cancel`. Both need a human session with write access to the scope. The one exception: the agent that opened a request can take it back while it is unfilled with the same `POST /api/credentials/requests/{id}/cancel` call using its own key (the response status is `withdrawn` and the audit log records `credential_request_withdrawn`). Taking a request back is not a refusal, so the agent may ask again later; it cannot cancel another agent's request or a filled one.
 
+### Who can reach what
+
+Admin session only. Names, ids and yes/no answers; never a secret value. Every answer comes from the same code that enforces access, so what a page shows is what the server allows.
+
+| Method | Path | Returns |
+| --- | --- | --- |
+| `GET` | `/api/access/credentials/{id}` | The three groups of a credential's page: connections that sign in with it, agents that can reach it (with the reason, and `needs_permission` when the agent lacks the Reference credentials permission), services that receive its value, and what can be added to each |
+| `GET` | `/api/access/connections/{id}` | The agents that can use a connection, with the reason and whether they can run it now |
+| `GET` | `/api/access/agents/{id}` | One agent's workspaces, the connections it can use, the credentials it can reference, its keys and permissions |
+| `GET` | `/api/access/services/{id}` | One service's grants (read or write, end date) and keys |
+| `POST` | `/api/access/preview/credential-owner` | Body `{entry_id, scope}`. Which agents gain and which lose access if the credential's owner changes |
+| `POST` | `/api/access/preview/agent-workspace` | Body `{agent_id, workspace_id, action: "add"\|"remove", read, write}`. What adding or removing a workspace opens or closes: memory, credentials, connections |
+| `POST` | `/api/agents/{id}/permissions/{permission}/turn-on` | Switch one permission on (the stored name, for example `credentials` or `connectors_execute`). A person does this, one permission at a time; nothing switches a permission on by itself, and nothing here switches one off. Audit event `agent_permission_turned_on` |
+
+A connection's credential can be taken away with `PUT /api/connector-bindings/{id}` and `{"reset_credential": true}`; giving or taking one is audited as `connector_binding_updated`. A new grant (`POST /api/credential-consumers/grants`) must name a service; the answer for any other entry is `403 NOT_A_SERVICE`. Grants an agent already held before 1.4.0 keep working.
+
 ### Who can use a credential
 
 A service (an entry whose one permission is `credentials_resolve`) reads a stored credential through an explicit **grant** on that one credential. The Credentials page manages grants with its **Access** button; the same routes are available to an admin:
