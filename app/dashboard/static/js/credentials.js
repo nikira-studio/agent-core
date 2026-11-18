@@ -48,7 +48,66 @@ async function deleteCredential(id) {
   else { showToast(j.error?.message || 'Failed to delete credential', 'danger'); }
 }
 
+// ── showing a stored value ─────────────────────────────────────────────────
+// The value is asked for only when a person presses Show value, put in the page with textContent, and taken out
+// again when they press Hide, after 30 seconds, when the tab is hidden or when the dialog closes. It is never kept
+// anywhere else: not in the table, not in a variable, not in an attribute and not in the address.
+const REVEAL_SECONDS = 30;
+let revealTimer = null;
+
+function hideRevealedValue() {
+  if (revealTimer) { clearTimeout(revealTimer); revealTimer = null; }
+  const box = document.getElementById('edit-credential-revealed');
+  const value = document.getElementById('edit-credential-revealed-value');
+  if (value) value.textContent = '';
+  if (box) box.hidden = true;
+  const show = document.getElementById('edit-credential-reveal');
+  if (show) show.style.display = '';
+}
+
+async function showCredentialValue() {
+  const id = document.getElementById('edit-credential-id').value;
+  if (!id) return;
+  const button = document.getElementById('edit-credential-reveal');
+  button.disabled = true;
+  try {
+    const j = await apiFetch('/api/credentials/entries/' + encodeURIComponent(id) + '/reveal', { method: 'POST' });
+    if (!j.ok) { showToast((j.error && j.error.message) || 'Could not show the value', 'danger'); return; }
+    document.getElementById('edit-credential-revealed-value').textContent = String(j.data.value);
+    document.getElementById('edit-credential-revealed').hidden = false;
+    button.style.display = 'none';
+    if (revealTimer) clearTimeout(revealTimer);
+    revealTimer = setTimeout(hideRevealedValue, REVEAL_SECONDS * 1000);
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function copyRevealedValue() {
+  const text = document.getElementById('edit-credential-revealed-value').textContent;
+  if (!text) return;
+  try {
+    await navigator.clipboard.writeText(text);
+    showToast('Copied', 'success');
+  } catch (err) {
+    showToast('Could not copy: select the value and copy it by hand', 'danger');
+  }
+}
+
+(function wireRevealedValue() {
+  const modal = document.getElementById('edit-credential-modal');
+  document.getElementById('edit-credential-reveal').addEventListener('click', showCredentialValue);
+  document.getElementById('edit-credential-reveal-hide').addEventListener('click', hideRevealedValue);
+  document.getElementById('edit-credential-reveal-copy').addEventListener('click', copyRevealedValue);
+  // However the dialog is closed (Cancel, the X, Escape, a click outside, Save), the value goes with it.
+  new MutationObserver(function () {
+    if (modal.style.display === 'none' || !modal.classList.contains('open')) hideRevealedValue();
+  }).observe(modal, { attributes: true, attributeFilter: ['style', 'class', 'aria-hidden'] });
+  document.addEventListener('visibilitychange', function () { if (document.hidden) hideRevealedValue(); });
+})();
+
 async function editCredential(id) {
+  hideRevealedValue();
   const j = await apiFetch('/api/credentials/entries/' + id);
   if (!j.ok) { showToast(j.error?.message || 'Error', 'danger'); return; }
   const c = j.data.entry;

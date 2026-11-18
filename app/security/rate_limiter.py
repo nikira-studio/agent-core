@@ -52,6 +52,8 @@ class RateLimiter:
         ("memory_write", "agent"): RateLimitConfig(60, 1.0),
         ("memory_search", "agent"): RateLimitConfig(60, 1.0),
         ("credential_create", "user"): RateLimitConfig(10, 1.0 / 60),
+        # Showing a stored value: a person looks at a few in a row, never hundreds.
+        ("credential_reveal", "user"): RateLimitConfig(30, 1.0 / 10),
         ("login_failed", "user"): RateLimitConfig(10, 1.0 / 60),
         ("otp_failed", "user"): RateLimitConfig(5, 1.0 / 300),
         ("inbound_webhook", "ip"): RateLimitConfig(60, 1.0),

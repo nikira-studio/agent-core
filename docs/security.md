@@ -46,7 +46,7 @@ Credentials are managed from the **Credentials** page or the `/api/credentials` 
 
 **The only controlled ways a raw secret leaves Agent Core:**
 
-1. A user with permission calls the reveal endpoint from an authenticated session.
+1. A person who can read the credential shows its value from **Credentials > Edit > Show value** (the reveal endpoint, which accepts a person's session or operator token and refuses an agent key). The value appears in the dialog, is hidden again after 30 seconds or when the dialog closes, and each time is recorded in the audit log (`credential_reveal`, with the person and the credential's name, never the value). At most 30 in a short burst, then one every 10 seconds.
 2. The local credential helper calls the internal resolution endpoint with a valid helper key and an authorized agent identity.
 3. A connection resolves the credential server-side so Agent Core can call the external system directly.
 

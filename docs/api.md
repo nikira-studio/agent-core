@@ -326,7 +326,7 @@ Credential responses never include raw `value` or `value_encrypted` fields.
 | `PUT` | `/api/credentials/entries/{entry_id}` | Agent/session | Update entry metadata or value |
 | `DELETE` | `/api/credentials/entries/{entry_id}` | Agent/session | Soft-delete entry |
 | `POST` | `/api/credentials/entries/{entry_id}/reference` | Agent/session | Return `AC_SECRET_*` reference |
-| `POST` | `/api/credentials/entries/{entry_id}/reveal` | Authorized user session | Reveal raw value |
+| `POST` | `/api/credentials/entries/{entry_id}/reveal` | A person (dashboard session or operator token) who can read the owner scope | Reveal raw value (`Cache-Control: no-store`); refused for agent keys (403); audited as `credential_reveal` (person, credential name, dashboard or operator token; never the value); rate limited (429) |
 | `GET` | `/api/credentials/scopes` | Agent/session | List authorized credential scopes |
 | `POST` | `/api/credentials/rotate` | Admin | Rotate the credential encryption key |
 | `GET` | `/api/credentials/rotate/status` | Admin | Get key rotation status |

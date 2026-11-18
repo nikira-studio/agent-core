@@ -480,6 +480,9 @@ def reveal_entry(
 
     if ctx.actor_type != "user":
         return error_response("FORBIDDEN", "User session required for reveal", 403)
+    allowed, info = RL.check("user", ctx.user_id, "credential_reveal")
+    if not allowed:
+        return rate_limited_response("RATE_LIMITED", "Too many values shown in a short time. Try again in a moment.", **info)
 
     enforcer = _enforcer(ctx)
     if not enforcer.can_read(entry["scope"]):
@@ -504,9 +507,12 @@ def reveal_entry(
         resource_type="credential",
         resource_id=entry_id,
         result="success",
+        # who (actor) and which credential, and whether it was asked for in the dashboard or with an operator
+        # token; never the value
+        details={"name": entry["name"], "via": "dashboard" if getattr(ctx.context, "browser_session", False) else "operator token"},
     )
 
-    return success_response({"value": plaintext})
+    return success_response_with_headers({"value": plaintext}, {"Cache-Control": "no-store", "Pragma": "no-cache"})
 
 
 @router.get("/scopes")

@@ -282,7 +282,7 @@ def credentials_page(request: Request, session: dict = Depends(require_auth)):
       <div>
         <h1>Credentials</h1>
         <p class="text-muted" style="max-width:640px;margin-top:8px">
-          Secrets stored encrypted. Agents and services use them by reference; the value is never shown again.
+          Values are stored encrypted. Agents and services use them by reference. A signed-in person who can read a credential can show its value again from Edit, and each time is recorded in the audit log.
         </p>
       </div>
       <div class="page-actions">
@@ -452,6 +452,15 @@ def credentials_page(request: Request, session: dict = Depends(require_auth)):
             <label>Secret value</label>
             <input type="password" id="edit-credential-value" autocomplete="new-password" placeholder="Leave blank to keep current value">
             <p class="form-hint">Leave it empty to keep the saved value.</p>
+            <div id="edit-credential-reveal-group">
+              <button type="button" class="btn btn-sm btn-secondary" id="edit-credential-reveal">Show value</button>
+              <div id="edit-credential-revealed" hidden style="margin-top:8px">
+                <code id="edit-credential-revealed-value" style="display:block;white-space:pre-wrap;word-break:break-all;user-select:all;padding:8px;border:1px solid var(--border,#ccc);border-radius:6px"></code>
+                <button type="button" class="btn btn-sm btn-secondary" id="edit-credential-reveal-hide">Hide</button>
+                <button type="button" class="btn btn-sm btn-secondary" id="edit-credential-reveal-copy">Copy</button>
+                <span class="form-hint" id="edit-credential-reveal-note">Hidden again after 30 seconds. Showing it is recorded in the audit log.</span>
+              </div>
+            </div>
           </div>
           <div class="form-group">
             <label>Expires</label>
@@ -465,6 +474,6 @@ def credentials_page(request: Request, session: dict = Depends(require_auth)):
     </div>
     """
 
-    extra_js = '<script src="/static/js/credentials.js?v=20261118b"></script>'
+    extra_js = '<script src="/static/js/credentials.js?v=20261118c"></script>'
 
     return render_page("Credentials", body, "/credentials", extra_js, session=session)
