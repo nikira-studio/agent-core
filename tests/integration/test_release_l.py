@@ -41,9 +41,12 @@ def world(admin):
 def test_the_agent_dialog_says_once_what_its_lists_are_missing():
     """The list says what it needs once, above the rows; the rows keep a quiet note of their own."""
     source = AGENT_ACCESS_JS.read_text()
-    assert "Some of these need the " in source
-    assert " permission before this agent can use them." in source
-    assert " permission before they can use it." in source
+    # The notice is told how many rows need the permission and how many rows the list has,
+    # so the sentence can say what is true: one row, all of them, or only some.
+    assert "noticeText(group.label, group.rows.length, total)" in source
+    assert "'This needs the ' + label + ' permission before this agent can use it.'" in source
+    assert "'These need the ' + label + ' permission before this agent can use them.'" in source
+    assert "'Some of these need the ' + label + ' permission before this agent can use them.'" in source
     # One button per missing permission, and it names what it turns on.
     assert "'Turn on ' + group.label" in source
     # The rows keep a plain note, not a badge and not a button of their own.
@@ -56,8 +59,11 @@ def test_the_agent_dialog_says_once_what_its_lists_are_missing():
 
 def test_the_credential_dialog_says_once_what_its_lists_are_missing():
     source = CREDENTIALS_JS.read_text()
-    assert "Some of these need the " in source
-    assert " permission before they can use it." in source
+    # The same three sentences, counted the same way, for a list of other agents.
+    assert "accessAgentsNoticeText(group.label, group.rows.length, total)" in source
+    assert "'This agent needs the ' + label + ' permission before it can use it.'" in source
+    assert "'These agents need the ' + label + ' permission before they can use it.'" in source
+    assert "'Some of these agents need the ' + label + ' permission before they can use it.'" in source
     assert "'Turn on ' + group.label" in source
     for name in ("renderAccessAgents", "connectionUsers"):
         body = source.split("function " + name, 1)[1].split("\nfunction ", 1)[0]
@@ -77,7 +83,10 @@ def test_the_turn_on_button_calls_the_same_route_as_before():
 def test_the_credential_rows_name_the_owner_once():
     """A row reads "<name> <owner> <reason>"; when the reason already names the owner, it is not named twice."""
     source = AGENT_ACCESS_JS.read_text()
-    assert "c.reason !== 'through ' + c.owner" in source
+    assert "reason === 'through ' + owner" in source
+    # A person's own space is named by the reason as well ("acts for <person>"): it is not named twice either.
+    assert "reason.indexOf('acts for ') === 0" in source
+    assert "owner.endsWith(\"'s personal space\")" in source
 
 
 # ── the owner panel ────────────────────────────────────────────────────────

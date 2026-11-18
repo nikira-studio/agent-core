@@ -450,7 +450,7 @@ def dashboard_home(request: Request, session: dict = Depends(require_auth)):
                 + f"<p class='form-hint' style='margin:4px 0 0'>Your answer goes to {agent} the next time it works in {workspace}, and this closes.</p>"
             )
 
-        waiting_body = "<table class='stack-phone'><tbody>" + "".join(
+        waiting_body = "<table class='stack-phone waiting-table'><tbody>" + "".join(
             "<tr><td class='waiting-what' data-label='Request'>"
             f"<strong>{escape_html(row['title'])}</strong>"
             f"<div class='text-muted' style='font-size:0.85rem'>{escape_html(row['sub'])}</div>"

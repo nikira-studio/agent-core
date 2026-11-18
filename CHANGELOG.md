@@ -37,6 +37,10 @@ Notable changes to Agent Core are documented here. The format follows [Keep a Ch
 
 - **Tables stack on a phone.** Needs you, Activity, Approvals and Access show each row as a block at narrow width with its action in view; the Activity note no longer overprints the next columns, and Approvals names the workspace instead of showing its scope.
 
+- **The Access page groups its rows.** The long table is now one closed header per "Who or what", with the kind and the row count; a header opens and closes on click and by keyboard, and a filter or search opens the groups that hold a match. An approval's detail page names the workspace instead of showing its scope.
+
+- **More tables stack on a phone.** The Audit log, Workspaces and Users tables show each row as a block at narrow width, and the Needs you answer box keeps its button inside the card. The Change owner panel keeps Save and Cancel above the dialog's Close bar. A list that is missing a permission says whether one, some or all of its rows are, and one Turn on that would reach several agents names them and asks first.
+
 ### Upgrading
 
 - **The local credential helper is stricter.** `/internal/credentials/resolve` now applies the same rule as the MCP `credential_get`: the named entry must be an active agent that holds the **Reference credentials** permission, besides the existing scope and expiry checks; a service is refused (it fetches with a grant). Before, the helper checked scope and expiry only, so an entry without the permission, or a service, could resolve what its scopes reached. (Every entry reads its person's own scope, so that reached the person's credentials.) If a script depended on the old behaviour it now gets `403 PERMISSION_REQUIRED` or `403 NOT_AN_AGENT`, and every refusal is an audit row (`broker_resolve_denied`, with the reason). Fix: switch the permission on for that agent (Agents > Access > Turn on), or give a service a grant on the credential. `python -m app.access_check <database> --helper-change` lists, on a read-only copy, exactly which entries would lose helper reach.

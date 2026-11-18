@@ -2115,12 +2115,26 @@ details.card-fold[open] > summary::before { content: "\25BE\00a0"; }
   .stack-phone, .stack-phone tbody, .stack-phone tr, .stack-phone td { display: block; width: 100%; }
   .stack-phone thead { display: none; }
   .stack-phone tr { padding: 10px 0; border-bottom: 1px solid var(--border); }
-  .stack-phone td { border: 0; padding: 3px 0; white-space: normal; max-width: none; }
-  .stack-phone td[data-label]::before { content: attr(data-label); display: inline-block; min-width: 6rem; color: var(--muted); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; }
+  /* A long name wraps inside its cell instead of running past the card, and no cell keeps a
+     minimum width that would push the row off the screen. */
+  .stack-phone td { border: 0; padding: 3px 0; white-space: normal; max-width: none; min-width: 0; overflow-wrap: anywhere; }
+  /* The label stands clear of the value it names: it has room of its own and a gap after it. */
+  .stack-phone td[data-label]::before { content: attr(data-label); display: inline-block; min-width: 8rem; margin-right: 8px; color: var(--muted); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; }
   .stack-phone td:empty { display: none; }
   .stack-phone td.hide-phone { display: none; }
   .stack-phone .actions-cell { display: flex; gap: 6px; flex-wrap: wrap; align-items: flex-start; }
   .stack-phone .activity-actions-cell { padding-top: 8px; flex-wrap: wrap; }
+}
+
+/* Waiting on you: the request takes the whole width, the answer sits under it. The answer box and its
+   button share one line, so the button never runs past the card. A phone keeps its own stacked rows. */
+@media (min-width: 769px) {
+  .waiting-table, .waiting-table tbody, .waiting-table tr, .waiting-table td { display: block; width: 100%; }
+  .waiting-table tr { padding: 12px 0; border-bottom: 1px solid var(--border); }
+  .waiting-table td { border: 0; padding: 0; text-align: left; white-space: normal; }
+  .waiting-table .waiting-act { margin-top: 10px; }
+  .waiting-table .inline-answer { display: flex; gap: 8px; align-items: center; }
+  .waiting-table .inline-answer input { flex: 1 1 260px; max-width: 520px; min-width: 0; }
 }
 
 /* Connect: three steps, each tool's pieces in the order a person does them. */
@@ -2368,5 +2382,5 @@ tr.access-group-row.is-closed { display: none !important; }
   .access-group-row td:first-child { padding-left: 28px; }
 }
 
-/* The dialog's Close bar covers the bottom of what is scrolled to: bring the owner panel to rest above it. */
-#access-owner-panel { scroll-margin-bottom: 96px; }
+/* The Unused list: a long name wraps inside its line instead of running past the card. */
+.access-unused-list li { overflow-wrap: anywhere; }

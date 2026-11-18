@@ -419,7 +419,7 @@ class TestAuditPage:
             },
         )
         r = admin_client.get("/audit")
-        assert 'class="audit-table"' in r.text
+        assert 'class="audit-table stack-phone"' in r.text
         assert "audit-details-cell" in r.text
         assert "Audit page wrap test" in r.text
 

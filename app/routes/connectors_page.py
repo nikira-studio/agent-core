@@ -1101,7 +1101,7 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
     extra_js = (
         '<script src="/static/js/adapter-actions.js?v=20260902"></script>'
         '<script src="/static/js/connectors.js?v=20261118b"></script>'
-        '<script src="/static/js/agent_access.js?v=20261118e"></script>'
+        '<script src="/static/js/agent_access.js?v=20261118m"></script>'
     )
     return render_page("Capabilities", body, "/connectors", extra_js, session=session)
 

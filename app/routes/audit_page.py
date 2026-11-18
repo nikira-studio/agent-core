@@ -149,13 +149,13 @@ def audit_page(request: Request, session: dict = Depends(require_auth)):
             if ts else "—"
         )
         return (
-            f"<tr><td class='audit-time-cell'>{time_cell}</td>"
-            f"<td class='audit-actor-cell'>{actor_cell(event)}</td>"
-            f"<td class='audit-action-cell'><code>{_breakable(event.get('action') or '')}</code></td>"
-            f"<td class='audit-resource-cell'>{_breakable(event.get('resource_type') or '-')}</td>"
-            f"<td class='audit-result-cell'><span class='badge badge-{result_class}'>{escape_html(event.get('result') or '')}</span></td>"
-            f"<td class='mono audit-details-cell'>{details_html}</td>"
-            f"<td class='mono audit-ip-cell'>{escape_html(event.get('ip_address') or '-')}</td></tr>"
+            f"<tr><td class='audit-time-cell' data-label='Time'>{time_cell}</td>"
+            f"<td class='audit-actor-cell' data-label='Who'>{actor_cell(event)}</td>"
+            f"<td class='audit-action-cell' data-label='Action'><code>{_breakable(event.get('action') or '')}</code></td>"
+            f"<td class='audit-resource-cell' data-label='Resource'>{_breakable(event.get('resource_type') or '-')}</td>"
+            f"<td class='audit-result-cell' data-label='Result'><span class='badge badge-{result_class}'>{escape_html(event.get('result') or '')}</span></td>"
+            f"<td class='mono audit-details-cell' data-label='Details'>{details_html}</td>"
+            f"<td class='mono audit-ip-cell' data-label='IP'>{escape_html(event.get('ip_address') or '-')}</td></tr>"
         )
 
     rows = "".join(audit_row(e) for e in all_events)
@@ -261,9 +261,9 @@ def audit_page(request: Request, session: dict = Depends(require_auth)):
         </div>
         <div class="stat-grid" style="margin-bottom:10px">
           <div class="stat-card"><div class="value">{total_events}</div><div class="label">Total Events</div></div>
-          <div class="stat-card"><div class="value">{success_count}</div><div class="label">Success</div></div>
-          <div class="stat-card {'stat-alert' if failure_count else 'stat-quiet'}"><div class="value">{failure_count}</div><div class="label">Failure</div></div>
-          <div class="stat-card {'stat-alert' if blocked_count else 'stat-quiet'}"><div class="value">{blocked_count}</div><div class="label">Blocked</div></div>
+          <div class="stat-card"><div class="value">{success_count}</div><div class="label">Success on this page</div></div>
+          <div class="stat-card {'stat-alert' if failure_count else 'stat-quiet'}"><div class="value">{failure_count}</div><div class="label">Failure on this page</div></div>
+          <div class="stat-card {'stat-alert' if blocked_count else 'stat-quiet'}"><div class="value">{blocked_count}</div><div class="label">Blocked on this page</div></div>
         </div>
         <div class="text-muted" style="font-size:0.85rem;margin-bottom:8px">Top actors:</div>
         <div>{top_actor_summary or "<span class='text-muted'>No events yet.</span>"}</div>
@@ -297,7 +297,7 @@ def audit_page(request: Request, session: dict = Depends(require_auth)):
         <button class="btn btn-sm btn-secondary" onclick="clearAuditFilters()">Clear</button>
       </div>
       <div style="overflow-x:auto">
-      <table class="audit-table"><thead><tr><th class="audit-time-cell">Time</th><th class="audit-actor-cell">Who</th><th class="audit-action-cell">Action</th><th class="audit-resource-cell">Resource</th><th class="audit-result-cell">Result</th><th class="audit-details-cell">Details</th><th class="audit-ip-cell">IP</th></tr></thead>
+      <table class="audit-table stack-phone"><thead><tr><th class="audit-time-cell">Time</th><th class="audit-actor-cell">Who</th><th class="audit-action-cell">Action</th><th class="audit-resource-cell">Resource</th><th class="audit-result-cell">Result</th><th class="audit-details-cell">Details</th><th class="audit-ip-cell">IP</th></tr></thead>
       <tbody>{rows or "<tr><td colspan=7 class=empty>No events yet.</td></tr>"}</tbody></table>
       </div>
       <div style="margin-top:8px;font-size:0.85rem;color:var(--text-muted)">{page_info}</div>

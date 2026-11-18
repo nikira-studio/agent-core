@@ -68,14 +68,14 @@ def users_page(request: Request, session: dict = Depends(require_auth)):
         actions = f"<div class='actions-cell'><button type='button' class='btn btn-sm btn-secondary' data-user='{user_payload}' onclick=\"editUser(this)\">Edit</button>{delete_action}</div>"
         return (
             f"<tr>"
-            f"<td>{escape_html(u.get('display_name', ''))}</td>"
-            f"<td><code>{escape_html(u['id'])}</code></td>"
-            f"<td>{escape_html(u.get('email', ''))}</td>"
-            f"<td><span class='badge badge-{'active' if u.get('role') == 'admin' else 'inactive'}'>{escape_html(u.get('role', 'user'))}</span></td>"
-            f"<td><span class='badge badge-{'active' if u.get('is_active', True) else 'inactive'}'>{'active' if u.get('is_active', True) else 'disabled'}</span></td>"
-            f"<td>{otp}</td>"
-            f"<td>{local_dt(u.get('created_at'), style='date')}</td>"
-            f"<td>{actions}</td>"
+            f"<td data-label='Name'>{escape_html(u.get('display_name', ''))}</td>"
+            f"<td data-label='ID'><code>{escape_html(u['id'])}</code></td>"
+            f"<td data-label='Email'>{escape_html(u.get('email', ''))}</td>"
+            f"<td data-label='Role'><span class='badge badge-{'active' if u.get('role') == 'admin' else 'inactive'}'>{escape_html(u.get('role', 'user'))}</span></td>"
+            f"<td data-label='Status'><span class='badge badge-{'active' if u.get('is_active', True) else 'inactive'}'>{'active' if u.get('is_active', True) else 'disabled'}</span></td>"
+            f"<td data-label='Two-step sign-in'>{otp}</td>"
+            f"<td data-label='Created'>{local_dt(u.get('created_at'), style='date')}</td>"
+            f"<td data-label='Actions'>{actions}</td>"
             f"</tr>"
         )
 
@@ -142,7 +142,7 @@ def users_page(request: Request, session: dict = Depends(require_auth)):
     <div class="card">
       <div class="card-head-row"><h2>All Users</h2><button class="btn" onclick="openModal('create-user-modal')">+ Add User</button></div>
       <p class="text-muted" style="margin-bottom:12px">Only admins see this page. Admins add people here and choose their role.</p>
-      <table><thead><tr><th>Name</th><th>ID</th><th>Email</th><th>Role</th><th>Status</th><th>Two-step sign-in</th><th>Created</th><th class="actions-cell">Actions</th></tr></thead>
+      <table class="stack-phone"><thead><tr><th>Name</th><th>ID</th><th>Email</th><th>Role</th><th>Status</th><th>Two-step sign-in</th><th>Created</th><th class="actions-cell">Actions</th></tr></thead>
       <tbody>{rows}</tbody></table>
     </div>
     <div class="modal-overlay" id="create-user-modal" style="display:none">

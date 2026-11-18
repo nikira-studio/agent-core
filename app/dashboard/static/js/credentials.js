@@ -324,14 +324,23 @@ function accessMissingPermissions(items, fallbackPermission, fallbackLabel) {
   return groups;
 }
 
+// The notice above a list of other agents: they are the ones who cannot use it yet.
+// One row that needs it, every row, or only some of them: the sentence says which.
+function accessAgentsNoticeText(label, needed, total) {
+  if (needed === 1) return 'This agent needs the ' + label + ' permission before it can use it.';
+  if (needed === total) return 'These agents need the ' + label + ' permission before they can use it.';
+  return 'Some of these agents need the ' + label + ' permission before they can use it.';
+}
+
 // One notice above a list, and one button: the list says once what its rows are missing, and the button turns
 // that permission on for every row that needs it. The rows keep a quiet "needs permission" of their own.
-function accessPermissionNotice(groups, turnOn) {
+// The sentence is told how many rows need it and how many rows the list has, so it can say what is true.
+function accessPermissionNotice(groups, turnOn, total) {
   if (!groups.length) return null;
   const box = accessEl('div', null, 'access-permission-notice');
   groups.forEach(function (group) {
     const line = accessEl('div', null, 'access-permission-line');
-    line.append(accessEl('span', 'Some of these need the ' + group.label + ' permission before they can use it.'));
+    line.append(accessEl('span', accessAgentsNoticeText(group.label, group.rows.length, total)));
     const button = accessEl('button', 'Turn on ' + group.label, 'btn btn-sm btn-secondary');
     button.type = 'button';
     button.addEventListener('click', () => turnOn(group));
@@ -432,7 +441,8 @@ function connectionUsers(connection) {
   // The agents that may not run it yet say so once, above the list, with one button.
   const notice = accessPermissionNotice(
     accessMissingPermissions(connection.users, 'connectors_execute', 'Run capabilities'),
-    (group) => turnOnForRows(group, renderAccess)
+    (group) => turnOnForRows(group, renderAccess),
+    connection.users.length
   );
   if (notice) details.append(notice);
   connection.users.forEach(user => {
@@ -511,7 +521,8 @@ function renderAccessAgents(d) {
   // The agents that may not use it yet say so once, above the list, with one button.
   const notice = accessPermissionNotice(
     accessMissingPermissions(d.agents, 'credentials', 'Reference credentials'),
-    (group) => turnOnForRows(group, renderAccess)
+    (group) => turnOnForRows(group, renderAccess),
+    d.agents.length
   );
   if (notice) list.append(notice);
   d.agents.forEach(agent => {
@@ -549,11 +560,18 @@ async function openOwnerPanel() {
   showOwnerPanel(panel);
 }
 
-// The panel is inside a dialog whose Close bar sticks to the bottom of the sheet. The panel carries a scroll margin
-// the height of that bar (see dashboard.css), so scrolling it into view leaves it clear of the bar; nothing is
-// added to the body, because padding there would lift the bar off the bottom of the sheet.
+// The panel is inside a dialog whose Close bar sticks to the bottom of the sheet. Scroll the dialog just far enough
+// that the whole panel, Save and Cancel included, is above that bar. Nothing is added to the body: padding there
+// would lift the bar off the bottom of the sheet.
 function showOwnerPanel(panel) {
-  panel.scrollIntoView({ block: 'nearest' });
+  const scroller = panel.closest('.modal-scroll');
+  const footer = scroller ? scroller.querySelector('.modal-footer') : null;
+  if (!scroller) { panel.scrollIntoView({ block: 'nearest' }); return; }
+  const barTop = footer ? footer.getBoundingClientRect().top : scroller.getBoundingClientRect().bottom;
+  const over = panel.getBoundingClientRect().bottom - (barTop - 12);
+  if (over > 0) scroller.scrollTop += over;
+  const under = scroller.getBoundingClientRect().top - panel.getBoundingClientRect().top;
+  if (under > 0) scroller.scrollTop -= under;  // never so far that the panel's top is lost
 }
 
 // The owner it has now: the scope the credential lives under.
@@ -586,7 +604,7 @@ async function previewOwner() {
   box.append(accessEl('p', p.unchanged + (p.unchanged === 1 ? ' agent keeps access' : ' agents keep access'), 'text-muted'));
   // The preview made the panel taller: bring Save and Cancel back into view, clear of the Close bar.
   const panel = document.getElementById('access-owner-panel');
-  if (panel) panel.scrollIntoView({ block: 'nearest' });
+  if (panel) showOwnerPanel(panel);
 }
 
 function ownerNames(agents) {

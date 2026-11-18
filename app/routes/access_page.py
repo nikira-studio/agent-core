@@ -37,23 +37,23 @@ def access_page(request: Request, session: dict = Depends(require_auth)):
 <p class="text-muted" style="max-width:760px;margin-top:8px">Every way a credential, a capability or an agent reaches something, and when it was last used.</p>
 <div class="card">
   <h2>Unused</h2>
-  <p class="text-muted" style="font-size:0.85rem">Things nothing uses. Check each before you delete it.</p>
+  <p class="text-muted" style="font-size:0.85rem;margin-bottom:12px">Things nothing uses. Check each before you delete it.</p>
   <p class="text-muted" id="access-unused-loading" role="status">Loading...</p>
   <div id="access-unused-credentials" style="display:none">
     <h3>Credentials nothing uses <span class="text-muted" id="access-unused-credentials-count"></span></h3>
-    <ul style="margin:0 0 12px;padding-left:18px" id="access-unused-credentials-list"></ul>
+    <ul class="access-unused-list" style="margin:0 0 12px;padding-left:18px" id="access-unused-credentials-list"></ul>
   </div>
   <div id="access-unused-connections" style="display:none">
     <h3>Capabilities nobody can use <span class="text-muted" id="access-unused-connections-count"></span></h3>
-    <ul style="margin:0 0 12px;padding-left:18px" id="access-unused-connections-list"></ul>
+    <ul class="access-unused-list" style="margin:0 0 12px;padding-left:18px" id="access-unused-connections-list"></ul>
   </div>
   <div id="access-unused-services" style="display:none">
     <h3>Services that look idle <span class="text-muted" id="access-unused-services-count"></span></h3>
-    <ul style="margin:0 0 12px;padding-left:18px" id="access-unused-services-list"></ul>
+    <ul class="access-unused-list" style="margin:0 0 12px;padding-left:18px" id="access-unused-services-list"></ul>
   </div>
   <div id="access-unused-left-behind" style="display:none">
     <h3>Left behind by a retired agent or service <span class="text-muted" id="access-unused-left-behind-count"></span></h3>
-    <ul style="margin:0 0 12px;padding-left:18px" id="access-unused-left-behind-list"></ul>
+    <ul class="access-unused-list" style="margin:0 0 12px;padding-left:18px" id="access-unused-left-behind-list"></ul>
   </div>
   <p class="empty" id="access-nothing-unused" style="display:none">Nothing is unused.</p>
 </div>

@@ -113,7 +113,8 @@ def test_a_credential_that_needs_a_permission_says_it_once(agents):
     assert text.count("workspace Main Place") == 1
     assert "through workspace Main Place" in text
     # One notice, one button, and the row keeps a quiet note of its own.
-    assert "Some of these need the Reference credentials permission before this agent can use them." in text
+    # One row needs it, so the notice says "this one", not "some of these".
+    assert "This needs the Reference credentials permission before this agent can use it." in text
     assert credentials.locator("button").count() == 1
     assert "Turn on Reference credentials" in text
     assert "needs permission" in text

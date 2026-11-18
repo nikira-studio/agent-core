@@ -84,17 +84,17 @@ def workspaces_page(request: Request, session: dict = Depends(require_auth)):
             toggle_btn = f"<button type='button' class='btn btn-sm btn-secondary' data-workspace-action='reactivate' data-workspace-id='{escape_html(p['id'])}'>Reactivate</button>"
         return (
             f"<tr>"
-            f"<td><code>{escape_html(p['id'])}</code></td>"
-            f"<td>{escape_html(p.get('name', ''))}</td>"
-            f"<td><span class='badge badge-{active_label}'>{active_label}</span></td>"
-            f"<td>{escape_html(p.get('owner_user_id', ''))}</td>"
-            f"<td>{active_memory_counts.get('workspace:' + p['id'], 0)}</td>"
-            f"<td class='agent-access-cell'>"
+            f"<td data-label='ID'><code>{escape_html(p['id'])}</code></td>"
+            f"<td data-label='Name'>{escape_html(p.get('name', ''))}</td>"
+            f"<td data-label='Status'><span class='badge badge-{active_label}'>{active_label}</span></td>"
+            f"<td data-label='Owner'>{escape_html(p.get('owner_user_id', ''))}</td>"
+            f"<td data-label='Memories'>{active_memory_counts.get('workspace:' + p['id'], 0)}</td>"
+            f"<td class='agent-access-cell' data-label='Agents'>"
             f"<div class='agent-read-list'><span class='access-label'>Read</span>{read_tags}</div>"
             f"<div class='agent-write-list'><span class='access-label'>Write</span>{write_tags}</div>"
             f"</td>"
-            f"<td>{local_dt(p.get('created_at'), style='date')}</td>"
-            f"<td><div class='actions-cell'>"
+            f"<td data-label='Created'>{local_dt(p.get('created_at'), style='date')}</td>"
+            f"<td data-label='Actions'><div class='actions-cell'>"
             f"<button type='button' class='btn btn-sm btn-secondary' data-workspace-action='edit' data-workspace-id='{p['id']}'>Edit</button>"
             f"{toggle_btn}"
             f"<button type='button' class='btn btn-sm btn-danger icon-delete-btn' data-workspace-action='purge' data-workspace-id='{p['id']}' data-memories='{memory_counts.get('workspace:' + p['id'], 0)}' data-tasks='{task_counts.get('workspace:' + p['id'], 0)}' data-credentials='{credential_counts.get('workspace:' + p['id'], 0)}' data-bindings='{binding_counts.get('workspace:' + p['id'], 0)}' title='Permanently delete' aria-label='Permanently delete'>{get_icon('delete')} Delete</button>"
@@ -527,7 +527,7 @@ def workspaces_page(request: Request, session: dict = Depends(require_auth)):
         <h2>Workspaces</h2>
         <div class="section-note">A workspace is one project's shared memory for the people and agents working on it. Create one per project or app. Give an agent access from Agents → Edit.</div>
       </div>
-      <table><thead><tr><th>ID</th><th>Name</th><th>Status</th><th>Owner</th><th>Memories</th><th>Agents (Read/Write)</th><th>Created</th><th class="actions-cell">Actions</th></tr></thead>
+      <table class="stack-phone"><thead><tr><th>ID</th><th>Name</th><th>Status</th><th>Owner</th><th>Memories</th><th>Agents (Read/Write)</th><th>Created</th><th class="actions-cell">Actions</th></tr></thead>
         <tbody>{rows or "<tr><td colspan=8 class=empty>No workspaces yet. Create one when agents and people need a shared place for memory and work.</td></tr>"}</tbody></table>
     </div>
 

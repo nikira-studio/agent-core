@@ -121,12 +121,13 @@ function accessMissingPermissions(items, fallbackPermission, fallbackLabel) {
 
 // One notice above a list, and one button: the list says once what its rows are missing, and the button turns
 // that permission on for every row that needs it. The rows keep a quiet "needs permission" of their own.
-function accessPermissionNotice(groups, noticeText, turnOn) {
+// The sentence is told how many rows need it and how many rows the list has, so it can say what is true.
+function accessPermissionNotice(groups, noticeText, turnOn, total) {
   if (!groups.length) return null;
   var box = accessEl('div', null, 'access-permission-notice');
   groups.forEach(function (group) {
     var line = accessEl('div', null, 'access-permission-line');
-    line.append(accessEl('span', noticeText(group.label)));
+    line.append(accessEl('span', noticeText(group.label, group.rows.length, total)));
     var button = accessEl('button', 'Turn on ' + group.label, 'btn btn-sm btn-secondary');
     button.type = 'button';
     button.addEventListener('click', function () {
@@ -139,13 +140,18 @@ function accessPermissionNotice(groups, noticeText, turnOn) {
 }
 
 // The notice above the agent's own lists: the agent is the one who cannot use them yet.
-function accessAgentNoticeText(label) {
+// One row that needs it, every row, or only some of them: the sentence says which.
+function accessAgentNoticeText(label, needed, total) {
+  if (needed === 1) return 'This needs the ' + label + ' permission before this agent can use it.';
+  if (needed === total) return 'These need the ' + label + ' permission before this agent can use them.';
   return 'Some of these need the ' + label + ' permission before this agent can use them.';
 }
 
 // The notice above a list of other people: they are the ones who cannot use it yet.
-function accessOthersNoticeText(label) {
-  return 'Some of these need the ' + label + ' permission before they can use it.';
+function accessOthersNoticeText(label, needed, total) {
+  if (needed === 1) return 'This agent needs the ' + label + ' permission before it can use it.';
+  if (needed === total) return 'These agents need the ' + label + ' permission before they can use it.';
+  return 'Some of these agents need the ' + label + ' permission before they can use it.';
 }
 
 // Turn one permission on for every row of a group that needs it, then show the list again.
@@ -438,7 +444,8 @@ function renderAgentCapabilities() {
         accessTurnOnGroup(group, function () {
           return { id: accessAgentId, name: accessAgentData.agent.display_name || accessAgentId };
         }, reloadAgentAccess);
-      }
+      },
+      list.length
     );
     if (notice) box.append(notice);
     list.forEach(function (c) {
@@ -556,17 +563,23 @@ function renderAgentCredentials() {
       accessTurnOnGroup(group, function () {
         return { id: accessAgentId, name: accessAgentData.agent.display_name || accessAgentId };
       }, reloadAgentAccess);
-    }
+    },
+    list.length
   );
   if (notice) box.append(notice);
   list.forEach(function (c) {
     var row = accessEl('div', null, 'access-row');
     row.append(accessEl('strong', c.name));
+    var reason = c.reason || '';
+    var owner = c.owner || '';
     // The owner is named once: when the reason already says "through <owner>", it says it again on its own.
-    if (c.reason !== 'through ' + c.owner) {
-      row.append(accessEl('span', c.owner, 'text-muted'));
+    // A person's own space is named by the reason too ("acts for <person>"), so it is not named twice.
+    var namesTheOwner = reason === 'through ' + owner;
+    var reasonIsTheOwner = reason.indexOf('acts for ') === 0 && owner.endsWith("'s personal space");
+    if (!namesTheOwner && !reasonIsTheOwner) {
+      row.append(accessEl('span', owner, 'text-muted'));
     }
-    row.append(accessEl('span', c.reason, 'text-muted'));
+    row.append(accessEl('span', reason, 'text-muted'));
     if (c.status === 'needs_permission') {
       row.append(accessEl('span', 'needs permission', 'text-muted access-needs'));
     } else {
@@ -868,7 +881,8 @@ function renderConnectionUsersNow() {
       accessTurnOnGroup(group, function (u) {
         return { id: u.agent_id, name: u.display_name };
       }, reloadConnectionUsers);
-    }
+    },
+    users.length
   );
   if (notice) box.append(notice);
   users.forEach(function (u) {
