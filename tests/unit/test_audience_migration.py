@@ -132,3 +132,43 @@ def test_a_seed_that_adds_reach_is_refused_too(before31, monkeypatch):
     # alex-svc is a service: the rule keeps it out, so reach is unchanged and the step is accepted ...
     _apply_schema_migrations(before31)
     assert snapshot.capture(before31)["see"]["alex-svc"] == []
+
+
+def test_an_agent_that_does_not_list_its_own_scope_does_not_reach_it_and_the_step_agrees(before31):
+    """build_agent_context adds an agent's own scope to its RECALL set only, never to its read scopes: an agent that does
+    not list agent:<id> cannot use a connection owned by it, before or after, so no row is needed and nothing differs."""
+    conn = before31
+    _agent(conn, "quiet", "alex", reads=["workspace:site"])  # does not list agent:quiet
+    _binding(conn, "b-quiet", "agent:quiet")
+    conn.commit()
+    frozen = snapshot.capture(conn, use_rule="1.3")
+    _apply_schema_migrations(conn)
+    now = snapshot.capture(conn)
+    assert "b-quiet" not in frozen["see"]["quiet"] and frozen["see"] == now["see"]
+    assert not [r for r in _rows(conn) if r[0] == "b-quiet"]
+
+
+def test_the_seed_follows_the_effective_scopes_even_if_a_build_adds_more_than_is_stored(before31, monkeypatch):
+    """If another install's effective read scopes ever exceed the stored list, the seed (which asks the frozen rule) still
+    names exactly the agents the 'before' snapshot says reach the connection, so the guard does not refuse the upgrade."""
+    from app.security import scope_enforcer
+
+    real = scope_enforcer.build_agent_context
+
+    def wider(agent):
+        context = real(agent)
+        own = f"agent:{agent['id']}"
+        if own not in context.read_scopes:
+            context.read_scopes = [*context.read_scopes, own]
+        return context
+
+    monkeypatch.setattr(scope_enforcer, "build_agent_context", wider)
+    conn = before31
+    _agent(conn, "quiet", "alex", reads=["workspace:site"])
+    _binding(conn, "b-quiet", "agent:quiet")
+    conn.commit()
+    frozen = snapshot.capture(conn, use_rule="1.3")
+    assert "b-quiet" in frozen["see"]["quiet"]  # the widened effective scopes reach it
+    _apply_schema_migrations(conn)  # must not be refused
+    now = snapshot.capture(conn)
+    assert frozen["see"] == now["see"] and ("b-quiet", "agent", "quiet", False) in _rows(conn)

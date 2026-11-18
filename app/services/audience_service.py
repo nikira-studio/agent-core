@@ -127,8 +127,19 @@ def seed_entries(conn, scope: str) -> list[dict]:
                 # An agent acting for someone else that lists this person's scope itself reached it before.
                 entries.append({"kind": "agent", "ref": agent["id"], "exclude": False})
         return entries
-    # agent:<id> and any other scope (shared, system): the agents that list it in their read scopes.
-    named = [a["id"] for a in agents if scope in _json_list(a.get("read_scopes_json"))]
+    # agent:<id> and any other scope (shared, system): the agents that reach it under the frozen 1.3 rule, that is by
+    # their EFFECTIVE read scopes (what the old enforcement used), not by what is stored. Today the two agree for these
+    # kinds (build_agent_context only adds the person's own scope and removes unreadable workspaces), but asking the same
+    # question the "before" snapshot asks means a difference between them can never refuse an upgrade.
+    from app.access_check import legacy_v13
+    from app.database import adopt_connection
+    from app.security.scope_enforcer import build_agent_context
+
+    named = []
+    with adopt_connection(conn):
+        for agent in agents:
+            if scope in legacy_v13.connector_read_scopes(build_agent_context(agent)):
+                named.append(agent["id"])
     return [{"kind": "agent", "ref": a, "exclude": False} for a in sorted(named)]
 
 
