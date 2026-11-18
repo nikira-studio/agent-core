@@ -406,7 +406,7 @@ def credentials_page(request: Request, session: dict = Depends(require_auth)):
             <input type="text" id="credential-label" placeholder="e.g. Service token" autocomplete="off">
           </div>
           <div class="form-group">
-            <label>Where it lives *</label>
+            <label>Owner *</label>
             <select id="credential-scope" required>
               <option value="">Select where it lives...</option>
               {scope_options}
@@ -442,7 +442,7 @@ def credentials_page(request: Request, session: dict = Depends(require_auth)):
             <input type="text" id="edit-credential-label" autocomplete="off">
           </div>
           <div class="form-group">
-            <label>Where it lives</label>
+            <label>Owner</label>
             <select id="edit-credential-scope" required>
               {scope_options}
             </select>

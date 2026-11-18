@@ -291,3 +291,13 @@ def test_the_old_address_of_the_services_list_still_works(world):
     r = world["client"].get("/agents?show=services", follow_redirects=False)
     assert r.status_code == 302
     assert r.headers["location"] == "/services"
+
+
+def test_the_credential_dialogs_call_the_field_owner(test_client, clean_db):
+    from app.services.auth_service import create_session, create_user
+
+    create_user("admin", "admin@test.local", "testpassword123", "Admin", "admin")
+    test_client.cookies.set("session_token", create_session("admin", channel="dashboard")["session_id"])
+    html = test_client.get("/credentials").text
+    assert "Where it lives" not in html
+    assert html.count("<label>Owner") >= 2

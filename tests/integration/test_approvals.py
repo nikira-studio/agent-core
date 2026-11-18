@@ -215,3 +215,36 @@ def test_status_and_effects_commit_together(test_client, admin_token, monkeypatc
     r = test_client.post(f"/api/approvals/{approval_id}/decide", json={"approve": True}, headers=csrf_headers(test_client))
     assert r.json()["data"]["approval"]["status"] == "failed"
     assert agent_service.get_agent_by_id("target-agent")["description"] != "must not stick"
+
+
+def test_one_approval_creates_a_service_and_grants_it_two_secrets_without_a_key(test_client, admin_token):
+    """A new container's login in one click: the service, and a read-only grant on each secret that already exists.
+    Approving creates no key (a person adds it afterwards under the service's Keys)."""
+    from app.services import agent_service, credential_service
+
+    key = _setup(test_client, admin_token)
+    first = credential_service.create_credential("workspace:ops", "gateway-user", "u-value")
+    second = credential_service.create_credential("workspace:ops", "gateway-pass", "p-value")
+    service_id = "secret-gateway-runtime"
+    r = _propose(test_client, key, [
+        {"name": "agent.create", "params": {
+            "id": service_id, "display_name": "Container: gateway", "kind": "service", "capabilities": ["credentials_resolve"]}},
+        {"name": "credential_grant.create", "params": {"consumer_agent_id": service_id, "entry_id": first["id"], "allow_write": False}},
+        {"name": "credential_grant.create", "params": {"consumer_agent_id": service_id, "entry_id": second["id"], "allow_write": False}},
+    ], title="Create the gateway service and grant it two secrets")
+    assert r.status_code == 201, r.text
+    approval_id = r.json()["data"]["approval"]["id"]
+    assert agent_service.get_agent_by_id(service_id) is None  # nothing before a person approves
+
+    _browser_admin(test_client)
+    done = test_client.post(f"/api/approvals/{approval_id}/decide", json={"approve": True}, headers=csrf_headers(test_client))
+    assert done.status_code == 200, done.text
+    assert done.json()["data"]["approval"]["status"] == "done"
+
+    service = agent_service.get_agent_by_id(service_id)
+    assert service["kind"] == "service"
+    grants = test_client.get(f"/api/credential-consumers/grants?consumer_agent_id={service_id}").json()["data"]["grants"]
+    assert sorted(g["entry_id"] for g in grants) == sorted([first["id"], second["id"]])
+    assert all(not g["allow_write"] for g in grants)
+    assert agent_service.list_agent_keys(service_id) == []  # no key until a person adds one
+    assert "u-value" not in done.text and "p-value" not in done.text
