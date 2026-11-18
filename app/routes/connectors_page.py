@@ -206,6 +206,19 @@ def _render_adapter_cards(adapter_entries: list[dict], ctx) -> str:
     return adapter_cards
 
 
+
+_MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+
+
+def _short_date(value) -> str:
+    """"2 Nov" from a stored UTC time ("2026-11-02 09:46:23"): the day a failure was last seen."""
+    text = str(value or "")[:10]
+    try:
+        year, month, day = (int(part) for part in text.split("-"))
+        return f"{day} {_MONTHS[month - 1]}"
+    except (ValueError, IndexError):
+        return "earlier"
+
 @router.get("/connectors")
 async def connectors_page(request: Request, session: dict = Depends(require_auth)):
     ctx = build_user_context(session)
@@ -236,6 +249,8 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
     connection_names = {b["id"]: (b.get("name") or b["id"]) for b in all_bindings}
     # Indexed once for the connection table below; see failing_actions_by_binding.
     failing_by_binding = connector_service.failing_actions_by_binding()
+    # Failures that are not recent are history: shown as a quiet line under the status, never as the status.
+    past_by_binding = connector_service.past_failures_by_binding()
     visible_bindings = [b for b in all_bindings if enforcer.can_read(b["scope"])]
     connector_type_count = len(connector_types)
     visible_binding_count = len(visible_bindings)
@@ -403,6 +418,16 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
                 + (f" (+{len(failing) - 1} more)" if len(failing) > 1 else "")
             )
         # A connection that allows less than its capability says so under the capability's name.
+        past_note = ""
+        past = [] if failing else past_by_binding.get(b["id"], [])
+        if past:
+            latest = max(past, key=lambda stat: stat.get("last_failed_at") or "")
+            past_note = (
+                "<div class='form-hint' style='margin:2px 0 0'>"
+                + escape_html(f"{latest['action']} last failed {_short_date(latest.get('last_failed_at'))}")
+                + (f" (+{len(past) - 1} more)" if len(past) > 1 else "")
+                + "</div>"
+            )
         actions_note = ""
         if ct and (b.get("actions_mode") or "all") != "all":
             allowed_n = len(connector_service.effective_actions(ct, b))
@@ -443,7 +468,7 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
           <td style="{text_style}">{escape_html(b.get("name", ""))}</td>
           <td data-label="Capability" style="{text_style}">{escape_html(ct.get("display_name", "") if ct else b.get("connector_type_id", ""))}{actions_note}</td>
           <td data-label="Owner" style="{text_style}" title="{escape_html(owner_words)}">{escape_html(owner_words)}</td>
-          <td data-label="Status" class="{status_cls}" style="{text_style}"{(' title="' + escape_html(b["last_test_note"]) + '"') if (b.get("last_test_note") and not b.get("last_error")) else ((' title="' + escape_html(b["last_error"]) + '"') if b.get("last_error") else "")}>{escape_html(status_text)}</td>
+          <td data-label="Status" class="{status_cls}" style="{text_style}"{(' title="' + escape_html(b["last_test_note"]) + '"') if (b.get("last_test_note") and not b.get("last_error")) else ((' title="' + escape_html(b["last_error"]) + '"') if b.get("last_error") else "")}>{escape_html(status_text)}{past_note}</td>
           <td class='actions-cell'>
             {oauth_button}
             <button type='button' class='btn btn-sm btn-secondary' data-binding-edit="{escape_html(b["id"])}">Edit</button>

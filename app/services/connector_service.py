@@ -2157,6 +2157,8 @@ def execute_binding_action_with_logging(
 # so one bad call out of two does not read as a broken connector.
 FAILING_ACTION_THRESHOLD = 0.2
 FAILING_ACTION_MIN_CALLS = 5
+# An action is "failing" only while it has failed lately: a failure older than this is history, not a state.
+FAILING_ACTION_RECENT_DAYS = 7
 
 FAILURE_CATEGORIES = frozenset({
     "caller_validation", "credential", "remote_service", "network", "rate_limited", "unknown",
@@ -2264,6 +2266,16 @@ def log_execution(
     return execution_id
 
 
+def is_failing_action(stat: dict) -> bool:
+    """The one rule for "this action is failing": it has failed within the last week, and either its latest run
+    failed or it meets the rate rule (at least a fifth of at least five calls in the window failed). A failure older
+    than that week, with nothing failing since, is history and is reported as such, not as a state."""
+    if not stat.get("recent_failure"):
+        return False
+    rate_rule = stat["failure_rate"] >= FAILING_ACTION_THRESHOLD and stat["calls"] >= FAILING_ACTION_MIN_CALLS
+    return bool(stat.get("last_run_failed")) or rate_rule
+
+
 def failing_actions_by_binding(days: int = 30) -> dict[str, list[dict]]:
     """Failing actions for every binding in one query.
 
@@ -2273,9 +2285,34 @@ def failing_actions_by_binding(days: int = 30) -> dict[str, list[dict]]:
     """
     grouped: dict[str, list[dict]] = {}
     for stat in action_health(days=days):
-        if stat["failure_rate"] >= FAILING_ACTION_THRESHOLD and stat["calls"] >= FAILING_ACTION_MIN_CALLS:
+        if is_failing_action(stat):
             grouped.setdefault(stat["binding_id"], []).append(stat)
     return grouped
+
+
+def past_failures_by_binding(days: int = 30) -> dict[str, list[dict]]:
+    """Actions that failed often enough in the window to have counted, but not lately: history for the page to show."""
+    grouped: dict[str, list[dict]] = {}
+    for stat in action_health(days=days):
+        if (
+            not is_failing_action(stat)
+            and stat["failures"]
+            and stat["failure_rate"] >= FAILING_ACTION_THRESHOLD
+            and stat["calls"] >= FAILING_ACTION_MIN_CALLS
+        ):
+            grouped.setdefault(stat["binding_id"], []).append(stat)
+    return grouped
+
+
+def _caller_mistake_filter(alias: str) -> str:
+    """SQL that leaves out runs where the caller named an action the connection does not have or does not allow
+    ("Unknown action", "Action not supported", a disabled action): a wrong name is not the connection failing."""
+    return (
+        f"NOT ({alias}.result_status != 'success' AND ("
+        f"COALESCE({alias}.error_message, '') LIKE 'Unknown action%' "
+        f"OR COALESCE({alias}.error_message, '') LIKE 'Action not supported%' "
+        f"OR COALESCE({alias}.error_code, '') IN ('INVALID_ACTION', 'DISABLED_ACTION')))"
+    )
 
 
 def action_health(binding_id: Optional[str] = None, days: int = 30) -> list[dict]:
@@ -2286,7 +2323,11 @@ def action_health(binding_id: Optional[str] = None, days: int = 30) -> list[dict
     deployment one binding's list action had been failing 81 times in 216 calls
     for two months with nothing reporting it.
     """
-    conditions = ["executed_at >= datetime('now', ?)"]
+    conditions = [
+        "ce.executed_at >= datetime('now', ?)",
+        # A caller guessing an action name is not the connection failing: those runs are not counted.
+        _caller_mistake_filter("ce"),
+    ]
     params: list = [f"-{max(days, 1)} days"]
     if binding_id:
         conditions.append("ce.binding_id = ?")
@@ -2299,14 +2340,21 @@ def action_health(binding_id: Optional[str] = None, days: int = 30) -> list[dict
                    COUNT(*) AS calls,
                    SUM(CASE WHEN ce.result_status != 'success' THEN 1 ELSE 0 END) AS failures,
                    GROUP_CONCAT(DISTINCT CASE WHEN ce.result_status != 'success' THEN ce.failure_category END) AS failure_categories,
-                   MAX(ce.executed_at) AS last_called_at
+                   MAX(ce.executed_at) AS last_called_at,
+                   MAX(CASE WHEN ce.result_status != 'success' THEN ce.executed_at END) AS last_failed_at,
+                   MAX(CASE WHEN ce.result_status != 'success' AND ce.executed_at >= datetime('now', ?) THEN 1 ELSE 0 END)
+                       AS recent_failure,
+                   (SELECT x.result_status FROM connector_executions x
+                     WHERE x.binding_id = ce.binding_id AND x.action = ce.action
+                       AND {_caller_mistake_filter('x')}
+                     ORDER BY x.executed_at DESC, x.rowid DESC LIMIT 1) AS last_status
             FROM connector_executions ce
             LEFT JOIN connector_bindings cb ON cb.id = ce.binding_id
             WHERE {' AND '.join(conditions)}
             GROUP BY ce.binding_id, ce.action
             ORDER BY failures DESC, calls DESC
             """,
-            params,
+            [f"-{FAILING_ACTION_RECENT_DAYS} days", *params],
         ).fetchall()
 
     health = []
@@ -2323,6 +2371,9 @@ def action_health(binding_id: Optional[str] = None, days: int = 30) -> list[dict
                 "failure_rate": round(failures / calls, 3) if calls else 0.0,
                 "failure_categories": sorted(filter(None, (row["failure_categories"] or "").split(","))),
                 "last_called_at": row["last_called_at"],
+                "last_failed_at": row["last_failed_at"],
+                "recent_failure": bool(row["recent_failure"]),
+                "last_run_failed": row["last_status"] is not None and row["last_status"] != "success",
             }
         )
     return health
