@@ -128,10 +128,19 @@ class EffectiveAuthority:
     def filter_scopes(self, resource_type: str, operation: str, scopes: list[str]) -> list[str]:
         return [scope for scope in scopes if self.can(resource_type, operation, scope=scope)]
 
+    def can_use_binding(self, binding: dict) -> bool:
+        """May this caller see and use this connection? An agent: it is in the connection's audience (see
+        audience_service) and holds the See permission. A person or token: the connection's scope is one they read."""
+        if not self.has_capability("connectors_read"):
+            return False
+        if self.context.actor_type == "agent" and self.context.usable_binding_ids is not None:
+            return binding["id"] in self.context.usable_binding_ids
+        return self.connector_enforcer().can_read(binding["scope"])
+
     def can_binding_action(self, binding_id: str, action: str, *, scope: str) -> bool:
         if not self.has_capability("connectors_execute"):
             return False
-        return self.can("connector", "read", scope=scope)
+        return self.can_use_binding({"id": binding_id, "scope": scope})
 
     def safe_summary(self) -> dict:
         """Return only information safe for an authenticated caller to inspect."""

@@ -272,6 +272,9 @@ def delete_workspace_hard(workspace_id: str) -> bool:
     scope = f"workspace:{normalized_id}"
     with get_db() as conn:
         cleanup_service.delete_scope_data(conn, scope)
+        from app.services import audience_service
+
+        audience_service.remove_references(conn, "workspace", normalized_id)
         cursor = conn.execute("DELETE FROM workspaces WHERE id = ?", (normalized_id,))
         conn.commit()
         return cursor.rowcount > 0

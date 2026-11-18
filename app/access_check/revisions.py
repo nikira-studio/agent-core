@@ -32,4 +32,7 @@ def _kept_as_agent(before: dict, after: dict) -> list[str]:
 # Revision 30 changes how entries are listed, not what any of them may do: nothing is allowed to differ.
 CHECKS: dict[int, RevisionCheck] = {
     30: RevisionCheck(allowed=(), validate=_kinds_match_the_rule, notes=_kept_as_agent),
+    # Revision 31 adds the audience list. "Before" is every agent's reach under the frozen 1.3 rule; "after" is the new
+    # rule over the seeded lists. Nothing may differ: not one agent x connection cell, see or run.
+    31: RevisionCheck(allowed=(), before={"use_rule": "1.3"}),
 }

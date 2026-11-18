@@ -165,6 +165,12 @@ def create_agent(
                 "UPDATE agents SET api_key_hash = ? WHERE id = ?",
                 (hashlib.sha256(secrets.token_bytes(32)).hexdigest(), normalized_id),
             )
+        if kind == "agent" and not inherit_user_bindings:
+            # A new agent starts without its person's connections: excluded from every "all of this person's agents"
+            # connection until the person includes it (the old default of the per-agent switch).
+            from app.services import audience_service
+
+            audience_service.exclude_new_agent(conn, normalized_id, default_user_id)
         conn.commit()
 
         agent = {
@@ -512,6 +518,14 @@ def update_agent(
             f"UPDATE agents SET {', '.join(updates)} WHERE id = ?",
             params,
         )
+        if inherit_user_bindings is not None and target_kind == "agent":
+            # The old per-agent switch, in terms of the audience: off excludes the agent from its person's
+            # "all my agents" connections, on removes that exclusion.
+            from app.services import audience_service
+
+            audience_service.set_agent_inherit(
+                conn, agent_id, current.get("default_user_id") or current.get("owner_user_id"), bool(inherit_user_bindings)
+            )
         conn.commit()
         return cursor.rowcount > 0
 
@@ -593,6 +607,9 @@ def delete_agent_hard(agent_id: str) -> bool:
         )
         conn.execute("DELETE FROM agent_executions WHERE agent_id = ?", (normalized_id,))
         conn.execute("DELETE FROM agent_keys WHERE agent_id = ?", (normalized_id,))
+        from app.services import audience_service
+
+        audience_service.remove_references(conn, "agent", normalized_id)
         cursor = conn.execute("DELETE FROM agents WHERE id = ?", (normalized_id,))
         conn.commit()
         return cursor.rowcount > 0

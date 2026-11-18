@@ -137,7 +137,9 @@ def build_agent_context(agent: dict) -> "RequestContext":
 
     active_workspace_ids = readable_workspace_ids | writable_workspace_ids
 
-    return RequestContext(
+    from app.services import audience_service
+
+    context = RequestContext(
         actor_type="agent",
         actor_id=agent["id"],
         user_id=user_id,
@@ -151,3 +153,6 @@ def build_agent_context(agent: dict) -> "RequestContext":
         principal_user_scope=principal_scope,
         inherit_user_bindings=bool(agent.get("inherit_user_bindings")),
     )
+    # Which connections the agent may use comes from their audience lists, not from the connection's scope.
+    context.usable_binding_ids = audience_service.usable_binding_ids(agent, context)
+    return context

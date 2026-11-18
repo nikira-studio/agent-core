@@ -199,15 +199,14 @@ def list_bindings(
     enabled: Optional[bool] = None,
     ctx: EffectiveAuthority = Depends(get_request_context),
 ):
-    enforcer = ctx.connector_enforcer()
-    if scope and not enforcer.can_read(scope):
-        return error_response("SCOPE_DENIED", "Access denied to this scope", 403)
     bindings = connector_service.list_bindings(
         scope=scope,
         connector_type_id=connector_type_id,
         enabled=enabled,
     )
-    allowed = [b for b in bindings if enforcer.can_read(b["scope"])]
+    allowed = [b for b in bindings if ctx.can_use_binding(b)]
+    if scope and not allowed and not ctx.connector_enforcer().can_read(scope):
+        return error_response("SCOPE_DENIED", "Access denied to this scope", 403)
     return success_response({"bindings": allowed, "total": len(allowed)})
 
 
@@ -349,8 +348,7 @@ def get_binding(
     binding = connector_service.get_binding(binding_id)
     if not binding:
         return error_response("NOT_FOUND", "Connection not found", 404)
-    enforcer = ctx.connector_enforcer()
-    if not enforcer.can_read(binding["scope"]):
+    if not ctx.can_use_binding(binding):
         return error_response("SCOPE_DENIED", "Access denied to this connection", 403)
     return success_response({"binding": binding})
 
@@ -497,8 +495,7 @@ async def test_binding(
     binding = connector_service.get_binding(binding_id)
     if not binding:
         return error_response("NOT_FOUND", "Connection not found", 404)
-    enforcer = ctx.connector_enforcer()
-    if not enforcer.can_read(binding["scope"]):
+    if not ctx.can_use_binding(binding):
         return error_response("SCOPE_DENIED", "Access denied to this connection", 403)
     result = await asyncio.to_thread(connector_service.test_binding, binding_id)
     audit_service.write_event(
@@ -559,8 +556,7 @@ def list_binding_executions(
     binding = connector_service.get_binding(binding_id)
     if not binding:
         return error_response("NOT_FOUND", "Connection not found", 404)
-    enforcer = ctx.connector_enforcer()
-    if not enforcer.can_read(binding["scope"]):
+    if not ctx.can_use_binding(binding):
         return error_response("SCOPE_DENIED", "Access denied to this connection", 403)
     limit = max(1, min(limit, 200))
     offset = max(0, offset)
@@ -583,8 +579,7 @@ async def get_binding_tools(
     binding = connector_service.get_binding(binding_id)
     if not binding:
         return error_response("NOT_FOUND", "Connection not found", 404)
-    enforcer = ctx.connector_enforcer()
-    if not enforcer.can_read(binding["scope"]):
+    if not ctx.can_use_binding(binding):
         return error_response("SCOPE_DENIED", "Access denied to this connection", 403)
 
     connector_type = connector_service.get_connector_type(binding["connector_type_id"])
@@ -623,14 +618,15 @@ def connector_summary(
     ctx: EffectiveAuthority = Depends(get_request_context),
 ):
     enforcer = ctx.connector_enforcer()
-    if scope and not enforcer.can_read(scope):
-        return error_response("SCOPE_DENIED", "Access denied to this scope", 403)
     summary = connector_service.build_capability_summary(
         enforcer,
         connector_type_id=connector_type_id,
         scope=scope,
         enabled_only=enabled_only,
+        authority=ctx,
     )
+    if scope and not summary.get("visible_bindings") and not enforcer.can_read(scope):
+        return error_response("SCOPE_DENIED", "Access denied to this scope", 403)
     return success_response(summary)
 
 
@@ -647,16 +643,14 @@ async def connector_health_check(
     # capability as one test, and one request tests at most HEALTH_CHECK_LIMIT bindings.
     if not ctx.has_capability("connectors_execute"):
         return error_response("CAPABILITY_DENIED", "This operation requires the connectors_execute capability", 403)
-    enforcer = ctx.connector_enforcer()
-    if body.scope and not enforcer.can_read(body.scope):
-        return error_response("SCOPE_DENIED", "Access denied to this scope", 403)
-
     bindings = connector_service.list_bindings(
         scope=body.scope,
         connector_type_id=body.connector_type_id,
         enabled=True,
     )
-    all_visible = [binding for binding in bindings if enforcer.can_read(binding["scope"])]
+    all_visible = [binding for binding in bindings if ctx.can_use_binding(binding)]
+    if body.scope and not all_visible and not ctx.connector_enforcer().can_read(body.scope):
+        return error_response("SCOPE_DENIED", "Access denied to this scope", 403)
     # Never-tested and longest-untested first, so repeating the check reaches the rest.
     all_visible.sort(key=lambda binding: binding.get("last_tested_at") or "")
     visible = all_visible[:HEALTH_CHECK_LIMIT]
@@ -724,15 +718,14 @@ async def get_connector_type_tools(
         binding = connector_service.get_binding(binding_id)
         if not binding or binding["connector_type_id"] != connector_type_id:
             return error_response("NOT_FOUND", "Connection not found", 404)
-        if not ctx.connector_enforcer().can_read(binding["scope"]):
+        if not ctx.can_use_binding(binding):
             return error_response("SCOPE_DENIED", "Access denied to this connection", 403)
         disabled = connector_service.connection_disabled_actions(ct, binding)
     elif ctx.actor_type == "agent" and not ctx.is_admin:
         # An agent is shown only what one of its own connections can run.
-        enforcer = ctx.connector_enforcer()
         usable = [
             b for b in connector_service.list_bindings(connector_type_id=connector_type_id, enabled=True)
-            if enforcer.can_read(b["scope"])
+            if ctx.can_use_binding(b)
         ]
         disabled = connector_service.listing_disabled_actions(ct, usable)
     if ctx.actor_type == "agent" and not ctx.is_admin:

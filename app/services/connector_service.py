@@ -668,7 +668,7 @@ def credential_reach(binding: dict) -> dict:
     can_fetch: list[str] = []
     for agent in agent_service.list_agents(is_active=True):
         context = build_agent_context(agent)
-        if not EffectiveAuthority(context=context).connector_enforcer().can_read(binding["scope"]):
+        if not EffectiveAuthority(context=context).can_use_binding(binding):
             continue
         name = agent.get("display_name") or agent["id"]
         users.append(name)
@@ -805,7 +805,12 @@ def create_binding(
     endpoint_url_override: Optional[str] = None,
     actions_mode: Optional[str] = None,
     disabled_actions: Optional[list[str]] = None,
+    audience: Optional[list[dict]] = None,
 ) -> dict:
+    """Create a connection. ``scope`` is its owner. Who may use it is ``audience`` when given (already validated by the
+    caller); otherwise the audience is what the scope always meant (see audience_service.seed_entries)."""
+    from app.services import audience_service
+
     normalized_scope = _normalize_scope(scope)
     config_data = _parse_json_object(config_json)
     if config_json is not None and config_data is None:
@@ -845,11 +850,18 @@ def create_binding(
                 actions_mode, json.dumps(narrowed) if narrowed else None,
             ),
         )
+        if audience is None:
+            audience_service.seed(conn, binding_id, normalized_scope)
+        elif audience_service.table_exists(conn):
+            audience_service.replace(conn, binding_id, audience)
         conn.commit()
     return get_binding(binding_id)
 
 
 def update_binding(binding_id: str, **fields) -> bool:
+    """Update a connection. Changing ``scope`` (the owner) without an ``audience`` gives it the audience that scope has
+    always meant, as when it was created; an explicit ``audience`` (already validated) replaces the list."""
+    audience = fields.pop("audience", None)
     allowed = (
         "name",
         "scope",
@@ -935,17 +947,28 @@ def update_binding(binding_id: str, **fields) -> bool:
         params.append(mode)
         updates.append("actions_disabled_json = ?")
         params.append(json.dumps(narrowed) if narrowed else None)
-    if not updates:
+    if not updates and audience is None:
         return False
-    updates.append("updated_at = CURRENT_TIMESTAMP")
-    params.append(binding_id)
+    from app.services import audience_service
+
     with get_db() as conn:
-        cursor = conn.execute(
-            f"UPDATE connector_bindings SET {', '.join(updates)} WHERE id = ?",
-            params,
-        )
+        changed = False
+        if updates:
+            updates.append("updated_at = CURRENT_TIMESTAMP")
+            cursor = conn.execute(
+                f"UPDATE connector_bindings SET {', '.join(updates)} WHERE id = ?",
+                [*params, binding_id],
+            )
+            changed = cursor.rowcount > 0
+        if changed or audience is not None:
+            if audience is not None:
+                if audience_service.table_exists(conn):
+                    audience_service.replace(conn, binding_id, audience)
+                    changed = True
+            elif fields.get("scope") is not None:
+                audience_service.seed(conn, binding_id, _normalize_scope(fields["scope"]))
         conn.commit()
-        return cursor.rowcount > 0
+        return changed
 
 
 def resolve_authorized_binding(
@@ -969,7 +992,7 @@ def resolve_authorized_binding(
             continue
         allowed = (
             can_run_binding_action(authority, binding, connector_type or {}, action)
-            if action else authority.can("connector", "read", scope=binding["scope"])
+            if action else authority.can_use_binding(binding)
         )
         if allowed:
             visible.append(binding)
@@ -997,6 +1020,10 @@ def resolve_authorized_binding(
 
 def delete_binding(binding_id: str) -> bool:
     with get_db() as conn:
+        from app.services import audience_service
+
+        if audience_service.table_exists(conn):
+            conn.execute("DELETE FROM connector_binding_audience WHERE binding_id = ?", (binding_id,))
         conn.execute(
             "DELETE FROM connector_executions WHERE binding_id = ?", (binding_id,)
         )
@@ -1418,6 +1445,7 @@ def build_capability_summary(
     connector_type_id: Optional[str] = None,
     scope: Optional[str] = None,
     enabled_only: bool = True,
+    authority=None,
 ) -> dict:
     from app.services import credential_service
 
@@ -1432,7 +1460,17 @@ def build_capability_summary(
         ]
 
     visible_bindings = []
-    if scope:
+    if authority is not None and not getattr(enforcer, "is_admin", False):
+        # What a caller sees is what its audience entries (or, for a person, its scopes) allow it to use.
+        visible_bindings = [b for b in list_bindings(scope=scope or None, enabled=enabled_filter) if authority.can_use_binding(b)]
+        if scope and not visible_bindings and not enforcer.can_read(scope):
+            return {
+                "connectors": [],
+                "total_connectors": 0,
+                "visible_bindings": 0,
+                "usable_bindings": 0,
+            }
+    elif scope:
         if not enforcer.can_read(scope):
             return {
                 "connectors": [],

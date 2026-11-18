@@ -12,7 +12,7 @@ from jwt.exceptions import InvalidTokenError
 from app.branding import APP_ISSUER
 from app.database import get_db
 from app.models.enums import USER_ROLES
-from app.services import cleanup_service
+from app.services import audience_service, cleanup_service
 from app.time_utils import parse_utc_datetime, utc_now, utc_now_iso
 
 logger = logging.getLogger(__name__)
@@ -297,6 +297,7 @@ def _delete_user(user_id: str) -> tuple[bool, str]:
         for workspace in workspace_rows:
             workspace_scope = f"workspace:{workspace['id']}"
             cleanup_service.delete_scope_data(conn, workspace_scope)
+            audience_service.remove_references(conn, "workspace", workspace["id"])
             conn.execute("DELETE FROM workspaces WHERE id = ?", (workspace["id"],))
 
         for agent in agent_rows:
@@ -309,9 +310,11 @@ def _delete_user(user_id: str) -> tuple[bool, str]:
                 """,
                 (agent["id"], agent["id"], agent["id"]),
             )
+            audience_service.remove_references(conn, "agent", agent["id"])
             conn.execute("DELETE FROM agents WHERE id = ?", (agent["id"],))
 
         cleanup_service.delete_scope_data(conn, f"user:{user_id}")
+        audience_service.remove_references(conn, "person_agents", user_id)
         # Grants this user held on workspaces they do not own, and grants they
         # issued on workspaces that outlive them. Both columns reference
         # users(id) without a cascade, so either one left behind aborts the

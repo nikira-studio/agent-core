@@ -537,7 +537,7 @@ def create_schema(conn) -> None:
     _seed_connector_types(conn)
 
 
-_GUARDED_REVISIONS = frozenset({30})
+_GUARDED_REVISIONS = frozenset({30, 31})
 
 
 def _apply_schema_migrations(conn) -> None:
@@ -580,6 +580,7 @@ def _apply_schema_migrations(conn) -> None:
         (28, "connection-action-limits", _migrate_028_connection_action_limits),
         (29, "several-keys-per-agent", _migrate_029_agent_keys),
         (30, "agent-or-service-kind", _migrate_030_agent_kind),
+        (31, "connection-audience-lists", _migrate_031_connection_audience),
     )
     applied = {
         row["revision"]
@@ -1650,6 +1651,34 @@ def _migrate_019_trusted_device_sessions(conn) -> None:
     )
     conn.execute("DROP TABLE sessions")
     conn.execute("ALTER TABLE sessions_rebuilt RENAME TO sessions")
+
+
+def _migrate_031_connection_audience(conn) -> None:
+    """Who may use a connection becomes a list (1.4.0).
+
+    Until now a connection had one scope and an agent could use it when it read that scope (minus its person's own
+    scope unless a per-agent switch was on). Now a connection has an audience list beside its owner scope. Each
+    existing connection's list is seeded from its scope so that every agent keeps exactly the reach it had (a named
+    agent, a workspace, "all of a person's agents" with an exclusion for each agent whose switch was off). Runs under the
+    access check, which compares every agent's see and run reach under the old rule with the new one and refuses the
+    step on any difference."""
+    from app.services import audience_service
+
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS connector_binding_audience (
+            binding_id TEXT NOT NULL REFERENCES connector_bindings(id) ON DELETE CASCADE,
+            kind TEXT NOT NULL CHECK (kind IN ('agent', 'workspace', 'person_agents')),
+            ref TEXT NOT NULL,
+            exclude INTEGER NOT NULL DEFAULT 0 CHECK (exclude IN (0, 1)),
+            created_at TEXT NOT NULL,
+            PRIMARY KEY (binding_id, kind, ref)
+        )
+        """
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_binding_audience_ref ON connector_binding_audience(kind, ref)")
+    for row in conn.execute("SELECT id, scope FROM connector_bindings").fetchall():
+        audience_service.seed(conn, row["id"], row["scope"])
 
 
 def _migrate_030_agent_kind(conn) -> None:

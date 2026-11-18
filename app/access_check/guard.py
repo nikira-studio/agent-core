@@ -36,6 +36,8 @@ class RevisionCheck:
     """What a revision declares: the paths that may differ, and extra checks over the two snapshots."""
 
     allowed: tuple[str, ...] = ()
+    # How "before" is computed, when the previous rule is not the current code's (for example use_rule="1.3").
+    before: dict = field(default_factory=dict)
     validate: Callable[[dict, dict], list[str]] = field(default=lambda before, after: [])
     notes: Callable[[dict, dict], list[str]] = field(default=lambda before, after: [])
 
@@ -116,7 +118,7 @@ def run_guarded(conn, revision: int, name: str, migrate: Callable, check: Revisi
     conn.execute("BEGIN IMMEDIATE")
     before = after = None
     try:
-        before = snapshot.capture(conn)
+        before = snapshot.capture(conn, **check.before)
         migrate(conn)
         after = snapshot.capture(conn)
         diffs = compare.differences(before, after, check.allowed)

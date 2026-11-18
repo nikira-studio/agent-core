@@ -131,7 +131,7 @@ def _capture(conn, helper_rule: str = "current", use_rule: str = "current") -> d
         else:
             see[agent_id] = sorted(
                 bid for bid, b in bindings.items()
-                if b["enabled"] and authority.can("connector", "read", scope=b["scope"])
+                if b["enabled"] and authority.can_use_binding({"id": bid, "scope": b["scope"]})
             )
             run[agent_id] = sorted(
                 bid for bid, b in bindings.items()

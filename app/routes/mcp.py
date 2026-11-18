@@ -2545,46 +2545,23 @@ async def _run_custom_mcp_tool(body: dict, ctx: EffectiveAuthority):
     elif tool == "connectors_bindings_list":
         from app.services import connector_service
 
-        enforcer = ctx.connector_enforcer()
         scope = params.get("scope")
-        if scope:
-            if not enforcer.can_read(scope):
-                return _mcp_error("SCOPE_DENIED", "Access denied to this scope", 403)
         # `enabled_only` restricts the listing; it is not a tri-state filter.
         # False means "include disabled bindings too", so the enabled filter must
         # be dropped entirely rather than inverted to enabled=False, which would
         # return ONLY disabled bindings.
         enabled_filter = True if params.get("enabled_only", True) else None
-        if ctx.is_admin:
-            bindings = connector_service.list_bindings(
-                scope=scope,
-                connector_type_id=params.get("connector_type_id"),
-                enabled=enabled_filter,
-            )
-        else:
-            allowed = enforcer.filter_readable_scopes(ctx.connector_read_scopes)
-            effective_scope = scope if (scope and enforcer.can_read(scope)) else None
-            if effective_scope:
-                bindings = connector_service.list_bindings(
-                    scope=effective_scope,
-                    connector_type_id=params.get("connector_type_id"),
-                    enabled=enabled_filter,
-                )
-            else:
-                all_bindings = []
-                for s in allowed:
-                    all_bindings.extend(
-                        connector_service.list_bindings(
-                            scope=s,
-                            connector_type_id=params.get("connector_type_id"),
-                            enabled=enabled_filter,
-                        )
-                    )
-                all_bindings.sort(key=lambda b: b.get("created_at", ""), reverse=True)
-                bindings = all_bindings[: params.get("limit", 50)]
-        if ctx.is_admin and scope is None:
-            bindings.sort(key=lambda b: b.get("created_at", ""), reverse=True)
-            bindings = bindings[: params.get("limit", 50)]
+        bindings = connector_service.list_bindings(
+            scope=scope,
+            connector_type_id=params.get("connector_type_id"),
+            enabled=enabled_filter,
+        )
+        if not ctx.is_admin:
+            bindings = [b for b in bindings if ctx.can_use_binding(b)]
+            if scope and not bindings and not ctx.connector_enforcer().can_read(scope):
+                return _mcp_error("SCOPE_DENIED", "Access denied to this scope", 403)
+        bindings.sort(key=lambda b: b.get("created_at", ""), reverse=True)
+        bindings = bindings[: params.get("limit", 50)]
         return JSONResponse(
             content={"ok": True, "data": {"bindings": bindings, "total": len(bindings)}}
         )
@@ -2592,11 +2569,10 @@ async def _run_custom_mcp_tool(body: dict, ctx: EffectiveAuthority):
     elif tool == "connectors_bindings_test":
         from app.services import connector_service
 
-        enforcer = ctx.connector_enforcer()
         binding = connector_service.get_binding(params["binding_id"])
         if not binding:
             return _mcp_error("NOT_FOUND", "Connection not found", 404)
-        if not enforcer.can_read(binding["scope"]):
+        if not ctx.can_use_binding(binding):
             return _mcp_error("SCOPE_DENIED", "Access denied to this binding", 403)
         result = await asyncio.to_thread(
             connector_service.test_binding, params["binding_id"]
@@ -2624,18 +2600,17 @@ async def _run_custom_mcp_tool(body: dict, ctx: EffectiveAuthority):
             return _mcp_error("INVALID_PARAMS", "view must be 'compact' or 'full'", 400)
         # What a caller sees is what its connections can run: one connection's menu with binding_id, otherwise the
         # actions at least one of the connections it can use allows (the service's own list when it has none).
-        enforcer_for_actions = ctx.connector_enforcer()
         if params.get("binding_id"):
             wanted_binding = connector_service.get_binding(params["binding_id"])
             if not wanted_binding or wanted_binding["connector_type_id"] != ct["id"]:
                 return _mcp_error("NOT_FOUND", "Connection not found", 404)
-            if not enforcer_for_actions.can_read(wanted_binding["scope"]):
+            if not ctx.can_use_binding(wanted_binding):
                 return _mcp_error("SCOPE_DENIED", "Access denied to this connection", 403)
             menu_disabled = connector_service.connection_disabled_actions(ct, wanted_binding)
         else:
             usable_for_menu = [
                 b for b in connector_service.list_bindings(connector_type_id=ct["id"], enabled=True)
-                if enforcer_for_actions.can_read(b["scope"])
+                if ctx.can_use_binding(b)
             ]
             menu_disabled = connector_service.listing_disabled_actions(ct, usable_for_menu)
         tool_result = await asyncio.to_thread(
@@ -2684,6 +2659,7 @@ async def _run_custom_mcp_tool(body: dict, ctx: EffectiveAuthority):
             connector_type_id=params.get("connector_type_id"),
             scope=params.get("scope"),
             enabled_only=bool(params.get("enabled_only", True)),
+            authority=ctx,
         )
         view = params.get("view") or ("full" if params.get("connector_type_id") else "compact")
         if view not in ("compact", "full"):

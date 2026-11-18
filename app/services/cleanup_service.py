@@ -51,6 +51,9 @@ def delete_scope_data(conn: sqlite3.Connection, scope: str) -> dict:
     # bindings that depend on them go first. A binding whose credential is gone
     # could not authenticate anyway; leaving it behind would only produce a
     # connector that fails at the moment someone relies on it.
+    from app.services import audience_service
+
+    audience_service.remove_for_bindings_of_scope(conn, scope)
     bindings_deleted = conn.execute(
         """
         DELETE FROM connector_bindings

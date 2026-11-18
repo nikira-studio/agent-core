@@ -135,36 +135,93 @@ def agents_reaching_credential(entry: dict) -> list[dict]:
 # ── connections ────────────────────────────────────────────────────────────
 
 
+def _audience_reason(entries: list[dict], agent: dict, ctx, names: "Names") -> str:
+    """The plain-words reason an agent may use a connection: the first audience entry that names it."""
+    from app.services import audience_service
+
+    for e in entries:
+        if not audience_service.entry_matches(e, agent, ctx):
+            continue
+        if e["kind"] == "agent":
+            return "named on it"
+        if e["kind"] == "workspace":
+            return f"through workspace {names.workspace(e['ref'])}"
+        return f"all of {names.person(e['ref'])}'s agents"
+    return "in its audience"
+
+
 def agents_using_connection(binding: dict) -> list[dict]:
-    """Agents that can see this connection, with the reason and whether they can run it now."""
+    """Agents that may use this connection (by its audience), with the reason and whether they can run it now."""
+    from app.services import audience_service
+
     names = Names()
+    entries = audience_service.entries_for(binding["id"])
     result = []
     for agent in active_agents():
         ctx = build_agent_context(agent)
         authority = EffectiveAuthority(context=ctx)
-        # Scope reach alone decides who is listed; the permission decides whether they can run it now.
-        if not authority.connector_enforcer().can_read(binding["scope"]):
+        # The audience alone decides who is listed; the permission decides whether they can run it now.
+        if binding["id"] not in (ctx.usable_binding_ids or frozenset()):
             continue
-        scope = binding["scope"]
-        kind, _, ident = scope.partition(":")
-        if scope == f"agent:{agent['id']}":
-            reason = "owns it"
-        elif kind == "user":
-            reason = f"takes the capabilities of {names.person(ident)}"
-        elif kind == "workspace":
-            reason = f"through workspace {names.workspace(ident)}"
-        else:
-            reason = f"can read {names.scope(scope)}"
-        can_run = authority.can_binding_action(binding["id"], "*", scope=scope)
+        can_run = authority.can_binding_action(binding["id"], "*", scope=binding["scope"])
         result.append({
             "agent_id": agent["id"],
             "display_name": agent.get("display_name") or agent["id"],
-            "reason": reason,
+            "reason": _audience_reason(entries, agent, ctx, names),
             "status": "can_use" if can_run else "needs_permission",
             "needs": None if can_run else "connectors_execute",
             "needs_label": None if can_run else PERMISSION_LABELS["connectors_execute"],
         })
     return sorted(result, key=lambda r: r["display_name"].lower())
+
+
+def connection_audience(binding: dict) -> list[dict]:
+    """The audience list of a connection in plain words, for the dialogs: what each entry is and who it names."""
+    from app.database import get_db
+    from app.services import audience_service
+
+    names = Names()
+    with get_db() as conn:
+        agents = {r["id"]: (r["display_name"] or r["id"]) for r in conn.execute("SELECT id, display_name FROM agents").fetchall()}
+    rows = []
+    for e in audience_service.entries_for(binding["id"]):
+        if e["kind"] == "agent":
+            label = agents.get(e["ref"], e["ref"])
+            text = f"{label} is excluded" if e["exclude"] else label
+        elif e["kind"] == "workspace":
+            label, text = names.workspace(e["ref"]), f"Everyone in workspace {names.workspace(e['ref'])}"
+        else:
+            label, text = names.person(e["ref"]), f"All of {names.person(e['ref'])}'s agents"
+        rows.append({**e, "label": label, "text": text})
+    return rows
+
+
+def preview_audience(binding: dict, entries: list[dict]) -> dict:
+    """Who gains and who loses the use of a connection if its audience becomes ``entries``, with effective access."""
+    from app.services import audience_service
+
+    names = Names()
+    current = audience_service.entries_for(binding["id"])
+    gain, lose, keep = [], [], 0
+    for agent in active_agents():
+        ctx = build_agent_context(agent)
+        was = audience_service.may_use(current, agent, ctx)
+        now = audience_service.may_use(entries, agent, ctx)
+        row = {"agent_id": agent["id"], "display_name": agent.get("display_name") or agent["id"]}
+        if now and not was:
+            can_run = "connectors_execute" in ctx.capabilities
+            gain.append({**row, "reason": _audience_reason(entries, agent, ctx, names),
+                         "status": "can_use" if can_run else "needs_permission",
+                         "needs_label": None if can_run else PERMISSION_LABELS["connectors_execute"]})
+        elif was and not now:
+            lose.append({**row, "reason": _audience_reason(current, agent, ctx, names)})
+        elif was and now:
+            keep += 1
+    return {
+        "gain": sorted(gain, key=lambda r: r["display_name"].lower()),
+        "lose": sorted(lose, key=lambda r: r["display_name"].lower()),
+        "unchanged": keep,
+    }
 
 
 # ── one agent ──────────────────────────────────────────────────────────────
@@ -191,7 +248,7 @@ def agent_summary(agent: dict) -> dict:
         })
     connections = []
     for binding in connector_service.list_bindings(enabled=True):
-        if not authority.connector_enforcer().can_read(binding["scope"]):
+        if binding["id"] not in (ctx.usable_binding_ids or frozenset()):
             continue
         can_run = authority.can_binding_action(binding["id"], "*", scope=binding["scope"])
         connections.append({
@@ -308,7 +365,6 @@ def preview_agent_workspace(agent: dict, workspace_id: str, action: str, read: b
     hypothetical = {**agent, "read_scopes_json": agent_service_json(new_read), "write_scopes_json": agent_service_json(new_write)}
     after_ctx = build_agent_context(hypothetical)
     authority = EffectiveAuthority(context=after_ctx)
-    before_auth = EffectiveAuthority(context=before_ctx)
     has_cred = "credentials" in after_ctx.capabilities
     credentials_changed = []
     # Whether the agent reaches the workspace's own scope before and after does not depend on the row.
@@ -322,12 +378,12 @@ def preview_agent_workspace(agent: dict, workspace_id: str, action: str, read: b
                 "needs_label": None if (has_cred or not now) else PERMISSION_LABELS["credentials"],
             })
     connections_changed = []
-    sees_before = before_auth.connector_enforcer().can_read(scope)
-    sees_after = authority.connector_enforcer().can_read(scope)
-    for binding in connector_service.list_bindings(scope=scope, enabled=True):
-        was, now = sees_before, sees_after
+    # A connection is gained or lost through the audience entries that name the agent (a workspace entry, mostly).
+    for binding in connector_service.list_bindings(enabled=True):
+        was = binding["id"] in (before_ctx.usable_binding_ids or frozenset())
+        now = binding["id"] in (after_ctx.usable_binding_ids or frozenset())
         if was != now:
-            can_run = authority.can_binding_action(binding["id"], "*", scope=scope)
+            can_run = authority.can_binding_action(binding["id"], "*", scope=binding["scope"])
             connections_changed.append({
                 "id": binding["id"], "name": binding["name"],
                 "status": ("can_use" if can_run else "needs_permission") if now else "no_longer_usable",

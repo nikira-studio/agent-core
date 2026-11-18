@@ -28,6 +28,9 @@ class RequestContext:
     # admin turned it on; principal_user_scope names the scope it covers.
     principal_user_scope: Optional[str] = None
     inherit_user_bindings: bool = True
+    # The connections this agent may use, by the audience lists (computed when the agent's context is built). None for
+    # a person, and for an agent context built without them: use is then decided by the connection's scope.
+    usable_binding_ids: Optional[frozenset] = None
 
     def connector_read_scopes(self) -> list[str]:
         """The scopes whose bindings this caller may see and run."""
