@@ -422,10 +422,14 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
         past = [] if failing else past_by_binding.get(b["id"], [])
         if past:
             latest = max(past, key=lambda stat: stat.get("last_failed_at") or "")
+            # The action's name may wrap; "last failed <date>" and "(+N more)" each stay whole.
             past_note = (
                 "<div class='form-hint' style='margin:2px 0 0'>"
-                + escape_html(f"{latest['action']} last failed {_short_date(latest.get('last_failed_at'))}")
-                + (f" (+{len(past) - 1} more)" if len(past) > 1 else "")
+                + escape_html(latest["action"])
+                + " <span style='white-space:nowrap'>"
+                + escape_html(f"last failed {_short_date(latest.get('last_failed_at'))}")
+                + "</span>"
+                + (f" <span style='white-space:nowrap'>(+{len(past) - 1} more)</span>" if len(past) > 1 else "")
                 + "</div>"
             )
         actions_note = ""

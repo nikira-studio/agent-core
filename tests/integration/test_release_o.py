@@ -86,7 +86,7 @@ def test_health_and_the_connections_table_agree_and_history_is_a_quiet_line(test
         _run(binding["id"], "GET /x", "failure", 20)
     assert "all working" in _services_tile(test_client, admin_token)
     html = test_client.get("/connectors", headers=_admin(admin_token)).text
-    assert "GET /x last failed" in html and "failing 7/7" not in html
+    assert "GET /x <span style='white-space:nowrap'>last failed" in html and "failing 7/7" not in html
     _run(binding["id"], "GET /x", "failure", 0)  # now it failed again, today
     assert "1 failing" in _services_tile(test_client, admin_token)
     html = test_client.get("/connectors", headers=_admin(admin_token)).text
