@@ -98,6 +98,7 @@ def credentials_page(request: Request, session: dict = Depends(require_auth)):
         ctx.agent_id,
         is_admin=ctx.is_admin,
         active_workspace_ids=ctx.active_workspace_ids,
+        is_person=ctx.actor_type != "agent",
     )
 
     credential_entries = [
