@@ -565,3 +565,36 @@ def test_an_agent_without_the_reference_credentials_permission_cannot_fetch_the_
     agent_service.update_agent("advisor", capabilities=["memory", "coordination", "connectors_read", "connectors_execute"])
     reach = cs.credential_reach(binding)
     assert reach["agents"] == ["advisor"] and reach["can_fetch"] == []
+
+
+# ---- discovery for a plain web service: the requests its connections list ----------------------------------------
+
+def _list_actions(world, **params):
+    response = world["client"].post("/mcp", headers=_bearer(world["key"]),
+                                    json={"tool": "connectors_actions_list", "params": {"connector_type_id": "plain-web", **params}})
+    assert response.status_code == 200, response.text
+    return response.json()["data"]
+
+
+def test_discovery_lists_the_requests_a_plain_web_connection_allows(world):
+    """The summary counted a plain web service's allowed requests while discovery listed none."""
+    binding = _plain_web_binding(world, ["get /a", "GET /b", "POST /c"])
+    data = _list_actions(world)
+    assert data["actions"] == ["GET /a", "GET /b", "POST /c"] and data["total"] == 3
+    by_name = {t["action"]: t for t in data["tools"]}
+    assert by_name["GET /a"]["side_effect"] == "read" and by_name["POST /c"]["side_effect"] != "read"
+    # the same menu for one connection, and the full form of one action
+    assert _list_actions(world, binding_id=binding["id"])["actions"] == ["GET /a", "GET /b", "POST /c"]
+    one = _list_actions(world, action="GET /b")
+    assert [t["action"] for t in one["tools"]] == ["GET /b"] and one["tools"][0]["input_schema"]["type"] == "object"
+    assert _list_actions(world, query="/b")["actions"] == ["GET /b"]
+
+
+def test_discovery_for_a_read_only_plain_web_connection_leaves_out_what_it_will_not_run(world):
+    _plain_web_binding(world, ["GET /a", "POST /c"], actions_mode="read_only")
+    assert _list_actions(world)["actions"] == ["GET /a"]
+
+
+def test_discovery_for_a_plain_web_service_with_no_usable_connection_lists_nothing(world):
+    _plain_web_binding(world, None)
+    assert _list_actions(world)["actions"] == []

@@ -27,6 +27,10 @@ Notable changes to Agent Core are documented here. The format follows [Keep a Ch
 
 - **The Credential, Agent, Service and connection pages answer from one place.** `GET /api/access/...` and two previews (owner change, workspace add) use the same code that enforces access, so a page never shows access the server would refuse, or hides access it would allow. `POST /api/agents/{id}/permissions/{permission}/turn-on` is the one way a permission is switched on: by a person, one at a time, recorded as `agent_permission_turned_on`. A connection's credential can be taken away (`reset_credential`).
 
+### Fixed
+
+- **Action discovery for a plain web service lists its requests.** The summary counted the requests a plain web connection allows (for example 4) while `connectors_actions_list` returned no names, so a caller could not find the request form. Discovery now lists the allowed requests of the connections the caller can use, in the form `METHOD /path`, with the same read-only and per-connection limits as running them. A running request that is not `METHOD /path` now says so.
+
 ### Upgrading
 
 - **The local credential helper is stricter.** `/internal/credentials/resolve` now applies the same rule as the MCP `credential_get`: the named entry must be an active agent that holds the **Reference credentials** permission, besides the existing scope and expiry checks; a service is refused (it fetches with a grant). Before, the helper checked scope and expiry only, so an entry without the permission, or a service, could resolve what its scopes reached. (Every entry reads its person's own scope, so that reached the person's credentials.) If a script depended on the old behaviour it now gets `403 PERMISSION_REQUIRED` or `403 NOT_AN_AGENT`, and every refusal is an audit row (`broker_resolve_denied`, with the reason). Fix: switch the permission on for that agent (Agents > Access > Turn on), or give a service a grant on the credential. `python -m app.access_check <database> --helper-change` lists, on a read-only copy, exactly which entries would lose helper reach.

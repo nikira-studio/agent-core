@@ -74,7 +74,11 @@ class GenericHttpConnector(BaseConnector):
             method = parts[0].upper() if parts else "GET"
             path = parts[1] if len(parts) > 1 else ""
             if method not in {"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"}:
-                return {"success": False, "error": f"Unknown action: {action}"}
+                return {
+                    "success": False,
+                    "error": f"Unknown action: {action}. A plain web connection takes the request itself, for example "
+                    "'GET /status'; connectors_actions_list shows the requests this connection allows.",
+                }
             # The action IS the request: "GET /x" sends a GET to /x whatever the caller's params or the connection's
             # defaults say. (Otherwise a read-only connection that allows "GET /x" could be made to send a DELETE.)
             merged_params["method"] = method

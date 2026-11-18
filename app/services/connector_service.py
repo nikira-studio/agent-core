@@ -633,6 +633,16 @@ def plain_web_allowed_requests(connector_type: dict, binding: dict) -> list[str]
     return names
 
 
+def plain_web_listed_actions(connector_type: dict, bindings: list[dict]) -> list[str]:
+    """The requests a caller may name for a plain web service: those the given connections list and allow, in one spelling."""
+    names: list[str] = []
+    for binding in bindings:
+        for name in plain_web_allowed_requests(connector_type, binding):
+            if name not in names and connection_allows(connector_type, binding, name):
+                names.append(name)
+    return names
+
+
 def effective_actions(connector_type: dict, binding: dict) -> list[str]:
     """What a connection can run: the service's catalogue, less the service's switches, less the connection's own."""
     return [name for name in catalogue_actions(connector_type) if connection_allows(connector_type, binding, name)]
@@ -1222,6 +1232,7 @@ def generate_connector_type_tools(
     query: Optional[str] = None,
     limit: int = 20,
     offset: int = 0,
+    extra_actions: Optional[list[str]] = None,
 ) -> dict:
     def enrich(result: dict) -> dict:
         from app.services import action_gate_service
@@ -1333,6 +1344,29 @@ def generate_connector_type_tools(
         }
         for action in supported_action_names
     ]
+    # A plain web service has no catalogue of its own: its actions are the requests its connections list ("GET /x").
+    for action in extra_actions or []:
+        if action in supported_action_names:
+            continue
+        method, _, path = action.partition(" ")
+        tools.append(
+            {
+                "name": action,
+                "action": action,
+                "method": method,
+                "path": path,
+                "description": "Sends " + action + " through a connection that lists it.",
+                "enabled": action not in disabled_set,
+                "side_effect": action_side_effect(connector_type, action),
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "object", "description": "Query string parameters, if the request takes any."},
+                    },
+                },
+                "capability_policy": capability_policy({}),
+            }
+        )
     if query:
         q = query.lower()
         tools = [t for t in tools if q in t["name"].lower() or q in t["action"].lower()]

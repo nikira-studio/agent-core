@@ -2607,12 +2607,14 @@ async def _run_custom_mcp_tool(body: dict, ctx: EffectiveAuthority):
             if not ctx.can_use_binding(wanted_binding):
                 return _mcp_error("SCOPE_DENIED", "Access denied to this connection", 403)
             menu_disabled = connector_service.connection_disabled_actions(ct, wanted_binding)
+            menu_bindings = [wanted_binding]
         else:
             usable_for_menu = [
                 b for b in connector_service.list_bindings(connector_type_id=ct["id"], enabled=True)
                 if ctx.can_use_binding(b)
             ]
             menu_disabled = connector_service.listing_disabled_actions(ct, usable_for_menu)
+            menu_bindings = usable_for_menu
         tool_result = await asyncio.to_thread(
             connector_service.generate_connector_type_tools,
             ct,
@@ -2622,6 +2624,7 @@ async def _run_custom_mcp_tool(body: dict, ctx: EffectiveAuthority):
             query=wanted or params.get("query"),
             limit=200 if wanted else min(int(params.get("limit", 100) or 100), 200),
             offset=0 if wanted else max(int(params.get("offset", 0) or 0), 0),
+            extra_actions=connector_service.plain_web_listed_actions(ct, menu_bindings),
         )
         tools = tool_result["tools"]
         if wanted:
