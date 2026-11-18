@@ -103,12 +103,17 @@ def test_one_other_is_singular_and_nobody_else_leaves_no_line(test_client, admin
     assert "Given the secret:" in lonely and "no one" in lonely and "can see its name" not in lonely
 
 
-def test_the_dialog_uses_the_same_two_labels_as_the_list(test_client, admin_token):
+def test_the_dialog_says_which_capabilities_agents_and_services_use_a_credential(test_client, admin_token):
     html = test_client.get("/credentials", headers=_admin(admin_token)).text
-    assert ">Given the secret</h3>" in html and ">Others who can see its name</h3>" in html
+    dialog = html.split('id="access-modal"', 1)[1].split('id="agent-access-modal"', 1)[0]
+    assert "Capabilities that sign in with this" in dialog
+    assert "Agents that can reach this" in dialog
+    assert "Services that receive this value" in dialog
     assert "Agents with access" not in html
     js = test_client.get("/static/js/credentials.js").text
-    assert "renderUsedBy" in js and "Given the secret:" in js and "location.reload" not in js.split("function closeAccess", 1)[1].split("}", 1)[0]
+    # the Used by cell is still there, still rebuilt from the same facts, and closing does not reload the page
+    assert "renderUsedBy" in js and "Given the secret:" in js
+    assert "location.reload" not in js.split("function closeAccess", 1)[1].split("}", 1)[0]
 
 
 def test_the_new_agent_dialog_is_not_titled_new_api_key():

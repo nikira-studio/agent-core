@@ -4,6 +4,8 @@ Use this when a service or container, rather than an AI agent, needs its own sec
 
 Machine consumers can retrieve individual encrypted credentials without vault browsing, credential administration, memory or capability access. Create a service (Credentials > Services, or `POST /api/agents` with `kind: "service"`; its one permission is `credentials_resolve`), then create exact entry grants through an administrator's human session. Inherited user and workspace scopes do not authorize resolution. Legacy agent defaults do not include this permission.
 
+In the dashboard, a grant is made from the credential's own page: the **Access** button opens **Who can use this**, and its **Services** group is where a service is given that credential's value (read, or read and write, with an optional end date). Only a service can be given the value. An agent reaches a credential by its reference and never receives the value itself.
+
 The owner API is `/api/credential-consumers`:
 
 | Method and path | Authority | Result |

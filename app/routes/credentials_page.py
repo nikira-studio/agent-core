@@ -256,38 +256,59 @@ def credentials_page(request: Request, session: dict = Depends(require_auth)):
       <div id="credentials-list">{credentials_html}</div>
     </div>
 
-    <!-- Who can use a credential -->
+    <!-- Who can use a credential: one list, in three groups -->
     <div class="modal-overlay" id="access-modal" style="display:none">
       <div class="modal modal-wide">
         <h2>Who can use <span id="access-name"></span></h2>
         <p class="form-hint" style="margin-bottom:12px">Store each secret once. Let every connection or service that needs it use the same credential. Use a separate credential only for a different account or a different permission level.</p>
-        <h3 class="sub-heading form-section-title">Given the secret</h3>
-        <div id="access-grants"></div>
+
+        <h3 class="sub-heading form-section-title">Capabilities that sign in with this</h3>
+        <div id="access-connections"></div>
         <div class="form-group">
-          <label for="access-agent">Give access to</label>
+          <label for="access-connection-pick">Add a connection</label>
           <div style="display:flex;gap:8px;align-items:center">
-            <select id="access-agent" style="flex:1"></select>
-            <button type="button" class="btn btn-sm" id="access-add">Add</button>
+            <select id="access-connection-pick" style="flex:1"></select>
+            <button type="button" class="btn btn-sm" id="access-connection-add">Add</button>
           </div>
-          <p class="form-hint">Only a service can be given this secret's value. Agents use it through a connection, or by its reference.</p>
-          <details id="access-cannot" style="display:none"><summary class="text-muted">Can't receive it yet (<span id="access-cannot-count"></span>)</summary><div id="access-cannot-list"></div></details>
+          <p id="access-connection-empty" class="text-muted" style="display:none">No connection to add yet. <a href="/connectors">Create one under Capabilities</a>.</p>
         </div>
-        <h3 class="sub-heading form-section-title">Connections using it</h3>
+
+        <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+          <h3 class="sub-heading form-section-title" style="margin:0">Agents that can reach this</h3>
+          <span class="text-muted">Owner: <span id="access-owner"></span></span>
+          <button type="button" class="btn btn-sm btn-secondary" id="access-owner-change">Change owner</button>
+        </div>
+        <p class="form-hint">Agents get a reference, never the secret value; Agent Core fills it in when a tool runs.</p>
+        <div id="access-agents"></div>
+        <div id="access-owner-panel" style="display:none">
+          <div class="form-group">
+            <label for="access-owner-pick">New owner</label>
+            <select id="access-owner-pick" style="max-width:340px">
+              {scope_options}
+            </select>
+          </div>
+          <div id="access-owner-preview"></div>
+          <div style="display:flex;gap:8px">
+            <button type="button" class="btn btn-primary" id="access-owner-save">Save</button>
+            <button type="button" class="btn btn-secondary" id="access-owner-cancel">Cancel</button>
+          </div>
+        </div>
+
+        <h3 class="sub-heading form-section-title">Services that receive this value</h3>
+        <p class="form-hint">A service receives the secret value itself. An agent using a capability does not.</p>
         <div id="access-services"></div>
-        <h3 class="sub-heading form-section-title" id="access-others-title">Others who can see its name</h3>
-        <div id="access-scope-readers"></div>
-        <details class="access-details">
-          <summary>Advanced</summary>
-          <div class="form-group">
-            <label for="access-expires">Access ends on</label>
-            <input type="date" id="access-expires" style="max-width:200px">
-            <p class="form-hint">Optional. Applies to the next agent you add. Leave empty for no end date.</p>
-          </div>
-          <div class="form-group">
-            <label class="checkbox-label"><input type="checkbox" id="access-write"> Allow it to write the value back</label>
-            <p class="form-hint">Off by default. Only for a service that rotates this secret itself.</p>
-          </div>
-        </details>
+        <p id="access-service-empty" class="text-muted" style="display:none"><a href="/services">No service exists yet. Create one under Credentials &gt; Services.</a></p>
+        <div class="form-group">
+          <label for="access-service-pick">Give a service this secret</label>
+          <select id="access-service-pick" style="max-width:340px"></select>
+          <label class="checkbox-label"><input type="checkbox" id="access-write"> Allow it to write the value back</label>
+          <p class="form-hint">Off by default. Only for a service that rotates this secret itself.</p>
+          <label for="access-expires">Access ends on</label>
+          <input type="date" id="access-expires" style="max-width:200px">
+          <p class="form-hint">Optional. Leave empty for no end date.</p>
+          <button type="button" class="btn btn-sm" id="access-service-add">Add</button>
+        </div>
+
         <div class="modal-footer"><button type="button" class="btn btn-secondary" onclick="closeAccess()">Close</button></div>
       </div>
     </div>
@@ -402,6 +423,6 @@ def credentials_page(request: Request, session: dict = Depends(require_auth)):
     </div>
     """
 
-    extra_js = '<script src="/static/js/credentials.js?v=20261105"></script>'
+    extra_js = '<script src="/static/js/credentials.js?v=20261117a"></script>'
 
     return render_page("Credentials", body, "/credentials", extra_js, session=session)

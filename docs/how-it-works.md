@@ -240,6 +240,8 @@ From there, three paths:
 
 Prefer the capability path when both are available. The reference is what agents see, and a reference in a transcript is worth nothing to anyone who reads it.
 
+One credential, one list of who can use it, in three groups: the capabilities that sign in with it, the agents that can reach it, and the services that receive its value. Only the last group is given the value itself.
+
 ---
 
 ## 6. Capabilities: the hands

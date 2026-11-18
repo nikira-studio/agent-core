@@ -52,6 +52,8 @@ Credentials are managed from the **Credentials** page or the `/api/credentials` 
 
 In the capability case, the raw secret stays inside the Agent Core process and is not returned to the agent.
 
+Each credential has one list of who can use it, in three groups: the capabilities that sign in with it, the agents that can reach it, and the services that receive its value. Only the third group receives the value; an agent gets a reference, and Agent Core fills it in when a tool runs. Turning a permission on from that list is one recorded action by a person, and nothing in the dashboard ever turns one off.
+
 Full backup exports are encrypted with a separate one-time backup key. The encrypted archive and the backup key together can restore your credentials, so treat both as sensitive data.
 
 ---

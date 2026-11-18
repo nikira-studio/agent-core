@@ -92,8 +92,8 @@ def test_the_credentials_page_shows_who_uses_each_one_to_an_admin(admin):
     assert "SVC-A" in html
     dialog = html.split('id="access-modal"', 1)[1]
     assert "Store each secret once" in dialog and "Use a separate credential only for a different account" in dialog
-    assert "<summary>Advanced</summary>" in dialog  # expiry and write stay out of the first view
-    assert 'id="access-expires"' in dialog.split("<summary>Advanced</summary>", 1)[1]
+    assert "<summary>Advanced</summary>" not in dialog  # the expiry and the write choice are in the Services group now
+    assert 'id="access-expires"' in dialog and 'id="access-write"' in dialog
 
 
 def test_a_regular_user_gets_no_access_controls_and_no_access_data(admin):
@@ -106,8 +106,11 @@ def test_a_regular_user_gets_no_access_controls_and_no_access_data(admin):
     assert admin.get(f"/api/credential-consumers/entries/{entry['id']}/access").status_code == 403
 
 
-def test_the_agents_page_links_service_agents_to_their_credentials_and_roles_deep_link(admin):
+def test_the_services_page_offers_the_access_dialog_and_the_old_link_still_works(admin):
     html = admin.get("/services").text  # the services are listed under Credentials > Services
-    assert "href='/credentials?agent=svc-a'" in html and "href='/credentials?agent=svc-b'" in html
-    assert "href='/credentials?agent=asst'" not in html  # an assistant does not take grants
+    # Each row opens a dialog that says what the service can fetch; the Credentials link is gone from the list.
+    assert "data-service-access='svc-a'" in html and "data-service-access='svc-b'" in html
+    assert "data-service-access='asst'" not in html  # an assistant is an agent, and has no grants
+    assert "href='/credentials?agent=" not in html
+    assert admin.get("/credentials?agent=svc-a").status_code == 200  # the old address still opens
     assert "get('edit')" in html  # /agents?edit=<id> opens that agent's role
