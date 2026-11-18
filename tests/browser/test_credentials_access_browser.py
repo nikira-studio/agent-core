@@ -53,6 +53,9 @@ def test_the_dialog_is_one_list_in_three_groups_and_a_service_can_be_given_the_s
     assert "A service receives the secret value itself. An agent using a capability does not." in text
     assert "Change owner" in text
 
+    # the lists are filled after the dialog opens, from the server: wait for them rather than reading at once
+    page.wait_for_function("document.querySelector('#access-agents').innerText.includes('Reader Two')")
+    page.wait_for_function("document.querySelector('#access-services').innerText.includes('No service receives this yet.')")
     agents = page.locator("#access-agents").inner_text()
     assert "Reader One" in agents and "Reader Two" in agents
     assert "through workspace Shared Place" in agents
