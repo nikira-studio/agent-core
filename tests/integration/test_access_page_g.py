@@ -114,6 +114,15 @@ def test_the_page_reads_the_access_overview_and_shows_no_name_of_its_own(admin):
     assert "innerHTML" not in source
 
 
+def test_both_cards_say_loading_until_the_answer_arrives_and_the_error_replaces_it(admin):
+    html = admin.get("/access").text
+    assert 'id="access-loading"' in html and 'id="access-unused-loading"' in html
+    assert html.count("Loading...") == 2
+    source = admin.get("/static/js/access_page.js").text
+    assert "access-loading" in source and "access-unused-loading" in source
+    assert "The access list could not be loaded" in source
+
+
 @pytest.mark.skipif(shutil.which("node") is None, reason="node is not installed")
 def test_the_page_script_parses():
     result = subprocess.run(

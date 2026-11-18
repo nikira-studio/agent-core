@@ -459,6 +459,6 @@ def credentials_page(request: Request, session: dict = Depends(require_auth)):
     </div>
     """
 
-    extra_js = '<script src="/static/js/credentials.js?v=20261118a"></script>'
+    extra_js = '<script src="/static/js/credentials.js?v=20261118b"></script>'
 
     return render_page("Credentials", body, "/credentials", extra_js, session=session)

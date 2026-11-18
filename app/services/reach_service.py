@@ -41,6 +41,22 @@ def active_agents() -> list[dict]:
     return agent_service.list_agents(is_active=True, kind="agent")
 
 
+def connection_label(capability: Optional[str], name: str) -> str:
+    """How a connection is shown: its own name, with the capability name in brackets only when the name does not already
+    start with it (so "Context7" stays "Context7", and "Work account" becomes "Work account (GitHub)")."""
+    name = name or ""
+    capability = (capability or "").strip()
+    if not capability or name.strip().lower().startswith(capability.lower()):
+        return name
+    return f"{name} ({capability})"
+
+
+def agent_contexts() -> list[tuple[dict, object]]:
+    """Each active agent with its request context, built once. A page that asks about many credentials or connections
+    builds this once and passes it on, rather than rebuilding every agent's context per question."""
+    return [(agent, build_agent_context(agent)) for agent in active_agents()]
+
+
 class Names:
     """Plain names for workspaces and people, looked up once per call."""
 
@@ -115,13 +131,13 @@ def helper_decision(agent: Optional[dict], ctx, entry: dict) -> tuple[bool, str]
     return True, "allowed"
 
 
-def agents_reaching_credential(entry: dict) -> list[dict]:
+def agents_reaching_credential(entry: dict, contexts: Optional[list] = None, names: Optional["Names"] = None) -> list[dict]:
     """Agents that reach this credential's owner scope, each with the reason and whether they can use the reference
-    now (``can_reference``) or need the Reference credentials permission first (``needs_permission``)."""
-    names = Names()
+    now (``can_reference``) or need the Reference credentials permission first (``needs_permission``).
+    ``contexts`` and ``names`` let a caller that asks about many credentials build them once."""
+    names = names or Names()
     result = []
-    for agent in active_agents():
-        ctx = build_agent_context(agent)
+    for agent, ctx in (contexts if contexts is not None else agent_contexts()):
         reason = why(agent, ctx, entry["scope"], names)
         if reason is None:
             continue
@@ -155,15 +171,18 @@ def _audience_reason(entries: list[dict], agent: dict, ctx, names: "Names") -> s
     return "in its audience"
 
 
-def agents_using_connection(binding: dict) -> list[dict]:
-    """Agents that may use this connection (by its audience), with the reason and whether they can run it now."""
+def agents_using_connection(
+    binding: dict, contexts: Optional[list] = None, names: Optional["Names"] = None, entries: Optional[list] = None,
+) -> list[dict]:
+    """Agents that may use this connection (by its audience), with the reason and whether they can run it now.
+    ``contexts``, ``names`` and ``entries`` let a caller that asks about many connections build them once."""
     from app.services import audience_service
 
-    names = Names()
-    entries = audience_service.entries_for(binding["id"])
+    names = names or Names()
+    if entries is None:
+        entries = audience_service.entries_for(binding["id"])
     result = []
-    for agent in active_agents():
-        ctx = build_agent_context(agent)
+    for agent, ctx in (contexts if contexts is not None else agent_contexts()):
         authority = EffectiveAuthority(context=ctx)
         # The audience alone decides who is listed; the permission decides whether they can run it now.
         if binding["id"] not in (ctx.usable_binding_ids or frozenset()):

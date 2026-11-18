@@ -77,3 +77,45 @@ def test_the_unused_list_is_under_its_own_heading(access_page):
     page = access_page
     assert "Unused" in page.locator("main h2").all_inner_texts()
     assert "Things nothing uses. Check each before you delete it." in page.locator("main").text_content()
+
+
+def test_both_cards_say_loading_while_the_answer_is_on_its_way(instance, admin_page):
+    page = admin_page
+    release = []
+
+    def slow(route):
+        release.append(route)  # hold the answer until the test lets it go
+
+    page.route("**/api/access/overview", slow)
+    try:
+        page.goto(instance + "/access")
+        page.wait_for_load_state("load")
+        assert page.locator("#access-loading").is_visible()
+        assert page.locator("#access-loading").text_content().strip() == "Loading..."
+        assert page.locator("#access-unused-loading").is_visible()
+        assert not page.locator("#access-table-wrap").is_visible()  # no bare table headers
+        while not release:
+            page.wait_for_timeout(50)
+        release[0].continue_()
+        page.wait_for_selector("#access-rows tr")
+        assert not page.locator("#access-loading").is_visible()
+        assert not page.locator("#access-unused-loading").is_visible()
+        assert page.locator("#access-table-wrap").is_visible()
+    finally:
+        page.unroute("**/api/access/overview")
+
+
+def test_a_failed_answer_replaces_loading_with_the_error(instance, admin_page):
+    page = admin_page
+    page.route("**/api/access/overview", lambda route: route.fulfill(
+        status=500, content_type="application/json",
+        body='{"ok": false, "error": {"code": "BOOM", "message": "The access list could not be loaded"}}'))
+    try:
+        page.goto(instance + "/access")
+        page.wait_for_function(
+            "document.getElementById('access-loading').textContent.includes('could not be loaded')"
+        )
+        assert "could not be loaded" in page.locator("#access-unused-loading").text_content()
+        assert not page.locator("#access-table-wrap").is_visible()
+    finally:
+        page.unroute("**/api/access/overview")

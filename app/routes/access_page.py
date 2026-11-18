@@ -59,8 +59,9 @@ def access_page(request: Request, session: dict = Depends(require_auth)):
       <select id="access-filter-service"><option value="">All</option></select>
     </div>
   </div>
+  <p class="text-muted" id="access-loading" role="status">Loading...</p>
   <p class="text-muted" id="access-row-count" style="font-size:0.85rem;margin:0 0 8px"></p>
-  <div style="overflow-x:auto">
+  <div style="overflow-x:auto;display:none" id="access-table-wrap">
   <table>
     <thead><tr>
       <th>Who or what</th>
@@ -78,6 +79,7 @@ def access_page(request: Request, session: dict = Depends(require_auth)):
 <div class="card">
   <h2>Unused</h2>
   <p class="text-muted" style="font-size:0.85rem">Things nothing uses. Check each before you delete it.</p>
+  <p class="text-muted" id="access-unused-loading" role="status">Loading...</p>
   <div id="access-unused-credentials" style="display:none">
     <h3>Credentials nothing uses <span class="text-muted" id="access-unused-credentials-count"></span></h3>
     <ul style="margin:0 0 12px;padding-left:18px" id="access-unused-credentials-list"></ul>
@@ -98,5 +100,5 @@ def access_page(request: Request, session: dict = Depends(require_auth)):
 </div>
 """
 
-    js = '<script src="/static/js/access_page.js?v=20261117a"></script>'
+    js = '<script src="/static/js/access_page.js?v=20261118a"></script>'
     return render_page("Access", body, "/access", js, session=session)

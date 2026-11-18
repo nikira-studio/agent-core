@@ -892,7 +892,7 @@ def _agents_view(request: Request, session: dict, show_services: bool):
     js = js.replace("__AGENT_ROWS__", row_data)
     js = js.replace("__ACCESS_WORKSPACES__", workspace_data)
     # The Access dialogs live in their own file, loaded the same way as the page's other scripts.
-    js = js + '\n<script src="/static/js/agent_access.js?v=20261118a"></script>'
+    js = js + '\n<script src="/static/js/agent_access.js?v=20261118b"></script>'
 
     page_title = "Services" if show_services else "Agents"
     create_button = (

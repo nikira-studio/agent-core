@@ -323,9 +323,15 @@
   async function loadAccess() {
     var j = await apiFetch('/api/access/overview');
     if (!j.ok) {
-      byId('access-row-count').textContent = (j.error && j.error.message) || 'The access list could not be loaded';
+      // The table and the unused list stay hidden; both cards say why instead of looking empty.
+      var failure = (j.error && j.error.message) || 'The access list could not be loaded';
+      byId('access-loading').textContent = failure;
+      byId('access-unused-loading').textContent = failure;
       return;
     }
+    byId('access-loading').style.display = 'none';
+    byId('access-unused-loading').style.display = 'none';
+    byId('access-table-wrap').style.display = '';
     var data = j.data || {};
     state.rows = data.rows || [];
     state.assignments = data.assignments || {};

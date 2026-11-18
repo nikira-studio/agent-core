@@ -19,6 +19,19 @@ if (typeof window.accessEl === 'undefined') {
 
 // ── small helpers ───────────────────────────────────────────────────────────
 
+// The capability name is worth showing next to a connection's own name only when the name does not already start
+// with it: "Context7" needs no second "Context7".
+function accessCapabilityNote(capability, name) {
+  var cap = (capability || '').trim();
+  if (!cap || String(name || '').trim().toLowerCase().indexOf(cap.toLowerCase()) === 0) return '';
+  return cap;
+}
+
+function accessConnectionLabel(capability, name) {
+  var note = accessCapabilityNote(capability, name);
+  return note ? name + ' (' + note + ')' : name;
+}
+
 // A date input yields YYYY-MM-DD with no timezone. The person means the end of that day where they are, so the
 // instant is built in their own timezone and converted to UTC. The same rule the Credentials page uses.
 function accessEndOfDayUtc(dateValue) {
@@ -332,7 +345,8 @@ function renderAgentCapabilities() {
     list.forEach(function (c) {
       var row = accessEl('div', null, 'access-row');
       row.append(accessEl('strong', c.name));
-      if (c.capability) row.append(accessEl('span', c.capability, 'text-muted'));
+      var note = accessCapabilityNote(c.capability, c.name);
+      if (note) row.append(accessEl('span', note, 'text-muted'));
       var chip = accessNeedsChip(c, 'Run capabilities');
       if (chip) {
         row.append(chip);
@@ -367,9 +381,7 @@ function renderAgentCapabilityPick() {
   var offered = 0;
   (accessAgentBindings || []).forEach(function (b) {
     if (shown[b.id]) return;
-    var label = b.connector_display_name
-      ? (b.connector_display_name + ', ' + (b.name || b.id))
-      : (b.name || b.id);
+    var label = accessConnectionLabel(b.connector_display_name, b.name || b.id);
     var option = accessEl('option', label);
     option.value = b.id;
     pick.append(option);

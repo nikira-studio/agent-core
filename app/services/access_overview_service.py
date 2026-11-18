@@ -54,6 +54,14 @@ def _use_maps() -> dict:
                 "GROUP BY binding_id, executor_agent_id"
             ).fetchall()
         }
+        # The execution log is trimmed after its retention period; the audit log keeps a line for every run for longer,
+        # so a connection that has not run lately is not shown as never used.
+        for r in conn.execute(
+            "SELECT resource_id, actor_type, actor_id, MAX(timestamp) AS last FROM audit_log "
+            "WHERE action = 'connector_action_executed' GROUP BY resource_id, actor_type, actor_id"
+        ).fetchall():
+            key = (r["resource_id"], r["actor_id"] if r["actor_type"] == "agent" else "")
+            runs[key] = _later(runs.get(key), r["last"])
         audit = {
             (r["actor_id"], r["resource_id"]): r["last"]
             for r in conn.execute(
@@ -92,20 +100,27 @@ def overview() -> dict:
     credentials = {e["id"]: e for e in credential_service.list_credentials(limit=100000)}
     bindings = connector_service.list_bindings()
     names = reach_service.Names()
+    # Each agent's context is built once for the whole answer, not once per credential and per connection.
+    contexts = reach_service.agent_contexts()
     rows: list[dict] = []
 
     def party(kind: str, ident: str, name: str) -> dict:
         return {"type": kind, "id": ident, "name": name}
+
+    from app.services import audience_service
+
+    with get_db() as conn:
+        audiences = audience_service.all_entries(conn)
 
     # 1 and 2: connections, the credential each signs in with, and who can use each.
     connection_users: dict[str, list[dict]] = {}
     for b in bindings:
         gated = sorted(use["gates"].get(b["connector_type_id"], {}))
         last_run = _later(*[v for (bid, _), v in use["runs"].items() if bid == b["id"]])
-        users = reach_service.agents_using_connection(b) if b.get("enabled") else []
+        users = reach_service.agents_using_connection(b, contexts, names, audiences.get(b["id"], [])) if b.get("enabled") else []
         connection_users[b["id"]] = users
         capability = b.get("connector_display_name") or b["connector_type_id"]
-        connection = party("connection", b["id"], f"{capability}, {b['name']}")
+        connection = party("connection", b["id"], reach_service.connection_label(capability, b["name"]))
         credential = credentials.get(b.get("credential_id") or "")
         if credential:
             rows.append({
@@ -123,7 +138,7 @@ def overview() -> dict:
 
     # 3: agents that reach a credential through its owner and their workspaces.
     for credential in credentials.values():
-        for r in reach_service.agents_reaching_credential(credential):
+        for r in reach_service.agents_reaching_credential(credential, contexts, names):
             rows.append({
                 "assignment": "agent_credential", "from": party("agent", r["agent_id"], r["display_name"]),
                 "to": party("credential", credential["id"], credential["name"]), "detail": r["reason"],
@@ -150,14 +165,13 @@ def overview() -> dict:
             "grant_id": g["id"], "last_used": _last_credential_use(use, g["consumer_agent_id"], g["entry_id"]),
         })
 
-    return {"assignments": KINDS, "rows": rows, "unused": _unused(agents, credentials, bindings, connection_users, grants, use)}
+    return {"assignments": KINDS, "rows": rows, "unused": _unused(agents, credentials, bindings, connection_users, grants, use, names, audiences)}
 
 
-def _unused(agents, credentials, bindings, connection_users, grants, use) -> dict:
+def _unused(agents, credentials, bindings, connection_users, grants, use, names, audiences) -> dict:
     live = [g for g in grants if not is_expired({"expires_at": g["expires_at"]})]
     granted = {g["entry_id"] for g in live}
     signed_in = {b["credential_id"] for b in bindings if b.get("credential_id")}
-    names = reach_service.Names()
     cutoff_at = datetime.now(timezone.utc) - timedelta(days=IDLE_SERVICE_DAYS)
     # The latest recorded reference or fetch of each credential by anyone (the audit log and the daily rollups).
     last_seen: dict[str, str] = {}
@@ -185,7 +199,7 @@ def _unused(agents, credentials, bindings, connection_users, grants, use) -> dic
                    + (f"Last referenced on {seen_at.strftime('%-d %b %Y')}." if seen_at else "Never referenced."),
         })
     unusable = [
-        {"id": b["id"], "name": f"{b.get('connector_display_name') or b['connector_type_id']}, {b['name']}",
+        {"id": b["id"], "name": reach_service.connection_label(b.get("connector_display_name") or b["connector_type_id"], b["name"]),
          "why": "It is switched off." if not b.get("enabled") else "No agent can use it."}
         for b in bindings if not b.get("enabled") or not connection_users.get(b["id"])
     ]
@@ -205,10 +219,6 @@ def _unused(agents, credentials, bindings, connection_users, grants, use) -> dic
             idle.append({"id": a["id"], "name": a.get("display_name") or a["id"], "last_signed_in": last,
                          "why": "It may fetch no secret."})
     left_behind = []
-    from app.services import audience_service
-
-    with get_db() as conn:
-        audiences = audience_service.all_entries(conn)
     for a in agents.values():
         if a.get("is_active"):
             continue  # a retired agent or a retired service

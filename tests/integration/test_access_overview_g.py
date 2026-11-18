@@ -70,9 +70,9 @@ def test_every_assignment_kind_is_listed_with_who_and_what(world):
     data = _overview(world["client"])
     assert set(data["assignments"]) == {"capability_credential", "agent_capability", "agent_credential", "service_credential"}
     sign_in = _rows(data, "capability_credential")
-    assert [(r["from"]["name"], r["to"]["name"]) for r in sign_in] == [("Overview capability, Main", "used-key")]
+    assert [(r["from"]["name"], r["to"]["name"]) for r in sign_in] == [("Main (Overview capability)", "used-key")]
     assert [(r["from"]["name"], r["to"]["name"], r["status"]) for r in _rows(data, "agent_capability")] == [
-        ("Assistant", "Overview capability, Main", "can_use")
+        ("Assistant", "Main (Overview capability)", "can_use")
     ]
     reach = {(r["from"]["name"], r["to"]["name"]): r for r in _rows(data, "agent_credential")}
     assert set(reach) == {("Assistant", "used-key"), ("Assistant", "orphan-key")}
@@ -147,7 +147,7 @@ def test_a_connection_nobody_can_use_and_what_a_retired_agent_leaves_behind_are_
     credential_service.create_credential("agent:old", "old-key", "not-shown")
     agent_service.deactivate_agent("old")
     unused = _overview(client)["unused"]
-    assert [c["name"] for c in unused["connections"]] == ["Overview capability, Nobody"]
+    assert [c["name"] for c in unused["connections"]] == ["Nobody (Overview capability)"]
     assert unused["connections"][0]["why"] == "No agent can use it."
     assert [r["name"] for r in unused["left_behind"]] == ["Old worker"]
     assert "old-key" in unused["left_behind"][0]["why"]
@@ -157,3 +157,59 @@ def test_the_overview_is_for_an_admin_session_only_and_shows_no_secret(world, te
     assert "not-shown" not in json.dumps(_overview(world["client"]))
     test_client.cookies.clear()
     assert test_client.get("/api/access/overview").status_code in (401, 403)
+
+
+def test_a_connection_is_shown_by_its_own_name_and_the_capability_only_when_the_name_does_not_start_with_it(world):
+    connector_service.create_binding("ov-cap", "Overview capability for the team", SCOPE, config_json='{"base_url": "http://example.test"}')
+    connector_service.create_binding("ov-cap", "OVERVIEW CAPABILITY", SCOPE, config_json='{"base_url": "http://example.test"}')
+    names = {r["to"]["name"] for r in _rows(_overview(world["client"]), "agent_capability")}
+    assert "Main (Overview capability)" in names
+    assert "Overview capability for the team" in names
+    assert "OVERVIEW CAPABILITY" in names
+    assert not any(", " in n for n in names)
+
+
+def test_last_used_survives_the_execution_log_being_trimmed(world):
+    """Runs older than the execution log's retention are gone from it; the audit log still holds a line for each."""
+    with get_db() as conn:
+        conn.execute("DELETE FROM connector_executions")
+        conn.execute(
+            "INSERT INTO audit_log (actor_type, actor_id, action, resource_type, resource_id, result, timestamp) "
+            "VALUES ('agent', 'asst', 'connector_action_executed', 'connector_binding', ?, 'success', '2026-10-09 22:32:05')",
+            (world["binding"]["id"],),
+        )
+        conn.commit()
+    data = _overview(world["client"])
+    assert _rows(data, "capability_credential")[0]["last_used"] == "2026-10-09 22:32:05"
+    assert _rows(data, "agent_capability")[0]["last_used"] == "2026-10-09 22:32:05"
+
+
+def test_the_overview_equals_the_answer_asked_one_credential_and_one_connection_at_a_time(world):
+    """The overview builds each agent's context once; asking per credential and per connection must give the same."""
+    from app.services import reach_service
+
+    data = _overview(world["client"])
+    for entry in credential_service.list_credentials(limit=1000):
+        expected = [
+            (r["agent_id"], r["reason"], r["status"]) for r in reach_service.agents_reaching_credential(entry)
+        ]
+        got = [
+            (r["from"]["id"], r["detail"], r["status"]) for r in _rows(data, "agent_credential") if r["to"]["id"] == entry["id"]
+        ]
+        assert sorted(got) == sorted(expected)
+    for binding in connector_service.list_bindings():
+        expected = [(r["agent_id"], r["reason"], r["status"]) for r in reach_service.agents_using_connection(binding)]
+        got = [(r["from"]["id"], r["detail"], r["status"]) for r in _rows(data, "agent_capability") if r["to"]["id"] == binding["id"]]
+        assert sorted(got) == sorted(expected)
+
+
+def test_the_overview_builds_each_agents_context_once(world, monkeypatch):
+    from app.services import reach_service
+
+    calls = []
+    real = reach_service.build_agent_context
+    monkeypatch.setattr(reach_service, "build_agent_context", lambda agent: calls.append(agent["id"]) or real(agent))
+    for n in range(5):
+        credential_service.create_credential(SCOPE, f"extra-{n}", "not-shown")
+    _overview(world["client"])
+    assert sorted(calls) == ["asst"]  # one active agent (the services are not agents), once

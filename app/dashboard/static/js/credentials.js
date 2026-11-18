@@ -167,9 +167,13 @@ function accessDate(value) {
   return when.toLocaleDateString('en-GB', { timeZone: 'UTC', day: 'numeric', month: 'short', year: 'numeric' });
 }
 
-// A connection is named by the capability it belongs to and by its own name: GitHub, account A.
+// A connection is shown by its own name; the capability goes in brackets only when the name does not already start
+// with it: "Context7" stays "Context7", "Work account" becomes "Work account (GitHub)".
 function connectionLabel(connection) {
-  return connection.capability ? connection.capability + ', ' + connection.name : connection.name;
+  var name = connection.name || '';
+  var capability = (connection.capability || '').trim();
+  if (!capability || name.trim().toLowerCase().indexOf(capability.toLowerCase()) === 0) return name;
+  return name + ' (' + capability + ')';
 }
 
 // The connections this page knows about, by id. A credential that belongs to a connection is shown with its name.
