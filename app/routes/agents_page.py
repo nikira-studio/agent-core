@@ -136,7 +136,7 @@ def _agents_view(request: Request, session: dict, show_services: bool):
             ]),
             ("Credentials", [
                 ("credentials", "Reference credentials", "List credentials and ask for the reference an agent uses (AC_SECRET_...). The agent never sees the secret value; Agent Core inserts it when a command or service runs.", True),
-                ("credentials_resolve", "Fetch secrets", "Fetch a stored value over HTTPS, one exact entry at a time, and only the entries an admin has granted it. For small services; leave off for assistants.", False),
+                ("credentials_resolve", "Fetch secrets", "Fetch a stored value over HTTPS, one exact entry at a time, and only the entries an admin has granted it. Only for services. An agent does not need it.", False),
             ]),
             ("Capabilities", [
                 ("connectors_read", "See capabilities", "See which external capabilities and actions are set up. Always on when Run capabilities is on.", True),
@@ -284,7 +284,7 @@ def _agents_view(request: Request, session: dict, show_services: bool):
             if is_admin and "credentials_resolve" in agent_service.parse_capabilities(a.get("capabilities_json")):
                 credentials_link = (
                     f"<a class='btn btn-sm btn-secondary' href='/credentials?agent={quote(a['id'])}'"
-                    " title='Choose which stored credentials this agent can use'>Credentials</a>"
+                    " title='Choose which stored credentials this one can fetch'>Credentials</a>"
                 )
             # The Connect page sets up an agent that does work; a service is set up with a key and a secret.
             connect_link = (

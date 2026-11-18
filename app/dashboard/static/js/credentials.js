@@ -38,7 +38,7 @@ async function deleteCredential(id) {
     const names = (access.data.services || []).map(function(s) { return s.name; });
     const agents = (access.data.grants || []).map(function(g) { return g.display_name || g.agent_id; });
     if (names.length) used += '\n\nThese connections use it and will stop working until you attach another credential: ' + names.join(', ') + '.';
-    if (agents.length) used += '\n\nThese agents are granted it and will lose it: ' + agents.join(', ') + '.';
+    if (agents.length) used += '\n\nThese services receive it and will lose it: ' + agents.join(', ') + '.';
   } else {
     used = '\n\nConnections that use it will stop working until you attach another credential.';
   }
@@ -168,7 +168,7 @@ async function renderAccess() {
 
   const grants = document.getElementById('access-grants');
   grants.replaceChildren();
-  if (!d.grants.length) grants.append(accessEl('p', 'No one. Give it to an agent below so it can fetch the secret at startup.', 'text-muted'));
+  if (!d.grants.length) grants.append(accessEl('p', 'No one. Give it to a service below so it can fetch the secret at startup.', 'text-muted'));
   d.grants.forEach(g => {
     const row = accessEl('div', null, 'access-row');
     row.append(accessEl('strong', g.display_name));
@@ -189,12 +189,12 @@ async function renderAccess() {
   pick.replaceChildren();
   d.candidates.forEach(a => { const o = accessEl('option', a.display_name); o.value = a.id; pick.append(o); });
   document.getElementById('access-add').disabled = !d.candidates.length;
-  if (!d.candidates.length) { const o = accessEl('option', 'No agent has the Service role'); o.value = ''; pick.append(o); }
+  if (!d.candidates.length) { const o = accessEl('option', 'No service exists yet. Create one under Credentials > Services.'); o.value = ''; pick.append(o); }
 
   const cannot = document.getElementById('access-cannot');
   const list = document.getElementById('access-cannot-list');
   list.replaceChildren();
-  cannot.style.display = d.cannot_receive.length ? '' : 'none';
+  cannot.style.display = 'none';  // an agent never receives the value, so there is no list of agents that cannot
   document.getElementById('access-cannot-count').textContent = d.cannot_receive.length;
   d.cannot_receive.forEach(a => {
     const row = accessEl('div', null, 'access-row');
@@ -223,7 +223,7 @@ async function renderAccess() {
     readers.append(accessEl('p', d.scope_readers.join(', '), 'used-by-others'));
     readers.append(accessEl('p', REFERENCE_NOTE + ' They can see it because they can read ' + accessScopeName(d.entry) + '.', 'form-hint'));
   } else {
-    readers.append(accessEl('p', 'No one else. Only the agents above can use it.', 'text-muted'));
+    readers.append(accessEl('p', 'No one else can see its name.', 'text-muted'));
   }
   renderUsedBy(d);
 }

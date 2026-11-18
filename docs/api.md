@@ -397,7 +397,7 @@ An agent calls the MCP `credential_request` tool. People see open requests at `G
 
 ### Who can use a credential
 
-A script or service (one whose role includes `credentials_resolve`) reads a stored credential through an explicit **grant** on that one credential. The Credentials page manages grants with its **Access** button; the same routes are available to an admin:
+A service (an entry whose one permission is `credentials_resolve`) reads a stored credential through an explicit **grant** on that one credential. The Credentials page manages grants with its **Access** button; the same routes are available to an admin:
 
 | Method | Path | Notes |
 |---|---|---|

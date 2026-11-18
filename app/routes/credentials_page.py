@@ -260,7 +260,7 @@ def credentials_page(request: Request, session: dict = Depends(require_auth)):
     <div class="modal-overlay" id="access-modal" style="display:none">
       <div class="modal modal-wide">
         <h2>Who can use <span id="access-name"></span></h2>
-        <p class="form-hint" style="margin-bottom:12px">One credential per capability: give it to each agent that needs it instead of storing it again. Use a separate credential only for a different account or a different capability.</p>
+        <p class="form-hint" style="margin-bottom:12px">Store each secret once. Let every connection or service that needs it use the same credential. Use a separate credential only for a different account or a different permission level.</p>
         <h3 class="sub-heading form-section-title">Given the secret</h3>
         <div id="access-grants"></div>
         <div class="form-group">
@@ -269,7 +269,7 @@ def credentials_page(request: Request, session: dict = Depends(require_auth)):
             <select id="access-agent" style="flex:1"></select>
             <button type="button" class="btn btn-sm" id="access-add">Add</button>
           </div>
-          <p class="form-hint">An agent can be given a credential when it has the Fetch secrets permission (the Service role).</p>
+          <p class="form-hint">Only a service can be given this secret's value. Agents use it through a connection, or by its reference.</p>
           <details id="access-cannot" style="display:none"><summary class="text-muted">Can't receive it yet (<span id="access-cannot-count"></span>)</summary><div id="access-cannot-list"></div></details>
         </div>
         <h3 class="sub-heading form-section-title">Connections using it</h3>
@@ -285,7 +285,7 @@ def credentials_page(request: Request, session: dict = Depends(require_auth)):
           </div>
           <div class="form-group">
             <label class="checkbox-label"><input type="checkbox" id="access-write"> Allow it to write the value back</label>
-            <p class="form-hint">Off by default. Only for an agent that rotates this secret itself.</p>
+            <p class="form-hint">Off by default. Only for a service that rotates this secret itself.</p>
           </div>
         </details>
         <div class="modal-footer"><button type="button" class="btn btn-secondary" onclick="closeAccess()">Close</button></div>
@@ -296,7 +296,7 @@ def credentials_page(request: Request, session: dict = Depends(require_auth)):
     <div class="modal-overlay" id="agent-access-modal" style="display:none">
       <div class="modal modal-wide">
         <h2>What <span id="agent-access-name"></span> can use</h2>
-        <p class="form-hint">Give an agent a credential that is already stored here instead of storing it again.</p>
+        <p class="form-hint">Give a service a credential that is already stored here instead of storing it again.</p>
         <div id="agent-access-list"></div>
         <div class="form-group">
           <label for="agent-access-pick">Give access to</label>

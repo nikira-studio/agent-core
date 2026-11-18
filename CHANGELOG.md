@@ -12,7 +12,7 @@ Notable changes to Agent Core are documented here. The format follows [Keep a Ch
 
 ### Changed
 
-- **The dashboard names things for what they are.** The Services page is now **Capabilities** (what an agent can do through Agent Core: each ready-made capability, and each connection you set up with it). **Services** now means only the programs and containers that fetch secrets, under **Credentials > Services**. An agent's on/off flags are called **Permissions** (Use memory, Coordinate tasks, Reference credentials, See capabilities, Run capabilities, Fetch secrets, Propose admin changes). Web addresses, API names, MCP tool names and stored names are unchanged, so nothing that calls Agent Core needs to change. `/agents?show=services` now redirects to `/services`.
+- **The dashboard names things for what they are.** The Services page is now **Capabilities** (what an agent can do through Agent Core: each ready-made capability, and each connection you set up with it). **Services** now means only the programs and containers that fetch secrets, under **Credentials > Services**. An agent's on/off flags are called **Permissions** (Use memory, Coordinate tasks, Reference credentials, See capabilities, Run capabilities, Fetch secrets, Propose admin changes). Web addresses, API names, MCP tool names and stored names are unchanged, so nothing that calls Agent Core needs to change. `/agents?show=services` now redirects to `/services`. Some error and instruction messages changed text with the new names (for example "Service not found" is now "Capability not found", and "Services > Edit connection" is now "Capabilities > Edit connection"); error codes did not change.
 
 ### Upgrading
 

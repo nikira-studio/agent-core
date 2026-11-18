@@ -2,7 +2,7 @@
 
 Use this when a service or container, rather than an AI agent, needs its own secrets from Agent Core at startup (database passwords, API tokens, OAuth refresh state). Each service gets a machine identity that can fetch only the entries granted to it, so one compromised service cannot read the rest of the vault. For agents, use `AC_SECRET_*` references through the [Local credential helper](credential-broker.md) instead.
 
-Machine consumers can retrieve individual encrypted credentials without vault browsing, credential administration, memory or capability access. Create a dedicated agent with only `credentials_resolve`, then create exact entry grants through an administrator's human session. Inherited user and workspace scopes do not authorize resolution. Legacy agent defaults do not include this permission.
+Machine consumers can retrieve individual encrypted credentials without vault browsing, credential administration, memory or capability access. Create a service (Credentials > Services, or `POST /api/agents` with `kind: "service"`; its one permission is `credentials_resolve`), then create exact entry grants through an administrator's human session. Inherited user and workspace scopes do not authorize resolution. Legacy agent defaults do not include this permission.
 
 The owner API is `/api/credential-consumers`:
 
