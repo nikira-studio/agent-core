@@ -21,6 +21,12 @@ def _normalize_scopes(scopes: list[str]) -> list[str]:
     return normalized
 
 
+def _refuse_connection_scopes(scopes: Optional[list[str]]) -> None:
+    """A connection's own scope (``capability:<id>``) is the one thing an agent can never be given."""
+    if scopes and any(isinstance(s, str) and s.startswith("capability:") for s in scopes):
+        raise ValueError("A connection's own scope cannot be given to an agent")
+
+
 def _with_own_scope(agent_id: str, scopes: list[str]) -> list[str]:
     own_scope = f"agent:{normalize_id(agent_id)}"
     normalized = _normalize_scopes(scopes)
@@ -105,6 +111,8 @@ def create_agent(
             capabilities is not None and sorted(set(capabilities)) == agent_kind.SERVICE_PERMISSIONS and only_own
         ) else "agent"
     kind = agent_kind.normalize_kind(kind)
+    for scope_list in (read_scopes, write_scopes, default_recall_scopes):
+        _refuse_connection_scopes(scope_list)
     if kind == "service":
         # A service fetches secrets and does nothing else: one permission, its own scope only.
         agent_kind.check_service_shape(capabilities, read_scopes, write_scopes, normalized_id, inherit_user_bindings)
@@ -443,6 +451,8 @@ def update_agent(
     # The kind rules. A service keeps one permission and no scope beyond its own unless it is first changed to an
     # agent; an agent becomes a service only when nothing says it does agent work, and the change itself writes the
     # service's fixed permission and scope (an explicit, audited change by a person, never a side effect).
+    for scope_list in (read_scopes, write_scopes) + ((default_recall_scopes,) if isinstance(default_recall_scopes, list) else ()):
+        _refuse_connection_scopes(scope_list)
     current_kind = current.get("kind") or "agent"
     target_kind = agent_kind.normalize_kind(kind) if kind is not None else current_kind
     if target_kind == "service":

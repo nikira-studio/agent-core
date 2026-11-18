@@ -24,9 +24,22 @@ class ScopeEnforcer:
         self.active_workspace_ids = active_workspace_ids
         self._workspace_status_cache: dict[str, bool] = {}
 
+    def _owning_connection_scope(self, scope: str) -> Optional[str]:
+        """For ``capability:<connection id>``: the owner scope of that connection, for a person who may manage it.
+        None for an agent (an agent is never refused by lookup: it never holds one) and for an unknown connection."""
+        if self.agent_id:
+            return None
+        from app.services import connector_service
+
+        binding = connector_service.get_binding(scope.split(":", 1)[1])
+        return binding["scope"] if binding else None
+
     def can_read(self, scope: str) -> bool:
         if self.is_admin:
             return True
+        if scope.startswith("capability:"):
+            owner = self._owning_connection_scope(scope)
+            return bool(owner) and self.can_read(owner)
         if scope.startswith("workspace:"):
             if not self._workspace_active(scope):
                 return False
@@ -38,6 +51,9 @@ class ScopeEnforcer:
     def can_write(self, scope: str) -> bool:
         if self.is_admin:
             return True
+        if scope.startswith("capability:"):
+            owner = self._owning_connection_scope(scope)
+            return bool(owner) and self.can_write(owner)
         if scope.startswith("workspace:"):
             if not self._workspace_active(scope):
                 return False
@@ -102,6 +118,9 @@ def build_agent_context(agent: dict) -> "RequestContext":
     def attenuate(scopes: list[str], allowed_workspace_ids: frozenset[str]) -> list[str]:
         result = []
         for scope in scopes:
+            # A connection's own scope is never an agent's, whatever is stored (the API refuses to store it).
+            if scope.startswith("capability:"):
+                continue
             if scope.startswith("workspace:"):
                 workspace_id = scope.split(":", 1)[1]
                 if workspace_id not in allowed_workspace_ids:

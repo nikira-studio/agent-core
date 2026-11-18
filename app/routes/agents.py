@@ -87,6 +87,8 @@ def _validate_agent_scopes(
             return error_response("INVALID_SCOPE", f"Invalid scope: {raw_scope}", 400)
 
         scope = normalize_scope_string(raw_scope)
+        if scope.startswith("capability:"):
+            return error_response("INVALID_SCOPE", "A connection's own scope cannot be given to an agent", 400)
         if scope == own_scope:
             continue
         if scope.startswith("user:"):

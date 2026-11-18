@@ -47,4 +47,6 @@ ACTIVITY_STATUSES = (
 
 USER_ROLES = ("admin", "user")
 
-SCOPE_PREFIXES = ("user", "agent", "workspace", "shared", "system")
+# "capability:<connection id>" is the owner of a credential made for one connection: no agent can reach it (it is in
+# no agent's scopes), only the hub, an administrator, and a person who may manage that connection.
+SCOPE_PREFIXES = ("user", "agent", "workspace", "shared", "system", "capability")
