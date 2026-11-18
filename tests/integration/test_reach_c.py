@@ -267,3 +267,24 @@ def test_a_connection_can_have_its_credential_taken_away_and_given_back_and_both
     details = [json.loads(r["details_json"]) for r in rows]
     assert details[0] == {"entry_before": entry["id"], "entry_after": None}
     assert details[1] == {"entry_before": None, "entry_after": entry["id"]}
+
+
+def test_the_helpers_reach_is_the_mcp_reach_for_every_entry(world):
+    """One rule, two doors: for every agent the snapshot's helper cells equal its MCP reference cells, and a service has none."""
+    from app.access_check import snapshot
+    from app.database import get_db_path
+
+    conn = sqlite3.connect(str(get_db_path()))
+    conn.row_factory = sqlite3.Row
+    try:
+        cells = snapshot.capture(conn)
+    finally:
+        conn.close()
+    for entry_id, identity in cells["identities"].items():
+        if not identity["active"]:
+            continue
+        if identity["kind"] == "service":
+            assert cells["helper_fetch"][entry_id] == [], entry_id
+        else:
+            assert cells["helper_fetch"][entry_id] == cells["mcp_reference"][entry_id], entry_id
+    assert cells["helper_fetch"]["asst"] != []  # the check is not vacuous

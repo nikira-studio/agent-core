@@ -93,18 +93,18 @@ def why(agent: dict, ctx, scope: str, names: Names) -> Optional[str]:
 def helper_decision(agent: Optional[dict], ctx, entry: dict) -> tuple[bool, str]:
     """May the local credential helper hand this credential to the agent it names? Returns (allowed, reason_code).
 
-    The same rule as the MCP ``credential_get``: an active entry that does agent work, holding the Reference
-    credentials permission, whose scopes reach the credential, and the credential not expired."""
+    The allow or deny is ``EffectiveAuthority.can("credential", "reference", ...)``, the very call the MCP
+    ``credential_get`` path makes (the Reference credentials permission and the agent's scopes), on an active entry
+    that does agent work, and the credential not expired. Only the reason code is worked out here, after a denial."""
     from app.services import credential_service
 
     if not agent or not agent.get("is_active"):
         return False, "agent_not_found"
     if (agent.get("kind") or "agent") != "agent":
         return False, "not_an_agent"
-    if "credentials" not in ctx.capabilities:
-        return False, "needs_permission"
-    if not _credential_enforcer(ctx).can_read(entry["scope"]):
-        return False, "scope_denied"
+    authority = EffectiveAuthority(context=ctx)
+    if not authority.can("credential", "reference", scope=entry["scope"]):
+        return False, "needs_permission" if not authority.has_capability("credentials") else "scope_denied"
     if credential_service.is_expired(entry):
         return False, "expired"
     return True, "allowed"
@@ -311,9 +311,10 @@ def preview_agent_workspace(agent: dict, workspace_id: str, action: str, read: b
     before_auth = EffectiveAuthority(context=before_ctx)
     has_cred = "credentials" in after_ctx.capabilities
     credentials_changed = []
+    # Whether the agent reaches the workspace's own scope before and after does not depend on the row.
+    was = _credential_enforcer(before_ctx).can_read(scope)
+    now = _credential_enforcer(after_ctx).can_read(scope)
     for entry in credential_service.list_credentials(scope=scope, limit=1000):
-        was = _credential_enforcer(before_ctx).can_read(scope)
-        now = _credential_enforcer(after_ctx).can_read(scope)
         if was != now:
             credentials_changed.append({
                 "id": entry["id"], "name": entry["name"],
@@ -321,9 +322,10 @@ def preview_agent_workspace(agent: dict, workspace_id: str, action: str, read: b
                 "needs_label": None if (has_cred or not now) else PERMISSION_LABELS["credentials"],
             })
     connections_changed = []
+    sees_before = before_auth.connector_enforcer().can_read(scope)
+    sees_after = authority.connector_enforcer().can_read(scope)
     for binding in connector_service.list_bindings(scope=scope, enabled=True):
-        was = before_auth.connector_enforcer().can_read(scope)
-        now = authority.connector_enforcer().can_read(scope)
+        was, now = sees_before, sees_after
         if was != now:
             can_run = authority.can_binding_action(binding["id"], "*", scope=scope)
             connections_changed.append({
