@@ -50,7 +50,7 @@ def propose_for(ctx: EffectiveAuthority, body: ProposalRequest) -> dict:
     if ctx.actor_type != "agent":
         raise APIError("AGENT_ONLY", "Proposals come from agents; people make admin changes directly", 403)
     if not ctx.has_capability("admin_propose"):
-        raise APIError("CAPABILITY_DENIED", "This operation requires the admin_propose capability", 403)
+        raise APIError("CAPABILITY_DENIED", "This operation requires the admin_propose permission", 403)
     if not _enforcer(ctx).can_write(body.scope):
         raise APIError("SCOPE_DENIED", f"Access denied to scope: {body.scope}", 403)
     from app.services import workspace_sync_service

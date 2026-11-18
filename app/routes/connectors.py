@@ -610,7 +610,7 @@ async def test_binding(
     ctx: EffectiveAuthority = Depends(get_request_context),
 ):
     if not ctx.has_capability("connectors_execute"):
-        return error_response("CAPABILITY_DENIED", "This operation requires the connectors_execute capability", 403)
+        return error_response("CAPABILITY_DENIED", "This operation requires the connectors_execute permission", 403)
     binding = connector_service.get_binding(binding_id)
     if not binding:
         return error_response("NOT_FOUND", "Connection not found", 404)
@@ -761,7 +761,7 @@ async def connector_health_check(
     # Every check calls a real service with its stored credential, so this is held to the same
     # capability as one test, and one request tests at most HEALTH_CHECK_LIMIT bindings.
     if not ctx.has_capability("connectors_execute"):
-        return error_response("CAPABILITY_DENIED", "This operation requires the connectors_execute capability", 403)
+        return error_response("CAPABILITY_DENIED", "This operation requires the connectors_execute permission", 403)
     bindings = connector_service.list_bindings(
         scope=body.scope,
         connector_type_id=body.connector_type_id,

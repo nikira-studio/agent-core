@@ -34,7 +34,7 @@ def llms(request: Request):
     tools = ", ".join(f"`{name}`" for name in _mcp_tools())
     return (
         f"# {APP_NAME}\n\n"
-        f"{APP_NAME} is a scoped memory, activity, credential-reference, and connector control service for agents.\n\n"
+        f"{APP_NAME} is a scoped memory, activity, credential-reference, and capability control service for agents.\n\n"
         f"MCP endpoint: {base_url}/mcp\n"
         f"Setup guidance: {base_url}/setup.md\n"
         f"Skill playbooks: {base_url}/skills/\n\n"

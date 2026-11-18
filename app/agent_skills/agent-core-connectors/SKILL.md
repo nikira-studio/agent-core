@@ -1,3 +1,3 @@
-# Agent Core connectors
+# Agent Core capabilities and connections
 
-List connector types and bindings before executing an action. Use `connectors_run` with a stored binding. Do not request or expose raw secrets.
+List the capabilities and the connections you may use before running an action. Use `connectors_run` with one of your connections. Do not request or expose raw secrets.

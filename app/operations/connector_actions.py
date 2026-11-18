@@ -36,7 +36,7 @@ def run_connector_action(
         return ConnectorActionOutcome(
             binding=binding,
             error_code="CAPABILITY_DENIED",
-            error_message="This operation requires the connectors_execute capability",
+            error_message="This operation requires the connectors_execute permission",
             status_code=403,
         )
     if not authority.can_binding_action(binding_id, action, scope=binding["scope"]):

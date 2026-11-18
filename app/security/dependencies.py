@@ -148,7 +148,7 @@ def require_capability(capability: str):
         if not authority.has_capability(capability):
             raise APIError(
                 "CAPABILITY_DENIED",
-                f"This operation requires the {capability} capability",
+                f"This operation requires the {capability} permission",
                 403,
             )
         return authority

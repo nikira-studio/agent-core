@@ -122,7 +122,7 @@ MANIFEST = {
                     "memory_class": {"type": "string", "enum": list(MEMORY_CLASSES)},
                     "subject_anchor": {
                         "type": "string",
-                        "description": "Only records anchored to this repo path, host, or service — prefix match, so 'repo:app/services' matches everything under it.",
+                        "description": "Only records anchored to this repo path, host, or connection — prefix match, so 'repo:app/services' matches everything under it.",
                     },
                     "activity_id": {
                         "type": "string",
@@ -196,7 +196,7 @@ MANIFEST = {
                         "description": (
                             "What would settle this record if someone doubted it? "
                             "'fact' = an observation about how things ARE, checkable "
-                            "against code/a host/a service, and false once the world "
+                            "against code, a host or an outside system, and false once the world "
                             "changes (e.g. 'the build server is 192.0.2.10'). 'decision' = a "
                             "choice about how things SHOULD be, which only a person can "
                             "revise and nothing can verify (e.g. 'do not edit vendored "
@@ -227,7 +227,7 @@ MANIFEST = {
                         "description": (
                             "What a later session would look at to check this record, as "
                             "'type:value' — 'repo:app/services/memory_service.py', "
-                            "'host:192.0.2.10', or 'service:<binding_id>'. Repo paths must "
+                            "'host:192.0.2.10', or 'service:<connection id>'. Repo paths must "
                             "be RELATIVE to the workspace root: the same directory has a "
                             "different absolute path in every agent's container, so an "
                             "absolute path is only resolvable by whoever wrote it. Name the "
@@ -285,7 +285,7 @@ MANIFEST = {
                     "record_id": {"type": "string"},
                     "subject_anchor": {
                         "type": "string",
-                        "description": "New anchor as 'repo:<path>', 'host:<name-or-ip>' or 'service:<binding_id>'. Pass an empty string to remove it.",
+                        "description": "New anchor as 'repo:<path>', 'host:<name-or-ip>' or 'service:<connection id>'. Pass an empty string to remove it.",
                     },
                 },
                 "required": ["record_id", "subject_anchor"],
@@ -296,7 +296,7 @@ MANIFEST = {
             "description": (
                 "Check anchored facts against the thing they describe — a repo path (only where the "
                 "operator mapped the workspace to a directory on the Core host) or a "
-                "connector binding an operator mapped to the anchor type. A present anchor sets anchor_checked_at; it does not "
+                "connection an operator mapped to the anchor type. A present anchor sets anchor_checked_at; it does not "
                 "confirm the record, which needs memory_confirm with evidence. Records "
                 "whose anchor has vanished in two checks an hour apart retract themselves (restorable). "
                 "Reports verified / missing / unverifiable counts."
@@ -457,7 +457,7 @@ MANIFEST = {
                 "each with the params the matching admin API takes. Nothing runs until a signed-in admin "
                 "approves; then all operations run together as that person, or none do. Never include "
                 "secret values: credential.create leaves out value, which the person types when approving. "
-                "Returns the approval id; check it with approval_get. Requires the admin_propose capability."
+                "Returns the approval id; check it with approval_get. Requires the admin_propose permission."
             ),
             "inputSchema": {
                 "type": "object",
@@ -657,10 +657,10 @@ MANIFEST = {
         {
             "name": "connectors_list",
             "description": (
-                "List installed connector types as lean summaries (id, name, "
+                "List the capabilities installed here as lean summaries (id, name, "
                 "auth/backend type, action_count) — no full specs. Use "
-                "connectors_actions_list for a type's actions, or connectors_summary "
-                "for a capability overview."
+                "connectors_actions_list for a capability's actions, or connectors_summary "
+                "for an overview of what you can use."
             ),
             "inputSchema": {
                 "type": "object",
@@ -672,7 +672,7 @@ MANIFEST = {
         },
         {
             "name": "connectors_resolve",
-            "description": "Resolve one authorized connector binding deterministically; ambiguous candidates fail closed",
+            "description": "Resolve one connection you may use (a capability set up with a credential) deterministically; ambiguous candidates fail closed",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -686,7 +686,7 @@ MANIFEST = {
         },
         {
             "name": "connectors_bindings_list",
-            "description": "List connector bindings in authorized scopes",
+            "description": "List the connections you may use",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -698,7 +698,7 @@ MANIFEST = {
         },
         {
             "name": "connectors_bindings_test",
-            "description": "Test a connector binding by resolving the credential and calling the connector's test_connection",
+            "description": "Test a connection by resolving its credential and calling the capability's test_connection",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -710,7 +710,7 @@ MANIFEST = {
         {
             "name": "connectors_actions_list",
             "description": (
-                "List actions for a connector type: name, one-line description, side effect and "
+                "List actions for a capability: name, one-line description, side effect and "
                 "required parameters. Pass action=<name> for that action's full input schema "
                 "before calling connectors_run."
             ),
@@ -731,7 +731,7 @@ MANIFEST = {
         },
         {
             "name": "connectors_summary",
-            "description": "Summarize visible connector types and bindings for the current caller: one line of state per binding (usable, health, failing actions). Pass view='full' or a connector_type_id for credential and health detail.",
+            "description": "Summarize the capabilities and connections you can use: one line of state per connection (usable, health, failing actions). Pass view='full' or a connector_type_id for credential and health detail.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -744,7 +744,7 @@ MANIFEST = {
         },
         {
             "name": "connectors_run",
-            "description": "Run a connector action server-side using a stored credential; the raw secret is never exposed to the agent. If a person asked to approve this action first, the answer is pending_approval with an approval_id: do not retry, check approval_get later (a rejection or expiry means stop and tell the person).",
+            "description": "Run a capability action server-side through a connection, using its stored credential; the raw secret is never exposed to the agent. If a person asked to approve this action first, the answer is pending_approval with an approval_id: do not retry, check approval_get later (a rejection or expiry means stop and tell the person).",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -2573,7 +2573,7 @@ async def _run_custom_mcp_tool(body: dict, ctx: EffectiveAuthority):
         if not binding:
             return _mcp_error("NOT_FOUND", "Connection not found", 404)
         if not ctx.can_use_binding(binding):
-            return _mcp_error("SCOPE_DENIED", "Access denied to this binding", 403)
+            return _mcp_error("SCOPE_DENIED", "Access denied to this connection", 403)
         result = await asyncio.to_thread(
             connector_service.test_binding, params["binding_id"]
         )
