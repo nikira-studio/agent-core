@@ -1,4 +1,5 @@
 import asyncio
+import sqlite3
 import json
 import time
 import threading
@@ -114,6 +115,10 @@ class CreateBindingRequest(BaseModel):
     # Who may use the connection, when not what its scope has always meant: a list of {kind, ref, exclude}
     # (kind: agent, workspace or person_agents). An administrator only.
     audience: Optional[list[dict]] = None
+    # A new credential made with the connection, in one step that is all-or-nothing. It belongs to the connection by
+    # default (``owned_by: "connection"``: no agent can reach it); ``owned_by: "owner"`` stores it under the owner scope
+    # as before, so agents there can reference it. A person only.
+    new_credential: Optional[dict] = None
 
 
 class UpdateBindingRequest(BaseModel):
@@ -289,6 +294,16 @@ def create_binding(
     audience, audience_error = _checked_audience(body.audience, ctx)
     if audience_error:
         return audience_error
+    new_credential = body.new_credential
+    if new_credential is not None:
+        if ctx.actor_type == "agent":
+            return error_response("FORBIDDEN", "Only a person can store a credential with a connection", 403)
+        if body.credential_id:
+            return error_response("INVALID_REQUEST", "Choose a stored credential or a new one, not both", 400)
+        if not str(new_credential.get("name") or "").strip() or not str(new_credential.get("value") or ""):
+            return error_response("INVALID_REQUEST", "A new credential needs a name and a value", 400)
+        if new_credential.get("owned_by", "connection") not in ("connection", "owner"):
+            return error_response("INVALID_REQUEST", "owned_by must be 'connection' or 'owner'", 400)
     actions_mode, disabled_actions = body.actions_mode, body.disabled_actions
     if ctx.actor_type == "agent":
         # What a connection allows is a person's decision. An agent cannot choose it, and a connection an agent makes
@@ -296,8 +311,9 @@ def create_binding(
         if actions_mode is not None or disabled_actions is not None:
             return error_response("ACTIONS_NOT_FOR_AGENTS", "Only a person can choose what a connection allows", 403)
         actions_mode = "none"
+    made_credential = None
     try:
-        binding = connector_service.create_binding(
+        create_kwargs = dict(
             connector_type_id=body.connector_type_id,
             name=body.name,
             scope=body.scope,
@@ -315,8 +331,40 @@ def create_binding(
             disabled_actions=disabled_actions,
             audience=audience,
         )
+        if new_credential is None:
+            binding = connector_service.create_binding(**create_kwargs)
+        else:
+            # The connection, its credential and the link between them are made together or not at all.
+            from app.database import all_or_nothing
+
+            with all_or_nothing():
+                binding = connector_service.create_binding(**create_kwargs)
+                owner_scope = (
+                    f"capability:{binding['id']}" if new_credential.get("owned_by", "connection") == "connection" else body.scope
+                )
+                made_credential = credential_service.create_credential(
+                    scope=owner_scope,
+                    name=str(new_credential["name"]).strip(),
+                    value_plaintext=str(new_credential["value"]),
+                    label=new_credential.get("label") or str(new_credential["name"]).strip(),
+                    created_by=ctx.user_id,
+                )
+                connector_service.update_binding(binding["id"], credential_id=made_credential["id"])
+            binding = connector_service.get_binding(binding["id"])
+    except sqlite3.IntegrityError:
+        return error_response(
+            "DUPLICATE_CREDENTIAL",
+            "A credential with that name already exists there. Choose it from the list instead of creating it again.",
+            409,
+        )
     except ValueError as e:
         return error_response("INVALID_CONFIG", str(e), 400)
+    if made_credential:
+        audit_service.write_event(
+            actor_type=ctx.actor_type, actor_id=ctx.actor_id, action="credential_entry_created",
+            resource_type="credential", resource_id=made_credential["id"], result="success",
+            details={"scope": made_credential["scope"], "with_connection": binding["id"]},
+        )
     binding = _with_audience(binding, ctx)
     audit_service.write_event(
         actor_type=ctx.actor_type,
@@ -520,14 +568,18 @@ def update_binding(
 @router.delete("/{binding_id}")
 def delete_binding(
     binding_id: str,
+    delete_credential: bool = False,
     ctx: EffectiveAuthority = Depends(get_request_context),
 ):
+    """Delete a connection. A credential made for it (owned by the connection) is kept unless ``delete_credential`` is
+    true: through the API the default is to keep, and a kept one is listed on the Access page as left behind."""
     binding = connector_service.get_binding(binding_id)
     if not binding:
         return error_response("NOT_FOUND", "Connection not found", 404)
     enforcer = ctx.connector_enforcer()
     if not enforcer.can_write(binding["scope"]):
         return error_response("SCOPE_DENIED", "Access denied to this connection", 403)
+    owned = credential_service.list_credentials(scope=f"capability:{binding_id}", limit=100)
     connector_service.delete_binding(binding_id)
     audit_service.write_event(
         actor_type=ctx.actor_type,
@@ -537,7 +589,19 @@ def delete_binding(
         resource_id=binding_id,
         result="success",
     )
-    return success_response({"message": "Connection deleted"})
+    deleted, kept = [], []
+    for entry in owned:
+        if delete_credential:
+            credential_service.delete_credential(entry["id"])
+            audit_service.write_event(
+                actor_type=ctx.actor_type, actor_id=ctx.actor_id, action="credential_entry_deleted",
+                resource_type="credential", resource_id=entry["id"], result="success",
+                details={"with_connection": binding_id},
+            )
+            deleted.append(entry["name"])
+        else:
+            kept.append(entry["name"])
+    return success_response({"message": "Connection deleted", "credential_deleted": deleted, "credential_kept": kept})
 
 
 @router.post("/{binding_id}/test")

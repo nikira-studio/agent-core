@@ -198,6 +198,13 @@ def list_entries(
         return error_response("SCOPE_DENIED", "Access denied to this scope", 403)
 
     readable_scopes = None if ctx.is_admin or scope else enforcer.filter_readable_scopes(ctx.read_scopes)
+    if readable_scopes is not None and not ctx.agent_id:
+        # A person also sees the credentials made for the connections they may manage; an agent never does.
+        from app.services import connector_service
+
+        readable_scopes = readable_scopes + [
+            f"capability:{b['id']}" for b in connector_service.list_bindings() if enforcer.can_write(b["scope"])
+        ]
     entries = credential_service.list_credentials(
         scope=scope, scopes=readable_scopes, limit=limit, offset=offset
     )
@@ -244,6 +251,11 @@ def create_entry(
         return error_response("INVALID_SCOPE", "Malformed scope", 400)
     if not enforcer.can_write(body.scope):
         return error_response("SCOPE_DENIED", "Access denied to this scope", 403)
+    if body.scope.startswith("capability:"):
+        from app.services import connector_service
+
+        if not connector_service.get_binding(body.scope.split(":", 1)[1]):
+            return error_response("INVALID_SCOPE", "There is no connection for that owner", 400)
 
     try:
         entry = credential_service.create_credential(
@@ -373,6 +385,21 @@ def update_entry(
                 return error_response(
                     "SCOPE_DENIED", "Access denied to the destination scope", 403
                 )
+            if body.scope.startswith("capability:"):
+                # A credential can belong to one connection only, and only a connection that exists.
+                from app.services import connector_service
+
+                owner_id = body.scope.split(":", 1)[1]
+                if not connector_service.get_binding(owner_id):
+                    return error_response("INVALID_SCOPE", "There is no connection for that owner", 400)
+                sharing = [b for b in connector_service.list_bindings() if b.get("credential_id") == entry_id and b["id"] != owner_id]
+                if sharing:
+                    return error_response(
+                        "SHARED_CREDENTIAL",
+                        f"{len(sharing)} other connection{'s' if len(sharing) != 1 else ''} also use this credential, "
+                        "so it cannot belong to just one connection. Move it to a workspace or a person instead.",
+                        409,
+                    )
             move_result = credential_service.move_credential(
                 entry_id, body.scope, **updates
             )

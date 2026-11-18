@@ -167,8 +167,13 @@ def _unused(agents, credentials, bindings, connection_users, grants, use) -> dic
             if when_at and (credential_id not in last_seen or when_at > _parse(last_seen[credential_id])):
                 last_seen[credential_id] = when
     unused_credentials = []
+    live_binding_ids = {b["id"] for b in bindings}
+    orphaned = [
+        c for c in credentials.values()
+        if c["scope"].startswith("capability:") and c["scope"].split(":", 1)[1] not in live_binding_ids
+    ]
     for c in credentials.values():
-        if c["id"] in granted or c["id"] in signed_in:
+        if c["id"] in granted or c["id"] in signed_in or c in orphaned:
             continue
         seen = last_seen.get(c["id"])
         seen_at = _parse(seen)
@@ -226,6 +231,16 @@ def _unused(agents, credentials, bindings, connection_users, grants, use) -> dic
             if named_on:
                 parts.append(f"named as a user of: {', '.join(named_on)}")
             left_behind.append({"id": a["id"], "name": a.get("display_name") or a["id"], "why": "; ".join(parts)})
+    for c in orphaned:
+        holders = sorted(
+            (agents.get(g["consumer_agent_id"]) or {}).get("display_name") or g["consumer_agent_id"]
+            for g in live if g["entry_id"] == c["id"]
+        )
+        left_behind.append({
+            "id": c["id"], "name": c["name"],
+            "why": "It belonged to a connection that was deleted, and no agent can reach it."
+                   + (f" Services that still receive it: {', '.join(holders)}." if holders else ""),
+        })
     return {
         "credentials": sorted(unused_credentials, key=lambda r: r["name"].lower()),
         "connections": sorted(unusable, key=lambda r: r["name"].lower()),

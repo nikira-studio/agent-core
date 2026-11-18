@@ -68,6 +68,11 @@ class Names:
             return f"{self.person(ident)}'s personal space"
         if kind == "agent":
             return f"{ident}'s private space"
+        if kind == "capability":
+            from app.services import connector_service
+
+            binding = connector_service.get_binding(ident)
+            return f"connection {binding['name']}" if binding else "a deleted connection"
         return scope
 
 

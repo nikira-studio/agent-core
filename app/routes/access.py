@@ -39,7 +39,25 @@ def connection_access(binding_id: str, session: dict = Depends(require_admin)):
     if not binding:
         return error_response("NOT_FOUND", "Connection not found", 404)
     credential = credential_service.get_credential(binding["credential_id"]) if binding.get("credential_id") else None
+    owned = credential_service.list_credentials(scope=f"capability:{binding['id']}", limit=100)
+    owned_info = None
+    if owned:
+        from app.database import get_db as _get_db
+        from app.services.credential_consumer_service import is_expired
+
+        with _get_db() as conn:
+            holders = [
+                r["display_name"] or r["consumer_agent_id"]
+                for r in conn.execute(
+                    "SELECT g.consumer_agent_id, g.expires_at, a.display_name FROM credential_consumer_grants g "
+                    "LEFT JOIN agents a ON a.id = g.consumer_agent_id WHERE g.entry_id = ? AND g.revoked_at IS NULL",
+                    (owned[0]["id"],),
+                ).fetchall()
+                if not is_expired({"expires_at": r["expires_at"]})
+            ]
+        owned_info = {"id": owned[0]["id"], "name": owned[0]["name"], "services_holding": holders}
     return success_response({
+        "owned_credential": owned_info,
         "connection": {"id": binding["id"], "name": binding["name"], "capability": binding.get("connector_display_name")},
         "credential": {"id": credential["id"], "name": credential["name"]} if credential else None,
         "users": reach_service.agents_using_connection(binding),
