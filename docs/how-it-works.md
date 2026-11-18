@@ -242,6 +242,8 @@ Prefer the capability path when both are available. The reference is what agents
 
 One credential, one list of who can use it, in three groups: the capabilities that sign in with it, the agents that can reach it, and the services that receive its value. Only the last group is given the value itself.
 
+A credential made while adding a connection belongs to that connection: it is stored for that connection alone, so no agent can reach it and only Agent Core uses it (a service can still be given it explicitly). Tick **Also let agents reference this credential** in the Add connection dialog to store it under the connection's owner instead, as before. Deleting a connection asks whether its credential goes with it; one that a service still receives is kept unless you say otherwise, and is then listed on the Access page under Left behind.
+
 The **Access** page (Credentials > Access) is that list for everything at once: every assignment there is, with when each was last used, any action that waits for a person, filters by agent, capability or service, and an **Unused** list of what nothing uses. It is for reading: anything is turned on or off where it belongs.
 
 ---
@@ -267,6 +269,8 @@ connectors_actions_list   what can this type do?
 connectors_bindings_test  is this binding still good?
 connectors_run            do it, server-side
 ```
+
+A connection can also make its own credential: entered in the Add connection dialog, it belongs to that connection, so no agent can reach it and only Agent Core uses it.
 
 Adapters declare their requirements, and a connection only exposes actions whose requirements are met, so a half-configured integration presents as unavailable rather than failing at the moment an agent depends on it. Every execution is logged, and the log is pruned on the same retention sweep as everything else.
 

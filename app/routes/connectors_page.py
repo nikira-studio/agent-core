@@ -82,6 +82,18 @@ def _binding_recipe_line(guidance: dict) -> str:
     return " · ".join([b for b in bits if b and b != "Suggested name: "])
 
 
+def _scope_words(scope: str, connections: dict[str, str]) -> str:
+    """A stored credential's owner in words, for the pickers: a credential that belongs to a connection is named
+    after that connection, never shown as a raw scope."""
+    kind, sep, name = scope.partition(":")
+    if not sep:
+        return scope
+    if kind == "capability":
+        connection_name = connections.get(name)
+        return f"Connection {connection_name}" if connection_name else "A deleted connection"
+    return scope
+
+
 def _render_adapter_cards(adapter_entries: list[dict], ctx) -> str:
     adapter_cards = ""
     for adapter in adapter_entries:
@@ -219,6 +231,8 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
     }
 
     all_bindings = connector_service.list_bindings()
+    # The connections by id: a credential that belongs to one is named after it, never shown as a raw scope.
+    connection_names = {b["id"]: (b.get("name") or b["id"]) for b in all_bindings}
     # Indexed once for the connection table below; see failing_actions_by_binding.
     failing_by_binding = connector_service.failing_actions_by_binding()
     visible_bindings = [b for b in all_bindings if enforcer.can_read(b["scope"])]
@@ -299,7 +313,7 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
     )
     credential_opts = "".join(
         f'<option value="{e["id"]}" data-credential-name="{escape_html(e.get("name", e["id"]))}" data-credential-scope="{escape_html(e.get("scope", ""))}">'
-        f'{escape_html(e.get("name", e["id"]))} ({escape_html(e.get("scope", ""))} / {escape_html(e.get("reference_name", ""))})'
+        f'{escape_html(e.get("name", e["id"]))} ({escape_html(_scope_words(e.get("scope", ""), connection_names))} / {escape_html(e.get("reference_name", ""))})'
         f'</option>'
         for e in credential_entries
     )
@@ -702,6 +716,12 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
               <div class="form-hint">A name for the new credential, so you can find it on the Credentials page.</div>
             </div>
             <div id="binding-new-credential-editor"></div>
+            <div class="form-group">
+              <label class="checkbox-label">
+                <input type="checkbox" id="binding-new-credential-shared"> Also let agents reference this credential
+              </label>
+              <div class="form-hint" id="binding-new-credential-owner-hint">Off: only Agent Core uses it and no agent can reach it. On: it is stored under the owner you pick, so agents there can reference it.</div>
+            </div>
           </div>
           <div class="form-group" id="binding-base-url-group" style="display:none">
             <label for="binding-base-url">Capability address *</label>
@@ -796,6 +816,22 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
           <button type="submit" class="btn btn-primary">Save Changes</button>
           <button type="button" class="btn btn-secondary" onclick="closeModal('edit-binding-modal')">Cancel</button>
         </form>
+      </div>
+    </div>
+
+    <!-- Delete Connection Modal -->
+    <div class="modal-overlay" id="delete-binding-modal" style="display:none">
+      <div class="modal">
+        <h2 id="delete-binding-title">Delete connection</h2>
+        <p id="delete-binding-text" class="form-hint" style="margin-bottom:12px"></p>
+        <div id="delete-binding-credential-block" style="display:none;margin-bottom:12px">
+          <label class="checkbox-label">
+            <input type="checkbox" id="delete-binding-credential"> <span id="delete-binding-credential-label">Also delete its credential</span>
+          </label>
+          <div class="form-hint" id="delete-binding-credential-note"></div>
+        </div>
+        <button type="button" class="btn btn-danger" onclick="confirmDeleteBinding()">Delete connection</button>
+        <button type="button" class="btn btn-secondary" onclick="closeModal('delete-binding-modal')">Cancel</button>
       </div>
     </div>
 
@@ -1047,7 +1083,7 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
 
     extra_js = (
         '<script src="/static/js/adapter-actions.js?v=20260902"></script>'
-        '<script src="/static/js/connectors.js?v=20261113a"></script>'
+        '<script src="/static/js/connectors.js?v=20261118b"></script>'
         '<script src="/static/js/agent_access.js?v=20261118a"></script>'
     )
     return render_page("Capabilities", body, "/connectors", extra_js, session=session)

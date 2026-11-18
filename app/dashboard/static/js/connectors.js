@@ -128,7 +128,12 @@ async function loadCredentialReach(bindingId) {
   const j = await apiFetch('/api/connector-bindings/' + encodeURIComponent(bindingId) + '/credential-reach');
   if (j.ok && j.data) {
     box.dataset.text = j.data.text || '';
-    box.title = j.data.credential_scope ? 'The credential is stored in ' + j.data.credential_scope : '';
+    const scope = String(j.data.credential_scope || '');
+    // A credential that belongs to a connection is named after it, never shown as a raw scope.
+    if (!scope) box.title = '';
+    else if (scope === 'capability:' + bindingId) box.title = 'The credential belongs to this connection';
+    else if (scope.indexOf('capability:') === 0) box.title = 'The credential belongs to another connection';
+    else box.title = 'The credential is stored in ' + scope;
   }
   updateCredentialReach();
 }
@@ -423,9 +428,28 @@ function bindingCredentialRequired(guidance) {
   return Array.isArray(guidance?.credential_fields) && guidance.credential_fields.length > 0;
 }
 
+// The owner of a new credential: the connection's owner, by the words the owner select shows.
+function bindingOwnerName() {
+  const select = document.getElementById('binding-scope');
+  if (!select || !select.value) return 'the owner you pick';
+  const option = select.options[select.selectedIndex];
+  const text = option ? (option.textContent || '').trim() : '';
+  return text || 'the owner you pick';
+}
+
+// What a new credential is for, in one line: off it belongs to the connection alone, on it belongs to the owner.
+const NEW_CREDENTIAL_OWNER_HINT = 'Off: only Agent Core uses it and no agent can reach it. On: it is stored under ';
+
+function updateNewCredentialOwnerHint() {
+  const hint = document.getElementById('binding-new-credential-owner-hint');
+  if (!hint) return;
+  hint.textContent = NEW_CREDENTIAL_OWNER_HINT + bindingOwnerName() + ', so agents there can reference it.';
+}
+
 async function createBinding(e) {
   e.preventDefault();
   let credentialId = document.getElementById('binding-credential').value || null;
+  let newCredential = null;
   const credentialMode = document.getElementById('binding-credential-mode').value;
   const bindingScope = document.getElementById('binding-scope').value;
   const guidance = parseBindingGuidance();
@@ -439,7 +463,7 @@ async function createBinding(e) {
     const credentialValueEl = document.getElementById('binding-new-credential-value');
     const credentialValue = credentialValueEl ? credentialValueEl.value : '';
     if (!bindingScope) {
-      showToast('Select a scope before creating a credential', 'danger');
+      showToast('Choose who may use it before creating a credential', 'danger');
       return;
     }
     if (!credentialName || !credentialValue) {
@@ -471,22 +495,20 @@ async function createBinding(e) {
           return;
         }
       }
-      const credentialBody = {
+      // The credential is made together with the connection, in one step: the connection, the credential and the
+      // link between them are created together or not at all. It belongs to the connection, so no agent can reach
+      // it, unless the person asks for it to be stored under the owner instead.
+      const shared = document.getElementById('binding-new-credential-shared');
+      newCredential = {
         name: credentialName,
-        label: credentialName,
-        scope: bindingScope,
         value: credentialValue,
+        label: credentialName,
+        owned_by: shared && shared.checked ? 'owner' : 'connection',
       };
-      const credentialResult = await apiFetch('/api/credentials/entries', { method: 'POST', body: JSON.stringify(credentialBody) });
-      if (!credentialResult.ok) {
-        showToast(credentialResult.error?.message || 'Failed to create credential', 'danger');
-        return;
-      }
-      credentialId = credentialResult.data.entry.id;
     }
   }
 
-  if (credentialRequired && !credentialId) {
+  if (credentialRequired && !credentialId && !newCredential) {
     showToast('This capability needs a credential for: ' + requiredCredentialFields.join(', '), 'danger');
     return;
   }
@@ -540,11 +562,13 @@ async function createBinding(e) {
     connector_type_id: document.getElementById('binding-connector-type').value,
     name: document.getElementById('binding-name').value,
     scope: bindingScope,
-    credential_id: credentialId,
     config_json: configJson,
     enabled: document.getElementById('binding-enabled').checked,
     ...readActionsPicker('binding'),
   };
+  // A new credential travels with the connection; a stored one is linked by its id.
+  if (newCredential) body.new_credential = newCredential;
+  else body.credential_id = credentialId;
   const endpointOverride = document.getElementById('binding-mcp-endpoint');
   const selectedType = document.getElementById('binding-connector-type').selectedOptions[0];
   if (selectedType?.dataset.providerType === 'mcp' && endpointOverride && endpointOverride.value.trim()) {
@@ -569,8 +593,14 @@ function toggleBindingCredentialMode(refreshContext) {
   const mode = document.getElementById('binding-credential-mode').value;
   document.getElementById('binding-existing-credential-fields').style.display = mode === 'existing' ? '' : 'none';
   document.getElementById('binding-new-credential-fields').style.display = mode === 'new' ? '' : 'none';
+  updateNewCredentialOwnerHint();
   if (refreshContext !== false) updateBindingFormContext();
 }
+
+// The new credential's owner is the connection's owner, so the line under it follows the owner select.
+document.addEventListener('change', function(ev) {
+  if (ev.target && ev.target.id === 'binding-scope') updateNewCredentialOwnerHint();
+});
 
 async function editBinding(id) {
   const j = await apiFetch('/api/connector-bindings/' + id);
@@ -613,14 +643,91 @@ async function submitEditBinding(e) {
   else { showToast(j.error?.message || 'Failed', 'danger'); }
 }
 
-async function deleteBinding(id) {
-  const row = document.querySelector('tr[data-binding-id="' + id + '"] td');
-  const label = row ? row.textContent.trim() : '';
-  if (!await confirmDialog('Delete the connection' + (label ? ' "' + label + '"' : '') + '? Agents can no longer use it, and its recent-runs list goes with it (the audit log keeps the record of what ran). This cannot be undone.')) return;
-  const j = await apiFetch('/api/connector-bindings/' + id, { method: 'DELETE' });
-  if (j.ok) { showToast('Connection deleted', 'success'); location.reload(); }
-  else { showToast(j.error?.message || 'Failed', 'danger'); }
+// Deleting a connection: a dialog that also says what happens to the credential made for it. The credential is
+// kept unless the person says otherwise, and it is kept by default when a service still receives it.
+const DELETE_BINDING_TEXT = 'Agents can no longer use it, and its recent-runs list goes with it. The audit log keeps the record of what ran. This cannot be undone.';
+let pendingDeleteBinding = null;
+
+function bindingNameFromRow(id) {
+  const row = document.querySelector('tr[data-binding-id="' + CSS.escape(String(id)) + '"] td');
+  return row ? row.textContent.trim() : '';
 }
+
+async function deleteBinding(id) {
+  let name = '';
+  let owned = null;
+  const j = await apiFetch('/api/access/connections/' + encodeURIComponent(id));
+  if (j.ok && j.data) {
+    name = (j.data.connection && j.data.connection.name) || '';
+    owned = j.data.owned_credential || null;
+  }
+  openDeleteBindingDialog(id, name || bindingNameFromRow(id), owned);
+}
+
+function openDeleteBindingDialog(id, name, owned) {
+  pendingDeleteBinding = { id: id, name: name, owned: owned };
+  document.getElementById('delete-binding-title').textContent = 'Delete ' + (name || 'this connection') + '?';
+  document.getElementById('delete-binding-text').textContent = DELETE_BINDING_TEXT;
+  const block = document.getElementById('delete-binding-credential-block');
+  const box = document.getElementById('delete-binding-credential');
+  const label = document.getElementById('delete-binding-credential-label');
+  const note = document.getElementById('delete-binding-credential-note');
+  if (owned) {
+    block.style.display = '';
+    label.textContent = 'Also delete its credential (' + owned.name + ')';
+    const holders = Array.isArray(owned.services_holding) ? owned.services_holding : [];
+    if (holders.length) {
+      box.checked = false;  // a service still receives it: deleting it would break that service
+      note.textContent = holders.join(', ') + ' still receive it. They keep it unless you delete it too.';
+    } else {
+      box.checked = true;
+      note.textContent = 'Nothing else can use it once the connection is gone.';
+    }
+  } else {
+    block.style.display = 'none';
+    box.checked = false;
+    note.textContent = '';
+  }
+  openModal('delete-binding-modal');
+}
+
+async function confirmDeleteBinding() {
+  const pending = pendingDeleteBinding;
+  if (!pending) return;
+  const box = document.getElementById('delete-binding-credential');
+  const drop = !!(pending.owned && box.checked);
+  const j = await apiFetch(
+    '/api/connector-bindings/' + encodeURIComponent(pending.id) + '?delete_credential=' + (drop ? 'true' : 'false'),
+    { method: 'DELETE' }
+  );
+  if (!j.ok) {
+    showToast(j.error?.message || 'Failed to delete the connection', 'danger');
+    return;
+  }
+  closeModal('delete-binding-modal');
+  let message = 'Connection deleted';
+  if (drop) message = 'Connection and its credential deleted';
+  else if (pending.owned) message = 'Connection deleted. Its credential was kept: ' + pending.owned.name;
+  showToastAfterReload(message);
+}
+
+// The toast after a reload: the page is shown again first, so the message is still there to read.
+function showToastAfterReload(message, type) {
+  try {
+    sessionStorage.setItem('connectorDeleteResult', JSON.stringify({ message: message, type: type || 'success' }));
+  } catch (e) { /* ignore a browser that keeps nothing */ }
+  location.reload();
+}
+
+(function showPendingDeleteResult() {
+  const stored = sessionStorage.getItem('connectorDeleteResult');
+  if (!stored) return;
+  sessionStorage.removeItem('connectorDeleteResult');
+  try {
+    const result = JSON.parse(stored);
+    showToast(result.message, result.type || 'success');
+  } catch (e) { /* ignore a malformed value */ }
+})();
 
 async function deleteConnectorType(id) {
   const card = document.querySelector('[data-connector-type-delete="' + id + '"]');

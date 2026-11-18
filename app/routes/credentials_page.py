@@ -1,10 +1,12 @@
 """Credentials dashboard page."""
 
+import json
+
 from fastapi import APIRouter, Request, Depends
 
 from app.security.context import build_user_context
 from app.security.scope_enforcer import ScopeEnforcer
-from app.services import credential_service, workspace_service
+from app.services import connector_service, credential_service, workspace_service
 from app.services.agent_service import list_agents
 from app.routes.dashboard_shared import (
     render_page,
@@ -32,14 +34,28 @@ REFERENCE_NOTE = (
 )
 
 
-def scope_html(scope: str) -> str:
-    """The workspace (or person, or agent) a credential lives in, with a small tag for which it is.
+def connection_owner_name(binding_id: str, connections: dict[str, str] | None) -> str:
+    """The connection a credential belongs to, in plain words: its name, or that it is gone.
+
+    A credential that belongs to a connection is never shown as the raw scope, and never as the connection's id.
+    """
+    if connections is None:
+        return "A connection"
+    name = connections.get(binding_id)
+    return f"Connection {name}" if name else "A deleted connection"
+
+
+def scope_html(scope: str, connections: dict[str, str] | None = None) -> str:
+    """The workspace (or person, or agent, or connection) a credential lives in, with a small tag for which it is.
 
     The name never splits inside itself (web-frontend stays whole); the tag sits beside or under it.
     """
     kind, sep, name = scope.partition(":")
     if not sep:
         return f"<span>{escape_html(scope)}</span>"
+    if kind == "capability":
+        # A credential that belongs to a connection: the connection's name, and no raw scope anywhere.
+        return f"<span class='scope-name'>{escape_html(connection_owner_name(name, connections))}</span>"
     tag = _SCOPE_KIND_TAG.get(kind, kind)
     return (
         f"<span class='scope-name'>{escape_html(name)}</span> "
@@ -89,6 +105,13 @@ def credentials_page(request: Request, session: dict = Depends(require_auth)):
         for e in (credential_service.list_credentials(limit=500) or [])
         if enforcer.can_read(e.get("scope", ""))
     ]
+
+    # The connections this person may see, by id: a credential that belongs to one is named after it.
+    connections = {
+        b["id"]: (b.get("name") or b["id"])
+        for b in connector_service.list_bindings()
+        if enforcer.can_read(b.get("scope", ""))
+    }
 
     workspaces = (
         workspace_service.list_workspaces()
@@ -191,7 +214,7 @@ def credentials_page(request: Request, session: dict = Depends(require_auth)):
           <td>{escape_html(e.get("name", "")).replace("_", "_<wbr>")}
             <div class='text-muted' style='font-size:0.8rem'>{origin}</div>
             <button type='button' class='btn btn-sm btn-link' data-copy-reference="{escape_html(e.get("reference_name", ""))}" title="Copy {escape_html(e.get("reference_name", ""))}">Copy reference</button></td>
-          <td data-label='Scope'><code class='scope-code'>{scope_html(e.get("scope", ""))}</code></td>
+          <td data-label='Scope'><code class='scope-code'>{scope_html(e.get("scope", ""), connections)}</code></td>
           <td data-label='Expires'>{_expiry_cell(e.get("expires_at"))}</td>
           {used_cell}
           <td class='actions-cell'>
@@ -213,7 +236,7 @@ def credentials_page(request: Request, session: dict = Depends(require_auth)):
         <tr>
           <td>{escape_html(r["name"])}
             <div class='text-muted' style='font-size:0.8rem'>asked by {escape_html(r["requested_by_agent_id"])} · {local_dt(r["created_at"], style="date")}</div></td>
-          <td><code class='scope-code'>{scope_html(r["scope"])}</code></td>
+          <td><code class='scope-code'>{scope_html(r["scope"], connections)}</code></td>
           <td>{escape_html(r["purpose"])}</td>
           <td class='actions-cell'>
             <button type='button' class='btn btn-sm' data-request-fill="{escape_html(r["id"])}" data-request-name="{escape_html(r["name"])}">Provide secret</button>
@@ -238,6 +261,15 @@ def credentials_page(request: Request, session: dict = Depends(require_auth)):
     else:
         credentials_html = "<div class='empty'>No credentials yet.</div>"
 
+    # The connection names, for the browser: a credential that belongs to a connection is shown with its name.
+    connection_names_blob = (
+        json.dumps(connections)
+        .replace("<", "\\u003c")
+        .replace(">", "\\u003e")
+        .replace("&", "\\u0026")
+        .replace("'", "\\u0027")
+    )
+
     body = f"""
     <div class="page-header">
       <div>
@@ -255,6 +287,9 @@ def credentials_page(request: Request, session: dict = Depends(require_auth)):
     <div class="card">
       <div id="credentials-list">{credentials_html}</div>
     </div>
+
+    <!-- The connections on this page, by id: a credential that belongs to one is shown with its name. -->
+    <script>window.AC_CREDENTIAL_CONNECTIONS = {connection_names_blob};</script>
 
     <!-- Who can use a credential: one list, in three groups -->
     <div class="modal-overlay" id="access-modal" style="display:none">
@@ -278,7 +313,7 @@ def credentials_page(request: Request, session: dict = Depends(require_auth)):
           <span class="text-muted">Owner: <span id="access-owner"></span></span>
           <button type="button" class="btn btn-sm btn-secondary" id="access-owner-change">Change owner</button>
         </div>
-        <p class="form-hint">Agents get a reference, never the secret value; Agent Core fills it in when a tool runs.</p>
+        <p class="form-hint" id="access-agents-hint">Agents get a reference, never the secret value; Agent Core fills it in when a tool runs.</p>
         <div id="access-agents"></div>
         <div id="access-owner-panel" style="display:none">
           <div class="form-group">
@@ -423,6 +458,6 @@ def credentials_page(request: Request, session: dict = Depends(require_auth)):
     </div>
     """
 
-    extra_js = '<script src="/static/js/credentials.js?v=20261117a"></script>'
+    extra_js = '<script src="/static/js/credentials.js?v=20261118a"></script>'
 
     return render_page("Credentials", body, "/credentials", extra_js, session=session)

@@ -55,8 +55,17 @@ async function editCredential(id) {
   document.getElementById('edit-credential-id').value = id;
   document.getElementById('edit-credential-name').value = c.name || '';
   document.getElementById('edit-credential-label').value = c.label || '';
-  document.getElementById('edit-credential-scope').value = c.scope || '';
-  document.getElementById('edit-credential-scope').dataset.originalScope = c.scope || '';
+  const scopeSelect = document.getElementById('edit-credential-scope');
+  scopeSelect.value = c.scope || '';
+  scopeSelect.dataset.originalScope = c.scope || '';
+  // A credential that belongs to a connection has an owner the form does not list. Keep it, so that saving does
+  // not move the credential out of its connection by accident.
+  if (c.scope && !Array.from(scopeSelect.options).some(function(o) { return o.value === c.scope; })) {
+    const option = accessEl('option', accessScopeName(c.scope));
+    option.value = c.scope;
+    scopeSelect.append(option);
+    scopeSelect.value = c.scope;
+  }
   document.getElementById('edit-credential-value').value = '';
   // Every credential has a value; say so, with when the entry last changed, and never show it.
   setSecretState('edit-credential-value', true, 'value', '', c.updated_at || c.created_at);
@@ -81,7 +90,7 @@ async function submitEditCredential(e) {
   body.expires_at = endOfDayUtc(document.getElementById('edit-credential-expires').value);
   const originalScope = document.getElementById('edit-credential-scope').dataset.originalScope;
   if (body.scope !== originalScope && !await confirmDialog(
-    'Move this credential from ' + originalScope + ' to ' + body.scope + '? Connections that use it keep their current workspace.'
+    'Move this credential from ' + accessScopeWords(originalScope) + ' to ' + accessScopeWords(body.scope) + '? Connections that use it keep their current workspace.'
   )) return;
   const j = await apiFetch('/api/credentials/entries/' + id, { method: 'PUT', body: JSON.stringify(body) });
   if (j.ok) {
@@ -161,6 +170,53 @@ function accessDate(value) {
 // A connection is named by the capability it belongs to and by its own name: GitHub, account A.
 function connectionLabel(connection) {
   return connection.capability ? connection.capability + ', ' + connection.name : connection.name;
+}
+
+// The connections this page knows about, by id. A credential that belongs to a connection is shown with its name.
+function accessConnectionNames() {
+  const names = window.AC_CREDENTIAL_CONNECTIONS;
+  return names && typeof names === 'object' ? names : null;
+}
+
+// The owners the page's own form offers, by their stored form: a workspace, a person or an agent.
+function accessScopeNames() {
+  const names = {};
+  const select = document.getElementById('edit-credential-scope') || document.getElementById('credential-scope');
+  if (!select) return names;
+  Array.from(select.options || []).forEach(function(option) {
+    if (option.value) names[option.value] = (option.textContent || '').trim();
+  });
+  return names;
+}
+
+// The owner of a credential in plain words. A credential that belongs to a connection says which one, by name;
+// the raw scope is never shown.
+function accessScopeName(scope) {
+  const raw = String(scope || '');
+  const kind = raw.split(':')[0];
+  if (kind === 'capability') {
+    const names = accessConnectionNames();
+    if (!names) return 'A connection';
+    const name = names[raw.slice('capability:'.length)];
+    return name ? 'Connection ' + name : 'A deleted connection';
+  }
+  const known = accessScopeNames()[raw];
+  if (known) return known;
+  if (kind === 'user') return 'Just me (personal)';
+  if (kind === 'workspace') return 'A workspace';
+  if (kind === 'agent') return 'An agent';
+  return 'Nowhere';
+}
+
+// A credential that belongs to a connection: only Agent Core uses it, and no agent can reach it.
+function accessBelongsToConnection(credential) {
+  return String((credential && credential.scope) || '').startsWith('capability:');
+}
+
+// The scope in words, when it is a connection: never the raw scope, never the word "capability".
+function accessScopeWords(scope) {
+  const raw = String(scope || '');
+  return accessBelongsToConnection({ scope: raw }) ? accessScopeName(raw) : raw;
 }
 
 // Turning a permission on is one recorded action by a person. Nothing here ever turns one off.
@@ -300,9 +356,18 @@ async function removeAccessConnection(connection) {
 // ── the agents that can reach it ──────────────────────────────────────────
 
 function renderAccessAgents(d) {
-  document.getElementById('access-owner').textContent = d.credential.owner;
+  const ownedByConnection = accessBelongsToConnection(d.credential);
+  const owner = ownedByConnection ? accessScopeName(d.credential.scope) : d.credential.owner;
+  document.getElementById('access-owner').textContent = owner;
   const list = document.getElementById('access-agents');
   list.replaceChildren();
+  // The line about agents getting a reference does not hold for a credential no agent can reach.
+  const hint = document.getElementById('access-agents-hint');
+  if (hint) hint.style.display = ownedByConnection ? 'none' : '';
+  if (ownedByConnection) {
+    list.append(accessEl('p', 'No agent can reach this. It belongs to ' + owner + ', so only Agent Core uses it.', 'text-muted'));
+    return;
+  }
   if (!d.agents.length) {
     list.append(accessEl('p', 'No agent can reach this.', 'text-muted'));
   }
@@ -326,13 +391,16 @@ async function openOwnerPanel() {
   const pick = document.getElementById('access-owner-pick');
   // The list is the one the page's own form uses: the owners a credential can live under.
   if (accessOwnerExtra) { accessOwnerExtra.remove(); accessOwnerExtra = null; }
-  if (!Array.from(pick.options).some(o => o.value === accessData.credential.scope)) {
+  const ownedByConnection = accessBelongsToConnection(accessData.credential);
+  // A connection's own owner is never offered: it cannot be given to an agent, and the credential only leaves it
+  // when a person moves it to a workspace or a person.
+  if (!ownedByConnection && !Array.from(pick.options).some(o => o.value === accessData.credential.scope)) {
     const option = accessEl('option', accessData.credential.owner);
     option.value = accessData.credential.scope;
     pick.append(option);
     accessOwnerExtra = option;
   }
-  pick.value = accessData.credential.scope;
+  pick.value = ownedByConnection ? '' : accessData.credential.scope;
   document.getElementById('access-owner-panel').style.display = '';
   await previewOwner();
 }
