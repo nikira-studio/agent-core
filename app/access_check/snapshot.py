@@ -27,17 +27,20 @@ def _columns(conn, table: str) -> set[str]:
     return {row[1] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
 
 
-def capture(conn, helper_rule: str = "current") -> dict:
+def capture(conn, helper_rule: str = "current", use_rule: str = "current") -> dict:
     """Snapshot the installation as ``conn`` sees it (including uncommitted changes on that connection).
 
     ``helper_rule`` is the rule the local credential helper applied: ``"current"`` is this build's (the same rule as the
     MCP ``credential_get``); ``"1.3"`` is the one before 1.4.0 (scope and expiry only), kept so a comparison across the
-    change can say exactly what it removed."""
+    change can say exactly what it removed.
+
+    ``use_rule`` is how "may this agent use this connection" is decided: ``"current"`` is this build's; ``"1.3"`` is the
+    frozen rule from before the audience list (``legacy_v13``), used as the "before" of the step that adds it."""
     with adopt_connection(conn):
-        return _capture(conn, helper_rule)
+        return _capture(conn, helper_rule, use_rule)
 
 
-def _capture(conn, helper_rule: str = "current") -> dict:
+def _capture(conn, helper_rule: str = "current", use_rule: str = "current") -> dict:
     from app.security.effective_authority import EffectiveAuthority
     from app.security.scope_enforcer import ScopeEnforcer, build_agent_context
     from app.services import agent_kind, agent_service, credential_service, reach_service
@@ -116,14 +119,24 @@ def _capture(conn, helper_rule: str = "current") -> dict:
             context.read_scopes, context.write_scopes, context.agent_id,
             is_admin=context.is_admin, active_workspace_ids=context.active_workspace_ids,
         )
-        see[agent_id] = sorted(
-            bid for bid, b in bindings.items()
-            if b["enabled"] and authority.can("connector", "read", scope=b["scope"])
-        )
-        run[agent_id] = sorted(
-            bid for bid, b in bindings.items()
-            if b["enabled"] and authority.can_binding_action(bid, "*", scope=b["scope"])
-        )
+        if use_rule == "1.3":
+            from app.access_check import legacy_v13
+
+            see[agent_id] = sorted(
+                bid for bid, b in bindings.items() if b["enabled"] and legacy_v13.can_see(context, b["scope"])
+            )
+            run[agent_id] = sorted(
+                bid for bid, b in bindings.items() if b["enabled"] and legacy_v13.can_run(context, b["scope"])
+            )
+        else:
+            see[agent_id] = sorted(
+                bid for bid, b in bindings.items()
+                if b["enabled"] and authority.can("connector", "read", scope=b["scope"])
+            )
+            run[agent_id] = sorted(
+                bid for bid, b in bindings.items()
+                if b["enabled"] and authority.can_binding_action(bid, "*", scope=b["scope"])
+            )
         mcp_reference[agent_id] = sorted(
             cid for cid, c in credentials.items()
             if not c["expired"] and authority.can("credential", "reference", scope=c["scope"])

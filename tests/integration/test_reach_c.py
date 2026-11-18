@@ -288,3 +288,22 @@ def test_the_helpers_reach_is_the_mcp_reach_for_every_entry(world):
         else:
             assert cells["helper_fetch"][entry_id] == cells["mcp_reference"][entry_id], entry_id
     assert cells["helper_fetch"]["asst"] != []  # the check is not vacuous
+
+
+def test_the_frozen_1_3_use_rule_gives_the_same_matrices_as_the_current_one_until_the_audience_list_exists(world):
+    """legacy_v13 is the "before" of the step that adds the audience list; it must say what the code says today."""
+    from app.access_check import snapshot
+    from app.database import get_db_path
+
+    # an agent acting for a person who owns a user-scope connection, with the old switch off and on
+    connector_service.create_binding("reach-cap", "Personal", "user:admin", config_json='{"base_url": "http://example.test"}')
+    agent_service.update_agent("plain", inherit_user_bindings=True)
+    conn = sqlite3.connect(str(get_db_path()))
+    conn.row_factory = sqlite3.Row
+    try:
+        now = snapshot.capture(conn)
+        frozen = snapshot.capture(conn, use_rule="1.3")
+    finally:
+        conn.close()
+    assert now["see"] == frozen["see"] and now["run"] == frozen["run"]
+    assert any(frozen["see"][a] for a in frozen["see"])  # not vacuous
