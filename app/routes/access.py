@@ -10,9 +10,15 @@ from pydantic import BaseModel, ConfigDict, Field
 from app.security.dependencies import require_admin
 from app.security.response_helpers import error_response, success_response
 from app.security.scope_utils import validate_scope_string, normalize_scope_string
-from app.services import agent_service, connector_service, credential_service, reach_service
+from app.services import access_overview_service, agent_service, connector_service, credential_service, reach_service
 
 router = APIRouter(prefix="/api/access", tags=["access"])
+
+
+@router.get("/overview")
+def overview(session: dict = Depends(require_admin)):
+    """Every assignment in one list with when it was last used, and what nothing uses."""
+    return success_response(access_overview_service.overview())
 
 
 @router.get("/credentials/{entry_id}")
