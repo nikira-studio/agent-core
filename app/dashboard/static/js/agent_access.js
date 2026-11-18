@@ -119,15 +119,33 @@ function accessMissingPermissions(items, fallbackPermission, fallbackLabel) {
   return groups;
 }
 
+// The display names of the agents that need the permission, each once, in the order the list shows them.
+function accessNamesOf(rows) {
+  var names = [];
+  (rows || []).forEach(function (row) {
+    var name = row && row.display_name ? String(row.display_name) : '';
+    if (name && names.indexOf(name) < 0) names.push(name);
+  });
+  return names;
+}
+
+// The names of several agents, said the way a person says them: two, three, or the first three and how many more.
+function accessNameList(names) {
+  if (names.length === 2) return names[0] + ' and ' + names[1];
+  if (names.length === 3) return names[0] + ', ' + names[1] + ' and ' + names[2];
+  return names[0] + ', ' + names[1] + ', ' + names[2] + ' and ' + (names.length - 3) + ' more';
+}
+
 // One notice above a list, and one button: the list says once what its rows are missing, and the button turns
 // that permission on for every row that needs it. The rows keep a quiet "needs permission" of their own.
-// The sentence is told how many rows need it and how many rows the list has, so it can say what is true.
+// The sentence is told how many rows need it, how many rows the list has, and which agents need it, so it can
+// say what is true and name who.
 function accessPermissionNotice(groups, noticeText, turnOn, total) {
   if (!groups.length) return null;
   var box = accessEl('div', null, 'access-permission-notice');
   groups.forEach(function (group) {
     var line = accessEl('div', null, 'access-permission-line');
-    line.append(accessEl('span', noticeText(group.label, group.rows.length, total)));
+    line.append(accessEl('span', noticeText(group.label, group.rows.length, total, accessNamesOf(group.rows))));
     var button = accessEl('button', 'Turn on ' + group.label, 'btn btn-sm btn-secondary');
     button.type = 'button';
     button.addEventListener('click', function () {
@@ -140,18 +158,24 @@ function accessPermissionNotice(groups, noticeText, turnOn, total) {
 }
 
 // The notice above the agent's own lists: the agent is the one who cannot use them yet.
-// One row that needs it, every row, or only some of them: the sentence says which.
+// One row of one, one of several, every row, or only some of them: the sentence says which.
 function accessAgentNoticeText(label, needed, total) {
-  if (needed === 1) return 'This needs the ' + label + ' permission before this agent can use it.';
+  if (needed === 1) {
+    if (total === 1) return 'This needs the ' + label + ' permission before this agent can use it.';
+    return 'One of these needs the ' + label + ' permission before this agent can use it.';
+  }
   if (needed === total) return 'These need the ' + label + ' permission before this agent can use them.';
   return 'Some of these need the ' + label + ' permission before this agent can use them.';
 }
 
-// The notice above a list of other people: they are the ones who cannot use it yet.
-function accessOthersNoticeText(label, needed, total) {
-  if (needed === 1) return 'This agent needs the ' + label + ' permission before it can use it.';
-  if (needed === total) return 'These agents need the ' + label + ' permission before they can use it.';
-  return 'Some of these agents need the ' + label + ' permission before they can use it.';
+// The notice above a list of other agents: they are the ones who cannot use it yet, and the sentence names them.
+// One agent, several of them, or all of them: the sentence says which.
+function accessOthersNoticeText(label, needed, total, names) {
+  var who = names || [];
+  if (!who.length) return 'These agents need the ' + label + ' permission before they can use it.';
+  if (who.length === 1) return who[0] + ' needs the ' + label + ' permission before it can use it.';
+  if (needed === total) return 'All of these agents need the ' + label + ' permission before they can use it.';
+  return accessNameList(who) + ' need the ' + label + ' permission before they can use it.';
 }
 
 // Turn one permission on for every row of a group that needs it, then show the list again.

@@ -34,7 +34,7 @@ def access_page(request: Request, session: dict = Depends(require_auth)):
 
     body = """
 <div class="page-header"><h1>Access</h1></div>
-<p class="text-muted" style="max-width:760px;margin-top:8px">Every way a credential, a capability or an agent reaches something, and when it was last used.</p>
+<p class="text-muted" style="max-width:760px;margin-top:8px;margin-bottom:12px">Every way a credential, a capability or an agent reaches something, and when it was last used.</p>
 <div class="card">
   <h2>Unused</h2>
   <p class="text-muted" style="font-size:0.85rem;margin-bottom:12px">Things nothing uses. Check each before you delete it.</p>
@@ -82,9 +82,13 @@ def access_page(request: Request, session: dict = Depends(require_auth)):
     </div>
   </div>
   <p class="text-muted" id="access-loading" role="status">Loading...</p>
+  <p class="text-muted" style="font-size:0.85rem;margin:0 0 4px">Select a name to see what it reaches.</p>
   <p class="text-muted" id="access-row-count" style="font-size:0.85rem;margin:0 0 8px"></p>
   <div style="overflow-x:auto;display:none" id="access-table-wrap">
-  <table class="stack-phone">
+  <table class="stack-phone access-table">
+    <colgroup>
+      <col style="width:26%"><col style="width:24%"><col style="width:18%"><col style="width:20%"><col style="width:12%">
+    </colgroup>
     <thead><tr>
       <th>Who or what</th>
       <th>Reaches</th>
@@ -100,5 +104,5 @@ def access_page(request: Request, session: dict = Depends(require_auth)):
 </div>
 """
 
-    js = '<script src="/static/js/access_page.js?v=20261118d"></script>'
+    js = '<script src="/static/js/access_page.js?v=20261118e"></script>'
     return render_page("Access", body, "/access", js, session=session)

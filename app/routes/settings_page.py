@@ -782,9 +782,16 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
             key_notes += f"<div class='form-hint' style='margin-top:4px'>Key ID {escape_html(key_status['primary_key_id'])}</div>"
         snapshot_rows = "".join(
             [
-                f"<tr><td>Saved credentials</td><td>{credential_count}</td><td class='text-muted'>Stored encrypted</td></tr>",
-                f"<tr><td>Encryption key</td><td><span class='badge badge-{'active' if key_status.get('mode') == 'keyring' else 'stale'}'>{'in use' if key_status.get('mode') == 'keyring' else escape_html(key_status.get('mode', 'unknown'))}</span></td><td class='text-muted'>{key_notes}</td></tr>",
-                f"<tr><td>Local credential helper</td><td><span class='badge badge-{broker_badge}'>{'ready' if broker_active else 'missing'}</span></td><td class='text-muted'>Fills in {CREDENTIAL_PREFIX}* references at runtime, so the tool never holds the secret</td></tr>",
+                f"<tr><td data-label='Item'>Saved credentials</td><td data-label='Status'>{credential_count}</td>"
+                f"<td data-label='Notes' class='text-muted'>Stored encrypted</td></tr>",
+                f"<tr><td data-label='Item'>Encryption key</td><td data-label='Status'>"
+                f"<span class='badge badge-{'active' if key_status.get('mode') == 'keyring' else 'stale'}'>"
+                f"{'in use' if key_status.get('mode') == 'keyring' else escape_html(key_status.get('mode', 'unknown'))}</span></td>"
+                f"<td data-label='Notes' class='text-muted'>{key_notes}</td></tr>",
+                f"<tr><td data-label='Item'>Local credential helper</td><td data-label='Status'>"
+                f"<span class='badge badge-{broker_badge}'>{'ready' if broker_active else 'missing'}</span></td>"
+                f"<td data-label='Notes' class='text-muted'>Fills in {CREDENTIAL_PREFIX}* references at runtime, "
+                "so the tool never holds the secret</td></tr>",
             ]
         )
         secrets_snapshot_html = f"""
@@ -793,7 +800,7 @@ def settings_page(request: Request, session: dict = Depends(require_auth)):
         <h2>How secrets are protected</h2>
         <div class="section-note">What is stored encrypted, and with which key.</div>
       </div>
-      <table>
+      <table class="stack-phone">
         <thead><tr><th>Item</th><th>Status</th><th>Notes</th></tr></thead>
         <tbody>{snapshot_rows}</tbody>
       </table>

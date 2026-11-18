@@ -390,8 +390,8 @@ def _agents_view(request: Request, session: dict, show_services: bool):
     rows = "".join(agent_row(a) for a in listed)
 
     services_note = (
-        "<p class=\"text-muted\">Programs and containers that only fetch secrets. Open a service's Access to "
-        "give it a secret, or open a credential's Access.</p>"
+        "<p class=\"text-muted\" style=\"margin-bottom:12px\">Programs and containers that only fetch secrets. "
+        "Open a service's Access to give it a secret, or open a credential's Access.</p>"
         if show_services
         else ""
     )
@@ -949,7 +949,7 @@ def _agents_view(request: Request, session: dict, show_services: bool):
     js = js.replace("__AGENT_ROWS__", row_data)
     js = js.replace("__ACCESS_WORKSPACES__", workspace_data)
     # The Access dialogs live in their own file, loaded the same way as the page's other scripts.
-    js = js + '\n<script src="/static/js/agent_access.js?v=20261118m"></script>'
+    js = js + '\n<script src="/static/js/agent_access.js?v=20261118n"></script>'
 
     page_title = "Services" if show_services else "Agents"
     create_button = (

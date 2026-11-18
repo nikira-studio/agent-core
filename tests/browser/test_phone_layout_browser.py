@@ -182,7 +182,9 @@ def test_the_labels_in_front_of_the_values_stay_on_one_line(phone, instance):
         phone.wait_for_selector(row, state="attached")
         if route == "/access":  # the rows sit in closed groups: open the first one to measure a label
             phone.locator("#access-rows .access-group-toggle").first.click()
-        height = phone.locator(row).first.locator("td[data-label]").first.evaluate(
+        # The label sits in a column of its own, so the first cell with a label that is on the
+        # screen is the one to measure: a cell with nothing in it is not shown on a phone.
+        height = phone.locator(row).first.locator("td[data-label]:visible").first.evaluate(
             "el => getComputedStyle(el, '::before').height"
         )
         # One line of a 0.75rem label is under 20px; two lines are over it.

@@ -865,7 +865,7 @@ def test_the_encryption_key_row_says_what_it_means_in_plain_words(admin_client):
     def key_row():
         html = admin_client.get("/settings").text
         security = html.split('id="tab-security"')[1].split("</section>")[0]
-        row = security.split("<td>Encryption key</td>")[1].split("</tr>")[0]
+        row = security.split("<td data-label='Item'>Encryption key</td>")[1].split("</tr>")[0]
         return security, row
 
     security, row = key_row()

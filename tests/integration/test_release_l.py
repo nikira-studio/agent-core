@@ -43,8 +43,9 @@ def test_the_agent_dialog_says_once_what_its_lists_are_missing():
     source = AGENT_ACCESS_JS.read_text()
     # The notice is told how many rows need the permission and how many rows the list has,
     # so the sentence can say what is true: one row, all of them, or only some.
-    assert "noticeText(group.label, group.rows.length, total)" in source
+    assert "noticeText(group.label, group.rows.length, total, accessNamesOf(group.rows))" in source
     assert "'This needs the ' + label + ' permission before this agent can use it.'" in source
+    assert "'One of these needs the ' + label + ' permission before this agent can use it.'" in source
     assert "'These need the ' + label + ' permission before this agent can use them.'" in source
     assert "'Some of these need the ' + label + ' permission before this agent can use them.'" in source
     # One button per missing permission, and it names what it turns on.
@@ -59,11 +60,12 @@ def test_the_agent_dialog_says_once_what_its_lists_are_missing():
 
 def test_the_credential_dialog_says_once_what_its_lists_are_missing():
     source = CREDENTIALS_JS.read_text()
-    # The same three sentences, counted the same way, for a list of other agents.
-    assert "accessAgentsNoticeText(group.label, group.rows.length, total)" in source
-    assert "'This agent needs the ' + label + ' permission before it can use it.'" in source
-    assert "'These agents need the ' + label + ' permission before they can use it.'" in source
-    assert "'Some of these agents need the ' + label + ' permission before they can use it.'" in source
+    # The same sentences, counted the same way, for a list of other agents: the agents that need the
+    # permission are named.
+    assert "accessAgentsNoticeText(group.label, group.rows.length, total, accessNamesOf(group.rows))" in source
+    assert "who[0] + ' needs the ' + label + ' permission before it can use it.'" in source
+    assert "accessNameList(who) + ' need the ' + label + ' permission before they can use it.'" in source
+    assert "'All of these agents need the ' + label + ' permission before they can use it.'" in source
     assert "'Turn on ' + group.label" in source
     for name in ("renderAccessAgents", "connectionUsers"):
         body = source.split("function " + name, 1)[1].split("\nfunction ", 1)[0]
@@ -114,7 +116,7 @@ def test_the_owner_panel_is_scrolled_into_view():
     [
         ("/", "id=\"overview-waiting\""),
         ("/approvals", "Waiting for a decision"),
-        ("/access", "class=\"stack-phone\""),
+        ("/access", "class=\"stack-phone access-table\""),
     ],
 )
 def test_the_tables_stack_on_a_phone(admin, route, marker):

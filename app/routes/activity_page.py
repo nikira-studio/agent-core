@@ -176,9 +176,9 @@ def activity_page(request: Request, session: dict = Depends(require_auth)):
 
     waiting = waiting_service.waiting_on_person(user_id=scope_user_id, include=("handoffs",), limit=20)["handoffs"]
     waiting_rows = "".join(
-        f"<tr><td data-label='Request'><div style='white-space:pre-line'>{escape_html(w.get('needs_human') or '')}</div>"
-        f"<div class='text-muted' style='font-size:0.8rem'>From {escape_html(agent_labels.get(w['agent_id'], w['agent_id']))}"
-        f" · {escape_html(w.get('task_description', '')[:100])}</div></td>"
+        f"<tr><td data-label='Request'><div class='activity-request'>{escape_html(w.get('needs_human') or '')}</div>"
+        f"<div class='text-muted activity-request-from' style='font-size:0.8rem'>From {escape_html(agent_labels.get(w['agent_id'], w['agent_id']))}"
+        f" · {escape_html(w.get('task_description', ''))}</div></td>"
         f"<td data-label='Scope'>{escape_html(_scope_words(w.get('memory_scope') or '', workspace_names, agent_labels))}</td>"
         f"<td data-label='Since'>{local_dt(w.get('updated_at'), style='date')}</td>"
         f"<td data-label='Action'><button type='button' class='btn btn-sm' data-handoff-resolve='{escape_html(w['id'])}'>Mark resolved</button></td></tr>"
@@ -186,9 +186,9 @@ def activity_page(request: Request, session: dict = Depends(require_auth)):
     )
     superseded = activity_service.list_superseded_requests(user_id=scope_user_id)
     superseded_rows = "".join(
-        f"<tr><td data-label='Request'><div style='white-space:pre-line'>{escape_html(w.get('needs_human') or '')}</div>"
-        f"<div class='text-muted' style='font-size:0.8rem'>From {escape_html(agent_labels.get(w['agent_id'], w['agent_id']))}"
-        f" · {escape_html((w.get('task_description') or '')[:100])}</div></td>"
+        f"<tr><td data-label='Request'><div class='activity-request'>{escape_html(w.get('needs_human') or '')}</div>"
+        f"<div class='text-muted activity-request-from' style='font-size:0.8rem'>From {escape_html(agent_labels.get(w['agent_id'], w['agent_id']))}"
+        f" · {escape_html((w.get('task_description') or ''))}</div></td>"
         f"<td data-label='Scope'>{escape_html(_scope_words(w.get('memory_scope') or '', workspace_names, agent_labels))}</td>"
         f"<td data-label='Replaced by'><code>{escape_html(w.get('superseded_by') or '')}</code></td>"
         f"<td data-label='When'>{local_dt(w.get('handoff_resolved_at'), style='date')}</td></tr>"

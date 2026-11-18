@@ -110,7 +110,11 @@
 
   function buildRow(row) {
     var tr = el('tr');
-    tr.appendChild(partyCell(row.from, 'Who or what'));
+    // Inside a group the header already names who or what, so this cell stays empty: the columns
+    // still line up, and the name is not repeated on every row of the group.
+    var who = el('td');
+    who.setAttribute('data-label', 'Who or what');
+    tr.appendChild(who);
     tr.appendChild(partyCell(row.to, 'Reaches'));
     var how = el('td', state.assignments[row.assignment] || '');
     how.setAttribute('data-label', 'How');
@@ -203,10 +207,20 @@
     cell.appendChild(button);
     tr.appendChild(cell);
     tr._rows = [];
-    button.addEventListener('click', function () {
+    function toggle() {
       var now = button.getAttribute('aria-expanded') === 'true';
       state.open[group.key] = !now;
       setGroupOpen(tr, !now);
+    }
+    button.addEventListener('click', function (ev) {
+      // The row below is a control too, so the click must not toggle it a second time.
+      ev.stopPropagation();
+      toggle();
+    });
+    // Clicking anywhere on the header row opens or closes the group.
+    tr.addEventListener('click', function (ev) {
+      if (ev.target.closest && ev.target.closest('button')) return;
+      toggle();
     });
     return tr;
   }

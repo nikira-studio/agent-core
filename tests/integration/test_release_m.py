@@ -117,10 +117,14 @@ def test_a_stacked_cell_has_no_minimum_width_that_would_push_it_off_the_screen()
 
 
 def test_the_label_in_front_of_a_value_has_room_of_its_own():
-    """The label does not touch the value it names."""
-    rule = _css_rule(CSS.read_text(), ".stack-phone td[data-label]::before {")
-    assert "min-width: 8rem" in rule
-    assert "margin-right: 8px" in rule
+    """The label has a column of its own, and the value keeps that column: a value that wraps starts
+    under the value, not under the label."""
+    css = CSS.read_text()
+    rule = _css_rule(css, ".stack-phone td[data-label]::before {")
+    assert "width: 8rem" in rule
+    assert "position: absolute" in rule
+    cell = _css_rule(css, ".stack-phone td[data-label] {")
+    assert "padding-left: calc(8rem + 8px)" in cell
 
 
 # ── the Access page ────────────────────────────────────────────────────────
@@ -147,30 +151,35 @@ def test_the_agent_notice_says_whether_it_is_one_row_all_of_them_or_some():
     assert "needed === 1" in notice
     assert "needed === total" in notice
     assert "This needs the ' + label + ' permission before this agent can use it." in notice
+    assert "One of these needs the ' + label + ' permission before this agent can use it." in notice
     assert "These need the ' + label + ' permission before this agent can use them." in notice
     assert "Some of these need the ' + label + ' permission before this agent can use them." in notice
-    # The rows that need it, and the rows in the list, are both passed in.
-    assert "noticeText(group.label, group.rows.length, total)" in source
+    # The rows that need it, the rows in the list, and the agents that need it are all passed in.
+    assert "noticeText(group.label, group.rows.length, total, accessNamesOf(group.rows))" in source
     assert "list.length" in source and "users.length" in source
 
 
-def test_the_notice_for_other_agents_says_the_same_three_things():
+def test_the_notice_for_other_agents_names_the_agents_that_need_it():
+    """A list of other agents says who needs the permission: one of them by name, several of them by name."""
     source = AGENT_ACCESS_JS.read_text()
     notice = source.split("function accessOthersNoticeText", 1)[1].split("\n}", 1)[0]
-    assert "needed === 1" in notice
+    assert "who.length === 1" in notice
     assert "needed === total" in notice
-    assert "This agent needs the ' + label + ' permission before it can use it." in notice
-    assert "These agents need the ' + label + ' permission before they can use it." in notice
-    assert "Some of these agents need the ' + label + ' permission before they can use it." in notice
+    assert "who[0] + ' needs the ' + label + ' permission before it can use it.'" in notice
+    assert "All of these agents need the ' + label + ' permission before they can use it." in notice
+    assert "accessNameList(who) + ' need the ' + label + ' permission before they can use it." in notice
+    # The names are the agents that need it, each once, in the order the list shows them.
+    assert "function accessNamesOf(rows)" in source
+    assert "row.display_name" in source
 
     credentials = CREDENTIALS_JS.read_text()
     notice = credentials.split("function accessAgentsNoticeText", 1)[1].split("\n}", 1)[0]
-    assert "needed === 1" in notice
+    assert "who.length === 1" in notice
     assert "needed === total" in notice
-    assert "This agent needs the ' + label + ' permission before it can use it." in notice
-    assert "These agents need the ' + label + ' permission before they can use it." in notice
-    assert "Some of these agents need the ' + label + ' permission before they can use it." in notice
-    assert "accessAgentsNoticeText(group.label, group.rows.length, total)" in credentials
+    assert "who[0] + ' needs the ' + label + ' permission before it can use it.'" in notice
+    assert "All of these agents need the ' + label + ' permission before they can use it." in notice
+    assert "accessNameList(who) + ' need the ' + label + ' permission before they can use it." in notice
+    assert "accessAgentsNoticeText(group.label, group.rows.length, total, accessNamesOf(group.rows))" in credentials
 
 
 def test_the_turn_on_button_still_does_the_same_thing():

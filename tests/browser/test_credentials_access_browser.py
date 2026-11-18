@@ -114,8 +114,8 @@ def test_the_agents_group_says_once_what_it_is_missing(credentials):
     page.wait_for_function("document.querySelector('#access-agents').innerText.includes('Reader Three')")
     agents = page.locator("#access-agents")
     text = agents.inner_text()
-    # One row of the three needs it, so the notice says "this one", not "some of these".
-    assert "This agent needs the Reference credentials permission before it can use it." in text
+    # One row of the three needs it, so the notice names that agent, not "some of these".
+    assert "Reader Three needs the Reference credentials permission before it can use it." in text
     assert "Turn on Reference credentials" in text
     assert agents.locator("button").count() == 1
     assert "needs permission" in text

@@ -141,6 +141,15 @@ a:focus-visible {
   border-radius: 6px;
   object-fit: contain;
   flex: 0 0 auto;
+  /* The mark is a dark outline around a bright centre: on the dark panel the outline cannot be seen,
+     so the mark sits on a light rounded backing and reads in both themes. */
+  background: #f4f5f8;
+  box-shadow: 0 0 0 1px var(--border);
+}
+
+/* In the dark theme the mark is lightened a little, so its centre glows. */
+[data-theme="dark"] .brand-logo {
+  filter: brightness(1.2);
 }
 
 .brand-link span {
@@ -2118,12 +2127,24 @@ details.card-fold[open] > summary::before { content: "\25BE\00a0"; }
   /* A long name wraps inside its cell instead of running past the card, and no cell keeps a
      minimum width that would push the row off the screen. */
   .stack-phone td { border: 0; padding: 3px 0; white-space: normal; max-width: none; min-width: 0; overflow-wrap: anywhere; }
-  /* The label stands clear of the value it names: it has room of its own and a gap after it. */
-  .stack-phone td[data-label]::before { content: attr(data-label); display: inline-block; min-width: 8rem; margin-right: 8px; color: var(--muted); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; }
+  /* The label stands clear of the value it names: it has a column of its own, and the value keeps
+     the same column, so a value that wraps starts under the value and not under the label. */
+  .stack-phone td[data-label] { position: relative; padding-left: calc(8rem + 8px); }
+  .stack-phone td[data-label]::before { content: attr(data-label); position: absolute; left: 0; top: 3px; width: 8rem; min-width: 0; margin: 0; display: block; color: var(--muted); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; }
   .stack-phone td:empty { display: none; }
   .stack-phone td.hide-phone { display: none; }
   .stack-phone .actions-cell { display: flex; gap: 6px; flex-wrap: wrap; align-items: flex-start; }
   .stack-phone .activity-actions-cell { padding-top: 8px; flex-wrap: wrap; }
+}
+
+/* The approval detail page: every table fits the card on a phone. The columns keep their places, the
+   cells wrap inside their own column, and the label column of a label/value pair is about 7rem. */
+@media (max-width: 768px) {
+  .detail-table { display: table; width: 100%; table-layout: fixed; }
+  .detail-table th, .detail-table td { overflow-wrap: anywhere; white-space: normal; vertical-align: top; }
+  .detail-table th:first-child, .detail-table td:first-child { width: 8.5rem; }
+  .detail-table td:first-child code { font-size: 0.8rem; }
+  .detail-table pre { white-space: pre-wrap; overflow-wrap: anywhere; max-width: 100%; }
 }
 
 /* Waiting on you: the request takes the whole width, the answer sits under it. The answer box and its
@@ -2323,6 +2344,11 @@ details[open]:not(.row-more):not(.card-fold):not(.activity-more) > summary:not(.
    column is narrow, and a line of words that does not fit there runs over the columns next to it. */
 .activity-ask-note { color: var(--muted); font-size: 0.75rem; margin-top: 2px; overflow-wrap: anywhere; }
 
+/* The request in the Waiting on you list is shown whole: it keeps its own lines and wraps inside its
+   cell, so no word is cut off and nothing is left out. */
+.activity-request { white-space: pre-line; overflow-wrap: anywhere; }
+.activity-request-from { overflow-wrap: anywhere; }
+
 /* The Access table: the date in the Last used column stays on one line, so the dates in a row line up. */
 .access-last-used { white-space: nowrap; }
 .stack-phone td.access-last-used { white-space: nowrap; }
@@ -2374,13 +2400,22 @@ details.fold-card[open]:not(.row-more):not(.card-fold):not(.activity-more) > sum
 .repo-root-row { display: flex; gap: 8px; margin-bottom: 6px; }
 .repo-root-row input { flex: 1; min-width: 0; }
 
+/* The Access table: the columns keep their places, so opening a group moves nothing. */
+.access-table { table-layout: fixed; }
+
 /* The Access table: one header row for each "Who or what", closed until it is opened. */
-.access-group-head td { padding: 0; }
+/* The header row is a control: it reads as one, and clicking anywhere on it opens the group. */
+.access-group-head { background: rgba(127, 127, 127, 0.07); cursor: pointer; }
+.access-group-head td { padding: 0; background: rgba(127, 127, 127, 0.07); border-bottom: 1px solid var(--border); }
+.access-group-head:hover { background: rgba(127, 127, 127, 0.12); }
+.access-group-head:hover td { background: rgba(127, 127, 127, 0.12); }
 .access-group-toggle { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 44px; padding: 8px 6px; background: none; border: 0; color: inherit; font: inherit; text-align: left; cursor: pointer; }
-.access-group-toggle:hover { background: rgba(127, 127, 127, 0.08); }
 .access-group-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
-.access-group-count { margin-left: auto; white-space: nowrap; }
-.access-chevron { display: inline-block; width: 1em; color: var(--muted); transition: transform 0.12s; }
+/* The name may wrap inside its own column; the kind and the count stay whole beside it. */
+.access-group-toggle strong { min-width: 0; overflow-wrap: anywhere; }
+.access-group-toggle .text-muted { white-space: nowrap; flex: none; }
+.access-group-count { margin-left: auto; white-space: nowrap; flex: none; }
+.access-chevron { display: inline-block; width: 1em; font-size: 1.1em; color: var(--text); transition: transform 0.12s; }
 .access-group-toggle[aria-expanded="true"] .access-chevron { transform: rotate(90deg); }
 tr.access-group-row.is-closed { display: none !important; }
 @media (min-width: 769px) {

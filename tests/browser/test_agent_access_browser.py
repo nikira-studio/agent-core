@@ -95,6 +95,11 @@ def test_adding_a_workspace_is_previewed_before_it_is_saved(agents):
         "async () => (await apiFetch('/api/agents/worker-a')).data.agent.read_scopes_json.includes('workspace:other-ws')"
     )
     assert "workspace:other-ws" in _stored_scopes(page)
+    # Saving shows the dialog again from the server's answer; close it only after that has finished, or it opens again.
+    page.wait_for_function(
+        "!Array.from(document.querySelectorAll('#access-agent-workspace-pick option'))"
+        ".some(o => o.textContent.includes('Other Place'))"
+    )
     page.locator("#access-agent-cancel").click()
 
 

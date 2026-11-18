@@ -323,7 +323,7 @@ def credentials_page(request: Request, session: dict = Depends(require_auth)):
         <p class="form-hint" id="access-agents-hint">Agents get a reference, never the secret value; Agent Core fills it in when a tool runs.</p>
         <div id="access-agents"></div>
         <div id="access-owner-panel" style="display:none">
-          <div class="form-group">
+          <div class="form-group" style="margin-top:12px">
             <label for="access-owner-pick">New owner</label>
             <select id="access-owner-pick" style="max-width:340px">
               {scope_options}
@@ -474,6 +474,6 @@ def credentials_page(request: Request, session: dict = Depends(require_auth)):
     </div>
     """
 
-    extra_js = '<script src="/static/js/credentials.js?v=20261118n"></script>'
+    extra_js = '<script src="/static/js/credentials.js?v=20261118o"></script>'
 
     return render_page("Credentials", body, "/credentials", extra_js, session=session)

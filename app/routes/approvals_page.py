@@ -155,7 +155,7 @@ def _operation_card(index: int, operation: dict, can_decide: bool) -> str:
         "<div class='card'>"
         "<h2>" + heading + "</h2>"
         + summary_html
-        + "<table><thead><tr><th>Parameter</th><th>Value</th></tr></thead>"
+        + "<table class='detail-table'><thead><tr><th>Parameter</th><th>Value</th></tr></thead>"
         "<tbody>" + param_rows + "</tbody></table>"
         + person_inputs
         + "</div>"
@@ -188,7 +188,7 @@ def _decision_card(view: dict) -> str:
     return (
         "<div class='card'>"
         "<h2>Decision</h2>"
-        "<table><tbody>"
+        "<table class='detail-table'><tbody>"
         "<tr><td>Decided by</td><td>" + decided_by + "</td></tr>"
         "<tr><td>Decided at</td><td>" + decided_at + "</td></tr>"
         "<tr><td>Note</td><td>" + decision_note + "</td></tr>"
@@ -285,8 +285,8 @@ def _connector_request_cards(row: dict, view: dict, owners: Owners | None = None
         "<div class='card'>"
         "<h2>What it will send</h2>"
         "<p class='text-muted' style='font-size:0.85rem'>Exactly this, once, if you approve. Anything that looks like a key or password is hidden.</p>"
-        "<div class='table-scroll' style='overflow-x:auto'><table><tbody>"
-        "<tr><td style='width:9rem'>Capability</td><td>" + escape_html((connector_type or {}).get("display_name") or "") + "</td></tr>"
+        "<div class='table-scroll' style='overflow-x:auto'><table class='detail-table'><tbody>"
+        "<tr><td>Capability</td><td>" + escape_html((connector_type or {}).get("display_name") or "") + "</td></tr>"
         "<tr><td>Action</td><td><code>" + escape_html(payload["action"]) + "</code></td></tr>"
         "<tr><td>Binding</td><td>" + escape_html((binding or {}).get("name") or payload["binding_id"]) + "</td></tr>"
         "<tr><td>Workspace</td><td>" + escape_html(owners.short(row["scope"]) if owners else row["scope"]) + "</td></tr>"
@@ -412,8 +412,8 @@ def approval_detail_page(
 
     meta_card = """
 <div class="card">
-  <table><tbody>
-    <tr><td style="width:180px">Status</td><td>""" + status_badge + """</td></tr>
+  <table class="detail-table"><tbody>
+    <tr><td>Status</td><td>""" + status_badge + """</td></tr>
     <tr><td>Workspace</td><td>""" + scope + """</td></tr>
     <tr><td>Asked by</td><td>""" + proposed_by + """</td></tr>
     <tr><td>Created</td><td>""" + created + """</td></tr>

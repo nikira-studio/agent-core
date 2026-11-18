@@ -278,3 +278,74 @@ def test_the_groups_work_on_a_phone(browser, instance, access_page):
         assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
     finally:
         context.close()
+
+
+# ---- the header row is the control, and the columns keep their places -------
+
+def test_the_header_row_opens_the_group_when_it_is_clicked(grouped_page):
+    """The whole header row is the control: a click on the row opens the group, and the button does
+    not toggle it twice."""
+    page = grouped_page
+    _reset(page)
+    head = page.locator("#access-rows tr.access-group-head").first
+    button = head.locator(".access-group-toggle").first
+    assert button.get_attribute("aria-expanded") == "false"
+    # A click on the row itself, not on the button.
+    head.evaluate("el => el.dispatchEvent(new MouseEvent('click', {bubbles: true}))")
+    assert button.get_attribute("aria-expanded") == "true"
+    assert _visible_rows(page) >= 1
+    # A click on the button opens and closes it, once each time.
+    button.click()
+    assert button.get_attribute("aria-expanded") == "false"
+    assert _visible_rows(page) == 0
+    button.click()
+    assert button.get_attribute("aria-expanded") == "true"
+
+
+def test_the_name_is_in_the_header_and_not_on_every_row(grouped_page):
+    """The header names the group; the rows under it do not repeat the name."""
+    page = grouped_page
+    _reset(page)
+    page.locator("#access-rows .access-group-toggle", has_text="Worker A").first.click()
+    row = page.locator("#access-rows tr.access-group-row:not(.is-closed)").first
+    # The first cell is empty: the columns still line up.
+    assert row.locator("td").first.inner_text().strip() == ""
+    # The row is found by what it reaches.
+    assert row.locator("td").nth(1).inner_text().strip() != ""
+
+
+def test_the_columns_keep_their_places_when_a_group_opens(browser, instance, access_page):
+    """At a wide window the Reaches column stays where it was: opening a group moves nothing."""
+    context = browser.new_context(viewport={"width": 1440, "height": 900})
+    page = context.new_page()
+    try:
+        sign_in(page, instance, "owner@example.com")
+        page.goto(instance + "/access")
+        page.wait_for_load_state("load")
+        page.wait_for_selector("#access-rows tr.access-group-head")
+        before = page.evaluate(
+            "document.querySelector('table.access-table thead th:nth-child(2)').getBoundingClientRect().left"
+        )
+        page.locator("#access-rows .access-group-toggle").first.click()
+        page.wait_for_selector("#access-rows tr.access-group-row:not(.is-closed)")
+        after = page.evaluate(
+            "document.querySelector('table.access-table thead th:nth-child(2)').getBoundingClientRect().left"
+        )
+        assert abs(after - before) <= 1, (before, after)
+        # The first open row's Reaches value starts under the heading.
+        cell = page.evaluate(
+            """
+            () => {
+              const row = document.querySelector('#access-rows tr.access-group-row:not(.is-closed)');
+              if (!row) return null;
+              return {
+                cell: row.children[1].getBoundingClientRect().left,
+                head: document.querySelector('table.access-table thead th:nth-child(2)').getBoundingClientRect().left,
+              };
+            }
+            """
+        )
+        assert cell is not None
+        assert abs(cell["cell"] - cell["head"]) <= 1, cell
+    finally:
+        context.close()

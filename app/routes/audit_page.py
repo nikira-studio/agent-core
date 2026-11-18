@@ -265,11 +265,11 @@ def audit_page(request: Request, session: dict = Depends(require_auth)):
           <div class="stat-card {'stat-alert' if failure_count else 'stat-quiet'}"><div class="value">{failure_count}</div><div class="label">Failure on this page</div></div>
           <div class="stat-card {'stat-alert' if blocked_count else 'stat-quiet'}"><div class="value">{blocked_count}</div><div class="label">Blocked on this page</div></div>
         </div>
-        <div class="text-muted" style="font-size:0.85rem;margin-bottom:8px">Top actors:</div>
+        <div class="text-muted" style="font-size:0.85rem;margin-bottom:8px">Top actors on this page:</div>
         <div>{top_actor_summary or "<span class='text-muted'>No events yet.</span>"}</div>
-        <div class="text-muted" style="font-size:0.85rem;margin:12px 0 8px">Top actions:</div>
+        <div class="text-muted" style="font-size:0.85rem;margin:12px 0 8px">Top actions on this page:</div>
         <div>{top_action_summary or "<span class='text-muted'>No events yet.</span>"}</div>
-        <div class="text-muted" style="font-size:0.85rem;margin:12px 0 8px">Top resources:</div>
+        <div class="text-muted" style="font-size:0.85rem;margin:12px 0 8px">Top resources on this page:</div>
         <div>{top_resource_summary or "<span class='text-muted'>No events yet.</span>"}</div>
       </div>
       <div class="filter-bar" style="margin-bottom:12px">
