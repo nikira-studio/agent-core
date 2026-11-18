@@ -16,19 +16,23 @@ class ScopeEnforcer:
         agent_id: Optional[str] = None,
         is_admin: bool = False,
         active_workspace_ids: Optional[frozenset[str]] = None,
+        is_person: bool = False,
     ):
         self.read_scopes = set(read_scopes)
         self.write_scopes = set(write_scopes)
         self.agent_id = agent_id
         self.is_admin = is_admin
         self.active_workspace_ids = active_workspace_ids
+        # Closed by default: a connection's own scope (capability:<id>) is refused unless the caller says it is acting as
+        # a person, and the caller derives that from the actor type, never from the absence of an agent id.
+        self.is_person = is_person
         self._workspace_status_cache: dict[str, bool] = {}
 
     def _owning_connection_scope(self, scope: str) -> Optional[str]:
         """For ``capability:<connection id>``: the owner scope of that connection, for a person who may manage it.
         None for an agent (an agent is never refused by lookup: it never holds one) and for an unknown connection."""
-        if self.agent_id:
-            return None
+        if self.agent_id or not self.is_person:
+            return None  # an agent, or anything that did not say it is a person: never
         from app.services import connector_service
 
         binding = connector_service.get_binding(scope.split(":", 1)[1])

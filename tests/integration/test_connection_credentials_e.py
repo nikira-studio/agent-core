@@ -109,7 +109,7 @@ def test_a_person_who_manages_the_connection_can_manage_its_credential_and_nobod
 def _person(context):
     return {
         "read_scopes": context.read_scopes, "write_scopes": context.write_scopes, "agent_id": None,
-        "is_admin": context.is_admin, "active_workspace_ids": context.active_workspace_ids,
+        "is_admin": context.is_admin, "active_workspace_ids": context.active_workspace_ids, "is_person": True,
     }
 
 
@@ -199,3 +199,65 @@ def test_deleting_a_connection_keeps_its_credential_through_the_api_unless_asked
     assert credential_service.get_credential(drop_entry) is None
     with get_db() as conn:
         assert conn.execute("SELECT COUNT(*) FROM audit_log WHERE action = 'credential_entry_deleted'").fetchone()[0] == 1
+
+
+# ── a connection's own scope is closed by default ──────────────────────────
+
+
+def _readable_connection_scope(world):
+    """A connection owned by a workspace the agent reads and writes, and its connection-owned credential's scope."""
+    agent_service.update_agent("asst", read_scopes=["workspace:acc"], write_scopes=["workspace:acc"])
+    binding = _create(world).json()["data"]["binding"]
+    return f"capability:{binding['id']}"
+
+
+def test_an_enforcer_built_from_an_agents_scopes_without_saying_it_is_a_person_refuses_a_connections_scope(world):
+    owner = _readable_connection_scope(world)
+    context = build_agent_context(agent_service.get_agent_by_id("asst"))
+    assert "workspace:acc" in context.read_scopes and "workspace:acc" in context.write_scopes
+    no_flag_no_id = ScopeEnforcer(context.read_scopes, context.write_scopes, active_workspace_ids=context.active_workspace_ids)
+    assert not no_flag_no_id.can_read(owner) and not no_flag_no_id.can_write(owner)  # the construction that used to fail open
+    # the same enforcer still works for what the scopes do cover
+    assert no_flag_no_id.can_read("workspace:acc")
+
+
+def test_the_person_flag_does_not_open_it_to_something_that_has_an_agent_id(world):
+    owner = _readable_connection_scope(world)
+    context = build_agent_context(agent_service.get_agent_by_id("asst"))
+    both = ScopeEnforcer(
+        context.read_scopes, context.write_scopes, "asst", active_workspace_ids=context.active_workspace_ids, is_person=True
+    )
+    assert not both.can_read(owner) and not both.can_write(owner)
+    # a person, with the flag, who reads the owner scope, is the one case that opens it
+    person = ScopeEnforcer(
+        context.read_scopes, context.write_scopes, None, active_workspace_ids=context.active_workspace_ids, is_person=True
+    )
+    assert person.can_read(owner) and person.can_write(owner)
+
+
+def test_only_the_credential_routes_and_page_turn_the_person_flag_on_and_they_take_it_from_the_actor_type():
+    """The flag is passed where a person manages credentials, and always as `ctx.actor_type != "agent"`."""
+    import pathlib
+
+    root = pathlib.Path(__file__).resolve().parents[2] / "app"
+    sites = []
+    for path in root.rglob("*.py"):
+        rel = str(path.relative_to(root))
+        if rel == "security/scope_enforcer.py":
+            continue
+        for number, line in enumerate(path.read_text().splitlines(), 1):
+            if "is_person=" in line:
+                sites.append((rel, number, line.strip()))
+    assert sorted({s[0] for s in sites}) == ["routes/credentials.py", "routes/credentials_page.py"], sites
+    assert all(s[2] == 'is_person=ctx.actor_type != "agent",' for s in sites), sites
+
+
+def test_a_connections_scope_is_not_visible_to_an_event_stream_that_did_not_ask_for_it(world):
+    from app.routes.events import _event_visible
+
+    create_user("pat", "pat@test.local", "testpassword123", "Pat", "user")
+    workspace_service.create_workspace("pats", "Pat's place", "pat")
+    binding = connector_service.create_binding("own-cap", "Pat's", "workspace:pats", config_json='{"base_url": "http://example.test"}')
+    session = {"user_id": "pat", "role": "user"}
+    payload = {"type": "connector_executed", "data": {"scope": f"capability:{binding['id']}"}}
+    assert _event_visible(payload, session) is False  # the stream's enforcer does not say it is a person

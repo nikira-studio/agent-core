@@ -21,6 +21,16 @@ from app.security.response_helpers import (
 )
 
 
+def _enforcer(ctx) -> ScopeEnforcer:
+    """The scope rules for this caller. A connection-owned credential (``capability:<id>``) is only ever open to a
+    person, so the flag comes from who is acting (the actor type), never from whether an agent id happens to be set."""
+    return ScopeEnforcer(
+        ctx.read_scopes, ctx.write_scopes, ctx.agent_id,
+        is_admin=ctx.is_admin, active_workspace_ids=ctx.active_workspace_ids,
+        is_person=ctx.actor_type != "agent",
+    )
+
+
 router = APIRouter(prefix="/api/credentials", tags=["credentials"], dependencies=[Depends(require_capability("credentials"))])
 
 
@@ -94,10 +104,7 @@ def _person_with_write(ctx: EffectiveAuthority, scope: str):
     """Requests are filled by a person: an agent asked, so an agent may not answer."""
     if ctx.actor_type != "user":
         return error_response("FORBIDDEN", "Only a person can fill or cancel a credential request", 403)
-    enforcer = ScopeEnforcer(
-        ctx.read_scopes, ctx.write_scopes, ctx.agent_id,
-        is_admin=ctx.is_admin, active_workspace_ids=ctx.active_workspace_ids,
-    )
+    enforcer = _enforcer(ctx)
     if not enforcer.can_write(scope):
         return error_response("SCOPE_DENIED", "Access denied to this scope", 403)
     return None
@@ -107,10 +114,7 @@ def _person_with_write(ctx: EffectiveAuthority, scope: str):
 def list_credential_requests(ctx: EffectiveAuthority = Depends(get_request_context)):
     from app.services import credential_request_service
 
-    enforcer = ScopeEnforcer(
-        ctx.read_scopes, ctx.write_scopes, ctx.agent_id,
-        is_admin=ctx.is_admin, active_workspace_ids=ctx.active_workspace_ids,
-    )
+    enforcer = _enforcer(ctx)
     requests = [
         r for r in credential_request_service.list_pending() if enforcer.can_read(r["scope"])
     ]
@@ -187,18 +191,12 @@ def list_entries(
     offset: int = 0,
     ctx: EffectiveAuthority = Depends(get_request_context),
 ):
-    enforcer = ScopeEnforcer(
-        ctx.read_scopes,
-        ctx.write_scopes,
-        ctx.agent_id,
-        is_admin=ctx.is_admin,
-        active_workspace_ids=ctx.active_workspace_ids,
-    )
+    enforcer = _enforcer(ctx)
     if scope and not enforcer.can_read(scope):
         return error_response("SCOPE_DENIED", "Access denied to this scope", 403)
 
     readable_scopes = None if ctx.is_admin or scope else enforcer.filter_readable_scopes(ctx.read_scopes)
-    if readable_scopes is not None and not ctx.agent_id:
+    if readable_scopes is not None and ctx.actor_type != "agent":
         # A person also sees the credentials made for the connections they may manage; an agent never does.
         from app.services import connector_service
 
@@ -240,13 +238,7 @@ def create_entry(
         )
 
     rate_headers = rate_limit_headers(**info)
-    enforcer = ScopeEnforcer(
-        ctx.read_scopes,
-        ctx.write_scopes,
-        ctx.agent_id,
-        is_admin=ctx.is_admin,
-        active_workspace_ids=ctx.active_workspace_ids,
-    )
+    enforcer = _enforcer(ctx)
     if not validate_scope_string(body.scope):
         return error_response("INVALID_SCOPE", "Malformed scope", 400)
     if not enforcer.can_write(body.scope):
@@ -310,13 +302,7 @@ def get_entry(
     if not entry:
         return error_response("NOT_FOUND", "Credential entry not found", 404)
 
-    enforcer = ScopeEnforcer(
-        ctx.read_scopes,
-        ctx.write_scopes,
-        ctx.agent_id,
-        is_admin=ctx.is_admin,
-        active_workspace_ids=ctx.active_workspace_ids,
-    )
+    enforcer = _enforcer(ctx)
     if not enforcer.can_read(entry["scope"]):
         return error_response("SCOPE_DENIED", "Access denied to this scope", 403)
 
@@ -347,13 +333,7 @@ def update_entry(
     if not entry:
         return error_response("NOT_FOUND", "Credential entry not found", 404)
 
-    enforcer = ScopeEnforcer(
-        ctx.read_scopes,
-        ctx.write_scopes,
-        ctx.agent_id,
-        is_admin=ctx.is_admin,
-        active_workspace_ids=ctx.active_workspace_ids,
-    )
+    enforcer = _enforcer(ctx)
     if not enforcer.can_write(entry["scope"]):
         return error_response("SCOPE_DENIED", "Access denied to this scope", 403)
 
@@ -447,13 +427,7 @@ def delete_entry(
     if not entry:
         return error_response("NOT_FOUND", "Credential entry not found", 404)
 
-    enforcer = ScopeEnforcer(
-        ctx.read_scopes,
-        ctx.write_scopes,
-        ctx.agent_id,
-        is_admin=ctx.is_admin,
-        active_workspace_ids=ctx.active_workspace_ids,
-    )
+    enforcer = _enforcer(ctx)
     if not enforcer.can_write(entry["scope"]):
         return error_response("SCOPE_DENIED", "Access denied to this scope", 403)
 
@@ -479,13 +453,7 @@ def get_reference(
     if not entry:
         return error_response("NOT_FOUND", "Credential entry not found", 404)
 
-    enforcer = ScopeEnforcer(
-        ctx.read_scopes,
-        ctx.write_scopes,
-        ctx.agent_id,
-        is_admin=ctx.is_admin,
-        active_workspace_ids=ctx.active_workspace_ids,
-    )
+    enforcer = _enforcer(ctx)
     if not enforcer.can_read(entry["scope"]):
         return error_response("SCOPE_DENIED", "Access denied to this scope", 403)
 
@@ -513,13 +481,7 @@ def reveal_entry(
     if ctx.actor_type != "user":
         return error_response("FORBIDDEN", "User session required for reveal", 403)
 
-    enforcer = ScopeEnforcer(
-        ctx.read_scopes,
-        ctx.write_scopes,
-        ctx.agent_id,
-        is_admin=ctx.is_admin,
-        active_workspace_ids=ctx.active_workspace_ids,
-    )
+    enforcer = _enforcer(ctx)
     if not enforcer.can_read(entry["scope"]):
         return error_response(
             "SCOPE_DENIED", "Access denied to this credential entry", 403
@@ -549,13 +511,7 @@ def reveal_entry(
 
 @router.get("/scopes")
 def list_scopes(ctx: EffectiveAuthority = Depends(get_request_context)):
-    enforcer = ScopeEnforcer(
-        ctx.read_scopes,
-        ctx.write_scopes,
-        ctx.agent_id,
-        is_admin=ctx.is_admin,
-        active_workspace_ids=ctx.active_workspace_ids,
-    )
+    enforcer = _enforcer(ctx)
     all_scopes = credential_service.get_credential_scopes()
     allowed = [s for s in all_scopes if enforcer.can_read(s)]
     return success_response({"scopes": allowed})
