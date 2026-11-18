@@ -402,7 +402,7 @@ async def connectors_page(request: Request, session: dict = Depends(require_auth
         users_button = ""
         if ctx.is_admin:
             users_button = (
-                f"<button type='button' class='btn btn-sm btn-secondary' data-binding-users='{escape_html(b["id"])}' "
+                f"<button type='button' class='btn btn-sm btn-secondary' data-binding-users='{escape_html(b['id'])}' "
                 "title='Who can use this connection'>Who can use it</button>"
             )
         bindings_rows += f"""
