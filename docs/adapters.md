@@ -1,8 +1,8 @@
 # Adapters
 
-In the dashboard, installable adapters are listed under **Ready-made services**; "adapter" is the name of the manifest format this guide describes.
+In the dashboard, installable adapters are listed under **Ready-made capabilities**; "adapter" is the name of the manifest format this guide describes.
 
-One manifest file adds any external service to Agent Core. It describes what the service is, what credentials it needs, what actions it exposes, and how Agent Core should call it. The built-in engines handle the rest. No Python is added to your installation. Adapters survive upgrades, and the same file works on any other Agent Core instance when you share it.
+One manifest file adds any external capability to Agent Core. It describes what the capability is, what credentials it needs, what actions it exposes, and how Agent Core should call it. The built-in engines handle the rest. No Python is added to your installation. Adapters survive upgrades, and the same file works on any other Agent Core instance when you share it.
 
 - **[Part 1: Using adapters](#part-1-using-adapters)**: installing, connection credentials, calling actions
 - **[Part 2: Building adapters](#part-2-building-adapters)**: the manifest spec, the three backends, templating, auth/refresh/sessions, testing, sharing
@@ -11,13 +11,13 @@ One manifest file adds any external service to Agent Core. It describes what the
 
 ## When to use an adapter
 
-Use an adapter when you want to add a service that **doesn't fit the simpler paths**:
+Use an adapter when you want to add a capability that **doesn't fit the simpler paths**:
 
 | Path | When |
 |---|---|
-| **Add a service → From an API spec** (OpenAPI) | the service publishes a clean REST spec |
-| **Add a service → From an MCP server** | the service is already a native MCP server |
-| **Add a service → A plain web service** | one-off authenticated HTTP, no per-action schemas needed |
+| **Add a capability → From an API spec** (OpenAPI) | the capability publishes a clean REST spec |
+| **Add a capability → From an MCP server** | the capability is already a native MCP server |
+| **Add a capability → A plain web capability** | one-off authenticated HTTP, no per-action schemas needed |
 | **Adapter** | session handshakes, OAuth refresh, multi-field credentials, CLI tools, named actions with schemas, anything you want to share with others |
 
 You write one manifest; the engine handles per-action input schemas, OAuth refresh, session-handshake retry, request templating, response extraction, and produces a shareable artifact that survives upgrades.
@@ -41,7 +41,7 @@ The Browse Adapters page at **`/connectors/adapters`** lists adapters from both 
 
 ### 1. Browse Adapters page (easiest)
 
-1. Go to **`/connectors`** → click the **adapters** link in the Service Catalog note (or visit `/connectors/adapters` directly).
+1. Go to **`/connectors`** → click the **adapters** link in the Capability Catalog note (or visit `/connectors/adapters` directly).
 2. Pick an adapter from the list. Each entry shows its description, version, backend (`http`/`mcp`/`cli`), and whether its `requires` (binaries, env vars) are satisfied.
 3. Click **Install**. If it's a system adapter, Agent Core copies it from `app/adapter_templates/` into `data/adapters/`, seeds the connector type, and records the installation. If it's already in `data/adapters/`, the install just seeds and records. If the page later shows **Update**, clicking it refreshes the installed copy in place without changing connections. The Update button appears when the available template version differs from the installed version.
 4. The new connector type now shows in your `/connectors` catalog.
@@ -190,13 +190,13 @@ Example:
 
 ## The three backends
 
-Agent Core's built-in engines interpret the `backend` block. Pick one based on what your service needs:
+Agent Core's built-in engines interpret the `backend` block. Pick one based on what your capability needs:
 
 | Backend | When to use | Code? |
 |---|---|---|
-| **`http`** | the service is HTTP, you can describe its requests declaratively | no; pure data |
-| **`mcp`** | the service is (or has) a native MCP server you already run | external server, out-of-process |
-| **`cli`** | the service has a local CLI you want to drive (e.g. `gh`, `rclone`) | external binary, out-of-process |
+| **`http`** | the capability is HTTP, you can describe its requests declaratively | no; pure data |
+| **`mcp`** | the capability is (or has) a native MCP server you already run | external server, out-of-process |
+| **`cli`** | the capability has a local CLI you want to drive (e.g. `gh`, `rclone`) | external binary, out-of-process |
 
 Every backend runs out-of-process or as pure data.
 
@@ -257,7 +257,7 @@ For fixed non-secret context, put defaults on the connection rather than making 
 }
 ```
 
-`default_params` works for imported OpenAPI connectors and adapter-backed connectors. HTTP adapters merge it both in the shared connector service before validation and again inside the HTTP engine as defense in depth for direct executor calls. Never put secrets in `default_params`; store secrets as credentials.
+`default_params` works for imported OpenAPI connectors and adapter-backed connectors. HTTP adapters merge it both in the shared connector layer before validation and again inside the HTTP engine as defense in depth for direct executor calls. Never put secrets in `default_params`; store secrets as credentials.
 
 ### `auth`
 
@@ -272,11 +272,11 @@ Six common shapes:
 | `custom_header` | single token | `"name": "X-API-Token", "template": "{{ cred.raw }}"` |
 | (anything else) | adapter-internal | the engine just resolves the template; describe whatever wire shape you need |
 
-The `apply` block has `target` (`request_header`, `query`, or `body`), `name`, and `template`. You can apply auth multiple ways if needed (most services pick one).
+The `apply` block has `target` (`request_header`, `query`, or `body`), `name`, and `template`. You can apply auth multiple ways if needed (most capabilities pick one).
 
 ### `session` (challenge-retry handshake)
 
-For services like Transmission that demand a session ID after a 409, declare a `session` block. The engine handles the handshake internally per request; the agent never sees it:
+For capabilities like Transmission that demand a session ID after a 409, declare a `session` block. The engine handles the handshake internally per request; the agent never sees it:
 
 ```json
 "session": {
@@ -300,7 +300,7 @@ On a triggering response, the engine captures the value from the source, re-issu
 
 ### `refresh` (OAuth2)
 
-For services with access-token expiry, declare a `refresh` block. The engine refreshes under a per-binding lock (concurrent calls won't double-refresh) and retries the action once after the new token lands.
+For capabilities with access-token expiry, declare a `refresh` block. The engine refreshes under a per-binding lock (concurrent calls won't double-refresh) and retries the action once after the new token lands.
 
 For browser-based authorization, also declare `auth.authorization.url`, `auth.authorization.scopes`, and optional `auth.authorization.params`. The dashboard then exposes an **Authorize OAuth** button and stores the returned access and refresh tokens in the linked credential.
 
@@ -453,7 +453,7 @@ For an HTTP adapter, set `backend.test_action` to an enabled health or read acti
 
 Declare `side_effect: "read"` or `"none"` for a POST-based read probe such as an RPC status call. Write and destructive actions cannot serve as connection tests. GET, HEAD, and OPTIONS probes can omit `side_effect`. Required inputs must be supplied through the connection's `config_json.default_params`; otherwise the test fails before sending a request.
 
-Write wire-level tests that mock the transport layer (HTTP or subprocess) and assert the rendered request matches what the service expects. These catch template errors that unit tests miss because they verify the actual bytes leaving the adapter.
+Write wire-level tests that mock the transport layer (HTTP or subprocess) and assert the rendered request matches what the capability expects. These catch template errors that unit tests miss because they verify the actual bytes leaving the adapter.
 
 For an `http` adapter:
 
@@ -485,7 +485,7 @@ def test_my_adapter_renders_correct_request(self):
 
 For a `cli` adapter: patch `subprocess.run`, capture the `args` list, assert the rendered argv matches.
 
-See `tests/integration/test_transmission_adapter.py`, `tests/integration/test_google_workspace_adapter.py`, and `tests/integration/test_github_cli_adapter.py` for full examples shipping with Agent Core. The Google Workspace tests, for example, decode the rendered `raw` field to verify the RFC822 message headers and body, and assert each service's request reaches the right API host; that's the level of rigor request-template tests should reach.
+See `tests/integration/test_transmission_adapter.py`, `tests/integration/test_google_workspace_adapter.py`, and `tests/integration/test_github_cli_adapter.py` for full examples shipping with Agent Core. The Google Workspace tests, for example, decode the rendered `raw` field to verify the RFC822 message headers and body, and assert each capability's request reaches the right API host; that's the level of rigor request-template tests should reach.
 
 ## Sharing your adapter
 
@@ -496,9 +496,9 @@ The shareable artifact is the `adapter.json` (plus its directory if you bundle a
 | Adapter | Backend | What it demonstrates |
 |---|---|---|
 | `transmission` | `http` | session-handshake (`challenge_retry`), multi-field basic auth, destructive actions, optional-field omission for `list_torrents`/`add_torrent` |
-| `google_workspace` | `http` | one OAuth2 client spanning six Google services across different API hosts (absolute-URL request paths override `base_url`), token refresh, RFC822 message construction via the `rfc822_base64url` filter |
+| `google_workspace` | `http` | one OAuth2 client spanning six Google APIs across different API hosts (absolute-URL request paths override `base_url`), token refresh, RFC822 message construction via the `rfc822_base64url` filter |
 | `github_cli` | `cli` | subprocess execution, `requires.bins` gating, JSON output parsing, env-var token injection, optional CLI-flag omission |
-| `searxng` | `http` | no-auth self-hosted service, per-binding `base_url`, GET query-param omission, renaming a param on the wire (`page` -> `pageno`) |
+| `searxng` | `http` | no-auth self-hosted system, per-binding `base_url`, GET query-param omission, renaming a param on the wire (`page` -> `pageno`) |
 | `firecrawl` | `http` | optional bearer auth (works with or without a credential via `auth_mode: none`), configurable API prefix in the request `path`, POST bodies with type-preserving optional fields, async job id + poll/cancel actions |
 
 Browse their manifests in `app/adapter_templates/<id>/adapter.json` for working, tested examples of every feature.

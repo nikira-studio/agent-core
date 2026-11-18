@@ -40,13 +40,13 @@ Session tokens are signed with their own random key, `session.key` in the data d
 | --- | --- | --- |
 | `AGENT_CORE_CORS_ORIGINS` | *(empty)* | Comma-separated list of allowed browser origins. Only needed if a separate web frontend needs to make authenticated requests. Example: `http://localhost:5173` |
 | `AGENT_CORE_ALLOWED_IPS` | *(empty)* | Comma-separated IPs or CIDR ranges. When set, requests from any IP not on this list are rejected with `403`. Useful if Agent Core is reachable on a LAN and you want to limit who can connect |
-| *Note* | | The private-address mode covers services, webhooks and imports. It does not cover the embedding backend (vector search) or the model list on the Settings page; those use the address an admin configured, normally a local Ollama. |
-| `AGENT_CORE_INTERNAL_HOSTS_MODE` | *(unset)* | `allow`, `report` or `block` for services, webhooks and imports that point at private addresses. Unset, the dashboard decides (Settings → Security → Network limits): a fresh install starts on `block`, an install that already had data on `allow`. `report` lets everything through and lists what `block` would have refused |
+| *Note* | | The private-address mode covers capabilities, webhooks and imports. It does not cover the embedding backend (vector search) or the model list on the Settings page; those use the address an admin configured, normally a local Ollama. |
+| `AGENT_CORE_INTERNAL_HOSTS_MODE` | *(unset)* | `allow`, `report` or `block` for capabilities, webhooks and imports that point at private addresses. Unset, the dashboard decides (Settings → Security → Network limits): a fresh install starts on `block`, an install that already had data on `allow`. `report` lets everything through and lists what `block` would have refused |
 | `AGENT_CORE_BROKER_ALLOWED_HOSTS` | *(empty)* | Addresses or ranges (comma-separated) that may call the local credential helper; this server itself always may. Empty: any caller holding the helper key. Also editable in Settings → Security |
 | `AGENT_CORE_BROKER_ALLOWLIST_MODE` | *(unset)* | `audit` (record callers outside the list, refuse nobody) or `enforce`. Unset, the dashboard decides; the default is `audit` |
-| `AGENT_CORE_BLOCK_INTERNAL_HOSTS` | *(unset)* | The older switch. `true` blocks service connections and imports that reach private, loopback or link-local hosts; `false` allows them. Setting it at all overrides the Network limits page; leave it unset to use the page (a fresh install blocks, an existing one allows) |
-| `AGENT_CORE_CONNECTOR_APPROVAL_EXPIRY_HOURS` | `24` | How long a service action that waits for a person's approval stays open before it expires (1 to 168) |
-| `AGENT_CORE_ALLOWED_INTERNAL_HOSTS` | *(empty)* | Comma-separated hostnames that are always allowed even when `AGENT_CORE_BLOCK_INTERNAL_HOSTS=true`. Useful for operator-managed internal services such as `firecrawl` or `searxng` |
+| `AGENT_CORE_BLOCK_INTERNAL_HOSTS` | *(unset)* | The older switch. `true` blocks connections and imports that reach private, loopback or link-local hosts; `false` allows them. Setting it at all overrides the Network limits page; leave it unset to use the page (a fresh install blocks, an existing one allows) |
+| `AGENT_CORE_CONNECTOR_APPROVAL_EXPIRY_HOURS` | `24` | How long a capability action that waits for a person's approval stays open before it expires (1 to 168) |
+| `AGENT_CORE_ALLOWED_INTERNAL_HOSTS` | *(empty)* | Comma-separated hostnames that are always allowed even when `AGENT_CORE_BLOCK_INTERNAL_HOSTS=true`. Useful for operator-managed internal systems such as `firecrawl` or `searxng` |
 
 ---
 
@@ -77,7 +77,7 @@ Session tokens are signed with their own random key, `session.key` in the data d
 
 The scratchpad and retracted/superseded retention windows themselves (7 and 30 days by default) are configured from **Settings → Data and backup → How long things are kept** in the dashboard. The last run's time, trigger, and results are shown in **Settings → Data and backup** and available from `GET /api/backup/maintenance/status`.
 
-The maintenance sweep also prunes the service execution and webhook delivery logs (30 days by default, `0` keeps them forever), runs the memory verification pass, and can generate capped memory-review proposals. These controls are set from **Settings → Data and backup** and **Settings → Memory**.
+The maintenance sweep also prunes the capability execution and webhook delivery logs (30 days by default, `0` keeps them forever), runs the memory verification pass, and can generate capped memory-review proposals. These controls are set from **Settings → Data and backup** and **Settings → Memory**.
 
 ### Workspace awareness
 
@@ -93,7 +93,7 @@ The embedding provider, endpoint URL, model, and auth type for **vector search**
 Two providers are supported:
 
 - **Ollama** speaks Ollama's own API. The URL is the server, for example `http://localhost:11434`.
-- **OpenAI-compatible** speaks the OpenAI embeddings API, which hosted providers and most gateways serve (including Ollama itself, under `/v1`). The URL is the API base, usually ending in `/v1`, for example `https://api.openai.com/v1`. Hosted services usually need an API key with Bearer auth.
+- **OpenAI-compatible** speaks the OpenAI embeddings API, which hosted providers and most gateways serve (including Ollama itself, under `/v1`). The URL is the API base, usually ending in `/v1`, for example `https://api.openai.com/v1`. Hosted providers usually need an API key with Bearer auth.
 
 **Load Models** lists what the endpoint reports, chat models included, so pick an embedding model, or type the name. The API key is Core's own setting, stored encrypted; it is only ever sent to the saved URL, or with a key typed into the form, to the URL in the form. Installs that saved the old "Generic" provider are read as Ollama, which is the API that option always used. Semantic search is off by default. When it's disabled or the embedding backend is unreachable, Agent Core falls back to full-text search automatically.
 
@@ -122,7 +122,7 @@ A value is one folder, or a list of folders when the same project lives on sever
 
 **Anchor paths are relative to that root, never absolute.** The same directory has a different absolute path inside every agent's container, so an absolute anchor is resolvable only by whoever wrote it. Agent Core resolves the relative path against this installation's root, which is what lets agents with different mounts share the same memory.
 
-A scope with no configured root reports `unverifiable` rather than guessing. It never treats "I could not check this" as "this is wrong". `host:` anchors are verified through a service connection that already targets that host, so credentials stay in the service layer.
+A scope with no configured root reports `unverifiable` rather than guessing. It never treats "I could not check this" as "this is wrong". `host:` anchors are verified through a connection that already targets that host, so credentials stay in the connector layer.
 
 | Setting (in `system_settings`) | Default | What it does |
 | --- | --- | --- |
@@ -134,7 +134,7 @@ A scope with no configured root reports `unverifiable` rather than guessing. It 
 
 ## Verification beyond code
 
-`repo:`, `host:` and `service:` are what Agent Core can check on its own. What actually settles a record depends on what the record is about: a web page, a policy document, a contact, a ticket. So **anchor types are open**, and an installation teaches the system to check its own by mapping a type to a service connection it already has:
+`repo:`, `host:` and `service:` are what Agent Core can check on its own. What actually settles a record depends on what the record is about: a web page, a policy document, a contact, a ticket. So **anchor types are open**, and an installation teaches the system to check its own by mapping a type to a connection it already has:
 
 ```json
 {
@@ -145,7 +145,7 @@ A scope with no configured root reports `unverifiable` rather than guessing. It 
 
 Stored in `system_settings` under `verification_bindings`. The anchor's value is passed as `value_param` (default `target`), along with any fixed `params`.
 
-**This is JSON configuration by design, and there is no dashboard editor planned.** Custom anchor types are an advanced capability for installations that already run their own services; an operator reaching for one is comfortable writing the mapping. A settings form would have to guess at a shape nobody has needed yet, and the built-in `repo:`, `host:` and `service:` types cover what the dashboard is for.
+**This is JSON configuration by design, and there is no dashboard editor planned.** Custom anchor types are an advanced feature for installations that already run their own systems; an operator reaching for one is comfortable writing the mapping. A settings form would have to guess at a shape nobody has needed yet, and the built-in `repo:`, `host:` and `service:` types cover what the dashboard is for.
 
 A connection that answers verifies the anchor. One that reports 404/not-found is evidence the subject is gone, and becomes a review proposal. **A timeout, an error, or an unconfigured type leaves the record unverifiable rather than condemning it.** An outage is not a false memory, and a system that forgets that will delete true records the first time the network hiccups.
 
@@ -252,8 +252,8 @@ curl http://localhost:3500/health
 For a local setup, the defaults are usually fine. Here's what's actually worth looking at:
 
 - **`AGENT_CORE_ALLOWED_IPS`**: set this if Agent Core will be accessible to other machines on your network
-- **`AGENT_CORE_BLOCK_INTERNAL_HOSTS`**: set this to `true` if you want to block service bindings/imports from private, loopback, or link-local hosts
-- **`AGENT_CORE_ALLOWED_INTERNAL_HOSTS`**: use this only as an exception list when `AGENT_CORE_BLOCK_INTERNAL_HOSTS=true`, for trusted internal services like `firecrawl` or `searxng`
+- **`AGENT_CORE_BLOCK_INTERNAL_HOSTS`**: set this to `true` if you want to block capability bindings/imports from private, loopback, or link-local hosts
+- **`AGENT_CORE_ALLOWED_INTERNAL_HOSTS`**: use this only as an exception list when `AGENT_CORE_BLOCK_INTERNAL_HOSTS=true`, for trusted internal systems like `firecrawl` or `searxng`
 - **`AGENT_CORE_CORS_ORIGINS`**: set this if you're building a separate web app that needs to make authenticated requests
 - **`AGENT_CORE_COOKIE_SECURE`**: set to `true` if serving over HTTPS
 - **`AGENT_CORE_ENCRYPTION_KEY`**: leave as `auto` unless you have a specific reason to manage the key yourself

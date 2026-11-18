@@ -2,7 +2,7 @@
 
 Use this when a service or container, rather than an AI agent, needs its own secrets from Agent Core at startup (database passwords, API tokens, OAuth refresh state). Each service gets a machine identity that can fetch only the entries granted to it, so one compromised service cannot read the rest of the vault. For agents, use `AC_SECRET_*` references through the [Local credential helper](credential-broker.md) instead.
 
-Machine consumers can retrieve individual encrypted credentials without vault browsing, credential administration, memory or service access. Create a dedicated agent with only `credentials_resolve`, then create exact entry grants through an administrator's human session. Inherited user and workspace scopes do not authorize resolution. Legacy agent defaults do not include this capability.
+Machine consumers can retrieve individual encrypted credentials without vault browsing, credential administration, memory or capability access. Create a dedicated agent with only `credentials_resolve`, then create exact entry grants through an administrator's human session. Inherited user and workspace scopes do not authorize resolution. Legacy agent defaults do not include this permission.
 
 The owner API is `/api/credential-consumers`:
 
@@ -45,7 +45,7 @@ A directly authenticated HTTPS consumer with that exact write grant may call `PO
 }
 ```
 
-The server authenticates the current key, owner, capability, grant and expiry before checking replay. Value, result and metadata audit commit in one transaction under the key-operation lock. A committed response contains only entry ID, request ID, state and new version. Values are limited to 65,536 UTF-8 bytes. Error responses do not echo submitted content.
+The server authenticates the current key, owner, permission, grant and expiry before checking replay. Value, result and metadata audit commit in one transaction under the key-operation lock. A committed response contains only entry ID, request ID, state and new version. Values are limited to 65,536 UTF-8 bytes. Error responses do not echo submitted content.
 
 Persist the request identity in the consumer's operation context before sending. If a transport response is lost, retry exactly the same identity, expected version and value. A committed replay returns its original result without re-encryption. Reusing the identity with another payload fails. Never resolve a fresh version and retry a rejected refresh value against it: that would silently overwrite concurrent work.
 

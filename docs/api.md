@@ -56,7 +56,7 @@ Agent API keys start with `ac_sk_`. Broker credentials start with `ac_broker_`. 
 
 | Method | Path | Description |
 | --- | --- | --- |
-| `GET` | `/health` | Service and database health |
+| `GET` | `/health` | Agent Core and database health |
 | `GET` | `/spec/public` | Version, auth methods, and MCP endpoint; no auth required |
 | `GET` | `/spec` | Full capability spec (agent auth required) |
 
@@ -77,13 +77,13 @@ Agent API keys start with `ac_sk_`. Broker credentials start with `ac_broker_`. 
 | `GET` | `/api/approvals` | Session or key | List approvals in scopes you can read (`status`, default `pending`) |
 | `GET` | `/api/approvals/{id}` | Session or key | Status, decision note and result of one approval |
 | `POST` | `/api/approvals/{id}/decide` | Browser session | Approve (runs the bundle as you) or reject; cookie only, needs `X-CSRF-Token` |
-| `GET` | `/api/connector-types/{id}/gates` | Session or key | Which actions of a service wait for a person, and whom they hold |
+| `GET` | `/api/connector-types/{id}/gates` | Session or key | Which actions of a capability wait for a person, and whom they hold |
 | `PUT` | `/api/connector-types/{id}/gates/{action}` | Browser session, admin | Turn "ask a person first" on or off for one action (`{"enabled": true, "actors": "all" or ["agent-id"]}`); refuses any `Authorization` header, so no key, operator token or bearer session can change a gate |
 | `POST` | `/api/auth/otp/enroll` | Session + password | Start TOTP enrollment and receive QR data. Reset also requires current OTP. |
 | `POST` | `/api/auth/otp/confirm` | Session | Confirm the first TOTP code and enable OTP |
 | `POST` | `/api/auth/otp/verify` | Pending session | Verify OTP during login |
 | `POST` | `/api/auth/otp/disable` | Session + password + OTP | Disable OTP on the account |
-| `GET` | `/api/auth/effective-authority` | Session or agent | The caller's current effective authority: identity, read and write scopes, workspaces, and capabilities |
+| `GET` | `/api/auth/effective-authority` | Session or agent | The caller's current effective authority: identity, read and write scopes, workspaces, and permissions |
 | `POST` | `/api/auth/users` | Admin session | Create a new user account |
 | `PUT` | `/api/auth/users/{user_id}` | Admin session | Update user metadata, role, or `is_active` status |
 | `DELETE` | `/api/auth/users/{user_id}` | Admin session | Delete a user account |
@@ -117,7 +117,7 @@ OTP verify (during login):
 
 ## Agents
 
-Session required. Admins can manage all agents. Non-admin users can create and manage agents they own. At request time, every active agent inherits read access to `user:<principal_user_id>`; this does not grant user-scope write access. Personal `user:<id>` scopes are limited to that principal; use `workspace:<id>` for multi-user collaboration. Agents marked `shared` are visible read-only to other authenticated users, but editing, key rotation, and delete controls stay with the owner or an admin. Running the services bound in that personal scope is separate: the agent's `inherit_user_bindings` setting (create, update and read; `false` by default) decides whether it sees, resolves and runs them.
+Session required. Admins can manage all agents. Non-admin users can create and manage agents they own. At request time, every active agent inherits read access to `user:<principal_user_id>`; this does not grant user-scope write access. Personal `user:<id>` scopes are limited to that principal; use `workspace:<id>` for multi-user collaboration. Agents marked `shared` are visible read-only to other authenticated users, but editing, key rotation, and delete controls stay with the owner or an admin. Running the capabilities bound in that personal scope is separate: the agent's `inherit_user_bindings` setting (create, update and read; `false` by default) decides whether it sees, resolves and runs them.
 
 | Method | Path | Description |
 | --- | --- | --- |
@@ -157,7 +157,7 @@ Update:
 }
 ```
 
-Every entry carries a `kind`: `agent` or `service`. Create and update take `kind`.
+Every entry carries a `kind`: `agent` or `service`. Create and update take `kind`. The `capabilities` field (the agent's permissions) holds its on/off flags.
 
 An agent does work. A service only fetches the secrets it is given: its one permission is `credentials_resolve` and it has no workspaces. Creating an entry with exactly that permission and no workspace makes a service. Changing an entry to a service is refused while it has recorded tasks, sessions, memory, workspaces, credentials or connections of its own.
 
@@ -237,7 +237,7 @@ Write:
 }
 ```
 
-Choosing `memory_class`: a **fact** is settled by checking (someone could verify it against the code, a host, or a service), a **decision** is settled by someone deciding and nothing can verify it. Reporting what you just did is neither; that belongs in `activity_update`.
+Choosing `memory_class`: a **fact** is settled by checking (someone could verify it against the code, a host, or an external system), a **decision** is settled by someone deciding and nothing can verify it. Reporting what you just did is neither; that belongs in `activity_update`.
 
 Optional memory metadata:
 
@@ -332,7 +332,7 @@ Credential responses never include raw `value` or `value_encrypted` fields.
 | `GET` | `/api/credentials/rotate/status` | Admin | Get key rotation status |
 | `POST` | `/api/credentials/restore-key` | Admin | Restore a previous encryption key |
 
-A credential stores one encrypted secret value plus metadata. The dashboard manages credentials from the `/connectors` page.
+A credential stores one encrypted secret value plus metadata. The dashboard manages credentials from the **Credentials** page (`/credentials`).
 
 Create:
 ```json
@@ -397,7 +397,7 @@ An agent calls the MCP `credential_request` tool. People see open requests at `G
 
 ### Who can use a credential
 
-A script or service agent (one whose role includes `credentials_resolve`) reads a stored credential through an explicit **grant** on that one credential. The Credentials page manages grants with its **Access** button; the same routes are available to an admin:
+A script or service (one whose role includes `credentials_resolve`) reads a stored credential through an explicit **grant** on that one credential. The Credentials page manages grants with its **Access** button; the same routes are available to an admin:
 
 | Method | Path | Notes |
 |---|---|---|
@@ -464,13 +464,13 @@ Import an MCP server:
 
 The MCP import stores the server URL and transport alongside the discovered tool snapshot. Use `streamable_http` for HTTP-native MCP servers. If your MCP server only speaks stdio, run it behind a small HTTP bridge/proxy and point Agent Core at that bridge instead. Refreshing an MCP connector type re-discovers the tool list and updates the snapshot in place.
 
-For OpenAPI-backed service connections, `config_json` can override the target base URL with `base_url` and can suppress auth injection with `auth_mode: "none"` when the imported spec expects auth but the actual deployment does not. Private addresses are blocked on a fresh install and allowed on an install that already had data (Settings → Security → Network limits); list trusted hosts under *Allowed private addresses* or in `AGENT_CORE_ALLOWED_INTERNAL_HOSTS`.
+For OpenAPI-backed connections, `config_json` can override the target base URL with `base_url` and can suppress auth injection with `auth_mode: "none"` when the imported spec expects auth but the actual deployment does not. Private addresses are blocked on a fresh install and allowed on an install that already had data (Settings → Security → Network limits); list trusted hosts under *Allowed private addresses* or in `AGENT_CORE_ALLOWED_INTERNAL_HOSTS`.
 
 ---
 
-## Service connections
+## Connections
 
-Service connections link a stored credential to an external service so Agent Core can run actions against that service on behalf of an agent. The credential never leaves Agent Core, the connector executor uses it server-side.
+Connections link a stored credential to a capability so Agent Core can run that capability's actions on behalf of an agent. The credential never leaves Agent Core, the connector executor uses it server-side.
 
 Credential scope controls access to the stored secret. Connection scope controls where the connector is available. A connection currently points to one credential; non-secret connector settings belong in `config_json`.
 
@@ -494,16 +494,16 @@ If the connector and credential are enough on their own, leave `config_json` emp
 
 | Method | Path | Auth | Description |
 | --- | --- | --- | --- |
-| `GET` | `/api/connector-bindings` | Agent/session | List visible service connections |
+| `GET` | `/api/connector-bindings` | Agent/session | List visible connections |
 | `POST` | `/api/connector-bindings` | Agent/session | Create a connection. Optional `actions_mode` (`all`, `read_only`, `custom`) and, for `custom`, `disabled_actions`: what the connection turns off. Only a person may set them; a connection an agent creates starts as `none` (nothing allowed until a person chooses) |
 | `GET` | `/api/connector-bindings/{binding_id}` | Agent/session | Get a connection |
-| `PUT` | `/api/connector-bindings/{binding_id}` | Agent/session | Update a connection, including `actions_mode` / `disabled_actions` (a person only; they can narrow the service's actions, never widen them) |
+| `PUT` | `/api/connector-bindings/{binding_id}` | Agent/session | Update a connection, including `actions_mode` / `disabled_actions` (a person only; they can narrow the capability's actions, never widen them) |
 | `DELETE` | `/api/connector-bindings/{binding_id}` | Agent/session | Delete a connection |
 | `POST` | `/api/connector-bindings/{binding_id}/test` | Agent/session | Test the connection using the stored credential |
 | `POST` | `/api/connector-bindings/{binding_id}/run` | Agent/session | Run a connection action directly through the REST API |
 | `POST` | `/api/connectors/{binding_id}/run` | Agent/session | Alias of the line above (intuitive path for plug-in scripts) |
 | `GET` | `/api/connector-bindings/{binding_id}/credential-reach` | Person | One sentence: can the agents using this connection fetch its credential (so does a limit on it hold)? |
-| `GET` | `/api/connector-bindings/{binding_id}/tools` | Agent/session | List the actions this connection allows (its service's switches and its own narrowing applied) |
+| `GET` | `/api/connector-bindings/{binding_id}/tools` | Agent/session | List the actions this connection allows (its capability's switches and its own narrowing applied) |
 | `GET` | `/api/connector-bindings/{binding_id}/executions` | Agent/session | List execution history for a connection |
 | `POST` | `/api/connector-bindings/{binding_id}/oauth/start` | Agent/session (write scope) | Begin the browser OAuth authorization flow for an oauth2 adapter connection; returns the provider authorization URL |
 | `GET` | `/api/connector-bindings/oauth/callback` | Session | OAuth redirect target; exchanges the authorization code and stores tokens on the connection's credential |
@@ -538,9 +538,9 @@ In that example, the credential provides the secret token, while `config_json` t
 
 #### Actions that wait for a person
 
-A person can set an action to **ask a person first** (Services → View Actions). Running it then does not run it: both `connectors_run` and `POST /api/connector-bindings/{id}/run` answer with `{"success": false, "pending_approval": true, "approval_id": "...", "status": "pending", "expires_at": "...", "path": "/approvals/<id>"}`. A caller that sees this should wait, not retry. The request is shown on the Approvals page; a signed-in person with write access to the connection's workspace approves or rejects it there. Read the outcome with `approval_get` (or `GET /api/approvals/{id}`): `status` is `pending`, `done`, `failed`, `rejected` or `expired`, with `decision_note`, `error` and, when it ran, `result`. A rejected, expired or failed request carries a `message` telling the agent to stop and report. Every key, operator token and script is held; the one exception is a person pressing Run in their own dashboard. See [docs/design/approval-gate.md](design/approval-gate.md).
+A person can set an action to **ask a person first** (Capabilities → View Actions). Running it then does not run it: both `connectors_run` and `POST /api/connector-bindings/{id}/run` answer with `{"success": false, "pending_approval": true, "approval_id": "...", "status": "pending", "expires_at": "...", "path": "/approvals/<id>"}`. A caller that sees this should wait, not retry. The request is shown on the Approvals page; a signed-in person with write access to the connection's workspace approves or rejects it there. Read the outcome with `approval_get` (or `GET /api/approvals/{id}`): `status` is `pending`, `done`, `failed`, `rejected` or `expired`, with `decision_note`, `error` and, when it ran, `result`. A rejected, expired or failed request carries a `message` telling the agent to stop and report. Every key, operator token and script is held; the one exception is a person pressing Run in their own dashboard. See [docs/design/approval-gate.md](design/approval-gate.md).
 
-The dashboard's `/connectors` page provides a UI for all of these operations.
+The dashboard's **Capabilities** page (`/connectors`) provides a UI for all of these operations.
 
 ---
 
@@ -665,7 +665,7 @@ The MCP `activity_update` response and the `PUT /api/activity/{id}` response can
 
 Recording or resolving a handoff in a `workspace:*` scope adds a `handoff_recorded` or `handoff_resolved` change to that workspace's change feed (`workspace_sync`), with the task, status, `needs_human` and `task_ref` in its summary. Activity webhook payloads carry the `handoff`, `handoff_resolved_at` and `task_ref`, and resolving sends `activity_handoff_resolved`.
 
-`GET /api/activity/attention` lists what is waiting on a person in the scopes the caller reads. `items` are unresolved `needs_human` requests, newest first: `id`, `agent_id`, `user_id`, `memory_scope`, `status`, `task_description`, `needs_human`, `task_ref`, `updated_at`. It is for a coordinator, such as an attention reader or a chief-of-staff agent, that tells a person what is waiting on them; it needs the `coordination` capability, not admin. The same response also carries `approvals` (pending approval requests) and `credential_requests` (secrets an agent asked a person to supply: `request_id`, `scope`, `name`, `purpose`, `requested_by`, `created_at`). Repeat `scope` to narrow it (each must be readable, or the call returns `403`), pass `without_task_ref=true` to skip requests that point at another system's task, and `limit` (default 50, at most 200). The MCP equivalent is `attention_list`. Listing never resolves anything; that stays with a person.
+`GET /api/activity/attention` lists what is waiting on a person in the scopes the caller reads. `items` are unresolved `needs_human` requests, newest first: `id`, `agent_id`, `user_id`, `memory_scope`, `status`, `task_description`, `needs_human`, `task_ref`, `updated_at`. It is for a coordinator, such as an attention reader or a chief-of-staff agent, that tells a person what is waiting on them; it needs the `coordination` permission, not admin. The same response also carries `approvals` (pending approval requests) and `credential_requests` (secrets an agent asked a person to supply: `request_id`, `scope`, `name`, `purpose`, `requested_by`, `created_at`). Repeat `scope` to narrow it (each must be readable, or the call returns `403`), pass `without_task_ref=true` to skip requests that point at another system's task, and `limit` (default 50, at most 200). The MCP equivalent is `attention_list`. Listing never resolves anything; that stays with a person.
 
 ### Compact activity lists
 
@@ -725,12 +725,12 @@ Dispatch:
 | `activity_list` | List activities visible to the current caller. Compact by default (see below); `view=full` returns every field |
 | `attention_list` | What is waiting on a person across readable scopes: unresolved `needs_human` handoffs (`items`, newest first, each with its `task_ref`), pending `approvals` and `credential_requests`; read-only, for coordinators |
 | `activity_search` | Full-text search the activity trail: what agents worked on, per task, with results. Use for "what did we do on X"; use `memory_search` for durable facts and decisions. Compact by default, like `activity_list` |
-| `effective_authority` | Report the caller's current effective authority: identity, read and write scopes, workspaces, and capabilities |
+| `effective_authority` | Report the caller's current effective authority: identity, read and write scopes, workspaces, and permissions |
 | `connectors_list` | List installed connector types as lean summaries (id, name, auth/backend type, action_count; no full specs). Supports `limit`/`offset`; use `connectors_actions_list` for a type's actions |
-| `connectors_bindings_list` | List service connections in authorized scopes |
+| `connectors_bindings_list` | List connections in authorized scopes |
 | `connectors_bindings_test` | Test a connection using its stored credential |
 | `connectors_actions_list` | List actions a connector type offers to you: only what at least one of your connections allows (pass `binding_id` for one connection's menu) |
-| `connectors_summary` | Summarize visible connector capability, connection, credential-presence, action, and health state |
+| `connectors_summary` | Summarize visible capabilities, connections, credential-presence, action, and health state |
 | `connectors_run` | Run one connector action server-side using a connection |
 | `connectors_resolve` | Deterministically resolve a connector type (plus optional alias, scope, and action) to a single authorized connection |
 | `result_fetch` | Retrieve a slice of a previously offloaded large tool result by handle |

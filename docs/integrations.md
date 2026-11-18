@@ -1,23 +1,23 @@
 # Integrations
 
-Agent Core exposes memory, credentials, service actions, and activity tracking over **MCP** (Model Context Protocol) and **REST**. It doesn't schedule or orchestrate. Agents call it when they need memory, credentials, services, or activity tracking.
+Agent Core exposes memory, credentials, capability actions, and activity tracking over **MCP** (Model Context Protocol) and **REST**. It doesn't schedule or orchestrate. Agents call it when they need memory, credentials, capabilities, or activity tracking.
 
 This doc is about wiring tools up. For what the pieces are and why they behave as they do, read [How It Works](how-it-works.md) first.
 
 The dashboard **Connect** page at `/integrations` generates ready-to-paste configs for specific tools and is usually the fastest path. This doc explains what's happening under the hood and covers cases the generator doesn't handle. The current presets include Claude Code, Codex, Cursor, Windsurf, Antigravity, and a generic MCP/REST path.
 
-Start small. First connect an agent over MCP and use a workspace for durable shared memory. Add stored credentials when a local tool needs a secret, then add service connections when Agent Core should run an external action. Activities, workspaces, and webhooks build on that path when you need them.
+Start small. First connect an agent over MCP and use a workspace for durable shared memory. Add stored credentials when a local tool needs a secret, then add connections when Agent Core should run an external action. Activities, workspaces, and webhooks build on that path when you need them.
 
-The dashboard **Services** page at `/connectors` is where you register external capabilities for Agent Core itself. It supports:
+The dashboard **Capabilities** page at `/connectors` is where you register external capabilities for Agent Core itself. It supports:
 
-- importing OpenAPI specs as services
-- registering native MCP servers as services
-- browsing adapters from the Ready-made services page and installing them into the service catalog
+- importing OpenAPI specs as capabilities
+- registering native MCP servers as capabilities
+- browsing adapters from the Ready-made capabilities page and installing them into the capability catalog
 - connection those capabilities to credentials and scopes
 
-OpenAPI imports and MCP server registrations both become first-class services in the same catalog. The difference is only how the service was discovered and how Agent Core executes it later.
+OpenAPI imports and MCP server registrations both become first-class capabilities in the same catalog. The difference is only how the capability was discovered and how Agent Core executes it later.
 
-For services on your own network: a fresh install blocks private addresses until you allow them (Settings → Security → Network limits: Allow, Report only or Block, with an *Allowed private addresses* list for exceptions such as `firecrawl`). An install that already had data starts on Allow. You can still use connection `config_json` overrides such as `{"base_url":"http://firecrawl:3002/v1","auth_mode":"none"}` when you need an imported OpenAPI spec to talk to that internal deployment.
+For capabilities on your own network: a fresh install blocks private addresses until you allow them (Settings → Security → Network limits: Allow, Report only or Block, with an *Allowed private addresses* list for exceptions such as `firecrawl`). An install that already had data starts on Allow. You can still use connection `config_json` overrides such as `{"base_url":"http://firecrawl:3002/v1","auth_mode":"none"}` when you need an imported OpenAPI spec to talk to that internal deployment.
 
 ---
 
@@ -57,7 +57,7 @@ The dashboard **Connect** page separates one-time client connection from reusabl
 
 When the browser has no saved key, use the generated **Verification Prompt** in the configured client. Agent Core stores only a hash of each agent key, so the dashboard cannot recover an existing key to test it.
 
-Clients and setup tools can discover public connection metadata at `/.well-known/agent-core.json`. The document contains the MCP URL, transport, authentication type, documentation link, and version. It never contains credentials, scopes, service connections, or installation state.
+Clients and setup tools can discover public connection metadata at `/.well-known/agent-core.json`. The document contains the MCP URL, transport, authentication type, documentation link, and version. It never contains credentials, scopes, connections, or installation state.
 
 ### Antigravity
 
@@ -101,16 +101,16 @@ Once connected, these tools are available in any session:
 | `activity_list` | List activities visible to the current agent or user |
 | `activity_search` | Search the activity trail for what agents have already worked on |
 | `memory_confirm` | Mark a record verified against the world (requires evidence saying what you checked) |
-| `memory_verify` | Check anchored facts against the code, host or service they describe |
+| `memory_verify` | Check anchored facts against the code, host or capability they describe |
 | `memory_reanchor` | Fix a record's pointer when the file moved or the anchor was wrong |
-| `effective_authority` | Report the caller's current effective authority: identity, read and write scopes, workspaces, and capabilities |
-| `connectors_list` | List installed services as lean summaries (no full specs); supports `limit`/`offset`. Use `connectors_actions_list` for a type's actions |
-| `connectors_bindings_list` | List service connections in authorized scopes |
+| `effective_authority` | Report the caller's current effective authority: identity, read and write scopes, workspaces, and permissions |
+| `connectors_list` | List installed capabilities as lean summaries (no full specs); supports `limit`/`offset`. Use `connectors_actions_list` for a type's actions |
+| `connectors_bindings_list` | List connections in authorized scopes |
 | `connectors_bindings_test` | Test a connection using the stored credential |
-| `connectors_actions_list` | List the actions of a service that your connections allow (`binding_id` shows one connection's menu) |
-| `connectors_summary` | Summarize visible services, connections, credentials, actions, and health state |
-| `connectors_run` | Run one service action server-side using a connection |
-| `connectors_resolve` | Deterministically resolve a service (plus optional alias, scope, and action) to a single authorized connection |
+| `connectors_actions_list` | List the actions of a capability that your connections allow (`binding_id` shows one connection's menu) |
+| `connectors_summary` | Summarize visible capabilities, connections, credentials, actions, and health state |
+| `connectors_run` | Run one capability action server-side using a connection |
+| `connectors_resolve` | Deterministically resolve a capability (plus optional alias, scope, and action) to a single authorized connection |
 | `result_fetch` | Read a large tool result that was offloaded to a handle, in chunks |
 
 Agents connect, discover authorized tools, and call what they need. Agent Core provides the capabilities and logs the results. It is not a workflow engine.
@@ -148,31 +148,31 @@ When you generate reusable instructions, keep these distinctions in mind:
 
 Agents are not granted user-scope or workspace write by default. If an assistant has no workspace and needs to store durable, shareable knowledge, the fix is to assign it a workspace, not to repurpose its private `agent:<id>` scope as the durable store.
 
-## Service setup in Agent Core
+## Capability setup in Agent Core
 
-There are four ways to add a service, all behind a single **Add a service** button on `/connectors` (Services):
+There are four ways to add a capability, all behind a single **Add a capability** button on `/connectors` (Capabilities):
 
 | Method | Use when… |
 |---|---|
-| **Add a service → From an API spec** | the service publishes a REST OpenAPI/Swagger spec |
-| **Add a service → From an MCP server** | the service is a native MCP server (HTTP transport) |
-| **Add a service → A plain web service** | the service is plain authenticated HTTP and you just need a base URL |
-| **Adapters** | you want to browse the built-in templates or local adapter folders on the Ready-made services page and install one into the service catalog; see [Adapters](#adapters) |
+| **Add a capability → From an API spec** | the capability publishes a REST OpenAPI/Swagger spec |
+| **Add a capability → From an MCP server** | the capability is a native MCP server (HTTP transport) |
+| **Add a capability → A plain web capability** | the capability is plain authenticated HTTP and you just need a base URL |
+| **Adapters** | you want to browse the built-in templates or local adapter folders on the Ready-made capabilities page and install one into the capability catalog; see [Adapters](#adapters) |
 
 For browsing pre-curated catalogs, the **Browse API Directory** page lists 2000+ public OpenAPI specs (powered by apis.guru) you can one-click import.
 
 ### OpenAPI import
 
 - Go to `/connectors`
-- Click **Add a service → From an API spec**
+- Click **Add a capability → From an API spec**
 - Paste a URL, upload a file, or paste the JSON/YAML directly
-- Click **Preview Spec**: this shows the service name, auth type, base server URL, operation count, and any warnings before anything is saved
+- Click **Preview Spec**: this shows the capability name, auth type, base server URL, operation count, and any warnings before anything is saved
 - Click **Import API** to commit the import
 - Create a connection to a stored credential
 
 When browsing the **API Directory**, specs with multiple variants (such as GitHub, which publishes separate specs for api.github.com, GHES, and GHEC) show a **View Variants** button instead of a direct Import. Open it, review the variants, and import the one that matches your deployment.
 
-For internal deployments, the connection can override the target server with `config_json.base_url`. If the imported spec declares auth but the local service does not use it, set `config_json.auth_mode` to `none` so Agent Core does not require or inject a credential for that connection.
+For internal deployments, the connection can override the target server with `config_json.base_url`. If the imported spec declares auth but the local deployment does not use it, set `config_json.auth_mode` to `none` so Agent Core does not require or inject a credential for that connection.
 
 Example: for a local Firecrawl deployment, import the public spec from GitHub, then create a connection with:
 
@@ -185,29 +185,29 @@ Example: for a local Firecrawl deployment, import the public spec from GitHub, t
 
 If you enable `AGENT_CORE_BLOCK_INTERNAL_HOSTS=true`, add `AGENT_CORE_ALLOWED_INTERNAL_HOSTS=firecrawl` in the Agent Core environment. That keeps the imported spec public while routing execution to your trusted internal Firecrawl instance.
 
-### HTTP service
+### HTTP capability
 
-Use this when the service does not publish an OpenAPI spec and you just need to make authenticated HTTP calls to a known base URL. This creates a built-in HTTP service backed by Agent Core's `generic_http` engine; no spec import required.
+Use this when the capability does not publish an OpenAPI spec and you just need to make authenticated HTTP calls to a known base URL. This creates a built-in HTTP capability backed by Agent Core's `generic_http` engine; no spec import required.
 
 - Go to `/connectors`
-- Click **Add a service → A plain web service**
+- Click **Add a capability → A plain web capability**
 - Enter a display name and base URL
 - Choose an auth type:
   - **Bearer**: injects `Authorization: Bearer <credential>` (default; works for most REST APIs)
   - **Header**: injects the credential into a custom header name you specify
   - **Query**: appends the credential as a query parameter (e.g. `?api_key=...`)
-  - **None**: no auth header (useful for internal services)
+  - **None**: no auth header (useful for internal systems)
 - Create a connection to a stored credential, then set the scope
 
-The service stores the base URL. Connection `config_json` is optional and only needed when you want to override the target per connection or set a custom `test_url`.
+The capability stores the base URL. Connection `config_json` is optional and only needed when you want to override the target per connection or set a custom `test_url`.
 
 #### Asking a person first
 
-For a service action you want a person to approve each time (closing a task, sending something), open **Services → View Actions** and tick **Ask a person first**, for every caller or for named agents. A run then waits on the **Approvals** page until a signed-in person approves or rejects it, and the agent is told to wait and check back with `approval_get`. Nothing is held until you turn it on. See [docs/design/approval-gate.md](design/approval-gate.md).
+For a capability action you want a person to approve each time (closing a task, sending something), open **Capabilities → View Actions** and tick **Ask a person first**, for every caller or for named agents. A run then waits on the **Approvals** page until a signed-in person approves or rejects it, and the agent is told to wait and check back with `approval_get`. Nothing is held until you turn it on. See [docs/design/approval-gate.md](design/approval-gate.md).
 
-#### A service that signs in first
+#### A capability that signs in first
 
-Some self-hosted services (network controllers, admin panels) have no API key. You sign in with a username and password and the service answers with a session cookie. For these, put the sign-in in the connection's **Advanced → Extra settings (JSON)**. The credential stays a single stored secret; Agent Core signs in, keeps the cookie in its encrypted session cache, sends it on later calls, and signs in again by itself when the service drops it. The cookie never appears in a response, the execution log or the audit trail.
+Some self-hosted systems (network controllers, admin panels) have no API key. You sign in with a username and password and the capability answers with a session cookie. For these, put the sign-in in the connection's **Advanced → Extra settings (JSON)**. The credential stays a single stored secret; Agent Core signs in, keeps the cookie in its encrypted session cache, sends it on later calls, and signs in again by itself when the capability drops it. The cookie never appears in a response, the execution log or the audit trail.
 
 ```json
 {
@@ -218,19 +218,19 @@ Some self-hosted services (network controllers, admin panels) have no API key. Y
   },
   "credential_split": ":",
   "allowed": ["GET /api/s/default/stat/sta", "GET /api/s/default/stat/health"],
-  "tls": {"pin_sha256": "<fingerprint of the service's certificate>"}
+  "tls": {"pin_sha256": "<fingerprint of the capability's certificate>"}
 }
 ```
 
 - **`login`**: a POST to `path` with the body shown. `{{credential.username}}` and `{{credential.password}}` come from the stored credential: either a JSON credential with `username` and `password` fields, or one `username:password` string when `credential_split` is `":"`. The split is on the first colon only, so a password that contains colons still works.
-- **`allowed`**: the only requests this connection will ever send, as exact `METHOD /path` entries. Anything else, including a different method, a query string or `..`, is refused before it leaves Agent Core. List only reads and the connection is read-only. A connection with a `login` must have a non-empty `allowed` list, otherwise every call is refused. On any connection with `allowed`, headers a caller supplies are ignored, so a request cannot be changed into something else with a method-override or Host header. Without `allowed` (and without `login`), any path on the service can be called.
-- **`tls.pin_sha256`**: for a service with a self-signed certificate. Agent Core accepts that one certificate and no other, so it is not the same as turning checking off. If the service later presents a different certificate (an update can regenerate it) the call fails with a message saying so and showing the new fingerprint; replace the pin once you have confirmed the change is expected.
+- **`allowed`**: the only requests this connection will ever send, as exact `METHOD /path` entries. Anything else, including a different method, a query string or `..`, is refused before it leaves Agent Core. List only reads and the connection is read-only. A connection with a `login` must have a non-empty `allowed` list, otherwise every call is refused. On any connection with `allowed`, headers a caller supplies are ignored, so a request cannot be changed into something else with a method-override or Host header. Without `allowed` (and without `login`), any path on the capability can be called.
+- **`tls.pin_sha256`**: for a capability with a self-signed certificate. Agent Core accepts that one certificate and no other, so it is not the same as turning checking off. If the capability later presents a different certificate (an update can regenerate it) the call fails with a message saying so and showing the new fingerprint; replace the pin once you have confirmed the change is expected.
 - **Test**: **Test** on a signing-in connection only signs in and reports signed in or failed. It returns no cookie and no body.
-- If the service is on your own network, add its host to `AGENT_CORE_ALLOWED_INTERNAL_HOSTS`.
+- If the capability is on your own network, add its host to `AGENT_CORE_ALLOWED_INTERNAL_HOSTS`.
 
-#### Calling an HTTP service from an agent
+#### Calling an HTTP capability from an agent
 
-Agents call HTTP services with `connectors_run`. The action is a method and path pair: `METHOD /path`. Any params that are not transport keys (`method`, `path`, `url`, `headers`, `query`) are automatically bundled as the JSON request body.
+Agents call HTTP capabilities with `connectors_run`. The action is a method and path pair: `METHOD /path`. Any params that are not transport keys (`method`, `path`, `url`, `headers`, `query`) are automatically bundled as the JSON request body.
 
 ```
 connectors_run(
@@ -244,11 +244,11 @@ connectors_run(
 )
 ```
 
-Agent Core injects the credential server-side, calls the external service, and returns the response. The raw API key never reaches the agent.
+Agent Core injects the credential server-side, calls the external system, and returns the response. The raw API key never reaches the agent.
 
-**Do not use `credential_get` for this.** HTTP service connections handle auth automatically. `credential_get` is for local tools that need to inject the secret themselves; it is not the right path when a service connection exists.
+**Do not use `credential_get` for this.** HTTP capability connections handle auth automatically. `credential_get` is for local tools that need to inject the secret themselves; it is not the right path when a connection exists.
 
-#### Calling a service action directly over REST (plug-in scripts)
+#### Calling a capability action directly over REST (plug-in scripts)
 
 A non-agent plug-in (e.g. a cron script) that isn't speaking MCP runs a connection action by POSTing to the connection's `run` endpoint:
 
@@ -268,12 +268,12 @@ The connection test in the dashboard hits the base URL directly (e.g. `GET https
 
 #### Example: OpenRouter
 
-[OpenRouter](https://openrouter.ai) provides a unified OpenAI-compatible API for hundreds of models, including image generation, without publishing a public OpenAPI spec. The HTTP service is the right path.
+[OpenRouter](https://openrouter.ai) provides a unified OpenAI-compatible API for hundreds of models, including image generation, without publishing a public OpenAPI spec. The HTTP capability is the right path.
 
 **Setup:**
 
 1. Create a credential with your OpenRouter API key
-2. Click **Add a service → A plain web service** with:
+2. Click **Add a capability → A plain web capability** with:
    - Display name: `OpenRouter`
    - Base URL: `https://openrouter.ai/api/v1`
    - Auth type: `Bearer`
@@ -315,39 +315,39 @@ Check the [OpenRouter model list](https://openrouter.ai/models) for which models
 ### MCP server import
 
 - Go to `/connectors`
-- Click **Add a service → From an MCP server**
+- Click **Add a capability → From an MCP server**
 - Enter the MCP endpoint URL, transport, and optional discovery headers
 - Refresh later if the server's tool set changes
 - Create a connection to a stored credential if the server needs one
 
-The MCP import is server-side only: it discovers and stores the tool list in Agent Core, then agents call those tools through the same service/binding execution path as OpenAPI-backed services.
+The MCP import is server-side only: it discovers and stores the tool list in Agent Core, then agents call those tools through the same capability/connection execution path as OpenAPI-backed capabilities.
 
 ### Adapters
 
-Adapters are the fourth way to add a service, for services that don't fit OpenAPI/MCP cleanly: OAuth refresh, session handshakes, multi-field credentials, CLI wrappers. An adapter is a single JSON **manifest** that describes a service's actions, auth, and request shape; Agent Core's built-in engines interpret it at runtime, so installing one adds no Python and survives upgrades.
+Adapters are the fourth way to add a capability, for capabilities that don't fit OpenAPI/MCP cleanly: OAuth refresh, session handshakes, multi-field credentials, CLI wrappers. An adapter is a single JSON **manifest** that describes a capability's actions, auth, and request shape; Agent Core's built-in engines interpret it at runtime, so installing one adds no Python and survives upgrades.
 
-**Quick install:** go to `/connectors` → the **ready-made services** link in the Service Catalog note → pick one (e.g. `transmission`, `google_workspace`, `github_cli`; `lifequery` and `healthquery` connect the [LifeQuery](https://github.com/nikira-studio/lifequery) and [HealthQuery](https://github.com/nikira-studio/healthquery) projects, read-only) → click **Install** → bind a credential and call actions like any other service. If a newer bundled template is available later, the same page shows **Update** and refreshes the installed copy in place without changing connections.
+**Quick install:** go to `/connectors` → the **ready-made capabilities** link in the Capability Catalog note → pick one (e.g. `transmission`, `google_workspace`, `github_cli`; `lifequery` and `healthquery` connect the [LifeQuery](https://github.com/nikira-studio/lifequery) and [HealthQuery](https://github.com/nikira-studio/healthquery) projects, read-only) → click **Install** → bind a credential and call actions like any other capability. If a newer bundled template is available later, the same page shows **Update** and refreshes the installed copy in place without changing connections.
 
-#### Google Workspace (one service for six Google services)
+#### Google Workspace (one capability for six Google APIs)
 
-The bundled **`google_workspace`** adapter is a single OAuth2 service covering **Gmail, Calendar, Drive, Contacts (People), Sheets, and Docs** through one OAuth client and one consent. Install it, bind your `client_id` + `client_secret`, click **Authorize Google**, and grant the scopes once.
+The bundled **`google_workspace`** adapter is a single OAuth2 capability covering **Gmail, Calendar, Drive, Contacts (People), Sheets, and Docs** through one OAuth client and one consent. Install it, bind your `client_id` + `client_secret`, click **Authorize Google**, and grant the scopes once.
 
 - **31 actions:** Gmail (`send_email`, `reply`, `create_draft`, `list_messages`, `get_message`, `search_messages`, `get_thread`, `list_labels`, `modify_labels`), Calendar (`list_events`, `get_event`, `create_event`, `update_event`, `delete_event`, `list_calendars`), Drive (`list_files`, `get_file`, `share`, `create_folder`, `delete_file`), Contacts (`list_contacts`, `search_contacts`), Sheets (`create_spreadsheet`, `get_values`, `update_values`, `append_values`, `clear_values`, `get_spreadsheet`), Docs (`get_document`, `create_document`, `insert_text`).
-- **Pick what you want:** authorize all scopes once, then disable the actions you don't use on the service (`disabled_actions`). To narrow at the consent level, enable only the APIs/scopes you want in Google Cloud and disable the actions whose APIs you didn't enable.
+- **Pick what you want:** authorize all scopes once, then disable the actions you don't use on the capability (`disabled_actions`). To narrow at the consent level, enable only the APIs/scopes you want in Google Cloud and disable the actions whose APIs you didn't enable.
 - **Scopes:** `gmail.modify`, `calendar`, `drive`, `contacts.readonly`, `spreadsheets`, `documents`.
 - **Setup:** create a **Web application** OAuth client; enable the Gmail/Calendar/Drive/People/Sheets/Docs APIs you intend to use; add their scopes to the consent screen; register Agent Core's per-binding callback URL (shown when you click Authorize) in the client's authorized redirect URIs. Tokens issued while the consent screen is in **Testing** expire after 7 days; publish to **Production** for durable refresh tokens.
 - **Not included:** Drive binary upload/download (binary content doesn't fit the declarative HTTP engine).
-- **Multi-host:** the services live on different API hosts; the adapter uses absolute-URL request paths (which override `base_url`) so one service reaches `gmail`/`sheets`/`docs`/`people`.googleapis.com plus `www.googleapis.com` for Calendar/Drive.
+- **Multi-host:** the Google APIs live on different API hosts; the adapter uses absolute-URL request paths (which override `base_url`) so one capability reaches `gmail`/`sheets`/`docs`/`people`.googleapis.com plus `www.googleapis.com` for Calendar/Drive.
 
-The adapter and service cards show a connection recipe so you know what to create next: a suggested connection name, the required credential fields, and any non-secret config fields. If an adapter needs more than one credential field, store those fields as one JSON secret and create the credential from the connection flow with the keys the card shows (for example, `username` and `password` for Transmission). Optional request fields are omitted when blank instead of being sent as empty placeholder values.
+The adapter and capability cards show a connection recipe so you know what to create next: a suggested connection name, the required credential fields, and any non-secret config fields. If an adapter needs more than one credential field, store those fields as one JSON secret and create the credential from the connection flow with the keys the card shows (for example, `username` and `password` for Transmission). Optional request fields are omitted when blank instead of being sent as empty placeholder values.
 
-For adapters that define their own request path, set `base_url` to the service root, not the final RPC endpoint. Transmission is the common example: use `http://HOST:PORT`, and the adapter appends `/transmission/rpc` itself. If you omit `ids` from `list_torrents`, Transmission returns the full torrent list. If you supply `download_dir` to `add_torrent`, it must be an absolute path.
+For adapters that define their own request path, set `base_url` to the capability root, not the final RPC endpoint. Transmission is the common example: use `http://HOST:PORT`, and the adapter appends `/transmission/rpc` itself. If you omit `ids` from `list_torrents`, Transmission returns the full torrent list. If you supply `download_dir` to `add_torrent`, it must be an absolute path.
 
 **Three backends** the engine understands: `http` (declarative requests with session/refresh support), `mcp` (point at an external MCP server), `cli` (drive a local binary). All run out-of-process or as pure data; adapters never inject Python into your Agent Core process.
 
-**Two install paths:** the Ready-made services page (system templates + already-dropped-in user adapters), or a drop-in into `data/adapters/<id>/adapter.json`. Code-bearing backends (`mcp`/`cli`) get a dangerous-pattern scan before enabling.
+**Two install paths:** the Ready-made capabilities page (system templates + already-dropped-in user adapters), or a drop-in into `data/adapters/<id>/adapter.json`. Code-bearing backends (`mcp`/`cli`) get a dangerous-pattern scan before enabling.
 
-Uninstall behavior is split by source: system adapters remove the installed copy from `data/adapters/` and clear the catalog entry; user-dropped adapters clear the catalog entry but leave the local file in place so you can reinstall without re-downloading. Updates are driven by the adapter `version`; bump it whenever you change a bundled template. Updating keeps the service id stable and preserves connections.
+Uninstall behavior is split by source: system adapters remove the installed copy from `data/adapters/` and clear the catalog entry; user-dropped adapters clear the catalog entry but leave the local file in place so you can reinstall without re-downloading. Updates are driven by the adapter `version`; bump it whenever you change a bundled template. Updating keeps the capability id stable and preserves connections.
 
 **For the complete guide: installing, building your own, the manifest schema, templating, OAuth/session patterns, testing, and sharing, see [docs/adapters.md](adapters.md).**
 
@@ -356,13 +356,13 @@ Uninstall behavior is split by source: system adapters remove the installed copy
 Agent Core connects to MCP servers over HTTP. It cannot launch local processes. If your MCP client config uses `command` and `args` fields (stdio transport), that server cannot be imported directly. Options:
 
 - Run the stdio server behind an HTTP bridge such as `mcp-proxy` and register the bridge URL
-- Use **Add a service → A plain web service** instead if the underlying service exposes a plain REST API
+- Use **Add a capability → A plain web capability** instead if the underlying system exposes a plain REST API
 
 Common stdio-based servers that fall into this category: `playwright-mcp`, `chrome-devtools-mcp`, `sequential-thinking`, and most `npx`-launched servers.
 
 #### Transport
 
-- `streamable_http`: preferred for modern MCP servers (MCP spec 2025-03-26+). Use this for hosted services like Context7.
+- `streamable_http`: preferred for modern MCP servers (MCP spec 2025-03-26+). Use this for hosted systems like Context7.
 - `http`: alias; try this if `streamable_http` fails.
 - Unsupported transports are rejected at import time.
 
@@ -397,12 +397,12 @@ MCP connections can also carry `timeout_ms` in config JSON for slow servers. The
 **Setup:**
 
 1. Create a credential with your Context7 API key
-2. Click **Add a service → From an MCP server** with:
+2. Click **Add a capability → From an MCP server** with:
    - URL: `https://mcp.context7.com/mcp`
    - Transport: `streamable_http`
    - Discovery auth header: `CONTEXT7_API_KEY` / value: your raw key
 3. Click **Import MCP Server**: Agent Core discovers the tool list
-4. Click **Bind** on the Context7 service:
+4. Click **Bind** on the Context7 capability:
    - Select your Context7 credential
    - Config JSON: `{"auth_header": "CONTEXT7_API_KEY", "auth_scheme": ""}`
    - Scope: your workspace
@@ -498,7 +498,7 @@ curl -X POST http://localhost:3500/mcp \
 
 Expected: `{"ok": true, "data": {"records": [], "total": 0, "retrieval_mode": "no_candidates", ...}}` on a workspace with no memories yet (the first call of a session may also carry a `session_context` block)
 
-This curl test only confirms MCP reachability. For the full end-to-end verification flow, use the generated **Verification Prompt** and run it in the connected agent. That prompt writes a workspace memory record, reads it back, checks credential and service visibility, and reports workspace-scoped and user-scoped connections separately when both exist.
+This curl test only confirms MCP reachability. For the full end-to-end verification flow, use the generated **Verification Prompt** and run it in the connected agent. That prompt writes a workspace memory record, reads it back, checks credential and capability visibility, and reports workspace-scoped and user-scoped connections separately when both exist.
 
 You can run that verification prompt immediately after wiring MCP. You do not need a `CLAUDE.md` or `AGENTS.md` file first; those files are only for persistent repository-level instructions when you want them.
 
@@ -710,7 +710,7 @@ Agent Core gives you two distinct paths for using stored credentials. Pick the o
 
 **Local credential helper: your local tool needs the secret.** The agent gets an `AC_SECRET_*` reference, your local tool gets the real value injected at runtime, and the helper is what does the injection. The secret travels from Agent Core to your local process only, never through the model.
 
-**Services: Agent Core runs the action for you.** The agent tells Agent Core which connection to use and what action to run. Agent Core uses the stored credential server-side, calls the external service, and returns the result. The raw secret never leaves Agent Core at all.
+**Capabilities: Agent Core runs the action for you.** The agent tells Agent Core which connection to use and what action to run. Agent Core uses the stored credential server-side, calls the external system, and returns the result. The raw secret never leaves Agent Core at all.
 
 ### Local credential helper flow
 
@@ -721,41 +721,41 @@ Agent Core gives you two distinct paths for using stored credentials. Pick the o
 
 See [Local credential helper](credential-broker.md) for setup instructions.
 
-### Services: Agent Core runs actions directly
+### Capabilities: Agent Core runs actions directly
 
-If you want Agent Core itself to call an imported OpenAPI spec, native MCP server, installed adapter, or another HTTP service on your behalf, use the **Services** page at `/connectors`.
+If you want Agent Core itself to call an imported OpenAPI spec, native MCP server, installed adapter, or another HTTP capability on your behalf, use the **Capabilities** page at `/connectors`.
 
 The current flow is:
 
-1. Import an OpenAPI spec, register a native MCP server, install an adapter, or use the built-in `generic_http` service for a quick one-off endpoint.
-2. Create or pick a stored credential. You can create credentials on the Credentials page or inline while creating a connection. If the service needs multiple credential fields, the connection form will show the exact field names and expects them as one JSON secret.
-3. Create a service connection for the imported service.
-4. Bind that service to a scope like `workspace:<id>`, `user:<id>`, or `shared`.
+1. Import an OpenAPI spec, register a native MCP server, install an adapter, or use the built-in `generic_http` capability for a quick one-off endpoint.
+2. Create or pick a stored credential. You can create credentials on the Credentials page or inline while creating a connection. If the capability needs multiple credential fields, the connection form will show the exact field names and expects them as one JSON secret.
+3. Create a connection for the imported capability.
+4. Bind that capability to a scope like `workspace:<id>`, `user:<id>`, or `shared`.
 5. Test the connection from the dashboard.
 6. Run actions through MCP with `connectors_run`.
 
-Services are instance-wide catalog entries. The built-in `generic_http` type is always available, and imported specs, registered MCP servers, and installed adapters become visible to other authenticated users in the same Agent Core instance.
+Capabilities are instance-wide catalog entries. The built-in `generic_http` type is always available, and imported specs, registered MCP servers, and installed adapters become visible to other authenticated users in the same Agent Core instance.
 
-This is the clearest example of the capability-layer model. The service catalog is a service directory, and each action is a server-side capability that the agent can call when it needs that external system.
+This is the clearest example of the capability-layer model. The capability catalog is the capability directory, and each action is a server-side capability the agent can call when it needs that external system.
 
-The agent sends a connection ID, an action name, and parameters. Agent Core resolves the credential server-side, calls the external service, logs the execution, and returns the result. The raw secret never reaches the agent.
+The agent sends a connection ID, an action name, and parameters. Agent Core resolves the credential server-side, calls the external system, logs the execution, and returns the result. The raw secret never reaches the agent.
 
 Credential scope and connection scope are both intentional:
 
 - **Credential scope** controls who can access the stored secret.
-- **Connection scope** controls where the service is available to agents.
+- **Connection scope** controls where the capability is available to agents.
 
 #### What a connection can do
 
-A connection starts with everything its service allows. Disable an action on the service (Services → View Actions) to remove it from every connection: that is the admin's switch for everyone. A connection can then **narrow** that further, never widen it:
+A connection starts with everything its capability allows. Disable an action on the capability (Capabilities → View Actions) to remove it from every connection: that is the admin's switch for everyone. A connection can then **narrow** that further, never widen it:
 
-- **Everything the service allows** (the default; every connection that existed before 1.3.1).
-- **Read-only**: only actions that declare they change nothing. Adapters declare this on every action; an imported API spec says it through the HTTP method (GET, HEAD, OPTIONS); an MCP tool says it with the `readOnlyHint` it lists. An action that does not say is treated as one that changes something, so a tool that appears on an MCP server later stays off for a read-only connection until the server declares it read-only. A plain web service is read-only for `GET /path` actions only.
-- **Choose actions**: the connection lists what it turns off. A tool that appears later is on, unless the service turns it off.
+- **Everything the capability allows** (the default; every connection that existed before 1.3.1).
+- **Read-only**: only actions that declare they change nothing. Adapters declare this on every action; an imported API spec says it through the HTTP method (GET, HEAD, OPTIONS); an MCP tool says it with the `readOnlyHint` it lists. An action that does not say is treated as one that changes something, so a tool that appears on an MCP server later stays off for a read-only connection until the server declares it read-only. A plain web capability is read-only for `GET /path` actions only.
+- **Choose actions**: the connection lists what it turns off. A tool that appears later is on, unless the capability turns it off.
 
-Edit a connection (Services → Edit) to choose. The rule is one function applied everywhere: running an action, resolving a connection for an action, the action lists agents see (`connectors_actions_list`, optionally with `binding_id` for one connection's menu), `connectors_summary` (each connection reports its mode and how many actions it allows), and the connection test. An agent only sees and can only run what one of its connections allows. Only a person can choose what a connection allows; an agent cannot, and a connection an agent creates through the REST API allows nothing until a person chooses (it answers `CONNECTION_DISABLED_ACTION` meanwhile). Read-only trusts what a service declares: an adapter that marks an action as read (some, such as a crawl, start work on the service) is honoured.
+Edit a connection (Capabilities → Edit) to choose. The rule is one function applied everywhere: running an action, resolving a connection for an action, the action lists agents see (`connectors_actions_list`, optionally with `binding_id` for one connection's menu), `connectors_summary` (each connection reports its mode and how many actions it allows), and the connection test. An agent only sees and can only run what one of its connections allows. Only a person can choose what a connection allows; an agent cannot, and a connection an agent creates through the REST API allows nothing until a person chooses (it answers `CONNECTION_DISABLED_ACTION` meanwhile). Read-only trusts what a capability declares: an adapter that marks an action as read (some, such as a crawl, start work on the capability) is honoured.
 
-**Does the limit hold against an agent?** A limit controls what an agent can do *through Agent Core*. It holds against an agent only if the agent cannot get the connection's credential and call the service itself. An agent can get a credential reference over MCP if it has the credentials capability and can read the credential's scope, and the local credential helper hands the value to any program that holds the helper key (and calls from an allowed address) for an agent id it names, provided that agent can read the credential's scope (an agent reads the scopes it was given and its person's own user scope; the helper trusts the agent id the caller names). So: store the credential in a scope the agent cannot read and the limit holds. Edit connection says which case applies, per connection, whenever the choice is not "everything": "The agents using this connection cannot fetch its credential, so this limit holds", or "This limits what <agents> can do through Agent Core. They can still fetch the credential and call the service directly; store it in a scope they can't read to make the limit hold." A refused action answers `CONNECTION_DISABLED_ACTION` and is never sent. This replaces the need to import a second copy of a service to give an agent fewer actions.
+**Does the limit hold against an agent?** A limit controls what an agent can do *through Agent Core*. It holds against an agent only if the agent cannot get the connection's credential and call the capability itself. An agent can get a credential reference over MCP if it has the credentials permission and can read the credential's scope, and the local credential helper hands the value to any program that holds the helper key (and calls from an allowed address) for an agent id it names, provided that agent can read the credential's scope (an agent reads the scopes it was given and its person's own user scope; the helper trusts the agent id the caller names). So: store the credential in a scope the agent cannot read and the limit holds. Edit connection says which case applies, per connection, whenever the choice is not "everything": "The agents using this connection cannot fetch its credential, so this limit holds", or "This limits what <agents> can do through Agent Core. They can still fetch the credential and call the capability directly; store it in a scope they can't read to make the limit hold." A refused action answers `CONNECTION_DISABLED_ACTION` and is never sent. This replaces the need to import a second copy of a capability to give an agent fewer actions.
 
 For normal workspace use, set both to the same workspace. For advanced use, a credential in a user scope can power multiple workspace connections if the acting agent has access to both.
 
@@ -775,20 +775,20 @@ This is the recommended setup for team use:
 2. Pick or create each user's own agent.
 3. Give that agent `workspace:<id>` access only after the user can see the workspace.
 
-That keeps agent ownership, workspace access, and service connection scope aligned without making users share one agent identity.
+That keeps agent ownership, workspace access, and connection scope aligned without making users share one agent identity.
 
 If you're importing a spec and using a PAT or other bearer token, the flow is simple: import the spec, create a credential, bind the credential, then call `connectors_run` with the action you want. The agent never needs the raw token, and you never need to paste it into a prompt.
 
 ### The right mental model
 
-Agent Core is a service layer, not an orchestrator:
+Agent Core is a capability layer, not an orchestrator:
 
 - **Memory** stores shared facts and decisions.
 - **Credentials** hold secrets agents never see directly.
-- **Services** are callable service actions with server-side credential injection.
+- **Capabilities** are callable actions with server-side credential injection.
 - **Activity** tracks what's running and what's waiting for handoff.
 
-Agents decide when to use a service. Agent Core makes the service available, enforces scope, and logs what happened.
+Agents decide when to use a capability. Agent Core makes it available, enforces scope, and logs what happened.
 
 ---
 
@@ -796,7 +796,7 @@ Agents decide when to use a service. Agent Core makes the service available, enf
 
 Agents can report what they're working on so you can see live status in the dashboard. This is especially useful when multiple agents are working in parallel, or when one agent leaves work for another agent in the same workspace.
 
-The dashboard receives activity updates in real time over a server-sent event stream (`GET /api/events`). When an agent creates, updates, cancels, or heartbeats an activity, the recent activity table on the Needs you page refreshes automatically without any page reload. The activity page shows a "refresh" banner when new events arrive. Service execution completions also surface as a brief indicator on the Services page. No polling is required; the browser opens one persistent connection per session and reconnects automatically on disconnect.
+The dashboard receives activity updates in real time over a server-sent event stream (`GET /api/events`). When an agent creates, updates, cancels, or heartbeats an activity, the recent activity table on the Needs you page refreshes automatically without any page reload. The activity page shows a "refresh" banner when new events arrive. Capability execution completions also surface as a brief indicator on the Capabilities page. No polling is required; the browser opens one persistent connection per session and reconnects automatically on disconnect.
 
 ```bash
 # Create an activity when you start a task
@@ -927,7 +927,7 @@ Then later, close the loop:
 
 ## Outbound webhook notifications
 
-Agent Core can push signed HTTP notifications to external systems when events occur. This lets automation tools like n8n, Zapier, or custom services react to activity changes or service executions without polling.
+Agent Core can push signed HTTP notifications to external systems when events occur. This lets automation tools like n8n, Zapier, or custom systems react to activity changes or capability executions without polling.
 
 Webhooks are **admin-only** and managed from the **Webhooks** page in the dashboard or via the REST API (`/api/webhooks`).
 
@@ -942,7 +942,7 @@ Webhooks are **admin-only** and managed from the **Webhooks** page in the dashbo
 | `activity_recovered` | An activity is recovered (resumed or closed) |
 | `activity_handoff_requested` | An agent asks a person for something and waits: a handoff with a `needs_human` request is recorded, or its text changes, or it is asked again after being resolved. It fires once per ask; later updates of the same activity while the same ask stands send nothing |
 | `activity_handoff_resolved` | A handoff's `needs_human` request is settled: by a person, by the agent that asked, or superseded by that agent's newer request. `handoff_resolution` says which |
-| `connector_executed` | A service connection action completes |
+| `connector_executed` | A connection action completes |
 | `approval_requested` | An agent proposes a change that waits for a person's approval. The payload carries ids only (see below) |
 
 ### Payload shape
@@ -984,7 +984,7 @@ Activity events (`activity_created`, `activity_updated`, `activity_heartbeat`, `
 
 `approval_requested` carries `approval_id`, `kind`, `scope`, `proposed_by`, `expires_at` and `path` (`/approvals/<approval_id>`). It has no title or summary on purpose, so the receiver can show who asked and where to look but not what was asked.
 
-Service events (`connector_executed`) include connection identity, scope, and result:
+Capability events (`connector_executed`) include connection identity, scope, and result:
 
 ```json
 {

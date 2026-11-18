@@ -28,11 +28,11 @@ Secrets have one controlled path out (below). Memory *content* has two, both off
 | Feature | What is sent | Sent where |
 | --- | --- | --- |
 | **Embedding backend** | Record content, on write and on search | The embedding endpoint you configured |
-| **Verification connections** | The anchor value only, never record content | The connection's service |
+| **Verification connections** | The anchor value only, never record content | The connection's capability |
 
-Point any of these at a service on a machine you control and nothing leaves it. Point one at a hosted API and your memory content is sent there. That is the entire trade-off, and it is why none of them has a default and why the features that use them stay off until switched on.
+Point any of these at a system on a machine you control and nothing leaves it. Point one at a hosted API and your memory content is sent there. That is the entire trade-off, and it is why none of them has a default and why the features that use them stay off until switched on.
 
-Service actions are the third outbound path, but those are explicit by nature: an agent asked for a call to be made.
+Capability actions are the third outbound path, but those are explicit by nature: an agent asked for a call to be made.
 
 ---
 
@@ -48,9 +48,9 @@ Credentials are managed from the **Credentials** page or the `/api/credentials` 
 
 1. A user with permission calls the reveal endpoint from an authenticated session.
 2. The local credential helper calls the internal resolution endpoint with a valid helper key and an authorized agent identity.
-3. A service connection resolves the credential server-side so Agent Core can call the external service directly.
+3. A connection resolves the credential server-side so Agent Core can call the external system directly.
 
-In the service case, the raw secret stays inside the Agent Core process and is not returned to the agent.
+In the capability case, the raw secret stays inside the Agent Core process and is not returned to the agent.
 
 Full backup exports are encrypted with a separate one-time backup key. The encrypted archive and the backup key together can restore your credentials, so treat both as sensitive data.
 
@@ -109,28 +109,28 @@ The model's context window never contains your actual secret. It's injected at e
 
 ---
 
-## Personal services and agents
+## Personal capabilities and agents
 
-An agent acts for a person (its default user) and can read that person's own memory scope. Running the services bound in that personal scope is a separate per-agent setting, `inherit_user_bindings`, off for new agents: without it the agent does not see, resolve or run those services, over MCP or REST. Turn it on only for an agent that really acts as that person, and give service agents their own person instead of a shared one. Upgrading switches it on for agents that could already run services, and writes each to the audit log.
+An agent acts for a person (its default user) and can read that person's own memory scope. Running the capabilities bound in that personal scope is a separate per-agent setting, `inherit_user_bindings`, off for new agents: without it the agent does not see, resolve or run those capabilities, over MCP or REST. Turn it on only for an agent that really acts as that person, and give each service its own person instead of a shared one. Upgrading switches it on for agents that could already run capabilities, and writes each to the audit log.
 
 Two known limits, noted and left as they are for now:
 
-- With `inherit_user_bindings` off, credential visibility in the person's own scope is not narrowed by that setting: it controls seeing, resolving and running the services bound there, not what the agent's credential capability can list.
-- The internal write-scope path that services use still includes the person's own scope. The setting is not a boundary against an agent that is allowed to write into that scope, so keep such agents on their own person.
+- With `inherit_user_bindings` off, credential visibility in the person's own scope is not narrowed by that setting: it controls seeing, resolving and running the capabilities bound there, not what the agent's credential permission can list.
+- The internal write-scope path that capabilities use still includes the person's own scope. The setting is not a boundary against an agent that is allowed to write into that scope, so keep such agents on their own person.
 
-## Service execution flow
+## Capability execution flow
 
-Services are the server-side path for external actions:
+Capabilities are the server-side path for external actions:
 
 1. You create a stored credential.
-2. You create a service connection that points to that credential and has its own scope.
+2. You create a connection that points to that credential and has its own scope.
 3. An agent calls `connectors_run` with a connection ID, action, and parameters.
-4. Agent Core verifies that the connection is visible to the agent. Connection visibility grants access to every action enabled on the service.
-5. Agent Core resolves the credential internally, calls the external service, logs the execution, and returns the result.
+4. Agent Core verifies that the connection is visible to the agent. Connection visibility grants access to every action enabled on the capability.
+5. Agent Core resolves the credential internally, calls the external system, logs the execution, and returns the result.
 
-Both transports enforce connection visibility identically: `connectors_run` over MCP and `POST /api/connector-bindings/{id}/run` over REST call the same check. Services define the available actions; connections decide which users, agents, or workspaces can use the connection.
+Both transports enforce connection visibility identically: `connectors_run` over MCP and `POST /api/connector-bindings/{id}/run` over REST call the same check. Capabilities define the available actions; connections decide which users, agents, or workspaces can use the connection.
 
-Credential scope controls access to the stored secret. Connection scope controls where the service is available. In normal workspace use, set both to the same workspace.
+Credential scope controls access to the stored secret. Connection scope controls where the capability is available. In normal workspace use, set both to the same workspace.
 
 ---
 
@@ -159,7 +159,7 @@ State-changing requests that rely on the session cookie must carry an `X-CSRF-To
 
 ## Approvals
 
-An agent that should prepare an admin change but not make it holds the `admin_propose` capability. It proposes named operations (the allowlist is in `app/operations/admin_operations.py`); a signed-in admin approves on the **Approvals** page, and the bundle runs as that person in one all-or-nothing transaction. The audit records the person as actor and the agent as proposer.
+An agent that should prepare an admin change but not make it holds the `admin_propose` permission. It proposes named operations (the allowlist is in `app/operations/admin_operations.py`); a signed-in admin approves on the **Approvals** page, and the bundle runs as that person in one all-or-nothing transaction. The audit records the person as actor and the agent as proposer.
 
 - Deciding takes the browser cookie only. Any `Authorization` header, whether an agent key, an operator token or a Bearer session, is refused, and the request needs the CSRF token and a matching `Origin`.
 - An approval changes only what it was proposed against: if a target changed in between, it fails and applies nothing.
@@ -217,7 +217,7 @@ curl -X POST http://localhost:3500/api/credentials/restore-key \
   -d '{"key_base64": "<base64-encoded-fernet-key>"}'
 ```
 
-This replaces the current keyring with a single-key keyring containing the restored key. Before changing key files, Agent Core verifies that the key can decrypt all stored encrypted data, including credentials, OTP secrets, webhook secrets, service sessions, vector API keys, and spilled tool results. If any encrypted entry fails validation, restoration is rejected and the existing keys remain in place. A successful restore writes a `credential_key_restored` audit event.
+This replaces the current keyring with a single-key keyring containing the restored key. Before changing key files, Agent Core verifies that the key can decrypt all stored encrypted data, including credentials, OTP secrets, webhook secrets, capability sessions, vector API keys, and spilled tool results. If any encrypted entry fails validation, restoration is rejected and the existing keys remain in place. A successful restore writes a `credential_key_restored` audit event.
 
 After key rotation, stored data may use multiple keys. In that case, restore the full backup with its matching keyring rather than replacing the ring with one key.
 
@@ -265,4 +265,4 @@ Before making Agent Core accessible beyond localhost:
 - [ ] Restrict filesystem permissions on `data/credential.key` and `data/broker.credential`
 - [ ] Rotate the helper key after any suspected exposure
 - [ ] Rotate webhook secrets if any are suspected to be exposed
-- [ ] Review the audit log after sensitive operations: credential reveals, backup/restore, key rotation, service execution
+- [ ] Review the audit log after sensitive operations: credential reveals, backup/restore, key rotation, capability execution

@@ -1,15 +1,15 @@
 # Quickstart
 
-This guide takes you from zero to a running Agent Core with an agent that can write and recall shared memory. The final steps show how to add credentials and services when a task needs them.
+This guide takes you from zero to a running Agent Core with an agent that can write and recall shared memory. The final steps show how to add credentials and capabilities when a task needs them.
 
-Agent Core is a local capability layer for agents: memory, credentials, services, and activity tracking. It is not a scheduler or orchestration OS. Your agents connect to it when they need services.
+Agent Core is a local capability layer for agents: memory, credentials, capabilities, and activity tracking. It is not a scheduler or orchestration OS. Your agents connect to it when they need capabilities.
 
 ## What you set up
 
 1. Run Agent Core and create an agent identity.
 2. Connect that agent over MCP and verify shared memory.
-3. Store a credential only when a local tool or external service needs one.
-4. Add a service connection only when Agent Core should call that service itself.
+3. Store a credential only when a local tool or external system needs one.
+4. Add a connection only when Agent Core should call that capability itself.
 
 Activities, workspaces, handoffs, webhooks, and backup are available later. They do not block the first memory workflow.
 
@@ -86,7 +86,7 @@ You won't be prompted for it during normal use, only at login.
 
 First open **Agents → Workspaces** and create a workspace, for example `my-project`: the shared place where agents keep memory and tasks. With one workspace, a new agent is set up to read and write it by default. In the same dialog you can add your project's folder (one per machine where the project lives, written as that machine names it) and tick the agents that can use it; a session started in that folder then gets the workspace's context automatically.
 
-Agents are the identities that connect to Agent Core. Each one gets its own API key and its own scope of what memory, credentials, and service capabilities it can access. Service capabilities can come from imported OpenAPI specs, native MCP server registrations, the built-in Generic HTTP fallback, or installed **adapters**. Install adapters from the **Adapter Library** on the Services page; user-installed adapter files live in `data/adapters/` and built-in templates ship in `app/adapter_templates/` (see [Adapters](integrations.md#adapters)).
+Agents are the identities that connect to Agent Core. Each one gets its own API key and its own scope of what memory, credentials, and capabilities it can access. Capabilities can come from imported OpenAPI specs, native MCP server registrations, the built-in Generic HTTP fallback, or installed **adapters**. Install adapters from **Ready-made capabilities**; user-installed adapter files live in `data/adapters/` and built-in templates ship in `app/adapter_templates/` (see [Adapters](integrations.md#adapters)).
 
 Open **Agents** in the sidebar and create a new agent. Give it a descriptive name like `claude-coding-agent` or `cursor-agent`. Creating an agent does not show a key. Open the **Connect** page (the dialog after you save links to it) to generate the agent's key and its tool settings. The key is shown **once**; copy it into the tool right away. There is no way to read it later, but you can generate another. An agent can hold several keys (one per machine or tool, each with a label), and generating one does not stop the others; revoke the ones you no longer use in **Agents > More > Keys**. Through the API, `POST /api/agents/coding-agent/keys` with `{"label": "laptop"}` (same header as below) returns a key once.
 
@@ -149,7 +149,7 @@ You should see:
 
 If you get a `401`, you're using the wrong key. Make sure it's the agent API key, not your dashboard password. A connection error means Agent Core isn't running on port 3500.
 
-After the MCP connection is working, run the generated **Verification Prompt** in the connected agent. The prompt starts a workspace execution, verifies change delivery and acknowledgement, writes and reads memory, checks credential and service visibility, and updates activity.
+After the MCP connection is working, run the generated **Verification Prompt** in the connected agent. The prompt starts a workspace execution, verifies change delivery and acknowledgement, writes and reads memory, checks credential and capability visibility, and updates activity.
 
 ---
 
@@ -157,7 +157,7 @@ After the MCP connection is working, run the generated **Verification Prompt** i
 
 Once connected, agents write memory records with three required fields: a class (what kind of thing it is), a scope (who can see it), and the content itself.
 
-The class matters more than it looks. A **fact** is settled by checking: someone or something could verify it against the code, a host, or a service. A **decision** is settled by someone deciding, and nothing can verify it. That split is what lets Agent Core re-check facts on a schedule while leaving your decisions alone. Reporting what you just did is neither, and belongs in the activity trail instead.
+The class matters more than it looks. A **fact** is settled by checking: someone or something could verify it against the code, a host, or an external system. A **decision** is settled by someone deciding, and nothing can verify it. That split is what lets Agent Core re-check facts on a schedule while leaving your decisions alone. Reporting what you just did is neither, and belongs in the activity trail instead.
 
 If you are writing a preference, add a `slot_key` to keep one active value per slot: a new preference with the same scope and slot supersedes the previous one. `valid_from` and `valid_to` describe when the content was true in the world, which is a separate timeline from when it was written; set them when a record covers a period other than "from now on".
 
@@ -187,7 +187,7 @@ A search covers the agent's default recall scopes: everything it can read, unles
 
 ## Step 7: Store a credential
 
-Credentials are managed from the **Credentials** page. A credential is the encrypted secret itself: an API key, token, password, URL, or config value. A service connection is separate. It tells Agent Core how to use a stored credential with a service such as an imported OpenAPI spec, a registered native MCP server, the built-in Generic HTTP fallback, or an installed adapter manifest.
+Credentials are managed from the **Credentials** page. A credential is the encrypted secret itself: an API key, token, password, URL, or config value. A connection is separate. It tells Agent Core how to use a stored credential with a capability, whether that capability came from an imported OpenAPI spec, a registered native MCP server, the built-in Generic HTTP fallback, or an installed adapter manifest.
 
 From the dashboard:
 
@@ -218,24 +218,24 @@ The response includes a stable `AC_SECRET_*` reference name, something like `AC_
 
 See [Local credential helper](credential-broker.md) for how to use that reference with local tools so the real token gets injected without appearing in your prompt or config files.
 
-## Step 8: Create a service connection (optional)
+## Step 8: Create a connection (optional)
 
-If you want Agent Core to take actions on your behalf, like creating an issue, reading a repo, or calling an API, rather than just supplying a secret to a local tool, use the **Services** page in the dashboard.
+If you want Agent Core to take actions on your behalf, like creating an issue, reading a repo, or calling an API, rather than just supplying a secret to a local tool, use the **Capabilities** page in the dashboard.
 
 This is the server-side capability path. The agent asks for a capability, Agent Core executes it, and the result comes back through the same scoped channel.
 
 The flow:
 
-1. Import an OpenAPI spec for the service you want, register a native MCP server, or use **Generic HTTP** for a one-off endpoint.
-2. Go to **Services** and pick that service.
+1. Import an OpenAPI spec for the capability you want, register a native MCP server, or use **Generic HTTP** for a one-off endpoint.
+2. Go to **Capabilities** and pick that capability.
 3. Select a stored credential, or create one inline while creating the connection.
 4. Bind it to a scope like `workspace:<id>`.
 5. Test the connection from the dashboard.
 6. Call `connectors_run` from MCP to trigger actions. Agent Core uses the credential server-side and returns the result, whether the backing provider is OpenAPI or MCP.
 
-Credential scope and connection scope are related but not identical. Credential scope controls who may access the stored secret. Connection scope controls where that service is available. In the common case, use the same workspace scope for both. For advanced setups, one personal credential can power multiple workspace connections.
+Credential scope and connection scope are related but not identical. Credential scope controls who may access the stored secret. Connection scope controls where that capability is available. In the common case, use the same workspace scope for both. For advanced setups, one personal credential can power multiple workspace connections.
 
-The key difference from the Local credential helper: with services, Agent Core runs the action and the raw secret never leaves the server. With the helper, your local tool gets the real value injected at runtime. Use whichever fits your situation.
+The key difference from the Local credential helper: with capabilities, Agent Core runs the action and the raw secret never leaves the server. With the helper, your local tool gets the real value injected at runtime. Use whichever fits your situation.
 
 ## Workspace collaboration
 

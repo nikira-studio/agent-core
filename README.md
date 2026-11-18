@@ -2,7 +2,7 @@
 
 **Shared memory and controlled capabilities for the agents you already use.**
 
-Agent Core is a self-hosted MCP and HTTP service. It gives Claude Code, Codex, Cursor, and custom agents durable context, encrypted credentials, scoped service access, and an auditable activity trail.
+Agent Core is a self-hosted MCP and HTTP server. It gives Claude Code, Codex, Cursor, and custom agents durable context, encrypted credentials, scoped access to capabilities, and an auditable activity trail.
 
 **Agent Core sits beside agents, not above them.**
 
@@ -12,8 +12,8 @@ Most installations need only shared memory at first. Add the next layer when a r
 
 1. [Install Agent Core](#get-running-in-minutes), create an agent, and connect it with MCP.
 2. [Write and recall shared memory](#memory-that-persists-across-sessions). This is the default reason to use Agent Core.
-3. Add encrypted credentials, used through service connections, [credential consumers](docs/credential-consumers.md) or, for a local tool, the [local credential helper](docs/credential-broker.md).
-4. Add [service connections](docs/integrations.md#services-agent-core-runs-actions-directly) when Agent Core should call an external service itself.
+3. Add encrypted credentials, used through connections, [credential consumers](docs/credential-consumers.md) or, for a local tool, the [local credential helper](docs/credential-broker.md).
+4. Add [connections](docs/integrations.md#capabilities-agent-core-runs-actions-directly) when Agent Core should run an external action itself.
 5. Use activities, workspaces, webhooks, backups, and administration when your work needs them.
 
 You do not need to configure every capability before your first agent can use memory.
@@ -26,7 +26,7 @@ If you use AI coding agents like Claude Code, Cursor, or Codex, you've probably 
 - You juggle API keys and tokens across tools, pasting them into configs and hoping nothing leaks
 - Two agents working on the same project have no idea what the other one has done
 
-Agent Core fixes that. It is a small service that you run on your own machine. Your agents connect to it to read and write memory, resolve credentials, and call external services, while the controls stay local and explicit.
+Agent Core fixes that. It is a small program that you run on your own machine. Your agents connect to it to read and write memory, resolve credentials, and call external systems, while the controls stay local and explicit.
 
 ![Agent Core explainer](docs/images/explainer.png)
 
@@ -37,8 +37,8 @@ Agent Core fixes that. It is a small service that you run on your own machine. Y
 Agent Core provides:
 
 - durable memory in one place
-- access control for credentials and external services
-- server-side services for imported OpenAPI specs, native MCP servers, and **adapters**, which are shareable data-manifest integrations for OAuth, session handshakes, and CLI wrappers (see [docs/adapters.md](docs/adapters.md))
+- access control for credentials and external systems
+- server-side capabilities for imported OpenAPI specs, native MCP servers, and **adapters**, which are shareable data-manifest integrations for OAuth, session handshakes, and CLI wrappers (see [docs/adapters.md](docs/adapters.md))
 - activity visibility and on-demand handoffs
 
 Agent Core is not:
@@ -55,7 +55,7 @@ A fresh install gives you a local control layer that agents can actually use:
 
 - a shared place to keep durable memory
 - a way to manage credentials without exposing raw secrets
-- a service and service catalog that agents can call through MCP
+- a capability catalog that agents can call through MCP
 - visibility into which agents are active and what they're doing
 - a clean dashboard for setup, oversight, and handoffs
 
@@ -63,11 +63,11 @@ A fresh install gives you a local control layer that agents can actually use:
 
 ## How it works
 
-Agent Core is a local HTTP server. It speaks REST and MCP (Model Context Protocol), so anything that can make an HTTP request can talk to it. Agents authenticate with an API key and use tools like `memory_search`, `memory_write`, `credential_get`, and the service discovery/execution tools.
+Agent Core is a local HTTP server. It speaks REST and MCP (Model Context Protocol), so anything that can make an HTTP request can talk to it. Agents authenticate with an API key and use tools like `memory_search`, `memory_write`, `credential_get`, and the capability discovery/execution tools.
 
-Memory, credentials, and configuration all live on your disk. Outbound traffic happens when an agent runs a service action, when scheduled maintenance tests a service connection to verify a memory anchored to it, when you browse the public service directory for service imports, and when you register outbound webhooks. Nothing else leaves the host.
+Memory, credentials, and configuration all live on your disk. Outbound traffic happens when an agent runs a capability action, when scheduled maintenance tests a connection to verify a memory anchored to it, when you browse the public capability directory for imports, and when you register outbound webhooks. Nothing else leaves the host.
 
-For the full picture, read **[How it works](docs/how-it-works.md)**: how memory is modelled, what keeps the corpus honest, how services and credentials fit together, and the reasoning behind each.
+For the full picture, read **[How it works](docs/how-it-works.md)**: how memory is modelled, what keeps the corpus honest, how capabilities and credentials fit together, and the reasoning behind each.
 
 ```
 ┌──────────────┐     MCP or HTTP     ┌────────────────────────────┐
@@ -81,7 +81,7 @@ For the full picture, read **[How it works](docs/how-it-works.md)**: how memory 
                        ┌──────────────────────────┴──────────────────────────┐
                        ▼                                                     ▼
           ┌─────────────────────────┐                         ┌─────────────────────────┐
-          │ SQLite and encrypted    │                         │ External services       │
+          │ SQLite and encrypted    │                         │ External systems        │
           │ credentials on your disk│                         │ via connector bindings  │
           └─────────────────────────┘                         └─────────────────────────┘
 ```
@@ -90,13 +90,13 @@ For the full picture, read **[How it works](docs/how-it-works.md)**: how memory 
 
 ## What it looks like
 
-The dashboard gives you a central view of your connected agents, active memory, stored credentials, and service connections. After setup, it's the quickest way to confirm the service is running and your agents have what they need.
+The dashboard gives you a central view of your connected agents, active memory, stored credentials, and connections. After setup, it's the quickest way to confirm Agent Core is running and your agents have what they need.
 
 ![Agent Core overview](docs/images/agent-overview.png)
 
 ---
 
-## Capabilities your agents can use
+## What your agents can use
 
 ### Memory that persists across sessions
 
@@ -110,7 +110,7 @@ Codex searches:     memory_search("database decision") → gets that record back
 
 Memory is scoped. Agents only see what they're allowed to: their own private agent scope, shared project context, or your personal preferences. Nothing bleeds across unless you want it to.
 
-Memory records are one of two kinds, and the difference decides what the system can do with them. A **fact** is settled by checking: someone could verify it against the code, a host, or a service. A **decision** is settled by someone deciding, and nothing can verify it. That split is what lets Agent Core re-check facts on a schedule while leaving your decisions alone.
+Memory records are one of two kinds, and the difference decides what the system can do with them. A **fact** is settled by checking: someone could verify it against the code, a host, or an external system. A **decision** is settled by someone deciding, and nothing can verify it. That split is what lets Agent Core re-check facts on a schedule while leaving your decisions alone.
 
 Facts can name what would confirm them (`repo:<path>` or `service:<binding>`; a `host:<name>` is a label that only a binding an operator mapped can check), and the maintenance sweep checks the ones it can, recording what it found. Search results say how long it has been since anyone confirmed a record, so an agent can tell a fact verified today from one nobody has checked in months. Unconfirmed, non-human facts receive a small ranking penalty until someone confirms them with evidence. Ranking follows the same principle: observed provenance, recall, and usefulness rather than a score the author gave itself.
 
@@ -122,21 +122,21 @@ Keyword search ranks matches by text relevance alongside confirmation and useful
 
 ![Agent Core memory](docs/images/agent-memory.png)
 
-### Credentials and services
+### Credentials and capabilities
 
-The **Credentials** page holds stored credentials and the **Services** page holds service connections. This is the capability layer: agents do not route through a scheduler or OS. They connect to a service catalog and call the capabilities they need, whether that capability came from an imported OpenAPI spec, a native MCP server, an installed adapter, or the built-in Generic HTTP fallback.
+The **Credentials** page holds stored credentials and the **Capabilities** page holds the capability catalog and its connections. This is the capability layer: agents do not route through a scheduler or OS. They connect to a capability catalog and call the capabilities they need, whether that capability came from an imported OpenAPI spec, a native MCP server, an installed adapter, or the built-in Generic HTTP fallback.
 
-A credential is the encrypted secret itself: a GitHub PAT, API key, URL, password, or other value. A service connection is how Agent Core uses one stored credential with a service such as an imported OpenAPI API, a native MCP server registration, an installed adapter, or the built-in Generic HTTP escape hatch.
+A credential is the encrypted secret itself: a GitHub PAT, API key, URL, password, or other value. A connection is how Agent Core uses one stored credential with a capability such as an imported OpenAPI API, a native MCP server registration, an installed adapter, or the built-in Generic HTTP escape hatch.
 
-Agent Core can also connect to trusted internal services on your own network without weakening global URL checks. See [Configuration](docs/configuration.md) for details on `AGENT_CORE_ALLOWED_INTERNAL_HOSTS` and connection overrides.
+Agent Core can also connect to trusted internal systems on your own network without weakening global URL checks. See [Configuration](docs/configuration.md) for details on `AGENT_CORE_ALLOWED_INTERNAL_HOSTS` and connection overrides.
 
 You store a credential entry in Agent Core once. You can edit its name, label, and type later. If you leave the replacement secret field blank while editing, Agent Core keeps the existing encrypted value; if you enter a new value, it overwrites the stored secret.
 
 From there, there are three paths, most used first:
 
-- If you run an action through a service connection, Agent Core uses the stored credential server-side to call the external service and returns the result. The agent never sees the secret.
-- If a service or container needs its own secrets at startup, give it a [credential consumer](docs/credential-consumers.md): an identity that can fetch only the entries granted to it.
-- If a local tool needs a secret in its own config, Agent Core returns a reference like `AC_SECRET_GITHUB_TOKEN_1A2B3C4D`, and the local credential helper resolves it at runtime. It only matters for a tool you run yourself that cannot go through a service connection.
+- If you run an action through a connection, Agent Core uses the stored credential server-side to call the external system and returns the result. The agent never sees the secret.
+- If a program or container needs its own secrets at startup, give it a [credential consumer](docs/credential-consumers.md): an identity that can fetch only the entries granted to it.
+- If a local tool needs a secret in its own config, Agent Core returns a reference like `AC_SECRET_GITHUB_TOKEN_1A2B3C4D`, and the local credential helper resolves it at runtime. It only matters for a tool you run yourself that cannot go through a connection.
 
 In both cases, the raw secret never appears in prompts, logs, or generated configs.
 
@@ -147,7 +147,7 @@ Agent gets:  AC_SECRET_GITHUB_TOKEN_1A2B3C4D  (just a reference)
 At runtime:  The local credential helper injects the token locally, or the connector executor uses it server-side
 ```
 
-![Agent Core service catalog](docs/images/agent-catalog.png)
+![Agent Core capability catalog](docs/images/agent-catalog.png)
 
 ### Shared context across tools and people
 
@@ -252,11 +252,11 @@ For REST-based clients or custom integrations, every feature is also available t
 
 | Doc | What's in it |
 | --- | --- |
-| [Quickstart](docs/quickstart.md) | Install, connect an agent, write shared memory, then add credentials and services when needed |
-| [Integrations](docs/integrations.md) | Set up MCP, credentials, services, activities, collaboration, and webhooks in that order |
-| [How it works](docs/how-it-works.md) | The system model and full feature set: memory, activity, credentials, services, and maintenance |
+| [Quickstart](docs/quickstart.md) | Install, connect an agent, write shared memory, then add credentials and capabilities when needed |
+| [Integrations](docs/integrations.md) | Set up MCP, credentials, capabilities, activities, collaboration, and webhooks in that order |
+| [How it works](docs/how-it-works.md) | The system model and full feature set: memory, activity, credentials, capabilities, and maintenance |
 | [Local credential helper](docs/credential-broker.md) | How `AC_SECRET_*` references work and how to resolve them at runtime |
-| [Credential consumers](docs/credential-consumers.md) | Give a service or container its own identity that fetches only the secrets granted to it |
+| [Credential consumers](docs/credential-consumers.md) | Give a program or container its own identity that fetches only the secrets granted to it |
 | [Configuration](docs/configuration.md) | Environment variables, ports, and data directory layout |
 | [Security](docs/security.md) | Scope model, secret handling, and deployment checklist |
 | [API reference](docs/api.md) | Full REST and MCP endpoint reference |

@@ -6,7 +6,7 @@ Something not working? Here's how to diagnose and fix the most common issues.
 
 ## Startup
 
-### The service won't start
+### Agent Core won't start
 
 Check the logs first; they almost always tell you exactly what's wrong:
 
@@ -133,7 +133,7 @@ Work through this checklist:
 
 ### Reveal fails
 
-Revealing a raw credential value requires a user session. Agent API keys can't reveal credentials; this is intentional. Most workflows should not need reveal; use service connections for server-side actions or the Local credential helper for local process injection.
+Revealing a raw credential value requires a user session. Agent API keys can't reveal credentials; this is intentional. Most workflows should not need reveal; use connections for server-side actions or the Local credential helper for local process injection.
 
 ### Credential edits did not change the secret
 
@@ -157,7 +157,7 @@ If OTP is enabled and you can no longer generate codes, use **Settings → Accou
 
 ### Dashboard pages show 404
 
-The dashboard root is `/` (Needs you). Main pages are: `/agents`, `/integrations` (Connect), `/workspaces`, `/memory`, `/connectors` (Services), `/credentials`, `/activity`, `/approvals`, and `/settings`; admins also have `/users`, `/webhooks` and `/audit` (the Audit log tab under Activity). If you're getting 404 on these, confirm the service is running and check the logs.
+The dashboard root is `/` (Needs you). Main pages are: `/agents`, `/integrations` (Connect), `/workspaces`, `/memory`, `/connectors` (Capabilities), `/credentials` (Credentials), `/services` (Services), `/activity`, `/approvals`, and `/settings`; admins also have `/users`, `/webhooks` and `/audit` (the Audit log tab under Activity). If you're getting 404 on these, confirm Agent Core is running and check the logs.
 
 ### CORS errors in the browser
 

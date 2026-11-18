@@ -10,6 +10,10 @@ Notable changes to Agent Core are documented here. The format follows [Keep a Ch
 
 - **Upgrade steps that touch access are checked before they are kept.** A step that changes how agents, services, connections or credentials are stored runs in one transaction. Agent Core records who can run which connection, who can get a reference to which credential (through the MCP tools and through the local credential helper), what each service may fetch (read or write, expiry), each key's hash, and each credential's owner, name and a hash of its stored value, applies the step, records it again, and compares. Any difference the step did not declare rolls everything back and the application does not start; the database is exactly as it was, a copy of it is kept beside it (`pre-migration-*.db`), and a report with ids and names only is written to `migration-reports/`. A restored backup from an older version is brought up to date under the same check before it replaces the live database. `python -m app.access_check <database>` shows what an upgrade would do, on a read-only copy. See `docs/upgrading.md`, which also has the recovery procedure.
 
+### Changed
+
+- **The dashboard names things for what they are.** The Services page is now **Capabilities** (what an agent can do through Agent Core: each ready-made capability, and each connection you set up with it). **Services** now means only the programs and containers that fetch secrets, under **Credentials > Services**. An agent's on/off flags are called **Permissions** (Use memory, Coordinate tasks, Reference credentials, See capabilities, Run capabilities, Fetch secrets, Propose admin changes). Web addresses, API names, MCP tool names and stored names are unchanged, so nothing that calls Agent Core needs to change. `/agents?show=services` now redirects to `/services`.
+
 ### Upgrading
 
 - Nothing to do. Existing entries keep every permission, workspace, key and secret they had; the upgrade only adds the `kind` column and checks that access is identical afterwards.

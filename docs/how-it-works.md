@@ -8,14 +8,14 @@ Everything here is current behaviour. For exact request and response shapes, see
 
 ## 1. The shape of the system
 
-Agent Core is a single local HTTP service backed by one SQLite database. It stores four kinds of thing and does nothing else:
+Agent Core is a single local HTTP server backed by one SQLite database. It stores four kinds of thing and does nothing else:
 
 | | What it holds | Who writes it |
 | --- | --- | --- |
 | **Memory** | What stays true: facts, decisions, preferences | Agents |
 | **Activity** | What happened: one record per task, with a heartbeat | Agents |
 | **Credentials** | Encrypted secrets, exposed only as references | Operator |
-| **Services** | How to reach external services, and with which credential | Operator |
+| **Capabilities** | How to reach external systems, and with which credential | Operator |
 
 Agents connect to it. It does not connect to agents, schedule them, or run their work. That boundary is deliberate: an agent's harness already decides what to do next, and a memory layer that also tried to would have to be replaced every time you changed agents. Agent Core is what stays constant while the agents around it change.
 
@@ -36,17 +36,17 @@ Agents connect to it. It does not connect to agents, schedule them, or run their
                               └─────────────────────┬──────────────────┘
                                                     │ only when a connector runs
                                                     ▼
-                                            external services
+                                            external systems
 ```
 
-Nothing leaves the machine unless you configure something that reaches out: a service action, an embedding backend, or an outbound webhook notification. Those are the only outbound paths, and all three are off until an operator sets them up.
+Nothing leaves the machine unless you configure something that reaches out: a capability action, an embedding backend, or an outbound webhook notification. Those are the only outbound paths, and all three are off until an operator sets them up.
 
 ### Two transports, one implementation
 
 - **MCP** at `POST /mcp`: 35 tools, the path agents normally use. Speaks both JSON-RPC (`tools/list`, `tools/call`) and a plain `{"tool": ..., "params": ...}` shape.
 - **REST** under `/api/...`: the same operations for scripts, CI, and non-MCP clients.
 
-Both call the same service layer, so they enforce the same rules and fail the same way. If a request is malformed, both return a `400` with an error code rather than a stack trace.
+Both go through the same layer, so they enforce the same rules and fail the same way. If a request is malformed, both return a `400` with an error code rather than a stack trace.
 
 ### Identity and authentication
 
@@ -113,7 +113,7 @@ service:<binding_id>                     something reachable through a connector
 
 **Repo paths are relative to the workspace root, never absolute.** The same directory has a different absolute path inside every agent's container, so an absolute anchor is resolvable only by whoever wrote it. Agent Core resolves the relative path against this installation's configured root, which is exactly what lets agents with different mounts share one corpus.
 
-The vocabulary is open. `repo:`, `host:` and `service:` are what Agent Core can check by itself; an installation teaches it to check others (`url:`, `doc:`, `ticket:`) by mapping the type to a service connection it already has (see [Configuration](configuration.md#verification-beyond-code)). Writing an anchor type nothing can check is allowed and warned about, not refused: the anchor still tells a human what would settle the record.
+The vocabulary is open. `repo:`, `host:` and `service:` are what Agent Core can check by itself; an installation teaches it to check others (`url:`, `doc:`, `ticket:`) by mapping the type to a connection it already has (see [Configuration](configuration.md#verification-beyond-code)). Writing an anchor type nothing can check is allowed and warned about, not refused: the anchor still tells a human what would settle the record.
 
 Anchors also work as a filter. `subject_anchor: "repo:app/services"` matches everything anchored under that prefix, which answers "what have we recorded about this part of the code".
 
@@ -169,9 +169,9 @@ A shared memory corpus decays in two different ways, and they need different tre
 | --- | --- | --- |
 | `verified` | The subject is there | `anchor_checked_at` is set (returned with the record; nothing ranks on it or shows it on a page). The record is **not** confirmed: a file that still exists does not make the sentence about it true, so staleness still counts from the last evidence-based confirmation |
 | `missing` | The subject is definitively gone (404, no such path) | The time is noted; a second `missing` at least an hour later retracts the record (soft, restorable, audited as the `anchor_missing` rule) |
-| `unverifiable` | Could not check: timeout, error, no configured root, or no service connection for the host | **Nothing** |
+| `unverifiable` | Could not check: timeout, error, no configured root, or no connection for the host | **Nothing** |
 
-What can be checked depends on the setup: a `repo:` anchor needs the workspace mapped to a directory on the Core host (`workspace_repo_roots`, see the configuration guide; empty on a new install, so repo anchors are unverifiable until it is set), a `host:` anchor is checked only through a service connection that targets that host, and a `service:` anchor through its connection.
+What can be checked depends on the setup: a `repo:` anchor needs the workspace mapped to a directory on the Core host (`workspace_repo_roots`, see the configuration guide; empty on a new install, so repo anchors are unverifiable until it is set), a `host:` anchor is checked only through a connection that targets that host, and a `service:` anchor through its connection.
 
 Only `missing` is evidence. An outage is not a false memory, and a system that forgets that will delete true records the first time the network hiccups. Records that cannot be checked are left alone rather than condemned, and the sweep orders by least-recently-attempted so never-verifiable records cannot starve the ones that can be checked.
 
@@ -234,28 +234,28 @@ credential_get → AC_SECRET_GITHUB_TOKEN_1A2B3C4D
 
 From there, three paths:
 
-- **Service**: Agent Core makes the call itself, server-side, using the stored credential. The secret never leaves the service at all.
-- **Credential consumer**: a container or service fetches its own granted secrets at startup ([Credential consumers](credential-consumers.md)). Use it for the software you run yourself.
+- **Capability**: Agent Core makes the call itself, server-side, using the stored credential. The secret never leaves the server at all.
+- **Credential consumer**: a program or container fetches its own granted secrets at startup ([Credential consumers](credential-consumers.md)). Use it for the software you run yourself.
 - **Local credential helper**: a tool you run yourself needs the secret in its own config or environment. The [Local credential helper](credential-broker.md) resolves the reference at runtime, on the machine, so the raw value never passes through a prompt, a log, or a generated config file.
 
-Prefer the service path when both are available. The reference is what agents see, and a reference in a transcript is worth nothing to anyone who reads it.
+Prefer the capability path when both are available. The reference is what agents see, and a reference in a transcript is worth nothing to anyone who reads it.
 
 ---
 
-## 6. Services: the hands
+## 6. Capabilities: the hands
 
-Memory is what agents know. Services are what they can do, and the point of putting them here is that every agent does a given thing the same way, with the same credential and the same audit trail, no matter which harness it runs in.
+Memory is what agents know. Capabilities are what they can do, and the point of putting them here is that every agent does a given thing the same way, with the same credential and the same audit trail, no matter which harness it runs in.
 
-A **service** describes a service and its actions. Four ways to add one:
+A **capability** describes what an agent can do and the actions it offers. Four ways to add one:
 
 | Source | Use when |
 | --- | --- |
-| **OpenAPI import** | The service publishes a spec |
-| **MCP server** | The service already speaks MCP |
+| **OpenAPI import** | The capability publishes a spec |
+| **MCP server** | The capability already speaks MCP |
 | **Adapter** | You want a shareable, data-only integration: OAuth, session handshakes, CLI wrappers ([docs/adapters.md](adapters.md)) |
 | **Generic HTTP** | Everything else; the escape hatch |
 
-A **connection** joins one service to one stored credential, inside a scope. That is what agents actually use:
+A **connection** joins one capability to one stored credential, inside a scope. That is what agents actually use:
 
 ```
 connectors_summary        what can I reach from here?
@@ -266,20 +266,20 @@ connectors_run            do it, server-side
 
 Adapters declare their requirements, and a connection only exposes actions whose requirements are met, so a half-configured integration presents as unavailable rather than failing at the moment an agent depends on it. Every execution is logged, and the log is pruned on the same retention sweep as everything else.
 
-Connection visibility grants access to every action enabled on the service. Services define which actions exist and which are disabled; connections decide which users, agents, or workspaces can use the connection.
+Connection visibility grants access to every action enabled on the capability. Capabilities define which actions exist and which are disabled; connections decide which users, agents, or workspaces can use the connection.
 
 ---
 
-## 7. Optional capabilities
+## 7. Optional features
 
-Two things make Agent Core better and neither of them are required. Each has a defined fallback, because a memory layer that stops working when an optional service is down is not a memory layer.
+Two things make Agent Core better and neither of them are required. Each has a defined fallback, because a memory layer that stops working when an optional feature is down is not a memory layer.
 
-| Capability | Enables | Without it |
+| Feature | Enables | Without it |
 | --- | --- | --- |
 | **Embedding backend** | Semantic and hybrid search | Full-text search; exact keywords matter more |
 | **Verification connections** | Checking anchor types beyond `repo:`/`host:`/`service:` | Those anchors report `unverifiable`, which changes nothing about the record |
 
-The rule they both follow: **a capability is never a dependency.** Configuring one turns on features, including for records written long before it existed. Removing one turns those features off and leaves everything else untouched. Nothing degrades into guessing.
+The rule they both follow: **a feature is never a dependency.** Configuring one turns on features, including for records written long before it existed. Removing one turns those features off and leaves everything else untouched. Nothing degrades into guessing.
 
 ---
 
@@ -291,7 +291,7 @@ One in-process sweep, hourly by default, does all of it (`AGENT_CORE_MAINTENANCE
 - sweeps records past `expires_at`
 - prunes scratchpad memory past its retention window
 - purges retracted and superseded records past theirs
-- prunes service execution and webhook delivery logs
+- prunes capability execution and webhook delivery logs
 - verifies a batch of anchored facts, least-recently-attempted first
 
 The last run's time, trigger, and results are visible in **Settings → Data and backup** and at `GET /api/backup/maintenance/status`.
@@ -323,7 +323,7 @@ Every design decision above comes from one of these. When something in Agent Cor
 
 **Evidence over self-assessment.** Ranking uses what was observed (recalls, confirmations), not what a record's author claimed about its own importance.
 
-**A capability is never a dependency.** Optional services add features. Their absence never breaks the core, and never degrades into guessing.
+**A feature is never a dependency.** Optional features add to what the system can do. Their absence never breaks the core, and never degrades into guessing.
 
 **Two clocks, not one.** When the system learned something is a different question from when it was true, and a corpus that conflates them cannot explain its own past.
 
@@ -340,9 +340,9 @@ Every design decision above comes from one of these. When something in Agent Cor
 | [Quickstart](quickstart.md) | Install, first agent, first memory write |
 | [Integrations](integrations.md) | Connecting Claude Code, Cursor, Codex, and others |
 | [API Reference](api.md) | Every REST endpoint and MCP tool |
-| [Configuration](configuration.md) | Settings, optional capabilities, data layout |
+| [Configuration](configuration.md) | Settings, optional features, data layout |
 | [Security](security.md) | Scope model, secret handling, deployment checklist |
-| [Adapters](adapters.md) | Building and sharing service integrations |
+| [Adapters](adapters.md) | Building and sharing capability integrations |
 | [Backup & Restore](backup-restore.md) | Export, restore, maintenance |
 | [Troubleshooting](troubleshooting.md) | Common issues and fixes |
 
@@ -365,8 +365,9 @@ The dashboard and the API use different words for some things. Tool and field na
 | Workspace, Personal, Private to an agent | scope (`workspace:<id>`, `user:<id>`, `agent:<id>`) |
 | Owner | `owner_user_id` (the agent's default user is the same person) |
 | Task | activity (`activity_update`, `/api/activity`) |
-| Service | connector type |
-| Connection (a service set up for a workspace or an agent) | binding (`connector_bindings`) |
+| Capability | connector type |
+| Connection (a capability set up for a workspace or an agent) | binding (`connector_bindings`) |
+| Service (a program that only fetches secrets) | `kind: service` |
 | Retract (hidden from search, restorable for the retention period) | `memory_retract`, `POST /api/memory/retract`; `POST /api/memory/restore` undoes it |
 | Delete (gone for good) | agents, credentials, connections, and a retracted memory you delete |
 | Two-step sign-in | TOTP, `otp_*` routes and audit events |
