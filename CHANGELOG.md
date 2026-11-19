@@ -2,7 +2,7 @@
 
 Notable changes to Agent Core are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow [Semantic Versioning](https://semver.org/).
 
-## [1.4.0] - Unreleased
+## [1.4.0] - 2026-11-19
 
 ### Added
 
@@ -39,13 +39,11 @@ Notable changes to Agent Core are documented here. The format follows [Keep a Ch
 
 - **The Access page groups its rows.** The long table is now one closed header per "Who or what", with the kind and the row count; a header opens and closes on click and by keyboard, and a filter or search opens the groups that hold a match. An approval's detail page names the workspace instead of showing its scope.
 
-- **More tables stack on a phone.** The Audit log, Workspaces and Users tables show each row as a block at narrow width, and the Needs you answer box keeps its button inside the card. The Change owner panel keeps Save and Cancel above the dialog's Close bar. A list that is missing a permission says whether one, some or all of its rows are, and one Turn on that would reach several agents names them and asks first.
+- **More tables stack on a phone.** The Audit log, Workspaces and Users tables show each row as a block at narrow width, and the Needs you answer box keeps its button inside the card. The Change owner panel keeps Save and Cancel above the dialog's Close bar. Wrapped values stay in their own column, the approval detail tables fit the card, and the Access list says how to open a group. A list that is missing a permission says whether one, some or all of its rows are, and one Turn on that would reach several agents names them and asks first.
 
 - **The Health card agrees with the Capabilities table.** "Capabilities" says "N failing" when a connection's last check failed or when recent runs of one of its actions keep failing, the same two things the Connections table shows. Before, it counted only the check, so it could say "all working" beside a connection whose action failed every time.
 
-- **Action discovery for a plain web service lists its requests** (see Fixed) and the Access, Approvals, Users and Audit pages read better on a phone: wrapped values stay in their own column, the approval detail tables fit the card, the Access list says how to open a group, and the permission notices name the agents they mean.
-
-- **"Failing" means failing lately.** An action counts as failing only when it has failed within the last 7 days and either its latest run failed or at least a fifth of at least five recent calls failed. A failure older than that, with nothing failing since, is history: the Capabilities table shows it as a quiet line ("reply_task last failed 29 Oct") and the Health card does not count it. A caller naming an action the connection does not have or does not allow is not counted as the connection failing. The Health card and the Connections table use the same rule.
+- **"Failing" means failing lately.** An action counts as failing only when it has failed within the last 7 days and either its latest run failed or at least a fifth of at least five recent calls failed. A failure older than that, with nothing failing since, is history: the Capabilities table shows it as a quiet line ("sync_items last failed 29 Oct") and the Health card does not count it. A caller naming an action the connection does not have or does not allow is not counted as the connection failing. The Health card and the Connections table use the same rule.
 
 ### Upgrading
 
