@@ -4,7 +4,7 @@ Agent Core is configured through environment variables. For local development, c
 
 **The short version:** for a basic local setup, you probably don't need to change anything.
 
-For what these settings actually affect, such as the memory model, verification, and the review queue, see [How it works](how-it-works.md).
+For what these settings actually affect, such as the memory model and verification, see [How it works](how-it-works.md).
 
 ---
 
@@ -77,7 +77,7 @@ Session tokens are signed with their own random key, `session.key` in the data d
 
 The scratchpad and retracted/superseded retention windows themselves (7 and 30 days by default) are configured from **Settings → Data and backup → How long things are kept** in the dashboard. The last run's time, trigger, and results are shown in **Settings → Data and backup** and available from `GET /api/backup/maintenance/status`.
 
-The maintenance sweep also prunes the capability execution and webhook delivery logs (30 days by default, `0` keeps them forever), runs the memory verification pass, and can generate capped memory-review proposals. These controls are set from **Settings → Data and backup** and **Settings → Memory**.
+The maintenance sweep also prunes the capability execution and webhook delivery logs (30 days by default, `0` keeps them forever) and runs the memory verification pass. These controls are set from **Settings → Data and backup**.
 
 ### Workspace awareness
 
@@ -86,7 +86,7 @@ The maintenance sweep also prunes the capability execution and webhook delivery 
 | `workspace_awareness_digest_enabled` | `1` | Allow a fresh MCP `activity_update` to return a best-effort `since_last_active` digest |
 | `workspace_awareness_digest_limit` | `10` | Maximum digest change entries; runtime bounds are 1–50 |
 
-The unconfirmed-inference days and the scheduled-scan switch are editable in **Settings → Memory → Memory review**. The three proposal caps and the workspace-awareness settings are installation-wide database settings with no dashboard control. Proposal generation rechecks all caps and candidate eligibility inside its short write transaction, so simultaneous manual and scheduled runs cannot overfill the queue.
+The workspace-awareness settings are installation-wide database settings with no dashboard control.
 
 The embedding provider, endpoint URL, model, and auth type for **vector search** are configured from **Settings → Memory → Search by meaning** in the dashboard, not through environment variables.
 

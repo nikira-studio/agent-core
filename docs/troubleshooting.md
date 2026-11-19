@@ -48,6 +48,12 @@ Restore from a backup that includes both the database and key material, or start
 
 SQLite allows one writer at a time. If you're seeing lock errors, you probably have two Agent Core processes pointed at the same `data/agent-core.db`. WAL mode and a 5-second busy timeout help with transient contention, but concurrent multi-process writes aren't supported. Make sure only one instance is running against that data directory.
 
+### The upgrade is refused by the access check
+
+Some upgrade steps change how agents, services, connections or credentials are stored, and each one runs under a check: Agent Core records access before and after the step, and rolls the whole step back if anything differs that the step did not say it would change. Nothing needs repairing, because the database is at the previous version. Read the report named in the error (`migration-reports/`), start the previous version again, and send the report to the project. See [Upgrading](upgrading.md) for the whole procedure.
+
+To see what an upgrade would do without changing anything, run `python -m app.access_check /path/to/agent-core.db` against a copy of the database.
+
 ---
 
 ## Authentication
@@ -128,6 +134,8 @@ Work through this checklist:
   during rotation. Update brokers that use `--token` or a copied token file.
 - Is the `Authorization` header using `Broker <credential>` (not `Bearer`)? The helper uses a different auth scheme from agents.
 - Is the configured `agent_id` active and not deactivated?
+- Is that entry an agent and not a service? A service fetches its secrets with a grant, and the answer is `403 NOT_AN_AGENT`.
+- Does that agent hold the Reference credentials permission? Without it the answer is `403 PERMISSION_REQUIRED`. Switch it on under **Agents > Access**, with **Turn on**.
 - Does that agent have read access to the credential entry's scope?
 - Does the credential entry have an `expires_at` TTL that has passed?
 
@@ -138,6 +146,33 @@ Revealing a raw credential value requires a user session. Agent API keys can't r
 ### Credential edits did not change the secret
 
 On the Credentials page, the credential edit form has an optional replacement secret field. If you leave it blank, Agent Core keeps the existing encrypted value and updates only metadata such as name, label, and type. Enter a new value only when you want to replace the stored secret.
+
+---
+
+## Access
+
+### An agent cannot use a connection
+
+Two things are needed, and they are edited in different places.
+
+1. The agent must be on the connection's **Who can use it** list: a named agent, everyone in a workspace, or all of one person's agents, with an exclusion for a single agent. Being on that list lets the agent use the connection and nothing more; it gives no memory access and no credential access.
+2. The agent must hold the **Run capabilities** permission. Where it does not, the row is shown as needing that permission, with a **Turn on** button. Nothing switches a permission on by itself.
+
+An agent that could use the connection before 1.4.0 still can: the upgrade filled every list from the connection's owner, so no agent gained anything and none lost anything.
+
+### A credential made with a connection
+
+A credential entered while adding a connection is stored for that connection alone. No agent can reach it, and only Agent Core uses it, so an agent that asks for it by name gets nothing. Tick **Also let agents reference this credential** when you create it to store it under the connection's owner instead.
+
+Deleting a connection asks whether its credential goes with it. Through the API the credential is kept unless you ask for it to be deleted; a kept one is listed on the Access page under Left behind, because no agent can reach it any more.
+
+### A service cannot own a connection
+
+Creating a connection with a service as its owner, or changing a connection's owner to a service, is refused with `SERVICE_CANNOT_OWN`. A service has no permission to see or run capabilities, so it could never use one. Connections you already have are not changed, and the Owner list no longer offers services.
+
+### The Health strip says a connection is failing
+
+A connection counts as failing when its last check failed, or when one of its actions failed within the last 7 days and either its latest run failed or at least a fifth of at least five recent calls failed. A failure older than that, with nothing failing since, is history: the Capabilities table shows it as a quiet line and the Health strip does not count it. A caller naming an action the connection does not have is not counted as the connection failing.
 
 ---
 
@@ -157,7 +192,9 @@ If OTP is enabled and you can no longer generate codes, use **Settings → Accou
 
 ### Dashboard pages show 404
 
-The dashboard root is `/` (Needs you). Main pages are: `/agents`, `/integrations` (Connect), `/workspaces`, `/memory`, `/connectors` (Capabilities), `/credentials` (Credentials), `/services` (Services), `/activity`, `/approvals`, and `/settings`; admins also have `/users`, `/webhooks` and `/audit` (the Audit log tab under Activity). If you're getting 404 on these, confirm Agent Core is running and check the logs.
+The dashboard root is `/` (Needs you). Main pages are: `/agents`, `/integrations` (Connect), `/workspaces`, `/memory`, `/connectors` (Capabilities), `/credentials` (Credentials), `/services` (Services), `/access` (Access), `/activity`, `/approvals`, and `/settings`; admins also have `/users`, `/webhooks` and `/audit` (the Audit log tab under Activity). If you're getting 404 on these, confirm Agent Core is running and check the logs.
+
+The old address `/agents?show=services` redirects to `/services`, where the programs that only fetch secrets are listed.
 
 ### CORS errors in the browser
 

@@ -1,6 +1,6 @@
 # API reference
 
-Every REST endpoint and MCP tool. For what the concepts mean (scopes, memory classes, anchors, the review queue), see [How it works](how-it-works.md).
+Every REST endpoint and MCP tool. For what the concepts mean (scopes, memory classes, anchors), see [How it works](how-it-works.md).
 
 Base URL: `http://localhost:3500`
 
@@ -157,7 +157,7 @@ Update:
 }
 ```
 
-Every entry carries a `kind`: `agent` or `service`. Create and update take `kind`. The `capabilities` field (the agent's permissions) holds its on/off flags.
+Every entry carries a `kind`: `agent` or `service`. Create and update take `kind`. The `capabilities` field (the agent's permissions) holds its on/off flags: `memory` (Use memory), `coordination` (Coordinate tasks), `credentials` (Reference credentials), `connectors_read` (See capabilities), `connectors_execute` (Run capabilities), `credentials_resolve` (Fetch secrets) and `admin_propose` (Propose admin changes). The stored names did not change in 1.4.0; only the words a person reads them by.
 
 An agent does work. A service only fetches the secrets it is given: its one permission is `credentials_resolve` and it has no workspaces. Creating an entry with exactly that permission and no workspace makes a service. Changing an entry to a service is refused while it has recorded tasks, sessions, memory, workspaces, credentials or connections of its own.
 
@@ -401,8 +401,9 @@ A connection has one **owner** (`scope`: who may edit it) and a list of who may 
 
 - `POST` / `PUT /api/connector-bindings` accept `audience: [{kind, ref, exclude?}]` (administrators only; `403 FORBIDDEN` for anyone else, `400 INVALID_AUDIENCE` with a plain message for a bad entry). Without it, creating a connection with a `scope` gives it the list that scope has always meant (a named agent for `agent:<id>`, the workspace for `workspace:<id>`, "all of the person's agents" for `user:<id>`, excluding that person's agents whose `inherit_user_bindings` is off), and changing the `scope` of an existing connection does the same; re-sending the current `scope` changes nothing. An administrator's answers carry `audience`; an agent's never do.
 - `inherit_user_bindings` on an agent is kept: turning it off excludes the agent from its person's "all agents" connections, turning it on removes that exclusion. A new agent starts excluded unless `inherit_user_bindings` is true.
-- Administrator session only: `PUT /api/access/connections/{id}/audience` (replace the list), `POST .../audience` (add an entry), `DELETE .../audience/{kind}/{ref}`, and `POST /api/access/preview/audience` with `{binding_id, audience}` (who gains and who loses the use of the connection; nothing is written). Every change is audited as `connector_audience_changed` with the list before and after.
+- The endpoints that read and write the list are in [Who can reach what](#who-can-reach-what). They are for administrators only.
 - Deleting an agent, a workspace or a person removes their entries; a retired agent's named entries are listed on the Access page under "Left behind".
+- A service can never own a connection: creating one with a service as its owner, or changing the owner of an existing one to a service, is refused with `400 SERVICE_CANNOT_OWN`. Connections you already have are not changed, and the owner list no longer offers services.
 
 ### Who can reach what
 
@@ -410,13 +411,20 @@ Admin session only. Names, ids and yes/no answers; never a secret value. Every a
 
 | Method | Path | Returns |
 | --- | --- | --- |
+| `GET` | `/api/access/overview` | Every assignment there is, with when each was last used and any action that waits for a person, plus the Unused list: the credentials nothing uses, the capabilities nobody can use, the services that look idle and what a retired agent or service left behind |
 | `GET` | `/api/access/credentials/{id}` | The three groups of a credential's page: connections that sign in with it, agents that can reach it (with the reason, and `needs_permission` when the agent lacks the Reference credentials permission), services that receive its value, and what can be added to each |
-| `GET` | `/api/access/connections/{id}` | The agents that can use a connection, with the reason and whether they can run it now |
+| `GET` | `/api/access/connections/{id}` | The agents that can use a connection, with the reason and whether they can run it now, and the audience list with what may be added to it |
 | `GET` | `/api/access/agents/{id}` | One agent's workspaces, the connections it can use, the credentials it can reference, its keys and permissions |
 | `GET` | `/api/access/services/{id}` | One service's grants (read or write, end date) and keys |
 | `POST` | `/api/access/preview/credential-owner` | Body `{entry_id, scope}`. Which agents gain and which lose access if the credential's owner changes |
 | `POST` | `/api/access/preview/agent-workspace` | Body `{agent_id, workspace_id, action: "add"\|"remove", read, write}`. What adding or removing a workspace opens or closes: memory, credentials, connections |
+| `POST` | `/api/access/preview/audience` | Body `{binding_id, audience}`. Who gains and who loses the use of the connection. Nothing is written |
+| `PUT` | `/api/access/connections/{id}/audience` | Body `{audience: [{kind, ref, exclude?}]}`. Replace the whole list |
+| `POST` | `/api/access/connections/{id}/audience` | Body `{kind, ref, exclude?}`. Add one entry |
+| `DELETE` | `/api/access/connections/{id}/audience/{kind}/{ref}` | Remove one entry |
 | `POST` | `/api/agents/{id}/permissions/{permission}/turn-on` | Switch one permission on (the stored name, for example `credentials` or `connectors_execute`). A person does this, one permission at a time; nothing switches a permission on by itself, and nothing here switches one off. Audit event `agent_permission_turned_on` |
+
+An audience entry is a named agent (`agent`), every agent that reaches a workspace (`workspace`), or all the agents that act for one person (`person_agents`). Only an agent can be excluded, and an exclusion beats every other entry. A bad entry is refused with `400 INVALID_AUDIENCE` and a plain message; anyone who is not an administrator is refused with `403 FORBIDDEN`. Every change is audited as `connector_audience_changed` with the list before and after.
 
 A connection's credential can be taken away with `PUT /api/connector-bindings/{id}` and `{"reset_credential": true}`; giving or taking one is audited as `connector_binding_updated`. A new grant (`POST /api/credential-consumers/grants`) must name a service; the answer for any other entry is `403 NOT_A_SERVICE`. Grants an agent already held before 1.4.0 keep working.
 
@@ -520,10 +528,10 @@ If the connector and credential are enough on their own, leave `config_json` emp
 | Method | Path | Auth | Description |
 | --- | --- | --- | --- |
 | `GET` | `/api/connector-bindings` | Agent/session | List visible connections |
-| `POST` | `/api/connector-bindings` | Agent/session | Create a connection. Optional `actions_mode` (`all`, `read_only`, `custom`) and, for `custom`, `disabled_actions`: what the connection turns off. Only a person may set them; a connection an agent creates starts as `none` (nothing allowed until a person chooses) |
+| `POST` | `/api/connector-bindings` | Agent/session | Create a connection. Optional `actions_mode` (`all`, `read_only`, `custom`) and, for `custom`, `disabled_actions`: what the connection turns off. Only a person may set them; a connection an agent creates starts as `none` (nothing allowed until a person chooses). A person may send `new_credential` (`name`, `value`, optional `label`, and `owned_by`) to store a credential with the connection in one step |
 | `GET` | `/api/connector-bindings/{binding_id}` | Agent/session | Get a connection |
-| `PUT` | `/api/connector-bindings/{binding_id}` | Agent/session | Update a connection, including `actions_mode` / `disabled_actions` (a person only; they can narrow the capability's actions, never widen them) |
-| `DELETE` | `/api/connector-bindings/{binding_id}` | Agent/session | Delete a connection |
+| `PUT` | `/api/connector-bindings/{binding_id}` | Agent/session | Update a connection, including `actions_mode` / `disabled_actions` (a person only; they can narrow the capability's actions, never widen them), `reset_credential` (take the credential away) and `audience` |
+| `DELETE` | `/api/connector-bindings/{binding_id}` | Agent/session | Delete a connection. A credential made for it is kept unless `delete_credential=true` is sent; a kept one is listed on the Access page under Left behind |
 | `POST` | `/api/connector-bindings/{binding_id}/test` | Agent/session | Test the connection using the stored credential |
 | `POST` | `/api/connector-bindings/{binding_id}/run` | Agent/session | Run a connection action directly through the REST API |
 | `POST` | `/api/connectors/{binding_id}/run` | Agent/session | Alias of the line above (intuitive path for plug-in scripts) |
@@ -561,6 +569,8 @@ Create:
 
 In that example, the credential provides the secret token, while `config_json` tells Agent Core which repo context and auth scheme to apply when it turns the connection into a real request. For MCP connections, `config_json` can also carry per-binding timeout and header overrides used during tool execution.
 
+A credential made with a connection belongs to that connection by default: it is stored for that connection alone, so no agent can reference it and only Agent Core uses it (a service can still be given it explicitly). Send `owned_by: "owner"` to store it under the connection's owner instead. Only a person may do this; an agent that sends `new_credential` is refused with `403 FORBIDDEN`, and sending both `credential_id` and `new_credential` is refused with `400 INVALID_REQUEST`. The connection, its credential and the link between them are made together or not at all, and a credential that already has that name in that place is refused with `409 DUPLICATE_CREDENTIAL`.
+
 #### Actions that wait for a person
 
 A person can set an action to **ask a person first** (Capabilities → View Actions). Running it then does not run it: both `connectors_run` and `POST /api/connector-bindings/{id}/run` answer with `{"success": false, "pending_approval": true, "approval_id": "...", "status": "pending", "expires_at": "...", "path": "/approvals/<id>"}`. A caller that sees this should wait, not retry. The request is shown on the Approvals page; a signed-in person with write access to the connection's workspace approves or rejects it there. Read the outcome with `approval_get` (or `GET /api/approvals/{id}`): `status` is `pending`, `done`, `failed`, `rejected` or `expired`, with `decision_note`, `error` and, when it ran, `result`. A rejected, expired or failed request carries a `message` telling the agent to stop and report. Every key, operator token and script is held; the one exception is a person pressing Run in their own dashboard. See [docs/design/approval-gate.md](design/approval-gate.md).
@@ -584,7 +594,15 @@ Only the local credential helper should call this route.
 }
 ```
 
-The helper key authenticates the request. The `agent_id` must come from trusted runtime configuration, not model-generated text. Agent Core checks that agent's read scopes before returning a raw value.
+The helper key authenticates the request. The `agent_id` must come from trusted runtime configuration, not model-generated text. Agent Core checks that the named entry is an active agent and not a service, that it holds the Reference credentials permission (`credentials`), and that it can read the credential's scope, before returning a raw value. Every refusal is audited as `broker_resolve_denied` with the reason.
+
+| Status | Code | Meaning |
+| --- | --- | --- |
+| `401` | — | Missing or invalid helper key |
+| `403` | `NOT_AN_AGENT` | The named entry is a service; it fetches its secrets with a grant |
+| `403` | `PERMISSION_REQUIRED` | The named agent does not hold the Reference credentials permission |
+| `403` | `SCOPE_DENIED` | The named agent cannot read the credential's scope |
+| `410` | `CREDENTIAL_EXPIRED` | The credential has passed its expiry |
 
 ---
 
@@ -754,7 +772,7 @@ Dispatch:
 | `connectors_list` | List installed connector types as lean summaries (id, name, auth/backend type, action_count; no full specs). Supports `limit`/`offset`; use `connectors_actions_list` for a type's actions |
 | `connectors_bindings_list` | List connections in authorized scopes |
 | `connectors_bindings_test` | Test a connection using its stored credential |
-| `connectors_actions_list` | List actions a connector type offers to you: only what at least one of your connections allows (pass `binding_id` for one connection's menu) |
+| `connectors_actions_list` | List actions a connector type offers to you: only what at least one of your connections allows (pass `binding_id` for one connection's menu). For a plain web capability the actions are the requests its connection allows, named `METHOD /path`, for example `GET /status` |
 | `connectors_summary` | Summarize visible capabilities, connections, credential-presence, action, and health state |
 | `connectors_run` | Run one connector action server-side using a connection |
 | `connectors_resolve` | Deterministically resolve a connector type (plus optional alias, scope, and action) to a single authorized connection |

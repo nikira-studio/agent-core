@@ -70,6 +70,8 @@ The first time you open the dashboard, you'll be prompted to register. This acco
 
 After registering, you're in. **Needs you** is the home page: it lists what is waiting on you (an empty list means nothing to do), whether everything is healthy, and a short **Getting started** list for a new install.
 
+Below the list is a Health strip with one tile per part of the install. The Capabilities tile says how many connections are failing: a connection counts as failing when its last check failed, or when one of its actions has failed within the last 7 days and either its latest run failed or at least a fifth of at least five recent calls failed. A failure older than that, with nothing failing since, is history and is not counted.
+
 ---
 
 ## Step 3 (optional): Set up two-step sign-in
@@ -107,6 +109,10 @@ curl -X POST http://localhost:3500/api/agents \
 The `read_scopes` and `write_scopes` control what this agent can see and write. By default, an agent can only write to its own private scope (`agent:<id>`). You can also give it access to shared context or a specific workspace, which is useful if you have multiple agents collaborating on the same project.
 
 The **Shared memory** option adds the `shared` scope: memory every user and workspace can see. Give it only to an agent that should read or write context for everyone; write access to `shared` also needs the agent to be in `AGENT_CORE_SHARED_SCOPE_AGENTS` or have `shared` in its write scopes.
+
+An agent's on and off flags are its **permissions**: Use memory, Coordinate tasks, Reference credentials, See capabilities, Run capabilities, Fetch secrets and Propose admin changes. The **Access** button on an agent's row opens one dialog about that agent: the workspaces it may read and write, the capabilities it can use, the credentials it can reference, its keys and its permissions. Adding or removing a workspace shows what it would open or close before anything is saved. A permission an agent lacks is never switched on for it: the dialog offers a **Turn on** button, and a person presses it.
+
+Not every entry on the Agents page is an agent. A **service** is a program or container that only fetches the secrets it is given: it has one permission, Fetch secrets, and no workspaces. Services are listed under **Credentials > Services**, so the Agents page lists the agents that do work.
 
 ---
 
@@ -216,6 +222,10 @@ curl -X POST http://localhost:3500/api/credentials/entries \
 
 The response includes a stable `AC_SECRET_*` reference name, something like `AC_SECRET_SERVICE_TOKEN_1A2B3C4D`. That's what you pass to tools and scripts. The raw value never comes back through regular list/get APIs.
 
+Each credential has one list of who can use it, in three groups: the capabilities that sign in with it, the agents that can reach it, and the services that receive its value. It opens from the credential's own page, under **Access**. An agent never receives the value; it receives a reference, and Agent Core fills that reference in when a tool runs.
+
+You can show a stored value again from **Credentials > Edit > Show value**. It appears in the dialog with Hide and Copy, is hidden again after 30 seconds or when the dialog closes, and never appears in the table or in the page source. Each time it is shown, the person and the credential's name are recorded in the audit log, never the value.
+
 See [Local credential helper](credential-broker.md) for how to use that reference with local tools so the real token gets injected without appearing in your prompt or config files.
 
 ## Step 8: Create a connection (optional)
@@ -232,6 +242,12 @@ The flow:
 4. Bind it to a scope like `workspace:<id>`.
 5. Test the connection from the dashboard.
 6. Call `connectors_run` from MCP to trigger actions. Agent Core uses the credential server-side and returns the result, whether the backing provider is OpenAPI or MCP.
+
+A credential entered while adding a connection belongs to that connection: no agent can reference it, and only Agent Core uses it (a service can still be given it explicitly). Tick **Also let agents reference this credential** to store it under the connection's owner instead, as before.
+
+Who may use a connection is a list of its own, under **Who can use it**: named agents, everyone in a workspace, or all of one person's agents, with an exclusion for a single agent. Every change shows who gains it and who loses it before it is saved. Being on that list lets an agent use the connection; it gives no memory access and no credential access.
+
+The **Access** page under Credentials reads all of this at once: every assignment there is, with when each was last used, any action waiting on a person, filters by agent, capability or service, and an **Unused** list of the credentials that no capability signs in with, no service may fetch and no agent has used in 90 days, the capabilities nobody can use, the services that look idle and what a retired agent or service left behind.
 
 Credential scope and connection scope are related but not identical. Credential scope controls who may access the stored secret. Connection scope controls where that capability is available. In the common case, use the same workspace scope for both. For advanced setups, one personal credential can power multiple workspace connections.
 

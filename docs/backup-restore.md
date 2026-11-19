@@ -58,8 +58,9 @@ Before replacing anything, Agent Core always:
 2. Validates the ZIP structure: must contain `agent-core.db`, `credential.key`, and `manifest.json`
 3. Verifies SHA-256 checksums match what the manifest says
 4. Creates timestamped copies of your current database and key material in `data/backups/`
+5. Brings the restored copy up to date under the access check, before it replaces the live database: a step that changes how agents, services, connections or credentials are stored runs in one transaction, and access is compared before and after
 
-If any validation step fails, your existing data is untouched.
+If any validation step fails, or the access check refuses the upgrade, your existing data is untouched and the restore is not carried out. See [Upgrading](upgrading.md) for the check and what to do when it refuses.
 
 ---
 

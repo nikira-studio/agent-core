@@ -240,11 +240,13 @@ From there, three paths:
 
 Prefer the capability path when both are available. The reference is what agents see, and a reference in a transcript is worth nothing to anyone who reads it.
 
-One credential, one list of who can use it, in three groups: the capabilities that sign in with it, the agents that can reach it, and the services that receive its value. Only the last group is given the value itself.
+One credential, one list of who can use it, in three groups: the capabilities that sign in with it, the agents that can reach it, and the services that receive its value. Only the last group is given the value itself. The list is called **Who can use this**, and it opens from the credential's own page. Changing the credential's owner shows who gains access and who loses it before it is saved.
 
 A credential made while adding a connection belongs to that connection: it is stored for that connection alone, so no agent can reach it and only Agent Core uses it (a service can still be given it explicitly). Tick **Also let agents reference this credential** in the Add connection dialog to store it under the connection's owner instead, as before. Deleting a connection asks whether its credential goes with it; one that a service still receives is kept unless you say otherwise, and is then listed on the Access page under Left behind.
 
-The **Access** page (Credentials > Access) is that list for everything at once: every assignment there is, with when each was last used, any action that waits for a person, filters by agent, capability or service, and an **Unused** list of what nothing uses. It is for reading: anything is turned on or off where it belongs.
+You can see a stored value again from **Credentials > Edit > Show value**. It appears in the dialog with Hide and Copy, and is hidden again after 30 seconds or when the dialog closes. It never appears in the table or in the page source, and each time it is shown it is recorded in the audit log with the person and the credential's name, never the value.
+
+The **Access** page (Credentials > Access) is that list for everything at once: every assignment there is, with when each was last used (the later of the run log and the audit log, so a run the run log has already trimmed still counts), any action that waits for a person, filters by agent, capability or service, rows grouped under one closed header for each "Who or what" that opens on click or when a filter matches, and an **Unused** list of the credentials that no capability signs in with, no service may fetch and no agent has used in 90 days, the capabilities nobody can use, the services that look idle and what a retired agent or service left behind. It is for reading: anything is turned on or off where it belongs.
 
 ---
 
@@ -272,13 +274,41 @@ connectors_run            do it, server-side
 
 A connection can also make its own credential: entered in the Add connection dialog, it belongs to that connection, so no agent can reach it and only Agent Core uses it.
 
+Who may use a connection is a list of its own, edited under **Who can use it**: named agents, everyone in a workspace, or all of one person's agents, with an exclusion for a single agent. Every change to the list shows who gains it and who loses it before it is saved. A service is never on that list, and a service can never own a connection.
+
 Adapters declare their requirements, and a connection only exposes actions whose requirements are met, so a half-configured integration presents as unavailable rather than failing at the moment an agent depends on it. Every execution is logged, and the log is pruned on the same retention sweep as everything else.
 
-Connection visibility grants access to every action enabled on the capability. Capabilities define which actions exist and which are disabled; connections decide which users, agents, or workspaces can use the connection.
+Connection visibility grants access to every action enabled on the capability. Capabilities define which actions exist and which are disabled; a connection decides who may use it at all, and each of those agents may only run what its own permissions and the connection's own limits allow.
 
 ---
 
-## 7. Optional features
+## 7. Who can use what
+
+Every entry is either an **agent**, which does work, or a **service**, which is a program or container that only fetches the secrets it is given. An agent records tasks, reads and writes memory and belongs to workspaces. A service has one permission, Fetch secrets, and no workspaces. The Agents page lists the agents that do work; the services are under Credentials > Services.
+
+Three lists decide what can reach what, and each one is edited where the thing itself lives:
+
+| List | Where it is edited | What it decides |
+| --- | --- | --- |
+| **Who can use this** | A credential's own page | The capabilities that sign in with it, the agents that can reach it, and the services that receive its value |
+| **Who can use it** | A connection's own page | Which agents may use that connection |
+| **What an agent can do and reach** | The agent's own page | Its workspaces, the capabilities it can use, the credentials it can reference, its keys and its permissions |
+
+![What an agent can do and reach](images/agent-access.png)
+
+![Who can use a connection](images/connection-users.png)
+
+Three rules hold across all of them:
+
+- **A change shows who gains and who loses it before it is saved.** The preview comes from the same code that enforces access, so a page never shows access the server would refuse, nor hides access it would allow.
+- **Nothing switches a permission on by itself.** Where an agent lacks a permission it needs, the entry is saved and shown as needing that permission, with a **Turn on** button. A person presses it, one permission at a time, and the press is recorded.
+- **Being on a connection's list is narrow.** It lets an agent use that connection and nothing else. It gives no memory access and no credential access; those come from workspaces and from owners.
+
+The on/off flags of an agent are called its **permissions**: Use memory, Coordinate tasks, Reference credentials, See capabilities, Run capabilities, Fetch secrets and Propose admin changes. The API field that holds them is unchanged.
+
+---
+
+## 8. Optional features
 
 Two things make Agent Core better and neither of them are required. Each has a defined fallback, because a memory layer that stops working when an optional feature is down is not a memory layer.
 
@@ -291,7 +321,7 @@ The rule they both follow: **a feature is never a dependency.** Configuring one 
 
 ---
 
-## 8. What runs on a schedule
+## 9. What runs on a schedule
 
 One in-process sweep, hourly by default, does all of it (`AGENT_CORE_MAINTENANCE_INTERVAL_MINUTES`, `0` to disable; the manual **Run Maintenance** button still works):
 
@@ -306,7 +336,7 @@ The last run's time, trigger, and results are visible in **Settings → Data and
 
 ---
 
-## 9. Your data
+## 10. Your data
 
 ```
 data/
@@ -321,7 +351,7 @@ data/
 
 ---
 
-## 10. The rules the system holds to
+## 11. The rules the system holds to
 
 Every design decision above comes from one of these. When something in Agent Core surprises you, one of these is usually the reason.
 
@@ -376,6 +406,8 @@ The dashboard and the API use different words for some things. Tool and field na
 | Capability | connector type |
 | Connection (a capability set up for a workspace or an agent) | binding (`connector_bindings`) |
 | Service (a program that only fetches secrets) | `kind: service` |
+| Permissions (an agent's on and off flags) | `capabilities`, the stored names behind the seven labels |
+| Who can use this (a credential) | the groups `GET /api/access/credentials/{id}` answers with |
 | Retract (hidden from search, restorable for the retention period) | `memory_retract`, `POST /api/memory/retract`; `POST /api/memory/restore` undoes it |
 | Delete (gone for good) | agents, credentials, connections, and a retracted memory you delete |
 | Two-step sign-in | TOTP, `otp_*` routes and audit events |
@@ -383,3 +415,5 @@ The dashboard and the API use different words for some things. Tool and field na
 | Operator token | `ac_op_…`, short-lived admin access, never called a key |
 | Helper key | the key of the local credential helper (the "broker": program, environment variables and API paths keep that name) |
 | Encryption key | the key that encrypts stored credentials at rest |
+
+The page once called **Services** is now **Capabilities**: what an agent can do through Agent Core, each ready-made capability and each connection set up with it. **Services** now means only the programs and containers that fetch secrets, and they are listed under Credentials > Services. Web addresses, API names and tool names did not change, so nothing that calls Agent Core needs to change.

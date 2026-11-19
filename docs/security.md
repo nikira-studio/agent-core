@@ -54,6 +54,8 @@ In the capability case, the raw secret stays inside the Agent Core process and i
 
 Each credential has one list of who can use it, in three groups: the capabilities that sign in with it, the agents that can reach it, and the services that receive its value. Only the third group receives the value; an agent gets a reference, and Agent Core fills it in when a tool runs. Turning a permission on from that list is one recorded action by a person, and nothing in the dashboard ever turns one off.
 
+The **Access** page (Credentials > Access) reads all of this at once: every assignment there is, with when each was last used, any action waiting on a person, filters by agent, capability or service, and an **Unused** list of the credentials that no capability signs in with, no service may fetch and no agent has used in 90 days, the capabilities nobody can use, the services that look idle and what a retired agent or service left behind. It is for reading; anything is turned on or off where it belongs.
+
 Full backup exports are encrypted with a separate one-time backup key. The encrypted archive and the backup key together can restore your credentials, so treat both as sensitive data.
 
 ---
@@ -102,7 +104,7 @@ Here's what happens from the time you store a secret to when a tool actually use
 3. The agent's tool configuration includes that reference.
 4. At runtime, the local credential helper intercepts the reference.
 5. The helper calls Agent Core's internal `/internal/credentials/resolve` endpoint.
-6. Agent Core checks the helper key and verifies the agent has read access to the credential's scope.
+6. Agent Core checks the helper key, and verifies that the named agent is an active agent rather than a service, holds the Reference credentials permission, and can read the credential's scope.
 7. The helper injects the raw value into the child process environment.
 
 The model's context window never contains your actual secret. It's injected at execution time, on your machine, by the helper.
@@ -113,7 +115,7 @@ The model's context window never contains your actual secret. It's injected at e
 
 ## Personal capabilities and agents
 
-An agent acts for a person (its default user) and can read that person's own memory scope. Running the capabilities bound in that personal scope is a separate per-agent setting, `inherit_user_bindings`, off for new agents: without it the agent does not see, resolve or run those capabilities, over MCP or REST. Turn it on only for an agent that really acts as that person, and give each service its own person instead of a shared one. Upgrading switches it on for agents that could already run capabilities, and writes each to the audit log.
+An agent acts for a person (its default user) and can read that person's own memory scope. Running the capabilities bound in that personal scope is a separate per-agent setting, `inherit_user_bindings`, off for new agents: without it the agent does not see, resolve or run those capabilities, over MCP or REST. Turn it on only for an agent that really acts as that person, and give each service its own person instead of a shared one. Upgrading switches it on for agents that could already run capabilities, and writes each to the audit log. The switch is still kept: turning it off excludes the agent from its person's "all agents" connections, and a new agent starts excluded unless you include it.
 
 Two known limits, noted and left as they are for now:
 
@@ -130,7 +132,9 @@ Capabilities are the server-side path for external actions:
 4. Agent Core verifies that the connection is visible to the agent. Connection visibility grants access to every action enabled on the capability.
 5. Agent Core resolves the credential internally, calls the external system, logs the execution, and returns the result.
 
-Both transports enforce connection visibility identically: `connectors_run` over MCP and `POST /api/connector-bindings/{id}/run` over REST call the same check. Capabilities define the available actions; connections decide which users, agents, or workspaces can use the connection.
+Both transports enforce connection visibility identically: `connectors_run` over MCP and `POST /api/connector-bindings/{id}/run` over REST call the same check. Capabilities define the available actions; a connection decides who may use it at all, and each of those agents may only run what its own permissions and the connection's own limits allow.
+
+**Who may use a connection is a list of its own**, edited under **Who can use it**: named agents, everyone in a workspace, or all of one person's agents, with an exclusion for a single agent. Every change shows who gains it and who loses it before it is saved. Being on the list lets an agent use that connection and nothing more: it gives no memory access and no credential access. A service is never on the list, and a service can never own a connection, because it could never use one.
 
 Credential scope controls access to the stored secret. Connection scope controls where the capability is available. In normal workspace use, set both to the same workspace.
 

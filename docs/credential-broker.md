@@ -31,6 +31,8 @@ Here's the full flow from storage to execution:
 
 This helper path is for local tools and scripts that need a secret in their own environment. If you want Agent Core itself to run the external action, use the **Capabilities** page and a connection instead of the helper.
 
+A credential made while adding a connection belongs to that connection, and no agent can reach it, so the helper cannot resolve it for an agent either. Only the connection uses it. A service can still be given it explicitly through a grant.
+
 You can edit credentials from the Credentials page. Metadata changes do not alter the encrypted secret. The secret is replaced only when you enter a new replacement value.
 
 ---

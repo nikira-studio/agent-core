@@ -22,6 +22,40 @@ python -m app.access_check /path/to/agent-core.db
 
 The file is opened read-only and a temporary copy is migrated and deleted. The output is the counts before and after, any difference, and the kind given to each entry.
 
+To see exactly what the stricter local credential helper would take away, add `--helper-change`:
+
+```
+python -m app.access_check /path/to/agent-core.db --helper-change
+```
+
+It lists, by entry, the credentials the helper could fetch before and the ones it can fetch after. Only removed reach is expected; anything else is reported as unexpected.
+
+## What 1.4.0 changes
+
+### Who can use a connection is now a list
+
+Each connection keeps its single owner scope (who may edit it) and gains a list of who may use it. The upgrade fills every list from the connection's scope, so that no agent gains or loses anything: a named agent for an agent-owned connection, the workspace for a workspace-owned one, and all of the person's agents for a personal one, with an exclusion for each agent whose own switch was off.
+
+The step runs under the access check above: it compares, for every agent and every connection, whether the agent can see and run it under the old rule and under the new one, and it is refused, with nothing changed and the application not starting, on any difference.
+
+The old per-agent switch still works and is kept in step: turning it off excludes the agent from its person's "all agents" connections, and a new agent starts excluded unless you include it. Creating or updating a connection with only an owner scope means what it always meant. The audience endpoints and the audience field are for administrators only in 1.4.0.
+
+### The local credential helper is stricter
+
+The internal resolution endpoint now applies the same rule as the MCP `credential_get` tool: the named entry must be an active agent that holds the **Reference credentials** permission, besides the scope and expiry checks it already made. A service is refused, because a service fetches with a grant.
+
+Before, the helper checked scope and expiry only, so an entry without the permission, or a service, could resolve what its scopes reached. Every entry reads its person's own scope, so that reached the person's credentials.
+
+A script that depended on the old behaviour now gets `403 PERMISSION_REQUIRED` or `403 NOT_AN_AGENT`, and every refusal is an audit row (`broker_resolve_denied`, with the reason). To fix it, switch the permission on for that agent (Agents > Access > Turn on), or give a service a grant on the credential. `python -m app.access_check <database> --helper-change` lists, on a read-only copy, exactly which entries would lose helper reach.
+
+### Agents and services are told apart
+
+The split needs nothing from you. Existing entries keep every permission, workspace, key and secret they had; the upgrade only adds the column that says which kind an entry is, and checks that access is identical afterwards. An entry is marked as a service only when its one permission is Fetch secrets and it has no recorded work, workspaces, credentials or connections of its own.
+
+### A service cannot own a connection
+
+Creating a connection with a service as its owner, or changing a connection's owner to a service, is refused (`SERVICE_CANNOT_OWN`). Connections you already have are not changed.
+
 ## If an upgrade is refused or fails
 
 Nothing needs repairing: the step was rolled back, so the database is at the previous version.
@@ -40,3 +74,7 @@ A step the database cannot make atomic (rebuilding a table) is the one case wher
 ## Going back to an older version
 
 An older build ignores new columns. Access you changed after upgrading with the newer build is not seen by the older one: anything the older build reads (an agent's permissions, a connection's single owner scope, a service grant) is what it reads. The changelog says, per version, what that means.
+
+**Going back after changing who can use a connection.** Builds before 1.4.0 read the connection's owner scope and the per-agent switch, not the list. Changes made to the list afterwards are not seen by them, and an entry you removed is still granted by the old scope rule, so rolling back can restore access you had taken away. Rolling back right after upgrading, before any change, loses and gains nothing.
+
+**Going back to 1.3.2.** That build ignores the column that says which kind an entry is, so a service created while it runs is stored as an agent and is not reclassified on the next upgrade. Change it to a service from its Edit dialog.

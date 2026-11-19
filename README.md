@@ -37,7 +37,7 @@ Agent Core fixes that. It is a small program that you run on your own machine. Y
 Agent Core provides:
 
 - durable memory in one place
-- access control for credentials and external systems
+- access control for credentials and external systems, with one place to see who can use what
 - server-side capabilities for imported OpenAPI specs, native MCP servers, and **adapters**, which are shareable data-manifest integrations for OAuth, session handshakes, and CLI wrappers (see [docs/adapters.md](docs/adapters.md))
 - activity visibility and on-demand handoffs
 
@@ -90,9 +90,9 @@ For the full picture, read **[How it works](docs/how-it-works.md)**: how memory 
 
 ## What it looks like
 
-The dashboard gives you a central view of your connected agents, active memory, stored credentials, and connections. After setup, it's the quickest way to confirm Agent Core is running and your agents have what they need.
+The dashboard gives you a central view of your connected agents, active memory, stored credentials, and connections. After setup, it's the quickest way to confirm Agent Core is running and your agents have what they need. Its first page, **Needs you**, is the one list of what is waiting on a person (approvals, questions an agent left in a handoff, credential requests), with a health strip underneath that says whether capabilities, webhooks and the local credential helper are working.
 
-![Agent Core overview](docs/images/agent-overview.png)
+![The Needs you page](docs/images/needs-you.png)
 
 ---
 
@@ -120,11 +120,11 @@ Plain noise retracts itself: per-occurrence logs, ticket-closeout narration, dup
 
 Keyword search ranks matches by text relevance alongside confirmation and usefulness signals. Agents can pass `max_response_chars` to memory search to receive a whole-record response within a chosen character budget. Over MCP the budget defaults to the inline size limit. See the [search API contract](docs/api.md#memory). `scripts/value_report.py` reports whether stored data reaches agents: read-through of offloaded results, empty searches per agent, never-recalled memory per scope, and sync-stream noise.
 
-![Agent Core memory](docs/images/agent-memory.png)
+![Memory](docs/images/memory.png)
 
 ### Credentials and capabilities
 
-The **Credentials** page holds stored credentials and the **Capabilities** page holds the capability catalog and its connections. This is the capability layer: agents do not route through a scheduler or OS. They connect to a capability catalog and call the capabilities they need, whether that capability came from an imported OpenAPI spec, a native MCP server, an installed adapter, or the built-in Generic HTTP fallback.
+The **Credentials** page holds stored credentials and the **Capabilities** page holds the capability catalog and its connections. A credential can also be shown again when you need to read it: **Show value** in its Edit dialog reveals it for 30 seconds, only to a signed-in person, and each time is recorded in the audit log. This is the capability layer: agents do not route through a scheduler or OS. They connect to a capability catalog and call the capabilities they need, whether that capability came from an imported OpenAPI spec, a native MCP server, an installed adapter, or the built-in Generic HTTP fallback.
 
 A credential is the encrypted secret itself: a GitHub PAT, API key, URL, password, or other value. A connection is how Agent Core uses one stored credential with a capability such as an imported OpenAPI API, a native MCP server registration, an installed adapter, or the built-in Generic HTTP escape hatch.
 
@@ -147,7 +147,24 @@ Agent gets:  AC_SECRET_GITHUB_TOKEN_1A2B3C4D  (just a reference)
 At runtime:  The local credential helper injects the token locally, or the connector executor uses it server-side
 ```
 
-![Agent Core capability catalog](docs/images/agent-catalog.png)
+![The Capabilities page](docs/images/capabilities.png)
+
+### Who can use what
+
+Access is something you set and can read back in plain words, from any of the things involved:
+
+- **A connection** has a **Who can use it** list: named agents, everyone in a workspace, or all of one person's agents, with an exclusion for a single agent. Being on the list lets an agent run the connection. It gives no memory access and no access to the credential itself.
+- **A credential** has a **Who can use this** list in three groups: the capabilities that sign in with it, the agents that can reach it (read only, with the reason), and the services that receive its value (read or write, with an optional end date). A credential entered while adding a connection belongs to that connection: no agent can reference it unless you tick **Also let agents reference this credential**.
+- **An agent** has an **Access** dialog: its workspaces, the capabilities it can use, the credentials it can reference, its keys (it can have several) and its permissions.
+- **Agents and services are different.** An agent does work. A **service** is a program or container that only fetches the secrets it is given, and is listed under **Credentials > Services**, not on the Agents page.
+
+Every change shows who gains and who loses access before you save it. When an agent lacks a permission it needs, the list says so once and offers a **Turn on** button; nothing is switched on for you.
+
+![The Who can use this dialog for a credential](docs/images/credential-access.png)
+
+The **Credentials > Access** page puts all of it in one list: every way something reaches something, when it was last used, and anything waiting on a person. Rows are grouped under one header per agent, capability or service. The **Unused** card lists credentials nothing uses, capabilities nobody can use, services that look idle, and what a retired agent or service left behind, so you can tidy up with the facts in front of you.
+
+![The Access page](docs/images/access.png)
 
 ### Shared context across tools and people
 
@@ -155,7 +172,7 @@ Working with a team, or switching between Claude Code and Cursor on the same pro
 
 Sync is an explicit pull, not a background process. Each session has its own execution ID, even when two sessions use the same agent identity. That lets one Codex session see work recorded by another Codex session without confusing the two sessions. As a fallback, starting a new workspace activity can return a bounded `since_last_active` digest. Agent Core omits that digest when the supplied execution is already caught up through `workspace_sync`.
 
-![Agent Core agents](docs/images/agent-workspace.png)
+![The Agents page](docs/images/agents.png)
 
 ---
 
@@ -181,7 +198,7 @@ memory_search    → fill in any gaps with a targeted query
 
 `workspace_sync` reports what changed. It is an explicit pull: agents call it at session boundaries and task boundaries, not on a background schedule.
 
-![Agent Core activity](docs/images/agent-activity.png)
+![The Activity page](docs/images/activity.png)
 
 ---
 
@@ -253,6 +270,7 @@ For REST-based clients or custom integrations, every feature is also available t
 | Doc | What's in it |
 | --- | --- |
 | [Quickstart](docs/quickstart.md) | Install, connect an agent, write shared memory, then add credentials and capabilities when needed |
+| [Dashboard map](docs/dashboard-map.md) | What each page of the dashboard is for |
 | [Integrations](docs/integrations.md) | Set up MCP, credentials, capabilities, activities, collaboration, and webhooks in that order |
 | [How it works](docs/how-it-works.md) | The system model and full feature set: memory, activity, credentials, capabilities, and maintenance |
 | [Local credential helper](docs/credential-broker.md) | How `AC_SECRET_*` references work and how to resolve them at runtime |
@@ -260,6 +278,7 @@ For REST-based clients or custom integrations, every feature is also available t
 | [Configuration](docs/configuration.md) | Environment variables, ports, and data directory layout |
 | [Security](docs/security.md) | Scope model, secret handling, and deployment checklist |
 | [API reference](docs/api.md) | Full REST and MCP endpoint reference |
+| [Upgrading](docs/upgrading.md) | How upgrades are checked before they are kept, and how to go back |
 | [Backup and restore](docs/backup-restore.md) | Export, restore, and routine maintenance |
 | [Troubleshooting](docs/troubleshooting.md) | Common issues and fixes |
 

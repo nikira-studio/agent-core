@@ -107,13 +107,15 @@ Once connected, these tools are available in any session:
 | `connectors_list` | List installed capabilities as lean summaries (no full specs); supports `limit`/`offset`. Use `connectors_actions_list` for a type's actions |
 | `connectors_bindings_list` | List connections in authorized scopes |
 | `connectors_bindings_test` | Test a connection using the stored credential |
-| `connectors_actions_list` | List the actions of a capability that your connections allow (`binding_id` shows one connection's menu) |
+| `connectors_actions_list` | List the actions of a capability that your connections allow (`binding_id` shows one connection's menu). For a plain web capability the actions are the requests its connection allows, named `METHOD /path`, for example `GET /status` |
 | `connectors_summary` | Summarize visible capabilities, connections, credentials, actions, and health state |
 | `connectors_run` | Run one capability action server-side using a connection |
 | `connectors_resolve` | Deterministically resolve a capability (plus optional alias, scope, and action) to a single authorized connection |
 | `result_fetch` | Read a large tool result that was offloaded to a handle, in chunks |
 
 Agents connect, discover authorized tools, and call what they need. Agent Core provides the capabilities and logs the results. It is not a workflow engine.
+
+An agent needs the **See capabilities** permission to list capabilities and the **Run capabilities** permission to run one. Where an agent lacks a permission it needs, the dashboard shows it as needing that permission and offers a **Turn on** button; nothing switches a permission on by itself.
 
 For memory writes, `slot_key` keeps one active value per slot for preference records, which makes "the current answer" deterministic instead of something retrieval has to guess at. `valid_from` and `valid_to` say when the content was **true in the world**, which is a separate timeline from when the system learned it; set them when a record describes a period other than "from now on", and pass `as_of` to a search to ask what the corpus held to be true at a past moment. See [How It Works](how-it-works.md#two-clocks).
 
@@ -231,6 +233,8 @@ Some self-hosted systems (network controllers, admin panels) have no API key. Yo
 #### Calling an HTTP capability from an agent
 
 Agents call HTTP capabilities with `connectors_run`. The action is a method and path pair: `METHOD /path`. Any params that are not transport keys (`method`, `path`, `url`, `headers`, `query`) are automatically bundled as the JSON request body.
+
+A plain web capability has no list of actions of its own, so `connectors_actions_list` shows the requests its connection allows, in the form `METHOD /path`. A run with a name that is not one of them is answered with a message saying the action is unknown and showing that form, for example `GET /status`.
 
 ```
 connectors_run(
@@ -755,7 +759,9 @@ A connection starts with everything its capability allows. Disable an action on 
 
 Edit a connection (Capabilities → Edit) to choose. The rule is one function applied everywhere: running an action, resolving a connection for an action, the action lists agents see (`connectors_actions_list`, optionally with `binding_id` for one connection's menu), `connectors_summary` (each connection reports its mode and how many actions it allows), and the connection test. An agent only sees and can only run what one of its connections allows. Only a person can choose what a connection allows; an agent cannot, and a connection an agent creates through the REST API allows nothing until a person chooses (it answers `CONNECTION_DISABLED_ACTION` meanwhile). Read-only trusts what a capability declares: an adapter that marks an action as read (some, such as a crawl, start work on the capability) is honoured.
 
-**Does the limit hold against an agent?** A limit controls what an agent can do *through Agent Core*. It holds against an agent only if the agent cannot get the connection's credential and call the capability itself. An agent can get a credential reference over MCP if it has the credentials permission and can read the credential's scope, and the local credential helper hands the value to any program that holds the helper key (and calls from an allowed address) for an agent id it names, provided that agent can read the credential's scope (an agent reads the scopes it was given and its person's own user scope; the helper trusts the agent id the caller names). So: store the credential in a scope the agent cannot read and the limit holds. Edit connection says which case applies, per connection, whenever the choice is not "everything": "The agents using this connection cannot fetch its credential, so this limit holds", or "This limits what <agents> can do through Agent Core. They can still fetch the credential and call the capability directly; store it in a scope they can't read to make the limit hold." A refused action answers `CONNECTION_DISABLED_ACTION` and is never sent. This replaces the need to import a second copy of a capability to give an agent fewer actions.
+**Does the limit hold against an agent?** A limit controls what an agent can do *through Agent Core*. It holds against an agent only if the agent cannot get the connection's credential and call the capability itself. An agent can get a credential reference over MCP if it has the Reference credentials permission and can read the credential's scope, and the local credential helper hands the value to any program that holds the helper key (and calls from an allowed address) for an agent id it names, provided that the agent is an active agent, not a service, holds the Reference credentials permission and can read the credential's scope (an agent reads the scopes it was given and its person's own user scope; the helper trusts the agent id the caller names). So: store the credential in a scope the agent cannot read and the limit holds. Edit connection says which case applies, per connection, whenever the choice is not "everything": "The agents using this connection cannot fetch its credential, so this limit holds", or "This limits what <agents> can do through Agent Core. They can still fetch the credential and call the capability directly; store it in a scope they can't read to make the limit hold." A refused action answers `CONNECTION_DISABLED_ACTION` and is never sent. This replaces the need to import a second copy of a capability to give an agent fewer actions.
+
+**Who may use the connection is a list of its own**, under **Who can use it**: named agents, everyone in a workspace, or all of one person's agents, with an exclusion for a single agent. Every change to the list shows who gains it and who loses it before it is saved. Being on the list lets an agent use the connection and nothing more: it gives no memory access and no credential access.
 
 For normal workspace use, set both to the same workspace. For advanced use, a credential in a user scope can power multiple workspace connections if the acting agent has access to both.
 
