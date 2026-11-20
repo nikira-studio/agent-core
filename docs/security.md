@@ -34,6 +34,8 @@ Point any of these at a system on a machine you control and nothing leaves it. P
 
 Capability actions are the third outbound path, but those are explicit by nature: an agent asked for a call to be made.
 
+Beyond memory content, Agent Core contacts other systems only when an agent runs a capability action, when scheduled maintenance tests a connection to verify a memory anchored to it, when you browse the public capability directory for imports, and when you register an outbound webhook. Nothing else leaves the host.
+
 ---
 
 ## How secrets are stored

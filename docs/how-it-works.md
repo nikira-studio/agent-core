@@ -159,6 +159,10 @@ Ranking is adjusted by **what the system observed**, never by what the record cl
 
 Search results are a **lean projection** by default: content and the few fields needed to decide relevance, plus a derived `days_since_confirmed`. The lifecycle columns are omitted because on a full page of results they cost more context than they inform. Pass `view: "full"` or fetch one record when you need everything.
 
+Keyword search ranks matches by text relevance together with the confirmation and usefulness signals above. An agent that needs a bounded answer can pass `max_response_chars` to `memory_search`: it then receives whole records that fit within that many characters. Over MCP the limit defaults to the inline size limit. The [search section of the API reference](api.md#memory) has the details.
+
+To check whether the memory you store is worth storing, run `python scripts/value_report.py /path/to/agent-core.db --days 30` against the database or a backup (it opens the database read-only). It reports whether long results were read in full, which agents get empty searches, which memories nobody has recalled in each scope, and how much of the sync stream is noise. Add `--json` for machine-readable output.
+
 ### Keeping the corpus honest
 
 A shared memory corpus decays in two different ways, and they need different treatment.

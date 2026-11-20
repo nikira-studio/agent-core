@@ -1,244 +1,66 @@
 # Agent Core
 
-**Shared memory and controlled capabilities for the agents you already use.**
+Agent Core is a program you run on your own computer. It gives the AI agents you already use (Claude Code, Codex, Cursor and others) a shared memory, a safe place for passwords and API keys, and a record of what each agent has done.
 
-Agent Core is a self-hosted MCP and HTTP server. It gives Claude Code, Codex, Cursor, and custom agents durable context, encrypted credentials, scoped access to capabilities, and an auditable activity trail.
+![What Agent Core does: shared memory, encrypted credentials, scoped access, local data](docs/images/explainer.png)
 
-**Agent Core sits beside agents, not above them.**
+## Is it for you?
 
-## Start with memory, then add capabilities
+It is if you use AI coding agents and have run into any of these:
 
-Most installations need only shared memory at first. Add the next layer when a real task needs it.
+- Every new session starts from zero, and you explain the same decisions again.
+- Your API keys are pasted into config files for each tool, and you hope none of them leaks.
+- Two agents work on the same project and neither knows what the other did.
 
-1. [Install Agent Core](#get-running-in-minutes), create an agent, and connect it with MCP.
-2. [Write and recall shared memory](#memory-that-persists-across-sessions). This is the default reason to use Agent Core.
-3. Add encrypted credentials, used through connections, [credential consumers](docs/credential-consumers.md) or, for a local tool, the [local credential helper](docs/credential-broker.md).
-4. Add [connections](docs/integrations.md#capabilities-agent-core-runs-actions-directly) when Agent Core should run an external action itself.
-5. Use activities, workspaces, webhooks, backups, and administration when your work needs them.
+Agent Core sits beside your agents. It is not an agent itself, and it does not run or schedule their work.
 
-You do not need to configure every capability before your first agent can use memory.
+## What it gives you
 
----
+- **Memory.** An agent writes down what it decided or learned. The next session, from any tool, can search for it. You choose which agents see which memories.
+- **Credentials.** You store a password or API key once, encrypted. Agents get a reference to it, never the secret.
+- **Capabilities.** Things an agent can do in another service, such as reading your GitHub issues. You set one up once with a credential. Agent Core makes the call for the agent, so the agent never holds the key.
+- **Access control.** You decide which agent may use which capability or credential, and one page shows who can reach what.
+- **Activity.** A list of what each agent is working on, and a short list of what is waiting for you.
 
-If you use AI coding agents like Claude Code, Cursor, or Codex, you've probably run into this:
+Everything is stored on your machine. Agent Core contacts other systems only for things you set up or ask for, such as a capability an agent runs or a webhook. [Security](docs/security.md#where-memory-content-can-leave-the-machine) lists every case.
 
-- You start a new session and have to re-explain the same decisions all over again
-- You juggle API keys and tokens across tools, pasting them into configs and hoping nothing leaks
-- Two agents working on the same project have no idea what the other one has done
+## Install
 
-Agent Core fixes that. It is a small program that you run on your own machine. Your agents connect to it to read and write memory, resolve credentials, and call external systems, while the controls stay local and explicit.
-
-![Agent Core explainer](docs/images/explainer.png)
-
----
-
-## What Agent Core does
-
-Agent Core provides:
-
-- durable memory in one place
-- access control for credentials and external systems, with one place to see who can use what
-- server-side capabilities for imported OpenAPI specs, native MCP servers, and **adapters**, which are shareable data-manifest integrations for OAuth, session handshakes, and CLI wrappers (see [docs/adapters.md](docs/adapters.md))
-- activity visibility and on-demand handoffs
-
-Agent Core is not:
-
-- an agent runtime or agent framework
-- a coding assistant or computer-use environment
-- a scheduler or orchestration engine
-- a sandbox or cloud execution environment
-- a replacement for the agent itself
-
-## What you install
-
-A fresh install gives you a local control layer that agents can actually use:
-
-- a shared place to keep durable memory
-- a way to manage credentials without exposing raw secrets
-- a capability catalog that agents can call through MCP
-- visibility into which agents are active and what they're doing
-- a clean dashboard for setup, oversight, and handoffs
-
----
-
-## How it works
-
-Agent Core is a local HTTP server. It speaks REST and MCP (Model Context Protocol), so anything that can make an HTTP request can talk to it. Agents authenticate with an API key and use tools like `memory_search`, `memory_write`, `credential_get`, and the capability discovery/execution tools.
-
-Memory, credentials, and configuration all live on your disk. Outbound traffic happens when an agent runs a capability action, when scheduled maintenance tests a connection to verify a memory anchored to it, when you browse the public capability directory for imports, and when you register outbound webhooks. Nothing else leaves the host.
-
-For the full picture, read **[How it works](docs/how-it-works.md)**: how memory is modelled, what keeps the corpus honest, how capabilities and credentials fit together, and the reasoning behind each.
-
-```
-┌──────────────┐     MCP or HTTP     ┌────────────────────────────┐
-│  Claude Code │ ──────────────────► │         Agent Core         │
-│  Cursor      │ ──────────────────► │ shared memory              │
-│  Codex       │ ──────────────────► │ encrypted credentials      │
-│  any agent   │ ──────────────────► │ scoped connector access    │
-└──────────────┘                     │ activity and handoffs      │
-                                     └────────────┬───────────────┘
-                                                  │
-                       ┌──────────────────────────┴──────────────────────────┐
-                       ▼                                                     ▼
-          ┌─────────────────────────┐                         ┌─────────────────────────┐
-          │ SQLite and encrypted    │                         │ External systems        │
-          │ credentials on your disk│                         │ via connector bindings  │
-          └─────────────────────────┘                         └─────────────────────────┘
-```
-
----
-
-## What it looks like
-
-The dashboard gives you a central view of your connected agents, active memory, stored credentials, and connections. After setup, it's the quickest way to confirm Agent Core is running and your agents have what they need. Its first page, **Needs you**, is the one list of what is waiting on a person (approvals, questions an agent left in a handoff, credential requests), with a health strip underneath that says whether capabilities, webhooks and the local credential helper are working.
-
-![The Needs you page](docs/images/needs-you.png)
-
----
-
-## What your agents can use
-
-### Memory that persists across sessions
-
-When an agent makes a decision or learns something useful, it writes that to Agent Core. The next time any agent starts, whether it's the same tool, a different one, or a week later, it can search for that context and pick up where things left off.
-
-```
-Claude Code writes: "We decided PostgreSQL over SQLite for the prod database."
-                          ↓
-Codex searches:     memory_search("database decision") → gets that record back
-```
-
-Memory is scoped. Agents only see what they're allowed to: their own private agent scope, shared project context, or your personal preferences. Nothing bleeds across unless you want it to.
-
-Memory records are one of two kinds, and the difference decides what the system can do with them. A **fact** is settled by checking: someone could verify it against the code, a host, or an external system. A **decision** is settled by someone deciding, and nothing can verify it. That split is what lets Agent Core re-check facts on a schedule while leaving your decisions alone.
-
-Facts can name what would confirm them (`repo:<path>` or `service:<binding>`; a `host:<name>` is a label that only a binding an operator mapped can check), and the maintenance sweep checks the ones it can, recording what it found. Search results say how long it has been since anyone confirmed a record, so an agent can tell a fact verified today from one nobody has checked in months. Unconfirmed, non-human facts receive a small ranking penalty until someone confirms them with evidence. Ranking follows the same principle: observed provenance, recall, and usefulness rather than a score the author gave itself.
-
-Plain noise retracts itself: per-occurrence logs, ticket-closeout narration, duplicates, and facts whose anchor has been gone for two checks an hour apart. A retraction is soft (restorable for the retention period) and audited, and nothing is left for a person to review.
-
-> Without semantic search configured, exact keywords matter more than fuzzy phrasing. `memory_search("authentication")` won't match a record that says "login logic", so use terms that match what was actually written. See [Requirements](#requirements) for how to enable semantic search.
-
-Keyword search ranks matches by text relevance alongside confirmation and usefulness signals. Agents can pass `max_response_chars` to memory search to receive a whole-record response within a chosen character budget. Over MCP the budget defaults to the inline size limit. See the [search API contract](docs/api.md#memory). `scripts/value_report.py` reports whether stored data reaches agents: read-through of offloaded results, empty searches per agent, never-recalled memory per scope, and sync-stream noise.
-
-![Memory](docs/images/memory.png)
-
-### Credentials and capabilities
-
-The **Credentials** page holds stored credentials and the **Capabilities** page holds the capability catalog and its connections. A credential can also be shown again when you need to read it: **Show value** in its Edit dialog reveals it for 30 seconds, only to a signed-in person, and each time is recorded in the audit log. This is the capability layer: agents do not route through a scheduler or OS. They connect to a capability catalog and call the capabilities they need, whether that capability came from an imported OpenAPI spec, a native MCP server, an installed adapter, or the built-in Generic HTTP fallback.
-
-A credential is the encrypted secret itself: a GitHub PAT, API key, URL, password, or other value. A connection is how Agent Core uses one stored credential with a capability such as an imported OpenAPI API, a native MCP server registration, an installed adapter, or the built-in Generic HTTP escape hatch.
-
-Agent Core can also connect to trusted internal systems on your own network without weakening global URL checks. See [Configuration](docs/configuration.md) for details on `AGENT_CORE_ALLOWED_INTERNAL_HOSTS` and connection overrides.
-
-You store a credential entry in Agent Core once. You can edit its name, label, and type later. If you leave the replacement secret field blank while editing, Agent Core keeps the existing encrypted value; if you enter a new value, it overwrites the stored secret.
-
-From there, there are three paths, most used first:
-
-- If you run an action through a connection, Agent Core uses the stored credential server-side to call the external system and returns the result. The agent never sees the secret.
-- If a program or container needs its own secrets at startup, give it a [credential consumer](docs/credential-consumers.md): an identity that can fetch only the entries granted to it.
-- If a local tool needs a secret in its own config, Agent Core returns a reference like `AC_SECRET_GITHUB_TOKEN_1A2B3C4D`, and the local credential helper resolves it at runtime. It only matters for a tool you run yourself that cannot go through a connection.
-
-In both cases, the raw secret never appears in prompts, logs, or generated configs.
-
-```
-You store:   GitHub PAT → encrypted credential entry
-You bind:    imported GitHub connector binding → points at that credential
-Agent gets:  AC_SECRET_GITHUB_TOKEN_1A2B3C4D  (just a reference)
-At runtime:  The local credential helper injects the token locally, or the connector executor uses it server-side
-```
-
-![The Capabilities page](docs/images/capabilities.png)
-
-### Who can use what
-
-Access is something you set and can read back in plain words, from any of the things involved:
-
-- **A connection** has a **Who can use it** list: named agents, everyone in a workspace, or all of one person's agents, with an exclusion for a single agent. Being on the list lets an agent run the connection. It gives no memory access and no access to the credential itself.
-- **A credential** has a **Who can use this** list in three groups: the capabilities that sign in with it, the agents that can reach it (read only, with the reason), and the services that receive its value (read or write, with an optional end date). A credential entered while adding a connection belongs to that connection: no agent can reference it unless you tick **Also let agents reference this credential**.
-- **An agent** has an **Access** dialog: its workspaces, the capabilities it can use, the credentials it can reference, its keys (it can have several) and its permissions.
-- **Agents and services are different.** An agent does work. A **service** is a program or container that only fetches the secrets it is given, and is listed under **Credentials > Services**, not on the Agents page.
-
-Every change shows who gains and who loses access before you save it. When an agent lacks a permission it needs, the list says so once and offers a **Turn on** button; nothing is switched on for you.
-
-![The Who can use this dialog for a credential](docs/images/credential-access.png)
-
-The **Credentials > Access** page puts all of it in one list: every way something reaches something, when it was last used, and anything waiting on a person. Rows are grouped under one header per agent, capability or service. The **Unused** card lists credentials nothing uses, capabilities nobody can use, services that look idle, and what a retired agent or service left behind, so you can tidy up with the facts in front of you.
-
-![The Access page](docs/images/access.png)
-
-### Shared context across tools and people
-
-Working with a team, or switching between Claude Code and Cursor on the same project? Create a workspace and grant each agent access to it. At session startup, an agent gets its session context (or calls `workspace_sync`) to receive the open work, recent results and workspace changes since that execution's last acknowledged cursor. Targeted `memory_search` calls still fill gaps when the agent needs older context.
-
-Sync is an explicit pull, not a background process. Each session has its own execution ID, even when two sessions use the same agent identity. That lets one Codex session see work recorded by another Codex session without confusing the two sessions. As a fallback, starting a new workspace activity can return a bounded `since_last_active` digest. Agent Core omits that digest when the supplied execution is already caught up through `workspace_sync`.
-
-![The Agents page](docs/images/agents.png)
-
----
-
-## Activity and handoffs
-
-The activity page lists what your agents are doing and have done, and what is waiting on you. A task nobody has updated for 48 hours closes itself as "ended without report".
-
-Activity tracking is self-reported. There is no automatic detection of agent work: a working agent must call `activity_update` at the start of a task and periodically as a heartbeat. Without that, nothing appears in the dashboard and no handoff is recorded.
-
-The trail is searchable, and it is the right home for "what did we do on X last month". Durable memory is for what stays true; the activity trail is for what happened. Agents that record per-task progress in memory instead get told so on write.
-
-The session-start tools are:
-
-```
-session_context   → one session-start block: rules, waiting work, recent results, changes
-workspace_sync    → receive new workspace context and changes for this execution
-workspace_sync_ack → acknowledge a delivered page after processing it
-activity_search  → search what agents have already worked on ("what did we do on X")
-activity_list    → find what's stale or pending (for reviews and handoffs)
-attention_list   → what is waiting on a person, across the scopes you read (for coordinators)
-memory_search    → fill in any gaps with a targeted query
-```
-
-`workspace_sync` reports what changed. It is an explicit pull: agents call it at session boundaries and task boundaries, not on a background schedule.
-
-![The Activity page](docs/images/activity.png)
-
----
-
-## Get running in minutes
-
-### Docker (recommended)
+You need [Docker with Compose](https://docs.docker.com/compose/). To run without Docker, see [Without Docker](#without-docker).
 
 ```bash
 git clone https://github.com/nikira-studio/agent-core agent-core
 cd agent-core
-cp .env.example .env
 cp docker-compose.example.yml docker-compose.yml
 docker compose up -d
 ```
 
-Open `http://localhost:3500`. The first page is a sign-in screen that offers to create your admin account. Whoever opens the dashboard first becomes the admin, which is why the example compose file listens on this machine only (`127.0.0.1`).
+Open <http://localhost:3500>. The sign-in page offers to create your admin account. Whoever opens the page first becomes the admin, which is why the example setup only listens on your own computer.
 
-> `docker-compose.yml` is gitignored so your local settings (data paths, ports, custom networks) stay private. Edit it before starting if you need to change anything.
+### Without Docker
 
-### Local Python
+You need Python 3.11 or 3.12.
 
 ```bash
 git clone https://github.com/nikira-studio/agent-core agent-core
 cd agent-core
-python3 -m venv .venv      # 3.11 or 3.12
-source .venv/bin/activate   # Windows: .venv\Scripts\activate
+python3 -m venv .venv
+source .venv/bin/activate        # on Windows: .venv\Scripts\activate
 pip install -r requirements.txt
-cp .env.example .env
-uvicorn app.main:app --reload --port 3500   # run from the project folder, the one containing app/
+uvicorn app.main:app --port 3500
 ```
 
----
+Run the last command from the folder that contains `app/`. Then open <http://localhost:3500>.
 
 ## Connect your first agent
 
-1. **Create a workspace.** Open **Agents → Workspaces** and create one, for example `my-project`. A workspace is the shared place where your agents keep memory and tasks.
-2. **Create an agent.** On **Agents**, click **+ Create Agent** and give it a name. Its access to your workspace is ticked for you (read and write); the defaults suit a coding assistant.
-3. **Connect it.** The dialog after you save links to the **Connect** page: pick the tool, click **Generate One-Time Key + …**, and copy the key (shown once) and the ready-to-paste config into your tool.
+An agent talks to Agent Core with a key that you create in the dashboard.
 
-For MCP-compatible clients (Claude Code, Cursor, Claude Desktop):
+1. Open **Agents**, then **Workspaces**, and create a workspace such as `my-project`. A workspace is a shared place where agents keep memory and tasks for one project.
+2. On **Agents**, choose **+ Create Agent** and give it a name. It gets read and write access to your workspace.
+3. Open **Connect**, pick your tool and choose **Generate One-Time Key**. Copy the key and the settings shown next to it into your tool. The key appears once.
+
+Most tools take the settings in this form. It uses MCP (Model Context Protocol), the standard way AI tools call outside programs. Claude Code, Codex and Cursor support it.
 
 ```json
 {
@@ -246,66 +68,58 @@ For MCP-compatible clients (Claude Code, Cursor, Claude Desktop):
     "agent-core": {
       "type": "http",
       "url": "http://localhost:3500/mcp",
-      "headers": {
-        "Authorization": "Bearer YOUR_AGENT_API_KEY"
-      }
+      "headers": { "Authorization": "Bearer YOUR_AGENT_KEY" }
     }
   }
 }
 ```
 
-For Claude Code specifically, you can also run:
+For Claude Code you can also run:
 
 ```bash
 claude mcp add --transport http --scope user agent-core http://localhost:3500/mcp \
-  --header "Authorization: Bearer YOUR_AGENT_API_KEY"
+  --header "Authorization: Bearer YOUR_AGENT_KEY"
 ```
 
-For REST-based clients or custom integrations, every feature is also available through the HTTP API.
+A tool that does not support MCP can use the [HTTP API](docs/api.md) with the same key.
 
----
+To check it works, ask your agent to write a note to memory, then start a new session and ask it to search for that note. The dashboard shows what the agent did under **Activity**.
 
-## Documentation
+## What the dashboard looks like
 
-| Doc | What's in it |
+The first page, **Needs you**, lists what is waiting for a person: approvals, questions an agent left for you, and requests for a credential. Below it, a health strip shows whether your capabilities, webhooks and the local credential helper are working.
+
+![The Needs you page](docs/images/needs-you.png)
+
+Every credential has a **Who can use this** list, and every capability connection has a **Who can use it** list. Each change shows who gains and who loses access before you save it.
+
+![The Who can use this dialog for a credential](docs/images/credential-access.png)
+
+[The dashboard map](docs/dashboard-map.md) explains every page, with screenshots.
+
+## Learn more
+
+| Read | To learn |
 | --- | --- |
-| [Quickstart](docs/quickstart.md) | Install, connect an agent, write shared memory, then add credentials and capabilities when needed |
+| [Quickstart](docs/quickstart.md) | The install and first agent again, in more detail, plus your first credential and capability |
+| [How it works](docs/how-it-works.md) | How memory, credentials and capabilities fit together, and why |
 | [Dashboard map](docs/dashboard-map.md) | What each page of the dashboard is for |
-| [Integrations](docs/integrations.md) | Set up MCP, credentials, capabilities, activities, collaboration, and webhooks in that order |
-| [How it works](docs/how-it-works.md) | The system model and full feature set: memory, activity, credentials, capabilities, and maintenance |
-| [Local credential helper](docs/credential-broker.md) | How `AC_SECRET_*` references work and how to resolve them at runtime |
-| [Credential consumers](docs/credential-consumers.md) | Give a program or container its own identity that fetches only the secrets granted to it |
-| [Configuration](docs/configuration.md) | Environment variables, ports, and data directory layout |
-| [Security](docs/security.md) | Scope model, secret handling, and deployment checklist |
-| [API reference](docs/api.md) | Full REST and MCP endpoint reference |
-| [Upgrading](docs/upgrading.md) | How upgrades are checked before they are kept, and how to go back |
-| [Backup and restore](docs/backup-restore.md) | Export, restore, and routine maintenance |
-| [Troubleshooting](docs/troubleshooting.md) | Common issues and fixes |
+| [Integrations](docs/integrations.md) | Connecting tools, setting up capabilities, webhooks |
+| [Security](docs/security.md) | How secrets and access are protected, and a checklist before you expose Agent Core |
+| [Configuration](docs/configuration.md) | Settings, ports and the data folder |
+| [Upgrading](docs/upgrading.md) and [Backup and restore](docs/backup-restore.md) | Moving to a new version safely, and keeping your data |
+| [Troubleshooting](docs/troubleshooting.md) | Common problems and fixes |
+| [API reference](docs/api.md) | Every endpoint and MCP tool |
+| [Adapters](docs/adapters.md), [Local credential helper](docs/credential-broker.md), [Credential consumers](docs/credential-consumers.md) | Advanced: add your own integrations, give a local tool a secret, give a program its own secrets |
 
----
+## Your data
 
-## Your data stays on your machine
-
-```
-data/
-  agent-core.db       ← SQLite database (memory, agents, credentials, activity)
-  credential.key      ← Encryption key for credentials
-  credential.keyring  ← Key history (used for decryption after key rotation)
-  broker.credential   ← Key for the local credential helper (auto-generated)
-  backups/
-```
-
-`data/` is gitignored. The full backup export from the dashboard bundles the database and encryption key material together. You need both to restore.
-
----
+Agent Core keeps its database and the key that encrypts your credentials in one folder: `data/` for a local install, a Docker volume for Docker. Back up both together. A copy of the database without the key cannot be read. See [Backup and restore](docs/backup-restore.md).
 
 ## Requirements
 
-- Docker with Compose, **or** Python 3.11 or 3.12 for local development
-- SQLite with FTS5 (standard in the Docker image and most Python 3.11 builds)
-- Optional: [Ollama](https://ollama.com) for semantic (AI-powered) memory search. Without it, Agent Core falls back to full-text search. Configure the endpoint and model from **Settings → Memory → Search by meaning** in the dashboard after setup
-
----
+- Docker with Compose, or Python 3.11 or 3.12.
+- Optional: [Ollama](https://ollama.com), if you want memory search to match meaning as well as words. Without it, search matches the words you type. Turn it on under **Settings → Memory → Search by meaning**.
 
 ## License
 
