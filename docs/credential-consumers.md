@@ -1,5 +1,7 @@
 # Resolve-only credential consumers
 
+A credential consumer (called a service in the dashboard) is a program or container that fetches its own secrets from Agent Core when it starts, instead of keeping them in its own config. You need this page if you run such a program.
+
 Use this when a service or container, rather than an AI agent, needs its own secrets from Agent Core at startup (database passwords, API tokens, OAuth refresh state). Each service gets a machine identity that can fetch only the entries granted to it, so one compromised service cannot read the rest of the vault. For agents, use `AC_SECRET_*` references through the [Local credential helper](credential-broker.md) instead.
 
 Machine consumers can retrieve individual encrypted credentials without vault browsing, credential administration, memory or capability access. Create a service (Credentials > Services, or `POST /api/agents` with `kind: "service"`; its one permission is `credentials_resolve`), then create exact entry grants through an administrator's human session. Inherited user and workspace scopes do not authorize resolution. Legacy agent defaults do not include this permission.

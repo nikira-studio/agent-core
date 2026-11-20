@@ -14,6 +14,40 @@ Seven sidebar entries in one plain list; every other page is a tab inside one of
 | **Credentials** (`/credentials`) | Services, Access | The stored credentials, each with one **Who can use this** list in three groups: the capabilities that sign in with it, the agents that can reach it, and the services that receive its value. A credential that belongs to a connection is listed with that connection's name, and no agent can reach it. **Services** lists the programs and containers that only fetch secrets; each row has an **Access** button that lists the secrets that service may fetch (read or write, end date) and lets you add or remove them. **Access** is the whole list in one place: every assignment (a capability signing in with a credential, an agent using a capability, an agent reaching a credential, a service fetching a credential) with when each was last used and any action that waits for a person, filters by agent, capability or service, rows grouped under one closed header per "Who or what" that opens on click or when a filter matches, and an **Unused** list of the credentials nothing uses, the capabilities nobody can use, the services that look idle and what a retired agent or service left behind. |
 | **Settings** (`/settings`) | Users, Webhooks (admin) | Account and two-step sign-in, memory and search settings, data and backup, security and network limits. Run Maintenance, Re-embed and Prune Log sit behind an Advanced fold: maintenance runs by itself every hour. |
 
+## What the pages look like
+
+The screenshots use invented names and data.
+
+**Needs you** is the home page: what is waiting on a person, then the health strip.
+
+![The Needs you page](images/needs-you.png)
+
+**Agents** lists the agents that do work. **Access** on a row opens the dialog that shows what that agent can do and reach.
+
+![The Agents page](images/agents.png)
+
+![What an agent can do and reach](images/agent-access.png)
+
+**Capabilities** holds the ready-made capabilities and the connections you set up with them. **Who can use it** on a connection opens its list of users.
+
+![The Capabilities page](images/capabilities.png)
+
+![Who can use a connection](images/connection-users.png)
+
+**Credentials** holds the stored secrets. **Access** on a credential opens **Who can use this**.
+
+![The Who can use this dialog for a credential](images/credential-access.png)
+
+**Credentials > Access** shows every way something reaches something, with the **Unused** card above it.
+
+![The Access page](images/access.png)
+
+**Activity** lists what agents are doing and have done. **Memory** lists what they have saved.
+
+![The Activity page](images/activity.png)
+
+![The Memory page](images/memory.png)
+
 ## Not in the dashboard
 
 There is no review queue, no stale-task list, no pinned standing context, no "assign a task to an agent" and no confidence column. See the 1.3.0 entries in the changelog.

@@ -1,17 +1,17 @@
 # Quickstart
 
-This guide takes you from zero to a running Agent Core with an agent that can write and recall shared memory. The final steps show how to add credentials and capabilities when a task needs them.
+This guide takes you from nothing to a running Agent Core with one agent that can save and find shared memory. Later steps add a stored credential and a capability, for when a task needs them.
 
-Agent Core is a local capability layer for agents: memory, credentials, capabilities, and activity tracking. It is not a scheduler or orchestration OS. Your agents connect to it when they need capabilities.
+Agent Core is a program that sits beside your AI agents. It gives them memory they share, a safe place for credentials, capabilities (things an agent can do in other services) and a record of what they did. It does not run your agents or schedule their work.
 
-## What you set up
+## What you will do
 
-1. Run Agent Core and create an agent identity.
-2. Connect that agent over MCP and verify shared memory.
-3. Store a credential only when a local tool or external system needs one.
-4. Add a connection only when Agent Core should call that capability itself.
+1. Run Agent Core and sign in.
+2. Create a workspace and an agent, and connect your tool to it.
+3. Check that memory works.
+4. Later, when a task needs it, store a credential and set up a capability.
 
-Activities, workspaces, handoffs, webhooks, and backup are available later. They do not block the first memory workflow.
+Webhooks, handoffs and backups can wait. The first memory workflow does not need them.
 
 ---
 
@@ -24,7 +24,7 @@ You need one of:
 
 You'll also want a browser for the dashboard.
 
-Optional but recommended: [Ollama](https://ollama.com) running locally. Agent Core uses it for semantic (AI-powered) memory search. Without it, memory search still works. It falls back to fast full-text search automatically.
+Optional: [Ollama](https://ollama.com) running locally. Agent Core uses it to search memory by meaning as well as by words. Without it, search still works and matches the words you type.
 
 ---
 
@@ -37,7 +37,6 @@ Docker is the supported runtime. It takes care of the Python version, SQLite dep
 ```bash
 git clone https://github.com/nikira-studio/agent-core agent-core
 cd agent-core
-cp .env.example .env
 cp docker-compose.example.yml docker-compose.yml
 docker compose up -d
 ```
@@ -54,11 +53,10 @@ cd agent-core
 python3 -m venv .venv      # python3 must be 3.11 or 3.12; use python3.11 or python3.12 if your default is different
 source .venv/bin/activate      # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
-cp .env.example .env
 uvicorn app.main:app --reload --port 3500   # run it from the project folder, the one that contains app/
 ```
 
-Open `http://localhost:3500` and register the first admin user.
+Open `http://localhost:3500` and create the first admin account. To change settings such as the port or data folder, copy `.env.example` to `.env` first; [Configuration](configuration.md) lists them.
 
 > **Stay on 3.11 or 3.12 for local work.** Newer Python versions accept syntax that the Docker image (which runs Python 3.11) will reject, so run `python3.11 -m compileall app` before you build an image. If you hit FTS5 database errors, switch to the Docker path, which bundles a compatible SQLite build.
 
@@ -68,9 +66,9 @@ Open `http://localhost:3500` and register the first admin user.
 
 The first time you open the dashboard, you'll be prompted to register. This account becomes the admin: it can manage all agents, view the audit log, and access backup and restore. Keep that password somewhere safe.
 
-After registering, you're in. **Needs you** is the home page: it lists what is waiting on you (an empty list means nothing to do), whether everything is healthy, and a short **Getting started** list for a new install.
+After registering, you are in. **Needs you** is the home page. It lists what is waiting on you, and an empty list means there is nothing to do. A short **Getting started** list helps on a new install.
 
-Below the list is a Health strip with one tile per part of the install. The Capabilities tile says how many connections are failing: a connection counts as failing when its last check failed, or when one of its actions has failed within the last 7 days and either its latest run failed or at least a fifth of at least five recent calls failed. A failure older than that, with nothing failing since, is history and is not counted.
+Below the list, a health strip shows whether your capabilities, webhooks and the local credential helper are working. If it says a capability is failing, [Troubleshooting](troubleshooting.md#the-health-strip-says-a-connection-is-failing) explains what that means.
 
 ---
 
@@ -86,13 +84,22 @@ You won't be prompted for it during normal use, only at login.
 
 ## Step 4: Create a workspace and your first agent
 
-First open **Agents → Workspaces** and create a workspace, for example `my-project`: the shared place where agents keep memory and tasks. With one workspace, a new agent is set up to read and write it by default. In the same dialog you can add your project's folder (one per machine where the project lives, written as that machine names it) and tick the agents that can use it; a session started in that folder then gets the workspace's context automatically.
+A **workspace** is a shared place where agents keep memory and tasks for one project. An **agent** is the identity a tool uses to sign in to Agent Core. Each agent has its own key and its own limits on what it can read and write.
 
-Agents are the identities that connect to Agent Core. Each one gets its own API key and its own scope of what memory, credentials, and capabilities it can access. Capabilities can come from imported OpenAPI specs, native MCP server registrations, the built-in Generic HTTP fallback, or installed **adapters**. Install adapters from **Ready-made capabilities**; user-installed adapter files live in `data/adapters/` and built-in templates ship in `app/adapter_templates/` (see [Adapters](integrations.md#adapters)).
+1. Open **Agents**, then the **Workspaces** tab, and create a workspace such as `my-project`. In the same dialog you can add your project's folder (one per machine where the project lives, written as that machine names it) and tick the agents that can use it. A session started in that folder then gets the workspace's context automatically.
+2. On the **Agents** tab, choose **+ Create Agent**. Give it an ID and a name that say what it is for, such as `coding-agent`. With one workspace, a new agent can read and write it by default.
 
-Open **Agents** in the sidebar and create a new agent. Give it a descriptive name like `claude-coding-agent` or `cursor-agent`. Creating an agent does not show a key. Open the **Connect** page (the dialog after you save links to it) to generate the agent's key and its tool settings. The key is shown **once**; copy it into the tool right away. There is no way to read it later, but you can generate another. An agent can hold several keys (one per machine or tool, each with a label), and generating one does not stop the others; revoke the ones you no longer use in **Agents > More > Keys**. Through the API, `POST /api/agents/coding-agent/keys` with `{"label": "laptop"}` (same header as below) returns a key once.
+Creating an agent does not show a key. You make the key in the next step.
 
-If you'd rather use the API, you act as a person with an **operator token**: a short-lived key you create in **Settings → Account → Operator tokens** while signed in (5 to 60 minutes, shown once; scripts that create agents, grants or backups use it instead of your password). Replace `<operator-token>` below with it:
+### What an agent's settings mean
+
+An agent's on and off switches are its **permissions**: Use memory, Coordinate tasks, Reference credentials, See capabilities, Run capabilities, Fetch secrets and Propose admin changes. The **Access** button on an agent's row opens one dialog about that agent: the workspaces it can read and write, the capabilities it can use, the credentials it can reference, its keys and its permissions. Adding or removing a workspace shows what it would open or close before you save. Agent Core never switches a permission on for an agent. If one is missing, the dialog offers a **Turn on** button, and a person presses it.
+
+Not every entry on the Agents page is an agent. A **service** is a program or container that only fetches the secrets it is given. It has one permission, Fetch secrets, and no workspaces. Services are listed under **Credentials > Services**.
+
+### Advanced: create an agent with the API
+
+You act as a person with an **operator token**: a short-lived key you create in **Settings → Account → Operator tokens** while signed in (5 to 60 minutes, shown once). Scripts that create agents, grants or backups use it instead of your password. Replace `<operator-token>` below with it:
 
 ```bash
 curl -X POST http://localhost:3500/api/agents \
@@ -106,23 +113,21 @@ curl -X POST http://localhost:3500/api/agents \
   }'
 ```
 
-The `read_scopes` and `write_scopes` control what this agent can see and write. By default, an agent can only write to its own private scope (`agent:<id>`). You can also give it access to shared context or a specific workspace, which is useful if you have multiple agents collaborating on the same project.
-
-The **Shared memory** option adds the `shared` scope: memory every user and workspace can see. Give it only to an agent that should read or write context for everyone; write access to `shared` also needs the agent to be in `AGENT_CORE_SHARED_SCOPE_AGENTS` or have `shared` in its write scopes.
-
-An agent's on and off flags are its **permissions**: Use memory, Coordinate tasks, Reference credentials, See capabilities, Run capabilities, Fetch secrets and Propose admin changes. The **Access** button on an agent's row opens one dialog about that agent: the workspaces it may read and write, the capabilities it can use, the credentials it can reference, its keys and its permissions. Adding or removing a workspace shows what it would open or close before anything is saved. A permission an agent lacks is never switched on for it: the dialog offers a **Turn on** button, and a person presses it.
-
-Not every entry on the Agents page is an agent. A **service** is a program or container that only fetches the secrets it is given: it has one permission, Fetch secrets, and no workspaces. Services are listed under **Credentials > Services**, so the Agents page lists the agents that do work.
+`read_scopes` and `write_scopes` say what the agent can see and write. A scope is a named area of memory: `agent:<id>` is the agent's own private area, `workspace:<id>` is a workspace, `user:<id>` is one person's. By default an agent can write only to its own area. The **Shared memory** option adds the `shared` scope, which every user and workspace can see. Give it only to an agent that should read or write for everyone. Writing to `shared` also needs the agent to be in `AGENT_CORE_SHARED_SCOPE_AGENTS` or to have `shared` in its write scopes.
 
 ---
 
 ## Step 5: Connect your tool
 
-The fastest way to connect an agent to your tool is the **Connect** page at `http://localhost:3500/integrations`. Select your user, workspace, agent, and target tool, and it shows, in order, the config to add to your tool, the `CLAUDE.md` or `AGENTS.md` content to save in your project and, for Claude Code and Codex, the session start hook that loads the workspace context when a session starts. Do the config and hook steps yourself in a terminal; an agent usually cannot.
+The **Connect** page (`http://localhost:3500/integrations`, also a tab on **Agents**) walks you through it. Choose your user, workspace, agent and tool. The page then shows, in order:
 
-You do **not** need to create a `CLAUDE.md` or `AGENTS.md` file before the verification step. The verification prompt works as soon as the agent has MCP access and the right scopes.
+1. The setting to add to your tool. Choose **Generate One-Time Key** and confirm, and the key is filled in for you. The key is shown once, so copy it into your tool right away. If you lose it, generate another: an agent can hold several keys (for example one per machine), and a new key does not stop the others. Revoke a key you no longer use under **Agents → More → Keys**. Through the API, `POST /api/agents/coding-agent/keys` with `{"label": "laptop"}` returns a key once.
+2. A `CLAUDE.md` or `AGENTS.md` file to save in your project. It tells the agent to use Agent Core. You can verify the connection before you save it.
+3. For Claude Code and Codex, an optional hook that loads the workspace context when a session starts.
 
-For a quick manual connection using MCP (works with Claude Code, Cursor, Claude Desktop, and others):
+Do the setting and the hook yourself in a terminal. An agent usually cannot, because it has no network access and cannot write to its own settings folder.
+
+Most tools take the setting as MCP (Model Context Protocol) settings. MCP is the standard way AI tools call outside programs, and Claude Code, Cursor, Claude Desktop and Codex support it:
 
 ```json
 {
@@ -138,7 +143,7 @@ For a quick manual connection using MCP (works with Claude Code, Cursor, Claude 
 }
 ```
 
-To verify the connection is working:
+To check from a terminal that the key works:
 
 ```bash
 curl -X POST http://localhost:3500/mcp \
@@ -147,25 +152,25 @@ curl -X POST http://localhost:3500/mcp \
   -d '{"tool": "memory_search", "params": {"query": "test", "limit": 5}}'
 ```
 
-You should see:
+You should get an answer that starts like this (the other fields vary):
 
 ```json
-{"ok": true, "data": {"records": [], "retrieval_mode": "no_candidates", "total": 0, ...}}
+{"ok": true, "data": {"records": [], "total": 0, ...}}
 ```
 
-If you get a `401`, you're using the wrong key. Make sure it's the agent API key, not your dashboard password. A connection error means Agent Core isn't running on port 3500.
+A `401` means the key is wrong. Use the agent's key, not your dashboard password. A connection error means Agent Core is not running on port 3500.
 
-After the MCP connection is working, run the generated **Verification Prompt** in the connected agent. The prompt starts a workspace execution, verifies change delivery and acknowledgement, writes and reads memory, checks credential and capability visibility, and updates activity.
+Then paste the **Verification Prompt** from the bottom of the Connect page into your tool. It asks the agent to write a note, find it again, check which credentials and capabilities it can see, and log a task.
 
 ---
 
 ## Step 6: Write and search memory
 
-Once connected, agents write memory records with three required fields: a class (what kind of thing it is), a scope (who can see it), and the content itself.
+Once connected, an agent writes a memory with three things: a class (what kind of record it is), a scope (who can see it) and the content.
 
-The class matters more than it looks. A **fact** is settled by checking: someone or something could verify it against the code, a host, or an external system. A **decision** is settled by someone deciding, and nothing can verify it. That split is what lets Agent Core re-check facts on a schedule while leaving your decisions alone. Reporting what you just did is neither, and belongs in the activity trail instead.
+The class matters. A **fact** is something that can be checked against the code, a server or another system. A **decision** is something a person or team chose, and nothing can check it. Agent Core re-checks facts on a schedule and leaves decisions alone. What an agent just did belongs in the activity record, not in memory.
 
-If you are writing a preference, add a `slot_key` to keep one active value per slot: a new preference with the same scope and slot supersedes the previous one. `valid_from` and `valid_to` describe when the content was true in the world, which is a separate timeline from when it was written; set them when a record covers a period other than "from now on".
+For a preference, add a `slot_key` to keep one active value per slot: a new preference with the same scope and slot replaces the old one. `valid_from` and `valid_to` say when the content was true in the world, which can differ from when it was written. Set them when a record covers a period other than "from now on".
 
 ```bash
 curl -X POST http://localhost:3500/api/memory/write \
@@ -193,7 +198,7 @@ A search covers the agent's default recall scopes: everything it can read, unles
 
 ## Step 7: Store a credential
 
-Credentials are managed from the **Credentials** page. A credential is the encrypted secret itself: an API key, token, password, URL, or config value. A connection is separate. It tells Agent Core how to use a stored credential with a capability, whether that capability came from an imported OpenAPI spec, a registered native MCP server, the built-in Generic HTTP fallback, or an installed adapter manifest.
+You manage credentials on the **Credentials** page. A credential is the encrypted secret itself: an API key, token, password, URL or other value. A connection is separate. It tells Agent Core how to use a stored credential with a capability. A capability can come from an imported OpenAPI spec, a registered MCP server, the built-in Generic HTTP option or an installed adapter.
 
 From the dashboard:
 
@@ -247,7 +252,7 @@ A credential entered while adding a connection belongs to that connection: no ag
 
 Who may use a connection is a list of its own, under **Who can use it**: named agents, everyone in a workspace, or all of one person's agents, with an exclusion for a single agent. Every change shows who gains it and who loses it before it is saved. Being on that list lets an agent use the connection; it gives no memory access and no credential access.
 
-The **Access** page under Credentials reads all of this at once: every assignment there is, with when each was last used, any action waiting on a person, filters by agent, capability or service, and an **Unused** list of the credentials that no capability signs in with, no service may fetch and no agent has used in 90 days, the capabilities nobody can use, the services that look idle and what a retired agent or service left behind.
+The **Access** page under Credentials shows all of this in one list: who can reach what, when each was last used, and anything waiting on a person. Its **Unused** card lists credentials, capabilities and services that nothing uses, so you can tidy up. The [dashboard map](dashboard-map.md) describes each page.
 
 Credential scope and connection scope are related but not identical. Credential scope controls who may access the stored secret. Connection scope controls where that capability is available. In the common case, use the same workspace scope for both. For advanced setups, one personal credential can power multiple workspace connections.
 

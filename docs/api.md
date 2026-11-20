@@ -1,6 +1,8 @@
 # API reference
 
-Every REST endpoint and MCP tool. For what the concepts mean (scopes, memory classes, anchors), see [How it works](how-it-works.md).
+This page lists every REST endpoint and MCP tool, with the fields each one takes and the errors it returns. You need it if you are writing a script or a program that talks to Agent Core. If you only use the dashboard and a tool that connects to it, you can skip it.
+
+For what the concepts mean (scopes, memory classes, anchors), see [How it works](how-it-works.md).
 
 Base URL: `http://localhost:3500`
 

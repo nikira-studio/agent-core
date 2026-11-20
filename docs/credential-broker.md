@@ -1,5 +1,7 @@
 # Local credential helper
 
+The local credential helper lets a program on your own machine use a secret from Agent Core without the secret being written into a config file or a prompt. Most people do not need it, because agents get what they need through capabilities.
+
 > **When to use it.** Only for a tool you run yourself that needs a secret in its own environment and cannot go through a connection. Prefer a [connection](how-it-works.md) (Agent Core makes the call) or, for a container or program of your own, a [credential consumer](credential-consumers.md).
 
 > **Names.** This page, the dashboard (Settings → Security) and the Health strip all say *local credential helper*. The program is `runner/agent_core_broker.py`, and the environment variables, API paths and audit action names keep the word "broker" (for example `AGENT_CORE_BROKER_TOKEN_FILE` and `/api/dashboard/broker/rotate`), so searching for them still works.

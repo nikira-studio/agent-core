@@ -1,5 +1,7 @@
 # Adapters
 
+An adapter is a small file that teaches Agent Core how to talk to one outside service, so agents can use that service as a capability. You need this page only if you want to add a service that is not already listed under **Ready-made capabilities** in the dashboard.
+
 In the dashboard, installable adapters are listed under **Ready-made capabilities**; "adapter" is the name of the manifest format this guide describes.
 
 One manifest file adds any external capability to Agent Core. It describes what the capability is, what credentials it needs, what actions it exposes, and how Agent Core should call it. The built-in engines handle the rest. No Python is added to your installation. Adapters survive upgrades, and the same file works on any other Agent Core instance when you share it.

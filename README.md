@@ -56,11 +56,11 @@ Run the last command from the folder that contains `app/`. Then open <http://loc
 
 An agent talks to Agent Core with a key that you create in the dashboard.
 
-1. Open **Agents**, then **Workspaces**, and create a workspace such as `my-project`. A workspace is a shared place where agents keep memory and tasks for one project.
-2. On **Agents**, choose **+ Create Agent** and give it a name. It gets read and write access to your workspace.
-3. Open **Connect**, pick your tool and choose **Generate One-Time Key**. Copy the key and the settings shown next to it into your tool. The key appears once.
+1. Open **Agents**, then the **Workspaces** tab, and create a workspace such as `my-project`. A workspace is a shared place where agents keep memory and tasks for one project.
+2. On the **Agents** tab, choose **+ Create Agent**. Give it an ID such as `coding-agent` and a name. It gets read and write access to your workspace.
+3. Open the **Connect** tab. Choose your agent and workspace, pick your tool, then choose **Generate One-Time Key** and confirm. Agent Core adds a new key to that agent and shows the setup with the key filled in. The key appears once, so copy it now.
 
-Most tools take the settings in this form. It uses MCP (Model Context Protocol), the standard way AI tools call outside programs. Claude Code, Codex and Cursor support it.
+The page shows the setup for your tool. Most tools take settings like these, which use MCP (Model Context Protocol), the standard way AI tools call outside programs. Claude Code, Codex and Cursor support it.
 
 ```json
 {
@@ -74,16 +74,18 @@ Most tools take the settings in this form. It uses MCP (Model Context Protocol),
 }
 ```
 
-For Claude Code you can also run:
+The Claude Code command, if you prefer to type it:
 
 ```bash
 claude mcp add --transport http --scope user agent-core http://localhost:3500/mcp \
   --header "Authorization: Bearer YOUR_AGENT_KEY"
 ```
 
+The same page gives you a short instructions file (`CLAUDE.md` or `AGENTS.md`). Save it in your project so the agent knows to use Agent Core.
+
 A tool that does not support MCP can use the [HTTP API](docs/api.md) with the same key.
 
-To check it works, ask your agent to write a note to memory, then start a new session and ask it to search for that note. The dashboard shows what the agent did under **Activity**.
+To check it works, paste the **Verification Prompt** from the bottom of the Connect page into your tool. It asks the agent to write a note, find it again and log the task. The dashboard then shows what the agent did under **Activity**.
 
 ## What the dashboard looks like
 
