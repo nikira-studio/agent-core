@@ -116,7 +116,7 @@ Every credential has a **Who can use this** list, and every capability connectio
 
 ## Your data
 
-Agent Core keeps its database and the key that encrypts your credentials in one folder: `data/` for a local install, a Docker volume for Docker. Back up both together. A copy of the database without the key cannot be read. See [Backup and restore](docs/backup-restore.md).
+Agent Core keeps its database and the key that encrypts your credentials in one folder: `data/` for a local install, a Docker volume for Docker. Back up both together. A copy of the database without the key cannot decrypt your credentials. See [Backup and restore](docs/backup-restore.md).
 
 ## Requirements
 
