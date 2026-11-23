@@ -819,7 +819,7 @@ curl -X POST http://localhost:3500/api/activity/<activity-id>/heartbeat \
   -H "Authorization: Bearer <agent-api-key>"
 ```
 
-If a task gets no update from its agent for more than `AGENT_CORE_STALE_THRESHOLD_MINUTES` (default: 5 minutes), it is marked `stale` the next time the sweep runs (hourly by default, `AGENT_CORE_MAINTENANCE_INTERVAL_MINUTES`) or a dashboard page or API call that lists tasks loads, whichever comes first; so a quiet task can still read `active` for up to an hour when nobody is looking. Any later update or heartbeat from the agent (a progress note counts) brings it back to `active` and sends `activity_recovered`. The dashboard also offers resume, reassign to another agent, or cancel.
+If a task gets no update from its agent for more than `AGENT_CORE_STALE_THRESHOLD_MINUTES` (default: 5 minutes), it is marked `stale` the next time the sweep runs (hourly by default, `AGENT_CORE_MAINTENANCE_INTERVAL_MINUTES`) or a dashboard page or API call that lists tasks loads, whichever comes first; so a quiet task can still read `active` for up to an hour when nobody is looking. Any later update or heartbeat from the agent (a progress note counts) brings it back to `active` and sends `activity_recovered`. The dashboard also offers resume or cancel.
 
 Agents open and close their own tasks; nothing is assigned to an agent. To hand work to another agent, close the task with a handoff (`next_steps`, `open_questions`): the next session in the workspace sees it in its session context. (Assigning a task to an agent, `activity_pickup` and **Reassign** were removed in 1.3.0.)
 
@@ -835,6 +835,8 @@ The practical flow is:
 2. It writes durable decisions, facts, and handoff notes to memory when something should survive beyond the current session.
 3. When it finishes or stops, it calls `activity_update` with `status` completed or blocked, a `task_result`, and `handoff={completed, next_steps, open_questions, needs_human}`. When the thing to do is in another system, add `needs_human_url` with the link: Needs you then leads with **Open in <that site>** (see the API reference).
 4. The next session's context shows that work with its next steps and open questions. Older history is available through `activity_search` and `activity_get`.
+
+Nothing tells the next agent a handoff exists. It is read when a session starts or when an agent asks, so work left for a tool that nobody opens stays unread. To get an agent's attention sooner, use that tool's own way of starting or messaging a session.
 
 A `needs_human` request waits on a person until a person marks it resolved, the agent that asked resolves it with `activity_handoff_resolve`, or a `needs_human` request that agent makes in a later session in the same workspace replaces it. Parallel sessions do not replace each other's requests, and superseding is per `metadata.task_ref`: a tool that runs several tasks as one agent tags each activity with its own task_ref so their requests stay separate, while terminal sessions without one supersede each other. When one replaces older requests, the `activity_update` response lists them in `superseded_requests` so the agent can restate any that still apply: after closing, it sends a `handoff` with only the restated ask, which is added to the asks already on the closed task. Asks are never removed that way, only resolved. When an agent closes a task without a request while older ones are open, the response lists them in `open_requests` as a reminder and resolves nothing. `PUT /api/activity/{id}` behaves the same.
 

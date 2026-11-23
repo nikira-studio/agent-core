@@ -1387,6 +1387,7 @@ def _build_instructions(
 - Codex reads `AGENTS.md` in the workspace root. Consider generating that output instead for a self-contained file.
 - Codex can use both the MCP tools and the REST API. The MCP endpoint is preferred for memory operations.
 - Set `{ENV_PREFIX}API_KEY` in your environment before starting a Codex session.
+- {APP_NAME} does not wake an agent that is not running, so a handoff waits until a session starts in that workspace. To message a Codex thread directly, use `codex queue`, and read `codex queue --help` for how to have Codex start the thread afterward: a queued message alone waits for the thread's next turn.
 """
     elif target == "cursor":
         scope_guide = f"{workspace_context_line}\n- Use `{user_scope}` only for stable preferences or personal working context.\n- Use `{agent_scope}` only for private scratch context."
