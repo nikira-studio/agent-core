@@ -151,3 +151,61 @@ def test_a_retraction_says_who_and_from_which_session(test_client, admin_token):
     )
     traced = memory_service.retraction_traces([other["id"]])[other["id"]]
     assert traced["by_person"] is True and traced["session"] is None
+
+
+def test_nobody_but_core_can_set_or_hide_the_person_pointer(test_client, admin_token):
+    headers, _ = _setup()
+    original = _person_record()
+    forged = memory_service.build_provenance(
+        actor_type="agent", actor_id="setby-agent", channel="mcp", source_kind="agent_inference", scope=SCOPE,
+        agent_id="setby-agent", extras={"replaces_person_set": "made-up-id"},
+    )
+    # A write that replaces nothing: a forged pointer in the supplied provenance is dropped.
+    plain, _ = memory_service.write_memory(
+        "An unrelated note.", "fact", SCOPE, provenance_json=forged,
+    )
+    assert "replaces_person_set" not in memory_service.set_by_fields(memory_service.get_memory_record(plain["id"]))
+
+    # A write that replaces a person's version: Core writes the real pointer over a forged one...
+    replaced, _ = memory_service.write_memory(
+        "Use SQLite.", "decision", SCOPE, topic="ledger-db", supersedes_id=original["id"], provenance_json=forged,
+    )
+    assert memory_service.set_by_fields(memory_service.get_memory_record(replaced["id"]))["replaces_person_set"] == original["id"]
+
+    # ...and keeps it when the supplied provenance leaves it out.
+    original_two = _person_record("Keep nightly exports.", "exports")
+    bare = memory_service.build_provenance(
+        actor_type="agent", actor_id="setby-agent", channel="mcp", source_kind="agent_inference", scope=SCOPE,
+    )
+    replaced_two, _ = memory_service.write_memory(
+        "Exports are weekly.", "decision", SCOPE, topic="exports", supersedes_id=original_two["id"], provenance_json=bare,
+    )
+    assert memory_service.set_by_fields(memory_service.get_memory_record(replaced_two["id"]))["replaces_person_set"] == original_two["id"]
+
+
+def test_extra_fields_an_agent_sends_cannot_change_who_set_a_record(test_client, admin_token):
+    headers, _ = _setup()
+    original = _person_record()
+    response = _tool(
+        test_client, headers, "memory_write", content="Use SQLite.", memory_class="decision", scope=SCOPE,
+        topic="ledger-db", supersedes_id=original["id"],
+        provenance_json={"agent_id": "someone-else", "actor_id": "alex", "actor_type": "user",
+                         "replaces_person_set": "made-up-id"},
+        replaces_person_set="made-up-id", set_by="person", agent_id="someone-else",
+    )
+    assert response.status_code in (200, 201, 400), response.json()
+    if response.status_code != 400:  # an unknown field may be refused; if it is accepted it must change nothing
+        new = _get(test_client, headers, response.json()["data"]["record"]["id"])
+        assert new["set_by"] == "agent:setby-agent"
+        assert new["replaces_person_set"] == original["id"]
+
+
+def test_a_non_agent_actor_is_not_named_as_an_agent(test_client, admin_token):
+    _setup()
+    person_via_api, _ = memory_service.write_memory(
+        "Written by a signed-in person through the API.", "fact", SCOPE,
+        provenance_json=memory_service.build_provenance(
+            actor_type="user", actor_id="alex", channel="api", source_kind="agent_inference", scope=SCOPE
+        ),
+    )
+    assert memory_service.set_by_fields(memory_service.get_memory_record(person_via_api["id"]))["set_by"] == "agent"

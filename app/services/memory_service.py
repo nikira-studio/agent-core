@@ -110,7 +110,8 @@ def set_by_fields(record: dict) -> dict:
         provenance = {}
     if not isinstance(provenance, dict):
         provenance = {}
-    who = provenance.get("agent_id") or provenance.get("actor_id")
+    # Core stamps agent_id from the authenticated key; the actor id is only trusted as a name when the actor is an agent.
+    who = provenance.get("agent_id") or (provenance.get("actor_id") if provenance.get("actor_type") == "agent" else None)
     fields = {"set_by": f"agent:{who}" if who else "agent"}
     if record.get("source_execution_id"):
         fields["session"] = record["source_execution_id"]
@@ -1492,6 +1493,16 @@ def write_memory(
             "slot_key preference writes can only supersede the current active record for that slot"
         )
     effective_supersedes_id = supersedes_id or slot_supersedes_id
+
+    # Core is the only writer of replaces_person_set: whatever a caller put in provenance is dropped, so nobody
+    # can forge the pointer or hide it; it is set below only when this write replaces a person's version.
+    try:
+        cleaned = json.loads(provenance_json) if provenance_json else None
+    except (TypeError, ValueError):
+        cleaned = None
+    if isinstance(cleaned, dict) and "replaces_person_set" in cleaned:
+        cleaned.pop("replaces_person_set")
+        provenance_json = json.dumps(cleaned, separators=(",", ":"), sort_keys=True)
 
     with get_db() as conn:
         if effective_supersedes_id:
