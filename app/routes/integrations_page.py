@@ -85,7 +85,7 @@ Search results carry `days_since_confirmed`. Treat a fact nobody has confirmed i
 
 MEMORY_WRITE_WHEN = "Write a memory only for something a future session cannot get from the code, the config or the task history, and that will still be true: a decision with its reason, a constraint that cost effort to find, who or where something is (an account, a host, an owner), or how things are wired. Do not write: that you finished, deployed or fixed something (use `activity_update`); what the code or API already says; an experiment or benchmark result; a ticket or review log; a status that was true for a day; a guess about a cause. One record per lasting insight; replace it when it changes."
 
-MEMORY_DISCIPLINE_GUIDANCE = """Write a memory only for something a future session cannot get from the code, the config or the task history, and that will still be true: a decision with its reason, a constraint that cost effort to find, who or where something is (an account, a host, an owner), or how things are wired. Do not write: that you finished, deployed or fixed something (use activity_update); what the code or API already says; an experiment or benchmark result; a ticket or review log; a status that was true for a day; a guess about a cause. One record per lasting insight; replace it when it changes.
+MEMORY_DISCIPLINE_GUIDANCE = """Write a memory only for something a future session cannot get from the code, the config or the task history, and that will still be true: a decision with its reason, a constraint that cost effort to find, who or where something is (an account, a host, an owner), or how things are wired. Do not write: that you finished, deployed or fixed something (use activity_update); what the code or API already says; an experiment or benchmark result; a ticket or review log; a status that was true for a day; a guess about a cause. One record per lasting insight; replace it when it changes. Make the first sentence of each record stand on its own: the session context index and compact listings show it, and agents choose what to open from it.
 
 One memory per insight, not per occurrence: when a recurring task (heartbeat, monitor tick, scheduled review, watchdog retry) keeps producing the same finding, write ONE record the first time and supersede it if the situation changes — never a new record per tick, per fire, or per re-check. Per-occurrence status belongs in `activity_update` (`task_note`/`task_result`) or the source system, not in memory. To find what has already been done — "what did we do on X", "has this been tried" — search the activity trail with `activity_search` rather than memory; memory is for what stays true, the trail is for what happened. Before writing a `fact` or `decision`, search for an existing record on the same topic and supersede it (`supersedes_id`) instead of adding a near-duplicate. For notes that stop being true on their own (for example "service X is down right now"), use `scratchpad` or set `expires_at`."""
 
@@ -1387,7 +1387,6 @@ def _build_instructions(
 - Codex reads `AGENTS.md` in the workspace root. Consider generating that output instead for a self-contained file.
 - Codex can use both the MCP tools and the REST API. The MCP endpoint is preferred for memory operations.
 - Set `{ENV_PREFIX}API_KEY` in your environment before starting a Codex session.
-- {APP_NAME} does not wake an agent that is not running, so a handoff waits until a session starts in that workspace. To message a Codex thread directly, use `codex queue`, and read `codex queue --help` for how to have Codex start the thread afterward: a queued message alone waits for the thread's next turn.
 """
     elif target == "cursor":
         scope_guide = f"{workspace_context_line}\n- Use `{user_scope}` only for stable preferences or personal working context.\n- Use `{agent_scope}` only for private scratch context."
@@ -1865,6 +1864,7 @@ def _hook_markdown(client_key, base_url):
             "- Only your own `~/.codex/config.toml` is read for the URL and key, never a repository's, and a redirect from the server is never followed, so a cloned project cannot make the hook send your key anywhere. "
             f"A project that keeps its own {APP_NAME} entry should set `AGENT_CORE_URL` and `AGENT_CORE_API_KEY` in the environment instead.",
             "- With no entry in `config.toml` the hook says so in a project folder.",
+            f"- {APP_NAME} does not wake an agent that is not running, so a handoff waits until a session starts in that workspace. To message a Codex thread directly, use `codex queue`, and read `codex queue --help` for how to have Codex start the thread afterward: a queued message alone waits for the thread's next turn.",
         ]
     behavior += [
         f"- If {APP_NAME} cannot be reached, the session starts normally and {name} shows a one-line notice. `AGENT_CORE_NOTICES=0` turns off the notices about a folder with no workspace and a project with no connection.",

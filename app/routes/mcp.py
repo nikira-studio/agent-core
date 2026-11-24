@@ -184,7 +184,7 @@ MANIFEST = {
         {
             "name": "memory_write",
             "description": (
-                "Write a memory only for something a future session cannot get from the code, the config or the task history, and that will still be true: a decision with its reason, a constraint that cost effort to find, who or where something is (an account, a host, an owner), or how things are wired. Do not write: that you finished, deployed or fixed something (use activity_update); what the code or API already says; an experiment or benchmark result; a ticket or review log; a status that was true for a day; a guess about a cause. One record per lasting insight; replace it when it changes."
+                "Write a memory only for something a future session cannot get from the code, the config or the task history, and that will still be true: a decision with its reason, a constraint that cost effort to find, who or where something is (an account, a host, an owner), or how things are wired. Do not write: that you finished, deployed or fixed something (use activity_update); what the code or API already says; an experiment or benchmark result; a ticket or review log; a status that was true for a day; a guess about a cause. One record per lasting insight; replace it when it changes. Make the first sentence of each record stand on its own: the session context index and compact listings show it, and agents choose what to open from it."
             ),
             "inputSchema": {
                 "type": "object",
