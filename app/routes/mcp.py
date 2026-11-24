@@ -1044,6 +1044,7 @@ def _compact_memory_record(record: dict) -> dict:
         "supersedes_id": record.get("supersedes_id"),
         "superseded_by_id": record.get("superseded_by_id"),
         "created_at": record.get("created_at"),
+        **memory_service.set_by_fields(record),
         "content_preview": preview,
     }
 
@@ -1529,6 +1530,8 @@ async def _run_custom_mcp_tool(body: dict, ctx: EffectiveAuthority):
         # is there for a caller that genuinely needs the lifecycle fields.
         if params.get("view") != "full":
             records = [memory_service.lean_record(r) for r in records]
+        else:
+            records = memory_service.with_set_by(records)
         embedding_status = await asyncio.to_thread(
             embedding_service.safe_backend_status
         )
@@ -1635,7 +1638,7 @@ async def _run_custom_mcp_tool(body: dict, ctx: EffectiveAuthority):
         out = (
             [_compact_memory_record(r) for r in records]
             if view == "compact"
-            else records
+            else memory_service.with_set_by(records)
         )
         return JSONResponse(
             content={
@@ -1755,9 +1758,9 @@ async def _run_custom_mcp_tool(body: dict, ctx: EffectiveAuthority):
             resource_type="memory_record",
             resource_id=params["record_id"],
             result="success",
-            details={"reason": params["reason"][:300]}
-            if isinstance(params.get("reason"), str) and params["reason"].strip()
-            else None,
+            details=memory_service.retraction_details(
+                params.get("reason"), ctx.agent_id, ctx.user_id, record["scope"]
+            ),
         )
         return JSONResponse(
             content={"ok": True, "data": {"message": "Memory record retracted"}}

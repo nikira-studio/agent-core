@@ -8,7 +8,7 @@ from datetime import timedelta
 from typing import Optional
 
 from app.database import get_db
-from app.models.enums import MEMORY_CLASSES, SOURCE_KINDS, normalize_id
+from app.models.enums import HUMAN_SOURCE_KINDS, MEMORY_CLASSES, SOURCE_KINDS, normalize_id
 from app.security.pii_detector import contains_pii
 from app.time_utils import parse_utc_datetime, utc_now, utc_now_iso
 
@@ -29,7 +29,7 @@ MEMORY_RECORD_COLUMNS = (
     "source_kind, created_at, record_status, superseded_by_id, "
     "supersedes_id, provenance_json, slot_key, valid_from, valid_to, last_confirmed_at, "
     "expires_at, status_changed_at, subject_anchor, recall_count, last_recalled_at, "
-    "last_verify_attempt_at, anchor_checked_at"
+    "last_verify_attempt_at, anchor_checked_at, source_execution_id"
 )
 
 # Ranking never needs claim text or provenance blobs. Load complete records only
@@ -87,7 +87,41 @@ def lean_record(record: dict) -> dict:
     """
     projected = {field: record.get(field) for field in MEMORY_RESULT_FIELDS}
     projected["days_since_confirmed"] = days_since_confirmed(record)
+    projected.update(set_by_fields(record))
     return projected
+
+
+def set_by_fields(record: dict) -> dict:
+    """Who set this version of a record: a person, or an agent (which one, and from which session).
+
+    A version counts as person-set only when its source_kind is one Core accepts solely from a signed-in
+    person. An agent that replaces a person's record writes a new version under its own source_kind, so
+    the label does not carry over; `replaces_person_set` points at the person's version it replaced, which
+    stays readable in the record's history. Fields Core cannot know are left out.
+    """
+    kind = record.get("source_kind")
+    if kind in HUMAN_SOURCE_KINDS:
+        return {"set_by": "person"}
+    if kind == "external_import":
+        return {"set_by": "import"}
+    try:
+        provenance = json.loads(record.get("provenance_json") or "{}")
+    except (TypeError, ValueError):
+        provenance = {}
+    if not isinstance(provenance, dict):
+        provenance = {}
+    who = provenance.get("agent_id") or provenance.get("actor_id")
+    fields = {"set_by": f"agent:{who}" if who else "agent"}
+    if record.get("source_execution_id"):
+        fields["session"] = record["source_execution_id"]
+    if provenance.get("replaces_person_set"):
+        fields["replaces_person_set"] = provenance["replaces_person_set"]
+    return fields
+
+
+def with_set_by(records: list[dict]) -> list[dict]:
+    """Full records with the set-by fields added."""
+    return [{**record, **set_by_fields(record)} for record in records]
 
 
 # A subject anchor names the thing a later session would go and look at to check
@@ -1461,6 +1495,19 @@ def write_memory(
 
     with get_db() as conn:
         if effective_supersedes_id:
+            replaced = conn.execute(
+                "SELECT source_kind FROM memory_records WHERE id = ?", (effective_supersedes_id,)
+            ).fetchone()
+            if replaced and replaced["source_kind"] in HUMAN_SOURCE_KINDS and source_kind not in HUMAN_SOURCE_KINDS:
+                # Core writes this, not the caller: an agent's version never inherits the person's label, and
+                # points at the person's version it replaced.
+                try:
+                    marked = json.loads(provenance_json or "{}")
+                except (TypeError, ValueError):
+                    marked = {}
+                if isinstance(marked, dict):
+                    marked["replaces_person_set"] = effective_supersedes_id
+                    provenance_json = json.dumps(marked, separators=(",", ":"), sort_keys=True)
             _superseded_mark = _changes_mark(conn, _record_scope(conn, effective_supersedes_id))
             conn.execute(
                 # Close the old record's validity window as well as marking it
@@ -1696,7 +1743,7 @@ def retraction_traces(record_ids: list[str]) -> dict[str, dict]:
         for start in range(0, len(record_ids), 400):
             chunk = record_ids[start : start + 400]
             rows = conn.execute(
-                "SELECT resource_id, actor_id, timestamp, details_json FROM audit_log "
+                "SELECT resource_id, actor_id, actor_type, timestamp, details_json FROM audit_log "
                 "WHERE action IN ('memory_retract', 'memory_auto_retracted') "
                 f"AND resource_id IN ({','.join('?' for _ in chunk)}) ORDER BY id",
                 chunk,
@@ -1709,11 +1756,32 @@ def retraction_traces(record_ids: list[str]) -> dict[str, dict]:
                 found[row["resource_id"]] = {
                     "by": row["actor_id"],
                     "by_label": RULE_LABELS.get(row["actor_id"], row["actor_id"]),
+                    "by_person": row["actor_type"] == "user",
+                    "session": details.get("execution_id") if isinstance(details.get("execution_id"), str) else None,
                     "when": row["timestamp"],
                     "reason": details.get("reason") if isinstance(details.get("reason"), str) else None,
                     "duplicate_of": details.get("duplicate_of") if isinstance(details.get("duplicate_of"), str) else None,
                 }
     return found
+
+
+def retraction_details(
+    reason: Optional[str], agent_id: Optional[str], user_id: Optional[str], scope: str
+) -> Optional[dict]:
+    """The audit details for a retraction: the reason, and the session when the agent was working in one."""
+    details: dict = {}
+    if isinstance(reason, str) and reason.strip():
+        details["reason"] = reason[:300]
+    if agent_id:
+        try:
+            from app.services import activity_service
+
+            active = activity_service.get_active_activity_for_agent(agent_id, user_id, memory_scope=scope)
+            if active and active.get("source_execution_id"):
+                details["execution_id"] = active["source_execution_id"]
+        except Exception:
+            logger.debug("Could not resolve the session for a retraction", exc_info=True)
+    return details or None
 
 
 def retract_memory(record_id: str, reason: Optional[str] = None, retracted_by: Optional[str] = None) -> bool:

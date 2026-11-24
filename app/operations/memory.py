@@ -4,7 +4,7 @@ import re
 from dataclasses import dataclass
 from typing import Any, Optional
 
-from app.models.enums import MEMORY_CLASSES, SOURCE_KINDS
+from app.models.enums import HUMAN_SOURCE_KINDS, MEMORY_CLASSES, SOURCE_KINDS
 from app.security.effective_authority import EffectiveAuthority
 from app.security.pii_detector import contains_pii
 from app.services import audit_service, memory_service, workspace_sync_service
@@ -118,6 +118,8 @@ def fetch_memory_by_ids(ids: Any, ctx: EffectiveAuthority, *, view: Optional[str
     found = {r["id"] for r in records}
     if view != "full":
         records = [memory_service.lean_record(r) for r in records]
+    else:
+        records = memory_service.with_set_by(records)
     memory_service.record_recall(list(found))
     audit_service.write_event(
         actor_type=ctx.actor_type,
@@ -139,7 +141,6 @@ def fetch_memory_by_ids(ids: Any, ctx: EffectiveAuthority, *, view: Optional[str
 # human sessions by validate_source_kind_authority — anything else claiming one
 # of these is the kind of input the ranking cannot reason about without
 # impersonation.
-HUMAN_SOURCE_KINDS = frozenset({"operator_authored", "human_direct"})
 
 
 def validate_source_kind_authority(

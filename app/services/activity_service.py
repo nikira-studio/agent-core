@@ -1337,7 +1337,7 @@ def get_active_activity_for_agent(
             f"""
             SELECT id, agent_id, user_id, assigned_agent_id, reassigned_from_agent_id,
                    task_description, task_note, task_result, status, memory_scope, started_at, updated_at,
-                   heartbeat_at, ended_at, metadata_json
+                   heartbeat_at, ended_at, metadata_json, source_execution_id
             FROM agent_activity
             WHERE {" AND ".join(conditions)}
             ORDER BY updated_at DESC

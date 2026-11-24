@@ -2,6 +2,17 @@
 
 Notable changes to Agent Core are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- **Sessions are visible as sessions.** Activity lists and records now name the session behind them (`session` on compact rows; `source_execution_id` and `host_session_ref` on full rows). The session context tags open and recent work with a short session id and says when another session of the same agent was active in the workspace in the last 30 minutes.
+- **A record shows who set it.** Search and get results carry `set_by`: `person` when someone signed in to the dashboard wrote that version, `agent:<name>` when an agent did, with `session` when the agent passed its `execution_id`. An agent that replaces a person's record writes its own version, which names the person's version it replaced (`replaces_person_set`); the person's version stays in the record's history. A retraction shows who made it (`by_person`) and, for an agent, from which session.
+
+### Changed
+
+- The MCP server's instructions now say that a session that was resumed, woken by a queued message or running in the background cannot assume a person is watching it, and that no agent records a person's choice or approval unless they gave it. The memory_write text says to start each record with a sentence that stands on its own. The Codex setup notes explain how to message a Codex thread.
+
 ## [1.4.0] - 2026-11-19
 
 ### Added

@@ -224,6 +224,12 @@ The Activity dashboard reports execution linkage for workspace activities over t
 
 The durable change log does not replace memory or activities. It tells a session which source records changed. Agent Core retains change rows for a bounded period, so an expired cursor returns `cursor_reset: true` and a recent bootstrap instead of pretending that no changes occurred.
 
+### Sessions and who set a record
+
+Every time one of your tools starts a session, Agent Core gives that session an id. Activity lists, the session context and records show it, so two sessions of the same agent are no longer one blur. When another session of the same agent was active in the workspace in the last 30 minutes, the session context says so.
+
+A record shows who set that version of it: `person` when someone signed in to the dashboard wrote it, `agent:<name>` when an agent did. Agent Core refuses the person label from an agent, so an agent cannot claim it. An agent can still replace a record that a person wrote. The new version is the agent's, it names the person's version it replaced (`replaces_person_set`), and the person's version stays in the record's history. A retraction shows who made it and, for an agent, from which session.
+
 ---
 
 ## 5. Credentials

@@ -185,6 +185,8 @@ async def search_memory(
         # Lean by default; see MEMORY_RESULT_FIELDS for what a result keeps.
         if body.view != "full":
             records = [memory_service.lean_record(r) for r in records]
+        else:
+            records = memory_service.with_set_by(records)
 
         embedding_status = await asyncio.to_thread(
             embedding_service.safe_backend_status
@@ -367,7 +369,9 @@ async def retract_memory(
         resource_type="memory_record",
         resource_id=record_id,
         result="success",
-        details={"reason": reason[:300]} if isinstance(reason, str) and reason.strip() else None,
+        details=memory_service.retraction_details(
+            reason, ctx.agent_id, ctx.user_id, record["scope"]
+        ),
     )
 
     return success_response({"message": "Memory record retracted"})
@@ -549,7 +553,7 @@ def get_memory_record(
 
     if record.get("record_status") == "retracted":
         record = {**record, "retraction": memory_service.retraction_traces([record_id]).get(record_id)}
-    return success_response({"record": record})
+    return success_response({"record": {**record, **memory_service.set_by_fields(record)}})
 
 
 @router.get("/{record_id}/chain")

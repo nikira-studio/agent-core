@@ -34,6 +34,10 @@ SOURCE_KINDS = (
     "external_import",
 )
 
+# Kinds only a signed-in person can write: Core refuses them from an agent, so a record with one of these was
+# written by a person. Every other kind is something an agent reported.
+HUMAN_SOURCE_KINDS = frozenset({"operator_authored", "human_direct"})
+
 RECORD_STATUSES = ("active", "superseded", "retracted")
 
 ACTIVITY_STATUSES = (
