@@ -100,7 +100,8 @@ def _attention(conn, scope: str, agent_id: str) -> list[dict]:
     return [
         dict(r)
         for r in conn.execute(
-            """SELECT id, agent_id, task_description, task_note, status, updated_at, handoff_json
+            """SELECT id, agent_id, task_description, task_note, status, updated_at, handoff_json,
+                   source_execution_id
             FROM agent_activity
             WHERE memory_scope = ? AND assigned_agent_id = ?
               AND status IN ('active', 'stale', 'blocked')
@@ -113,7 +114,7 @@ def _attention(conn, scope: str, agent_id: str) -> list[dict]:
 def _recent(conn, scope: str, exclude_ids: set[str]) -> list[dict]:
     rows = conn.execute(
         """SELECT id, agent_id, task_description, task_note, task_result, status, handoff_json,
-                  COALESCE(ended_at, updated_at) AS at, updated_at
+                  COALESCE(ended_at, updated_at) AS at, updated_at, source_execution_id
         FROM agent_activity
         WHERE memory_scope = ? AND (status IN ('completed', 'blocked')
               OR (status = 'cancelled' AND json_valid(handoff_json)
@@ -210,7 +211,8 @@ def _needs_human(conn, scope: str, agent_id: str) -> list[dict]:
     (a few more), so the agent always sees what it asked for and can resolve
     or restate it.
     """
-    base = """SELECT id, agent_id, assigned_agent_id, task_description, handoff_json, updated_at
+    base = """SELECT id, agent_id, assigned_agent_id, task_description, handoff_json, updated_at,
+                   source_execution_id
             FROM agent_activity
             WHERE memory_scope = ? AND status IN ('blocked', 'completed', 'active', 'stale')
               AND json_valid(handoff_json)
@@ -223,6 +225,41 @@ def _needs_human(conn, scope: str, agent_id: str) -> list[dict]:
     ).fetchall()
     merged = {r["id"]: dict(r) for r in [*rows, *own]}
     return sorted(merged.values(), key=lambda r: r["updated_at"] or "", reverse=True)
+
+
+def _session_tag(activity: dict, execution_id: str) -> str:
+    """Which session wrote an activity, in a few characters: two sessions of one agent look alike otherwise."""
+    session = activity.get("source_execution_id")
+    if not session:
+        return ""
+    return f" [session {session[:8]}{', this one' if session == execution_id else ''}]"
+
+
+def _other_sessions(conn, scope: str, agent_id: str, user_id: str, execution_id: str) -> list[dict]:
+    """Other sessions of this agent seen in this workspace lately: live ones, newest first."""
+    from datetime import timedelta
+
+    from app.config import settings
+    from app.time_utils import utc_now
+
+    cutoff = (utc_now() - timedelta(minutes=settings.EXECUTION_STALE_MINUTES)).isoformat()
+    rows = conn.execute(
+        """SELECT id, host_session_ref, started_at, last_seen_at FROM agent_executions
+        WHERE agent_id = ? AND user_id = ? AND memory_scope = ? AND id != ?
+          AND status = 'active' AND last_seen_at >= ?
+        ORDER BY last_seen_at DESC LIMIT 5""",
+        (agent_id, user_id, scope, execution_id, cutoff),
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def _minutes_ago(stamp: str) -> int:
+    from app.time_utils import parse_utc_datetime, utc_now
+
+    try:
+        return max(0, int((utc_now() - parse_utc_datetime(stamp)).total_seconds() // 60))
+    except Exception:
+        return 0
 
 
 def _render(scope: str, execution_id: str, parts: dict, limits: dict) -> str:
@@ -239,6 +276,16 @@ def _render(scope: str, execution_id: str, parts: dict, limits: dict) -> str:
         "workspace: use an item only when it bears on what the user asks, and do not volunteer the rest.",
     ]
 
+    others = parts.get("other_sessions") or []
+    if others:
+        lines += ["", f"## Other sessions of {parts['agent_id']} in this workspace ({len(others)})"]
+        for other in others:
+            lines.append(f"- session {other['id'][:8]}, last seen {_minutes_ago(other['last_seen_at'])} min ago")
+        lines.append(
+            "They may be working on the same things: read the open work below before you start, "
+            "and do not assume one person is watching all of them."
+        )
+
     waiting = parts.get("needs_human") or []
     if waiting:
         lines += ["", "## Waiting on a person"]
@@ -247,7 +294,8 @@ def _render(scope: str, execution_id: str, parts: dict, limits: dict) -> str:
             yours = activity.get("assigned_agent_id") == parts["agent_id"]
             own += yours
             lines.append(
-                f"- {activity['id']} ({activity['agent_id']}{', yours' if yours else ''}): "
+                f"- {activity['id']} ({activity['agent_id']}{', yours' if yours else ''})"
+                f"{_session_tag(activity, execution_id)}: "
                 f"{_one_line(_handoff(activity).get('needs_human'), 240)}"
             )
         if own:
@@ -266,7 +314,7 @@ def _render(scope: str, execution_id: str, parts: dict, limits: dict) -> str:
             if steps:
                 note = "next: " + _one_line("; ".join(steps), 240)
             lines.append(
-                f"- [{activity['status']}] {activity['id']}{owner}: "
+                f"- [{activity['status']}] {activity['id']}{owner}{_session_tag(activity, execution_id)}: "
                 f"{_one_line(activity['task_description'], 200)}" + (f" — last note: {note}" if note else "")
             )
             outcome = _ask_outcome(activity)
@@ -285,7 +333,8 @@ def _render(scope: str, execution_id: str, parts: dict, limits: dict) -> str:
                 else ""
             )
             lines.append(
-                f"- {str(activity['at'])[:10]} {activity['agent_id']} {activity['status']}{later}: "
+                f"- {str(activity['at'])[:10]} {activity['agent_id']} {activity['status']}{later}"
+                f"{_session_tag(activity, execution_id)}: "
                 f"{_one_line(activity['task_description'], 160)}"
                 + (f" → {_one_line(outcome, detail_limit)}" if outcome and detail_limit else "")
             )
@@ -446,6 +495,7 @@ def build_session_context(
         attention_ids = {a["id"] for a in attention}
         recent = _recent(conn, scope, attention_ids)
         needs_human = _needs_human(conn, scope, agent_id)
+        other_sessions = _other_sessions(conn, scope, agent_id, user_id, execution["execution_id"])
     shown_activity_ids = attention_ids | {a["id"] for a in recent}
     changes, changes_truncated = _changes(scope, agent_id, shown_activity_ids)
     # A record that just changed is already listed under the changes; the index
@@ -456,6 +506,7 @@ def build_session_context(
 
     parts = {
         "agent_id": agent_id,
+        "other_sessions": other_sessions,
         "needs_human": needs_human,
         "attention": attention,
         "recent": recent,

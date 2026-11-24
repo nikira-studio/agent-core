@@ -126,12 +126,38 @@ def get_activity(activity_id: str) -> Optional[dict]:
             """
             SELECT id, agent_id, user_id, assigned_agent_id, reassigned_from_agent_id,
                    task_description, task_note, task_result, status, memory_scope, started_at, updated_at,
-                   heartbeat_at, ended_at, metadata_json, handoff_json, handoff_requested_at, handoff_resolved_at
+                   heartbeat_at, ended_at, metadata_json, handoff_json, handoff_requested_at, handoff_resolved_at,
+                   source_execution_id
             FROM agent_activity WHERE id = ?
             """,
             (activity_id,),
         ).fetchone()
-        return dict(row) if row else None
+        if not row:
+            return None
+        return attach_sessions(conn, [dict(row)])[0]
+
+
+def attach_sessions(conn, activities: list[dict]) -> list[dict]:
+    """Name the session behind each activity.
+
+    An activity written with a session's execution_id carries `source_execution_id`; the session
+    start hook also gave Core the tool's own id for that session, returned here as
+    `host_session_ref`, so two sessions of one agent can be told apart. Activities written without
+    an execution_id have neither.
+    """
+    ids = sorted({a.get("source_execution_id") for a in activities if a.get("source_execution_id")})
+    refs: dict = {}
+    if ids:
+        marks = ", ".join("?" for _ in ids)
+        refs = {
+            r["id"]: r["host_session_ref"]
+            for r in conn.execute(
+                f"SELECT id, host_session_ref FROM agent_executions WHERE id IN ({marks})", ids
+            ).fetchall()
+        }
+    for activity in activities:
+        activity["host_session_ref"] = refs.get(activity.get("source_execution_id"))
+    return activities
 
 
 # Statuses whose needs_human request counts as open: the same ones session
@@ -846,7 +872,7 @@ def list_activities(
             """,
             params,
         ).fetchall()
-        return [dict(row) for row in rows]
+        return attach_sessions(conn, [dict(row) for row in rows])
 
 
 def list_attention_activities(
@@ -899,7 +925,8 @@ def list_attention_activities(
 ACTIVITY_COLUMNS = (
     "id, agent_id, user_id, assigned_agent_id, reassigned_from_agent_id, "
     "task_description, task_note, task_result, status, memory_scope, started_at, "
-    "updated_at, heartbeat_at, ended_at, metadata_json, handoff_json, handoff_resolved_at"
+    "updated_at, heartbeat_at, ended_at, metadata_json, handoff_json, handoff_resolved_at, "
+    "source_execution_id"
 )
 
 # Per-field preview lengths for compact activity rows. A list of 50 activities
@@ -939,6 +966,11 @@ def compact_activity(activity: dict) -> dict:
     }
     if activity.get("assigned_agent_id") not in (None, activity.get("agent_id")):
         row["assigned_agent_id"] = activity["assigned_agent_id"]
+    if activity.get("source_execution_id"):
+        row["session"] = {
+            "execution_id": activity["source_execution_id"],
+            "host_session_ref": activity.get("host_session_ref"),
+        }
     for field in ("task_description", "task_note", "task_result"):
         value = _preview(activity.get(field), COMPACT_PREVIEW_CHARS[field])
         if value:
@@ -1031,7 +1063,7 @@ def search_activities(
             """,
             params,
         ).fetchall()
-        return [dict(row) for row in rows]
+        return attach_sessions(conn, [dict(row) for row in rows])
 
 
 def count_activities(
