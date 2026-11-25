@@ -394,7 +394,8 @@ def test_connect_is_three_steps_and_a_chosen_tool_gets_only_its_own_pieces(integ
     codex_only = _build_mcp_json("https://core.test", "K", tool="codex")
     assert codex_only in full and "# Claude Code" not in codex_only and "mcpServers" not in codex_only
     assert "# Codex CLI" not in _build_mcp_json("https://core.test", "K", tool="claude_code")
-    assert '"serverUrl"' in _build_mcp_json("https://core.test", "K", tool="antigravity")
+    antigravity = _build_mcp_json("https://core.test", "K", tool="antigravity")
+    assert '"url": "https://core.test/mcp"' in antigravity and '"serverUrl"' not in antigravity and '"type"' not in antigravity
     assert [t[0] for t in SETUP_TOOLS] == ["claude_code", "codex", "cursor", "windsurf", "antigravity", "generic_mcp"]
 
 
@@ -672,3 +673,12 @@ def test_the_by_hand_command_in_the_guide_pastes_and_runs(tmp_path):
     event = _json.loads(subprocess.run(["bash", "-c", echo], capture_output=True, text=True, cwd=tmp_path).stdout)
     assert event["hook_event_name"] == "SessionStart" and event["session_id"] == "try-1" and event["cwd"] == str(tmp_path)
     assert "```powershell" in doc.split("**Checking it.**", 1)[1]
+
+
+def test_the_connect_page_shows_the_hook_step_for_antigravity_only(integrations_client):
+    base = "/integrations?user_id=alex&workspace_id=agent-core&agent_id=claude-code"
+    chosen = integrations_client.get(base + "&target=antigravity").text.split('id="tool-step"', 1)[1].split('id="check-step"', 1)[0]
+    assert "Add the session start hook" in chosen and ".gemini" in chosen and "hooks.json" in chosen
+    assert "commandWindows" not in chosen and "Trust it once" not in chosen
+    cursor = integrations_client.get(base + "&target=cursor").text.split('id="tool-step"', 1)[1].split('id="check-step"', 1)[0]
+    assert "Add the session start hook" not in cursor

@@ -241,6 +241,7 @@ def _agent_setup_output_options(target=None):
         ("verification", "Verification Prompt", f"{APP_SLUG}-verification.md"),
         ("claude_code_hook", "Claude Code Hook", f"{APP_SLUG}-claude-code-hook.md"),
         ("codex_hook", "Codex Hook", f"{APP_SLUG}-codex-hook.md"),
+        ("antigravity_hook", "Antigravity Hook", f"{APP_SLUG}-antigravity-hook.md"),
     ]
 
 
@@ -294,7 +295,7 @@ SETUP_TOOLS = (
      "instructions", "Setup guide", f"{APP_SLUG}-instructions.md",
      "Read this yourself: which output to use, where to put it, and when to generate a one-time key."),
     ("antigravity", "Antigravity",
-     "Add this to your MCP settings. It uses <code>serverUrl</code> instead of <code>url</code>. Restart Antigravity if it does not appear.",
+     "Add this to <code>mcp_config.json</code> in the <code>.gemini/config</code> folder of your user folder. Restart Antigravity if it does not appear.",
      "instructions", "Setup guide", f"{APP_SLUG}-instructions.md",
      "Read this yourself: which output to use, where to put it, and when to generate a one-time key."),
     ("generic_mcp", "Other MCP tool",
@@ -651,6 +652,10 @@ HOOK_SCRIPTS = {
     "codex/agent_core_hook.py": Path(__file__).resolve().parents[2]
     / "integrations"
     / "codex"
+    / "agent_core_hook.py",
+    "antigravity/agent_core_hook.py": Path(__file__).resolve().parents[2]
+    / "integrations"
+    / "antigravity"
     / "agent_core_hook.py",
 }
 
@@ -1227,7 +1232,7 @@ def _agent_setup_extra_js(base_url):
 # verification prompt without saying so, so a mistyped type looked like it had worked.
 KNOWN_OUTPUT_TYPES = frozenset({
     "instructions", "session", "claude_md", "agents_md", "assistants_md", "mcp_json", "mcp_tool",
-    "cursor_mcp_json", "windsurf_mcp_json", "env", "claude_code_hook", "codex_hook", "verification",
+    "cursor_mcp_json", "windsurf_mcp_json", "env", "claude_code_hook", "codex_hook", "antigravity_hook", "verification",
 })
 
 KEY_BEARING_OUTPUTS = frozenset(
@@ -1345,6 +1350,9 @@ def _build_agent_setup_output_for(
     elif output_type == "codex_hook":
         label = "Codex Hook"
         content = _build_codex_hook(base_url)
+    elif output_type == "antigravity_hook":
+        label = "Antigravity Hook"
+        content = _build_antigravity_hook(base_url)
     else:
         label = "Verification Prompt"
         content = _build_verification_prompt(workspace_scope or agent_scope)
@@ -1408,7 +1416,7 @@ def _build_instructions(
         scope_guide = f"{workspace_context_line}\n- Use `{user_scope}` only for stable preferences or personal working context.\n- Use `{agent_scope}` only for private scratch context."
         tool_tips = f"""## Antigravity Tips
 
-- Add the MCP config using the `serverUrl` field instead of `url`.
+- Add the MCP config to `~/.gemini/config/mcp_config.json`; `url` and `headers` are the fields it needs.
 - Restart Antigravity after adding MCP servers if the config does not appear immediately.
 - Set `{ENV_PREFIX}API_KEY` in your shell environment before starting an Antigravity session.
 """
@@ -1656,6 +1664,15 @@ _HOOK_CLIENTS = {
         "settings": "hooks.json",
         "output_type": "codex_hook",
     },
+    "antigravity": {
+        "name": "Antigravity",
+        "slug": "antigravity",
+        "dot": ".gemini",
+        "script_dir": ".gemini/agent-core",
+        "settings_dir": ".gemini/config",
+        "settings": "hooks.json",
+        "output_type": "antigravity_hook",
+    },
 }
 
 _WINDOWS_USER_FOLDER = "C:/Users/YOU"
@@ -1673,12 +1690,15 @@ def _hook_steps(client_key, base_url):
     """The install, register, trust, map and try-it text for one tool, for macOS/Linux and Windows."""
     c = _HOOK_CLIENTS[client_key]
     name, slug, dot = c["name"], c["slug"], c["dot"]
+    # Where the script goes, and where the tool reads its hook registration (Antigravity keeps the second in .gemini/config).
+    script_dir = c.get("script_dir", f"{dot}/hooks")
+    settings_dir = c.get("settings_dir", dot)
     script_url = f"{base_url}/integrations/hooks/{slug}/agent_core_hook.py"
-    unix_script = f"~/{dot}/hooks/agent_core_hook.py"
+    unix_script = f"~/{script_dir}/agent_core_hook.py"
     # Forward slashes: valid in Windows paths, and nothing to double in JSON.
-    win_script = f"{_WINDOWS_USER_FOLDER}/{dot}/hooks/agent_core_hook.py"
-    win_env_script = rf"$env:USERPROFILE\{dot}\hooks\agent_core_hook.py"
-    win_env_hooks = rf"$env:USERPROFILE\{dot}\hooks.json"
+    win_script = f"{_WINDOWS_USER_FOLDER}/{script_dir}/agent_core_hook.py"
+    win_env_script = "$env:USERPROFILE\\" + script_dir.replace("/", "\\") + "\\agent_core_hook.py"
+    win_env_hooks = "$env:USERPROFILE\\" + settings_dir.replace("/", "\\") + "\\hooks.json"
     unix_command = f"python3 {unix_script}"
     matcher = "startup|clear|compact|resume"
 
@@ -1710,6 +1730,37 @@ def _hook_steps(client_key, base_url):
         requirements = (
             "Python 3 (`python3`; on Windows `python` or `py -3`) and step a done. "
             "The hook reads the key from the MCP entry, so a new key in that entry needs no change here."
+        )
+        trust = None
+        trust_windows = None
+    elif client_key == "antigravity":
+        # Hook groups are top-level keys of hooks.json, so adding ours never disturbs a group the person already has.
+        group = APP_SLUG
+        unix_hook = {
+            group: {
+                "SessionStart": [{"type": "command", "command": unix_command, "timeout": 15}],
+                "Stop": [{"type": "command", "command": unix_command, "timeout": 10}],
+            }
+        }
+        win_command = f'python "{win_script}"'
+        win_hook = {
+            group: {
+                "SessionStart": [{"type": "command", "command": win_command, "timeout": 15}],
+                "Stop": [{"type": "command", "command": win_command, "timeout": 10}],
+            }
+        }
+        unix_where = (
+            f"Save this as `~/{settings_dir}/hooks.json`. If the file already exists, add the `{group}` entry to it instead of replacing the file. "
+            "For one project only, put it in `.agents/hooks.json` at the project root. "
+            "Hooks written in `settings.json` are not loaded."
+        )
+        win_where = (
+            f"The command creates `hooks.json` in the `{settings_dir.replace('/', chr(92))}` folder of your user folder if there is none. "
+            f"If you already have one, copy the `{group}` entry from the command into it instead."
+        )
+        requirements = (
+            "Python 3 (`python3`; on Windows `python` or `py -3`) and step a done. "
+            "The hook reads the key from `mcp_config.json`, so a new key in that entry needs no change here."
         )
         trust = None
         trust_windows = None
@@ -1762,9 +1813,17 @@ def _hook_steps(client_key, base_url):
             'if (Test-Path $f) { Write-Host "hooks.json already exists: add the SessionStart and Stop entries to it by hand" } '
             "else { [IO.File]::WriteAllText($f, $json) }"
         )
-    unix_install = f"mkdir -p ~/{dot}/hooks\ncurl -fsSL {script_url} -o {unix_script}"
+    if client_key == "antigravity":
+        win_create_cmd = (
+            f'$f = "{win_env_hooks}"\n'
+            "$json = @'\n" + json.dumps(win_hook, indent=2) + "\n'@\n"
+            f"$json = $json.Replace('{_WINDOWS_USER_FOLDER}', ($env:USERPROFILE -replace '\\\\', '/'))\n"
+            f'if (Test-Path $f) {{ Write-Host "hooks.json already exists: add the {APP_SLUG} entry to it by hand" }} '
+            "else { [IO.File]::WriteAllText($f, $json) }"
+        )
+    unix_install = f"mkdir -p ~/{script_dir}\ncurl -fsSL {script_url} -o {unix_script}"
     win_install = (
-        f'New-Item -ItemType Directory -Force "$env:USERPROFILE\\{dot}\\hooks" | Out-Null\n'
+        f'New-Item -ItemType Directory -Force "$env:USERPROFILE\\{script_dir.replace("/", chr(92))}" | Out-Null\n'
         f'Invoke-WebRequest {script_url} -OutFile "{win_env_script}"'
     )
     unix_try = (
@@ -1776,6 +1835,17 @@ def _hook_steps(client_key, base_url):
         "((Get-Location).Path -replace '\\\\','/') + '\"}' | "
         f'python "{win_env_script}"'
     )
+    if client_key == "antigravity":
+        # Antigravity sends camelCase fields and has no "source".
+        unix_try = (
+            "echo '{\"hookEventName\":\"SessionStart\",\"conversationId\":\"try-1\",\"cwd\":\"'\"$PWD\"'\"}' "
+            f"| python3 {unix_script}"
+        )
+        win_try = (
+            "'{\"hookEventName\":\"SessionStart\",\"conversationId\":\"try-1\",\"cwd\":\"' + "
+            "((Get-Location).Path -replace '\\\\','/') + '\"}' | "
+            f'python "{win_env_script}"'
+        )
     mapping = (
         f"Add your project folder to the workspace: Workspaces → Edit Workspace → Repository folders, one per machine where the project lives, "
         f"written as that machine names it (on Windows, `C:\\Users\\you\\my-repo`). Admin only. "
@@ -1792,7 +1862,7 @@ def _hook_steps(client_key, base_url):
         "name": name,
         "output_type": c["output_type"],
         "intro": (
-            f"Loads the agent's {APP_NAME} context when a {name} session starts: open work, recent results with their next steps, "
+            f"Loads the agent's {APP_NAME} context when {'an' if name[0] in 'AEIOU' else 'a'} {name} session starts: open work, recent results with their next steps, "
             "changes since its last session, key records."
             + " It also asks the agent once to record a handoff if a task is left open."
         ),
@@ -1808,8 +1878,12 @@ def _hook_steps(client_key, base_url):
         "mapping_rules": mapping_rules,
         "try": {"unix": ("bash", unix_try), "windows": ("powershell", win_try)},
         "try_note": (
-            "It prints one line of JSON whose `additionalContext` is the session context, or nothing when no workspace matches the folder. "
-            f"This opens a small session record in {APP_NAME}, which is harmless."
+            (
+                "It prints one line of JSON whose `injectSteps` carry the session context, or nothing when no workspace matches the folder. "
+                if client_key == "antigravity"
+                else "It prints one line of JSON whose `additionalContext` is the session context, or nothing when no workspace matches the folder. "
+            )
+            + f"This opens a small session record in {APP_NAME}, which is harmless."
         ),
     }
 
@@ -1846,13 +1920,29 @@ def _hook_markdown(client_key, base_url):
         parts.append(f"## {next(n)}. Trust it once\n\n{s['trust']} On Windows: {s['trust_windows']}\n")
     parts.append(f"## {next(n)}. Map your project folder to a workspace\n\n{s['mapping']}\n")
     parts.append(f"## Try it by hand\n\nFrom a project folder you mapped, feed the hook the event {name} sends and read what it prints:\n\n{pair('try')}\n{s['try_note']}\n")
+    antigravity = client_key == "antigravity"
     behavior = [
         f"- {s['mapping_rules']}",
         "- Session context runs on `startup`, `clear`, `compact` and `resume`. A resumed session gets it only if it never received context for its workspace "
         "(for example the folder was not mapped yet)."
         + ("" if claude else " A forked session keeps its parent's context."),
     ]
-    if claude:
+    if antigravity:
+        behavior = [
+            f"- {s['mapping_rules']}",
+            "- Session context runs once, when a conversation starts (Antigravity's SessionStart). Whether Antigravity runs it again when a "
+            "conversation is resumed is not documented; the context is also one `session_context` call away.",
+            "- The context arrives as a system message that stays in the conversation. It is capped at 10,000 characters; set `AGENT_CORE_CONTEXT_CHARS` to use less.",
+            "- The Stop entry asks the agent once per task to record a handoff. It stays silent when the turn was cancelled, failed or cut off, "
+            "while background work is still running, and while Antigravity is already continuing because of a stop hook. "
+            "Set `AGENT_CORE_HANDOFF_NUDGE=0` to turn it off.",
+            "- Only your own `~/.gemini/config/mcp_config.json` is read for the URL and key, never a workspace's, and a redirect from the server is never followed, "
+            "so a cloned project cannot make the hook send your key anywhere. "
+            f"A project that keeps its own {APP_NAME} entry should set `AGENT_CORE_URL` and `AGENT_CORE_API_KEY` in the environment instead.",
+            "- With no entry in `mcp_config.json` the hook says so in a project folder, to you only: the model is sent nothing.",
+            "- What the hook delivers is information for the agent. A handoff in it is never a person's approval of anything.",
+        ]
+    elif claude:
         behavior += [
             "- The handoff request blocks a stop at most once per task, and never while Claude is already continuing because of a stop hook. Set `AGENT_CORE_HANDOFF_NUDGE=0` to turn it off.",
             "- Output stays under Claude Code's 10,000-character limit; set `AGENT_CORE_CONTEXT_CHARS` to use less.",
@@ -1880,6 +1970,10 @@ def _build_claude_code_hook(base_url):
 
 def _build_codex_hook(base_url):
     return _hook_markdown("codex", base_url)
+
+
+def _build_antigravity_hook(base_url):
+    return _hook_markdown("antigravity", base_url)
 
 
 def _mcp_config_sections(base_url, api_key=None):
@@ -1920,8 +2014,7 @@ def _mcp_config_sections(base_url, api_key=None):
         {
             "mcpServers": {
                 APP_SLUG: {
-                    "type": "http",
-                    "serverUrl": f"{base_url}/mcp",
+                    "url": f"{base_url}/mcp",
                     "headers": {
                         "Authorization": f"Bearer {key}",
                     },
@@ -2023,7 +2116,7 @@ def _get_destination_guidance(target, output_type):
     elif output_type == "assistants_md":
         return "Paste this into the assistant's own onboarding or instruction field. It is meant for assistant-style agents that manage their own MCP configuration. Use the one-time key button here when you want the prompt to include a fresh key."
     elif output_type == "mcp_json":
-        return f"Use the section that matches your tool. For Claude Code, run the <code>claude mcp add</code> command or save the JSON as <code>.mcp.json</code> in your repo root. Antigravity uses the same MCP shape but expects <code>serverUrl</code> instead of <code>url</code>. The key decides which {APP_NAME} agent is active."
+        return f"Use the section that matches your tool. For Claude Code, run the <code>claude mcp add</code> command or save the JSON as <code>.mcp.json</code> in your repo root. Antigravity takes <code>url</code> and <code>headers</code> in <code>~/.gemini/config/mcp_config.json</code>. The key decides which {APP_NAME} agent is active."
     elif output_type == "env":
         return "Optional. Paste these into your shell profile (<code>~/.bashrc</code>, <code>~/.zshrc</code>) or tool environment only if you want the tool to read values from environment variables. This does not configure MCP by itself."
     elif output_type == "instructions":
@@ -2034,6 +2127,8 @@ def _get_destination_guidance(target, output_type):
         return "Follow these steps on each machine that runs Claude Code. The hook contains no key; it reuses the MCP configuration."
     elif output_type == "codex_hook":
         return "Follow these steps on each machine that runs Codex. The hook contains no key; it reuses the MCP configuration, and you trust it once in Codex with /hooks."
+    elif output_type == "antigravity_hook":
+        return "Follow these steps on each machine that runs Antigravity. The hook contains no key; it reuses the MCP configuration."
     elif output_type == "verification":
         return "Paste this into your connected agent after setup. It writes, finds and closes one note in a scope the agent can write to, and reports whether each step worked."
     return ""
