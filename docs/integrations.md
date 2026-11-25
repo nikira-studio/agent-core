@@ -680,7 +680,7 @@ A hook is a small script your tool runs at set moments in a session. Agent Core 
 
 A handoff that reaches an agent this way is information, not a person's approval of anything.
 
-The Connect page labels its steps a (the MCP entry), b (the instructions file) and c (the hook). It generates the install and registration steps (step c once you choose the tool, and the same text as a tab under **Other outputs**); the script itself is served at `/integrations/hooks/`. The hook holds no key: it reads the one in the tool's own MCP entry (Claude Code: the project's `.mcp.json` or `~/.claude.json`, or `$CLAUDE_CONFIG_DIR/.claude.json`; Codex: `~/.codex/config.toml` or `$CODEX_HOME/config.toml`; Antigravity: `~/.gemini/config/mcp_config.json`). A hook you registered before one of its entries existed needs that entry added: for Codex the Stop entry (then trust it once in `/hooks`), for Antigravity the PreInvocation entry and a fresh download of the script.
+The Connect page labels its steps a (the MCP entry), b (the instructions file) and c (the hook). It generates the install and registration steps (step c once you choose the tool, and the same text as a tab under **Other outputs**); the script itself is served at `/integrations/hooks/`. The hook holds no key: it reads the one in the tool's own MCP entry (Claude Code: the project's `.mcp.json` or `~/.claude.json`, or `$CLAUDE_CONFIG_DIR/.claude.json`; Codex: `~/.codex/config.toml` or `$CODEX_HOME/config.toml`; Antigravity: `~/.gemini/config/mcp_config.json`). A Codex hook registered before its Stop entry existed needs that entry added (then trust it once in `/hooks`).
 
 **Where the session start hook runs** (checked November 2026):
 
@@ -721,7 +721,7 @@ Where a hook does not run, the instructions file (CLAUDE.md or AGENTS.md) still 
    }
    ```
 
-   The three entries are the three jobs above, in order: load the context when a conversation starts, check for new handoffs before each model call (at most 2 seconds, and silent when there is nothing new), and ask for a handoff before an open task is left. If you installed the hook before the PreInvocation entry existed, download the script again (step 2), because an older copy ignores the new entry, and add that one line to your `agent-core` entry yourself: the Connect page's command never changes a `hooks.json` you already have.
+   The three entries are the three jobs above, in order: load the context when a conversation starts, check for new handoffs before each model call (at most 2 seconds, and silent when there is nothing new), and ask for a handoff before an open task is left.
 4. Map your project folder to a workspace. In the dashboard, open **Workspaces**, edit the workspace, and add the folder under Repository folders (admin only), written as your machine names it. Then check that the agent can read the workspace (**Agents**, edit the agent, Advanced access, Can Read From). "Which workspace a session gets" above has the details.
 5. Try it by hand from that folder. Antigravity names its fields in camelCase (`hookEventName`, `conversationId`), so the test uses those names:
 
