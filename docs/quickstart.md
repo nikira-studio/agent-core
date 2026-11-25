@@ -47,11 +47,13 @@ Open `http://localhost:3500`. You'll see a sign-in screen that offers to create 
 
 ### Option B: Local Python
 
+This option runs on Linux and macOS. It does not run on Windows itself, because Agent Core uses a file lock that Windows does not have. On Windows, use Option A (Docker), or run these commands inside WSL (Windows Subsystem for Linux).
+
 ```bash
 git clone https://github.com/nikira-studio/agent-core agent-core
 cd agent-core
 python3 -m venv .venv      # python3 must be 3.11 or 3.12; use python3.11 or python3.12 if your default is different
-source .venv/bin/activate      # Windows: .venv\Scripts\activate
+source .venv/bin/activate
 pip install -r requirements.txt
 uvicorn app.main:app --reload --port 3500   # run it from the project folder, the one that contains app/
 ```

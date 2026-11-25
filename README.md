@@ -39,13 +39,15 @@ Docker starts Agent Core in the background on port 3500. Run `docker compose ps`
 
 ### Without Docker
 
+This route runs on Linux and macOS. It does not run on Windows itself, because Agent Core uses a file lock that Windows does not have. On Windows, use the Docker install above, or run the commands below inside WSL (Windows Subsystem for Linux).
+
 You need Git and Python 3.11 or 3.12.
 
 ```bash
 git clone https://github.com/nikira-studio/agent-core agent-core
 cd agent-core
 python3 -m venv .venv                # a private Python environment for this project
-source .venv/bin/activate        # on Windows: .venv\Scripts\activate
+source .venv/bin/activate
 pip install -r requirements.txt
 uvicorn app.main:app --port 3500
 ```
