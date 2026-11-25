@@ -9,6 +9,10 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 ENV = {"AGENT_CORE_URL": "http://core", "AGENT_CORE_API_KEY": "k"}
+# Antigravity's documentation says a hook must print a JSON object. When there is nothing to say the hook prints
+# an empty object, or for Stop (whose "decision" is documented as required) a decision that lets the agent stop.
+NOTHING = "{}"
+ALLOW_STOP = json.dumps({"decision": "allow"})
 
 
 def _load(*parts):
@@ -127,7 +131,7 @@ def test_only_a_string_context_is_passed_on_and_it_is_capped(monkeypatch):
     event = {"hookEventName": "SessionStart", "conversationId": "c", "cwd": "/repo"}
     for bad in (["x"], 5, {"a": 1}, ""):
         monkeypatch.setattr(hook, "post", lambda *a, _bad=bad: {"context": _bad})
-        assert _run(hook, event) == ""
+        assert _run(hook, event) == NOTHING
     monkeypatch.setattr(hook, "post", lambda *a: {"context": "x" * 50_000})
     text = json.loads(_run(hook, event))["injectSteps"][0]["systemMessage"]["systemMessage"]
     assert len(text) == hook.MAX_CONTEXT_CHARS
@@ -152,7 +156,7 @@ def test_a_notice_for_the_person_carries_nothing_for_the_model(monkeypatch, tmp_
     raw = _run(hook, event, {"AGENT_CORE_URL": "http://127.0.0.1:9", "AGENT_CORE_API_KEY": "abc\r\nX-Evil: 1"})
     assert "abc" not in raw and "X-Evil" not in raw and "unavailable" in raw
     # not configured at all, in a bare folder: silent
-    assert _run(hook, event, {}) == ""
+    assert _run(hook, event, {}) == NOTHING
 
 
 def test_no_connection_and_an_unmapped_folder_are_said_only_in_a_project_folder(monkeypatch, tmp_path):
@@ -163,11 +167,11 @@ def test_no_connection_and_an_unmapped_folder_are_said_only_in_a_project_folder(
     event = {"hookEventName": "SessionStart", "conversationId": "c", "cwd": str(project)}
     note = json.loads(_run(hook, event, {}))["injectSteps"][0]["systemMessage"]
     assert note["systemMessage"] == "" and "no connection found" in note["metadata"]["user_markdown"]
-    assert _run(hook, event, {"AGENT_CORE_NOTICES": "0"}) == ""
+    assert _run(hook, event, {"AGENT_CORE_NOTICES": "0"}) == NOTHING
     monkeypatch.setattr(hook, "post", lambda *a: {"context": "", "resolved_by": "unmatched"})
     note = json.loads(_run(hook, event))["injectSteps"][0]["systemMessage"]
     assert "no workspace this agent can read is mapped" in note["metadata"]["user_markdown"]
-    assert _run(hook, {**event, "cwd": str(tmp_path)}) == ""  # not a project folder
+    assert _run(hook, {**event, "cwd": str(tmp_path)}) == NOTHING  # not a project folder
 
 
 # --- Stop ---------------------------------------------------------------------------------------------------------
@@ -206,8 +210,8 @@ def test_stop_stays_silent_when_it_should_not_keep_the_agent_going(monkeypatch):
         {**base, "terminationReason": "TERMINAL_CUSTOM_HOOK"},
         {k: v for k, v in base.items() if k != "conversationId"},
     ):
-        assert _run(hook, event) == "", event
-    assert _run(hook, base, {**ENV, "AGENT_CORE_HANDOFF_NUDGE": "0"}) == ""
+        assert _run(hook, event) == ALLOW_STOP, event
+    assert _run(hook, base, {**ENV, "AGENT_CORE_HANDOFF_NUDGE": "0"}) == ALLOW_STOP
     assert calls == []
 
 
@@ -219,10 +223,10 @@ def test_stop_never_fails_because_core_is_unreachable_or_says_nothing(monkeypatc
         raise OSError("down")
 
     monkeypatch.setattr(hook, "post", failing)
-    assert _run(hook, event) == ""
+    assert _run(hook, event) == ALLOW_STOP
     for answer in ({"nudge": False}, {"nudge": True}, {"nudge": True, "reason": 5}, {}):
         monkeypatch.setattr(hook, "post", lambda *a, _a=answer: _a)
-        assert _run(hook, event) == ""
+        assert _run(hook, event) == ALLOW_STOP
 
 
 def test_malformed_events_exit_cleanly():
@@ -230,7 +234,7 @@ def test_malformed_events_exit_cleanly():
     for stdin in ("[]", '"text"', "{not json", "", json.dumps({"hookEventName": "PreInvocation"}), json.dumps({"hookEventName": "Other"})):
         out = io.StringIO()
         assert hook.main(stdin=io.StringIO(stdin), stdout=out, env=ENV) == 0
-        assert out.getvalue() == ""
+        assert out.getvalue() == NOTHING
 
 
 # --- the same requests as the other hooks, never leaking a key ----------------------------------------------------
@@ -327,7 +331,7 @@ def test_a_session_start_and_a_stop_against_the_real_server(test_client, agent_t
     stop = {"hookEventName": "Stop", "conversationId": "agy-1", "terminationReason": "NO_TOOL_CALL", "fullyIdle": True}
     first = json.loads(_run(hook, stop, env))
     assert first["decision"] == "continue" and first["reason"]
-    assert _run(hook, stop, env) == "", "Core asks at most once per task"
+    assert _run(hook, stop, env) == ALLOW_STOP, "Core asks at most once per task"
 
 
 # --- what the Connect page generates ------------------------------------------------------------------------------
@@ -365,3 +369,19 @@ def test_the_antigravity_preset_writes_the_current_mcp_fields():
     block = _build_mcp_json("https://core.test", "K", tool="antigravity")
     assert '"url": "https://core.test/mcp"' in block and '"Authorization": "Bearer K"' in block
     assert "serverUrl" not in block and '"type"' not in block
+
+
+def test_every_answer_is_a_json_object_even_when_there_is_nothing_to_say(monkeypatch, tmp_path):
+    hook = _hook()
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr(hook, "post", lambda *a: {})
+    for raw in ("", "[]", "{not json", json.dumps({"hookEventName": "PreInvocation"}), json.dumps({"hookEventName": "Stop"}),
+                json.dumps({"hookEventName": "SessionStart"}), json.dumps({"hookEventName": "Stop", "conversationId": "c"})):
+        for env in (ENV, {}):
+            out = io.StringIO()
+            assert hook.main(io.StringIO(raw), out, env) == 0
+            assert isinstance(json.loads(out.getvalue()), dict), (raw, env)
+    # Stop's decision is documented as required, and only "continue" keeps the agent going
+    out = io.StringIO()
+    hook.main(io.StringIO(json.dumps({"hookEventName": "Stop", "conversationId": "c"})), out, ENV)
+    assert json.loads(out.getvalue()) == {"decision": "allow"}

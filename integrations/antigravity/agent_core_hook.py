@@ -40,6 +40,9 @@ name an environment variable to send:
   AGENT_CORE_NOTICES=0  turn off the one-line notices about a folder with no
                        workspace and a project with no Agent Core connection
 
+It always prints a JSON object, as Antigravity's documentation asks of a hook: an empty one when it has nothing
+to add (Stop prints {"decision": "allow"}, because its "decision" is documented as required).
+
 It never breaks a session: any failure exits 0, at most with a one-line notice
 that never carries the key, a redirect is never followed (the key would go with
 it), and the whole run is cut off after HARD_DEADLINE_SECONDS.
@@ -265,6 +268,13 @@ def stop(event, base_url, api_key, env):
 HANDLERS = {"SessionStart": session_start, "Stop": stop}
 
 
+def nothing_to_say(name):
+    """What to print when there is nothing to add. Antigravity's documentation says a hook must print a JSON
+    object, so an empty object stands for "nothing"; Stop documents its "decision" as required and lets the agent
+    stop on any value but "continue", so it gets a decision that lets it stop."""
+    return {"decision": "allow"} if name == "Stop" else {}
+
+
 def main(stdin=sys.stdin, stdout=sys.stdout, env=os.environ):
     try:
         return _run(stdin, stdout, env)
@@ -286,26 +296,31 @@ def _run(stdin, stdout, env):
         raw = stdin.buffer.read().decode("utf-8", "replace") if hasattr(stdin, "buffer") else stdin.read()
         event = json.loads(raw)
     except ValueError:
+        json.dump({}, stdout)
         return 0
     if not isinstance(event, dict):
+        json.dump({}, stdout)
         return 0
-    handler = HANDLERS.get(event.get("hookEventName", "SessionStart"))
+    name = event.get("hookEventName", "SessionStart")
+    handler = HANDLERS.get(name)
     if handler is None:
+        json.dump({}, stdout)
         return 0
     cwd = _working_folder(event)
     base_url, bearer = resolve_connection(cwd, env)
     if not base_url:
-        # Silent unless a session starts in a project folder: there the person expects shared context.
+        # Nothing to say unless a session starts in a project folder: there the person expects shared context.
         if (
             handler is session_start
             and env.get("AGENT_CORE_NOTICES") != "0"
             and _looks_like_project(cwd)
         ):
             json.dump(_notice_step(no_connection_notice(env)), stdout)
+        else:
+            json.dump(nothing_to_say(name), stdout)
         return 0
     output = handler(event, base_url, bearer, env)
-    if output:
-        json.dump(output, stdout)
+    json.dump(output or nothing_to_say(name), stdout)
     return 0
 
 
