@@ -1739,6 +1739,8 @@ def _hook_steps(client_key, base_url):
         unix_hook = {
             group: {
                 "SessionStart": [{"type": "command", "command": unix_command, "timeout": 15}],
+                # Runs before every model call, so it waits at most 2 seconds and prints nothing unless there is news.
+                "PreInvocation": [{"type": "command", "command": unix_command, "timeout": 2}],
                 "Stop": [{"type": "command", "command": unix_command, "timeout": 10}],
             }
         }
@@ -1746,6 +1748,7 @@ def _hook_steps(client_key, base_url):
         win_hook = {
             group: {
                 "SessionStart": [{"type": "command", "command": win_command, "timeout": 15}],
+                "PreInvocation": [{"type": "command", "command": win_command, "timeout": 2}],
                 "Stop": [{"type": "command", "command": win_command, "timeout": 10}],
             }
         }
@@ -1865,6 +1868,7 @@ def _hook_steps(client_key, base_url):
             f"Loads the agent's {APP_NAME} context when {'an' if name[0] in 'AEIOU' else 'a'} {name} session starts: open work, recent results with their next steps, "
             "changes since its last session, key records."
             + " It also asks the agent once to record a handoff if a task is left open."
+            + (" It also tells the agent when another session closes a handoff in the same workspace." if client_key == "antigravity" else "")
         ),
         "requirements": requirements,
         "install": {"unix": ("bash", unix_install), "windows": ("powershell", win_install)},
@@ -1933,6 +1937,10 @@ def _hook_markdown(client_key, base_url):
             "- Session context runs once, when a conversation starts (Antigravity's SessionStart). Whether Antigravity runs it again when a "
             "conversation is resumed is not documented; the context is also one `session_context` call away.",
             "- The context arrives as a system message that stays in the conversation. It is capped at 10,000 characters; set `AGENT_CORE_CONTEXT_CHARS` to use less.",
+            "- The PreInvocation entry runs before every model call. It asks whether another session closed a handoff in this workspace since "
+            "this one started or was last told, and adds it as a system message if so. With nothing new it prints an empty object, waits at most 2 seconds "
+            "and never fails a call; each handoff arrives once. Set `AGENT_CORE_HANDOFF_NEWS=0` to turn it off. "
+            "If you registered the hook before this entry existed, add the PreInvocation entry to your `agent-core` group.",
             "- The Stop entry asks the agent once per task to record a handoff. It stays silent when the turn was cancelled, failed or cut off, "
             "while background work is still running, and while Antigravity is already continuing because of a stop hook. "
             "Set `AGENT_CORE_HANDOFF_NUDGE=0` to turn it off.",

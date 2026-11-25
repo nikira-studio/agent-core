@@ -614,6 +614,8 @@ The helper key authenticates the request. The `agent_id` must come from trusted 
 
 `POST /api/session-context/handoff-check` with `{host_session_ref}` returns `{nudge: false}` or `{nudge: true, activity_id, reason}`. It is used by the Claude Code Stop hook, and asks at most once per activity.
 
+`POST /api/session-context/new-handoffs` with `{host_session_ref}` (agent key, `coordination` permission) answers whether another session closed a handoff in the session's workspace since the session started or was last told. With nothing new it returns `{count: 0, items: [], text: ""}` and writes nothing. Otherwise it returns up to 5 handoffs, oldest first, as `{count, more, items, text}`: each item has `id`, `agent_id`, `session`, `at`, `status`, `task`, `result`, `next_steps` (up to 3) and `needs_human` (while unresolved), and `text` is a block ready to put in front of the agent that says the handoffs are information from other sessions and not a person's approval of anything. What it returns is marked delivered for that session (a row in `execution_handoff_marks` and a `handoff_news_delivered` audit event), so each handoff arrives once; `more: true` means the next call returns the rest. The session's own activities, and its agent's activities that carry no execution, are left out. The Antigravity PreInvocation hook calls it; any hook that runs before a model call can.
+
 ## Workspace synchronization
 
 These routes require agent authentication and workspace memory read access.

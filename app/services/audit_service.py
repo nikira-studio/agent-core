@@ -77,6 +77,7 @@ AUDIT_ACTIONS = (
     "context_injected",
     "memory_fetched",
     "handoff_requested",
+    "handoff_news_delivered",
     "handoff_resolved",
     "handoff_superseded",
     "credential_requested",

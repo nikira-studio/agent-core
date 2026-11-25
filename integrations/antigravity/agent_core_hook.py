@@ -1,13 +1,19 @@
 #!/usr/bin/env python3
 """Antigravity hook for Agent Core: session context in, handoff out.
 
-Register it for two events (see the Antigravity Hook output on the Integrations page);
+Register it for three events (see the Antigravity Hook output on the Integrations page);
 it reads hookEventName from the event on stdin.
 
 SessionStart: asks Agent Core for one budgeted block (standing rules, work waiting
 on a person, unfinished and handed-off work, recent results, changes since the
 agent's last session, an index of key records) and hands it to Antigravity as a
 system message, so the agent does not have to remember a startup routine.
+
+PreInvocation: before a model call, asks Agent Core whether another session closed a handoff in
+this workspace since this one started or was last told, and adds it as a system message if so. A
+session with nothing new costs one fast request and prints an empty object; any error does the same,
+so it never slows or breaks a turn. Core marks what it delivers, so each handoff arrives once.
+AGENT_CORE_HANDOFF_NEWS=0 turns it off.
 
 Stop: when the session has an open activity without a structured handoff, it keeps
 the agent going once with a request to record one. Agent Core remembers that it
@@ -60,6 +66,7 @@ import urllib.parse
 import urllib.request
 
 TIMEOUT_SECONDS = 8
+NEWS_TIMEOUT_SECONDS = 2  # PreInvocation runs before every model call: wait very little
 HARD_DEADLINE_SECONDS = 12  # under the 15s the install text registers; covers DNS and slow servers
 MAX_CONFIG_BYTES = 256 * 1024
 MAX_RESPONSE_BYTES = 1_000_000
@@ -149,14 +156,14 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
 _OPENER = urllib.request.build_opener(_NoRedirect)
 
 
-def post(base_url, api_key, path, payload):
+def post(base_url, api_key, path, payload, timeout=None):
     request = urllib.request.Request(
         f"{base_url}{path}",
         data=json.dumps(payload).encode("utf-8"),
         headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
         method="POST",
     )
-    with _OPENER.open(request, timeout=TIMEOUT_SECONDS) as response:
+    with _OPENER.open(request, timeout=timeout or TIMEOUT_SECONDS) as response:
         body = json.loads(response.read(MAX_RESPONSE_BYTES).decode("utf-8"))
     if not isinstance(body, dict) or not body.get("ok"):
         error = body.get("error") if isinstance(body, dict) else None
@@ -265,7 +272,23 @@ def stop(event, base_url, api_key, env):
     return {"decision": "continue", "reason": data["reason"]}
 
 
-HANDLERS = {"SessionStart": session_start, "Stop": stop}
+def pre_invocation(event, base_url, api_key, env):
+    if env.get("AGENT_CORE_HANDOFF_NEWS") == "0" or not event.get("conversationId"):
+        return None
+    try:
+        data = post(
+            base_url, api_key, "/api/session-context/new-handoffs",
+            {"host_session_ref": event["conversationId"]}, timeout=NEWS_TIMEOUT_SECONDS,
+        )
+    except NETWORK_ERRORS:
+        return None  # a model call must never wait on or fail because of this
+    text = data.get("text")
+    if not data.get("count") or not isinstance(text, str) or not text:
+        return None
+    return _context_step(text[:MAX_CONTEXT_CHARS])
+
+
+HANDLERS = {"SessionStart": session_start, "PreInvocation": pre_invocation, "Stop": stop}
 
 
 def nothing_to_say(name):

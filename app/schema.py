@@ -958,6 +958,14 @@ def _ensure_workspace_sync_schema(conn) -> None:
             FOREIGN KEY(execution_id) REFERENCES agent_executions(id) ON DELETE CASCADE
         );
 
+        -- How far a session has been told about handoffs other sessions closed after it started.
+        CREATE TABLE IF NOT EXISTS execution_handoff_marks (
+            execution_id TEXT PRIMARY KEY,
+            delivered_through TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            FOREIGN KEY(execution_id) REFERENCES agent_executions(id) ON DELETE CASCADE
+        );
+
         DROP TRIGGER IF EXISTS workspace_memory_ai;
         DROP TRIGGER IF EXISTS workspace_memory_au;
         DROP TRIGGER IF EXISTS workspace_activity_ai;

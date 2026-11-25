@@ -92,3 +92,23 @@ def handoff_check(
             host_session_ref=body.host_session_ref,
         )
     )
+
+
+@router.post("/new-handoffs")
+def new_handoffs(
+    body: HandoffCheckRequest, ctx: EffectiveAuthority = Depends(get_request_context)
+):
+    """Called by a hook before a model call: has another session closed a handoff here since this one started?
+
+    Answers `{count: 0}` when not, and writes nothing. Otherwise it returns the handoffs and a ready-to-inject
+    `text`, and marks them delivered to this session so each reaches it once."""
+    if not ctx.agent_id:
+        return error_response("AGENT_REQUIRED", "Handoff news requires an agent", 400)
+    return success_response(
+        session_context_service.new_handoffs(
+            agent_id=ctx.agent_id,
+            user_id=ctx.user_id or "",
+            host_session_ref=body.host_session_ref,
+            can_read=lambda scope: ctx.can("memory", "read", scope=scope),
+        )
+    )

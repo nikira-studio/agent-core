@@ -349,9 +349,10 @@ def test_the_script_is_served_and_the_generated_steps_register_it_in_hooks_json(
     assert "Bearer" not in text and "sk-" not in text
     registered = json.loads(text.split("```json\n", 1)[1].split("\n```", 1)[0])
     group = registered["agent-core"]
-    start, stop = group["SessionStart"][0], group["Stop"][0]
+    start, stop, news = group["SessionStart"][0], group["Stop"][0], group["PreInvocation"][0]
     assert start == {"type": "command", "command": "python3 ~/.gemini/agent-core/agent_core_hook.py", "timeout": 15}
     assert stop == {"type": "command", "command": start["command"], "timeout": 10}
+    assert news == {"type": "command", "command": start["command"], "timeout": 2}  # runs before every model call
     assert "matcher" not in start and "hooks" not in group  # flat handler lists, as Antigravity requires
     # the Windows steps use the full path with forward slashes, in the folder Antigravity reads
     assert 'python \\"C:/Users/YOU/.gemini/agent-core/agent_core_hook.py\\"' in text
@@ -385,3 +386,79 @@ def test_every_answer_is_a_json_object_even_when_there_is_nothing_to_say(monkeyp
     out = io.StringIO()
     hook.main(io.StringIO(json.dumps({"hookEventName": "Stop", "conversationId": "c"})), out, ENV)
     assert json.loads(out.getvalue()) == {"decision": "allow"}
+
+
+# --- PreInvocation: handoffs other sessions closed -----------------------------------------------------------------
+
+
+def test_pre_invocation_adds_new_handoffs_as_information_and_is_silent_otherwise(monkeypatch):
+    hook = _hook()
+    calls = []
+
+    def fake_post(base_url, api_key, path, payload, timeout=None):
+        calls.append((path, payload, timeout))
+        return {"count": 1, "text": "Agent Core: 1 handoff closed ... not a person's approval of anything"}
+
+    monkeypatch.setattr(hook, "post", fake_post)
+    event = {"hookEventName": "PreInvocation", "conversationId": "c-1", "invocationNum": 3, "cwd": "/repo"}
+    result = json.loads(_run(hook, event))
+    assert result == {"injectSteps": [{"systemMessage": {"systemMessage": "Agent Core: 1 handoff closed ... not a person's approval of anything"}}]}
+    assert calls == [("/api/session-context/new-handoffs", {"host_session_ref": "c-1"}, hook.NEWS_TIMEOUT_SECONDS)]
+    assert hook.NEWS_TIMEOUT_SECONDS <= 2
+    # nothing new, a malformed answer, no conversation, or the switch off: an empty object, and no request when it is off
+    for answer in ({"count": 0, "text": ""}, {"count": 1}, {"count": 1, "text": 5}, {}):
+        monkeypatch.setattr(hook, "post", lambda *a, _a=answer, **k: _a)
+        assert _run(hook, event) == NOTHING, answer
+    calls.clear()
+    monkeypatch.setattr(hook, "post", fake_post)
+    assert _run(hook, {**event, "conversationId": None}) == NOTHING
+    assert _run(hook, event, {**ENV, "AGENT_CORE_HANDOFF_NEWS": "0"}) == NOTHING
+    assert calls == []
+
+
+def test_pre_invocation_never_fails_or_waits_on_an_unreachable_core(monkeypatch):
+    hook = _hook()
+    event = {"hookEventName": "PreInvocation", "conversationId": "c-1"}
+
+    def failing(*a, **k):
+        raise OSError("down")
+
+    monkeypatch.setattr(hook, "post", failing)
+    assert _run(hook, event) == NOTHING
+    # with a real unreachable address it comes back quickly and says nothing the model would read
+    import time
+
+    monkeypatch.undo()
+    started = time.time()
+    raw = _run(hook, event, {"AGENT_CORE_URL": "http://127.0.0.1:9", "AGENT_CORE_API_KEY": "secret-key"})
+    assert raw == NOTHING and time.time() - started < 5
+
+
+def test_a_closed_handoff_reaches_another_session_through_the_hook_against_the_real_server(test_client, agent_token, monkeypatch):
+    from app.database import get_db
+    from app.services import activity_service
+
+    hook = _hook()
+
+    def through_the_app(base_url, api_key, path, payload, timeout=None):
+        response = test_client.post(path, headers={"Authorization": f"Bearer {api_key}"}, json=payload)
+        assert response.status_code == 200, response.json()
+        return response.json()["data"]
+
+    monkeypatch.setattr(hook, "post", through_the_app)
+    env = {"AGENT_CORE_URL": "http://core", "AGENT_CORE_API_KEY": agent_token, "AGENT_CORE_SCOPE": "agent:testagent"}
+    _run(hook, {"hookEventName": "SessionStart", "conversationId": "agy-a", "cwd": "/repo"}, env)
+    event = {"hookEventName": "PreInvocation", "conversationId": "agy-a"}
+    assert _run(hook, event, env) == NOTHING
+    _run(hook, {"hookEventName": "SessionStart", "conversationId": "agy-b", "cwd": "/repo"}, env)
+    with get_db() as conn:
+        other = conn.execute("SELECT id, user_id FROM agent_executions WHERE host_session_ref = 'agy-b'").fetchone()
+    done = activity_service.create_activity(
+        agent_id="testagent", user_id=other["user_id"], task_description="Closed in the other session",
+        memory_scope="agent:testagent", source_execution_id=other["id"],
+    )
+    activity_service.update_activity(done["id"], status="completed", task_result="It is done.")
+    activity_service.set_handoff(done["id"], {"completed": "It is done.", "next_steps": ["Check it"]})
+    text = json.loads(_run(hook, event, env))["injectSteps"][0]["systemMessage"]["systemMessage"]
+    assert done["id"] in text and "It is done." in text and "not a person's approval of anything" in text
+    assert _run(hook, event, env) == NOTHING, "delivered once"
