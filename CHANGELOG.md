@@ -2,7 +2,7 @@
 
 Notable changes to Agent Core are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [1.4.1] - 2026-11-24
 
 ### Added
 
@@ -15,12 +15,13 @@ Notable changes to Agent Core are documented here. The format follows [Keep a Ch
 
 - The Antigravity MCP preset now writes `url` and `headers`, the fields Antigravity's current documentation names, instead of `serverUrl` and `type`. The older `serverUrl` still works in Antigravity, so an existing entry needs no change.
 - The MCP server's instructions now say that a session that was resumed, woken by a queued message or running in the background cannot assume a person is watching it. It does not treat a queued message as approval, leaves approval-gated work to a session a person is in, and records a person's choice or approval only when they gave it. The memory_write text asks for a first sentence that stands on its own. The Codex setup notes explain how to message a Codex thread.
+- The README and the quickstart no longer say the Python install route works on Windows. It does not run on Windows itself, because Agent Core uses a Unix-only file lock; use Docker, or run the commands inside WSL.
+- The code passes the project's lint check again, so the public CI runs green. Nothing about how Agent Core behaves changed.
 - The documentation covers the three hooks together. The integration guide has an Antigravity step-by-step, and "How it works" has a short section, "Sessions and who set a record".
 
 ### Upgrading
 
 - Nothing to do. Starting this version adds one small table, `execution_handoff_marks`, automatically (schema revision 32). Older code ignores it, so going back needs no database restore.
-- A hook you registered earlier keeps working as it did. To get handoff news in Antigravity, download the hook script again and add the PreInvocation entry to your `agent-core` entry in `hooks.json`; the Connect page shows both.
 
 ## [1.4.0] - 2026-11-19
 
