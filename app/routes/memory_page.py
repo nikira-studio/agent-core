@@ -1,6 +1,5 @@
 """Memory dashboard page."""
 
-from collections import defaultdict
 
 from fastapi import APIRouter, Request, Depends
 
@@ -198,7 +197,7 @@ def memory_page(request: Request, session: dict = Depends(require_auth)):
     from urllib.parse import quote as _quote
 
     extra_query = "&".join(
-        part for part in (f"show=retracted" if show == "retracted" else "", f"workspace={_quote(ws_filter, safe='')}" if ws_filter else "") if part
+        part for part in ("show=retracted" if show == "retracted" else "", f"workspace={_quote(ws_filter, safe='')}" if ws_filter else "") if part
     )
     memory_pagination_html = _build_pagination(page, total_pages, extra_query) if total_pages > 1 else ""
     memory_page_info = (

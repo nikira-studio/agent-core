@@ -3,7 +3,7 @@
 from datetime import timedelta
 
 from app.database import get_db
-from app.services import activity_service, agent_service, audit_service, memory_service, workspace_service
+from app.services import activity_service, agent_service, audit_service, workspace_service
 from app.services.activity_service import utc_now
 from tests.conftest import csrf_headers
 

@@ -1,9 +1,8 @@
 """Closing a record that ended blocked."""
 
-import json
 
 from app.database import get_db
-from app.services import activity_service, agent_service, memory_service, workspace_service
+from app.services import activity_service, agent_service, workspace_service
 
 WS = "workspace:close-a"
 

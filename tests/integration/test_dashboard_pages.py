@@ -656,7 +656,6 @@ def test_every_dashboard_page_has_headings_in_order(authenticated_client):
 
 
 def test_overview_waiting_list_shows_every_kind_to_an_admin(authenticated_client):
-    from app.database import get_db
     from app.services import activity_service, credential_request_service
 
     activity = activity_service.create_activity("admin", "admin", "Needs a decision")

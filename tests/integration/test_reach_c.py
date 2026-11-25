@@ -7,7 +7,7 @@ import sqlite3
 import pytest
 
 from app.database import get_db
-from app.services import agent_service, auth_service, broker_service, connector_service, credential_service, workspace_service
+from app.services import agent_service, broker_service, connector_service, credential_service, workspace_service
 from app.services.auth_service import create_session, create_user
 from tests.conftest import csrf_headers
 

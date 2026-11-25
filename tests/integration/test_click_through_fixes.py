@@ -5,7 +5,6 @@ import re
 
 import pytest
 
-from app.database import get_db
 from app.services import connector_service, credential_service
 from app.services.webhook_service import WEBHOOK_EVENT_LABELS, WEBHOOK_EVENT_TYPES
 

@@ -2,7 +2,7 @@
 
 from app.database import get_db
 from app.services import connector_service
-from tests.integration.test_ui_truth import _admin, _bound_service, _services_tile
+from tests.integration.test_ui_truth import _bound_service, _services_tile
 
 
 def _runs(binding_id, action, successes, failures):

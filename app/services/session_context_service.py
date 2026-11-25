@@ -22,7 +22,6 @@ report can tell whether an injected record is later fetched.
 from __future__ import annotations
 
 import json
-import os
 import re
 from typing import Optional
 

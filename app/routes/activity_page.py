@@ -108,21 +108,10 @@ def _detail_record(a: dict, workspace_names: dict, agent_labels: dict) -> dict:
 def activity_page(request: Request, session: dict = Depends(require_auth)):
     from app.services import activity_service
     from app.services.agent_service import list_agents
-    from app.services import workspace_service, workspace_sync_service
+    from app.services import workspace_service
 
     activity_service.mark_stale_activities()
     is_admin = session.get("role") == "admin"
-    executions = workspace_sync_service.list_executions(
-        limit=25, user_id=None if is_admin else session["user_id"]
-    )
-    execution_rows = "".join(
-        f"<tr><td>{escape_html(e['agent_id'])}</td><td><code>{escape_html(e['memory_scope'])}</code></td>"
-        f"<td><span class='badge badge-{escape_html(e['status'])}'>{escape_html(e['status'])}</span></td>"
-        f"<td>{local_dt(e.get('last_seen_at'))}</td><td>{e.get('acknowledged_sequence') or 0}</td>"
-        f"<td>{e.get('unacknowledged') or 0}</td></tr>"
-        for e in executions
-    )
-
     page = _page_number(request.query_params.get("page"))
     status_filter = request.query_params.get("status", "")
     limit = 50

@@ -67,7 +67,7 @@ def test_non_decisions_that_open_alike_but_differ_are_kept_too(clean_db):
 def test_a_decision_is_never_retracted_by_a_rule_even_as_an_exact_duplicate(clean_db):
     text = "Only a person may approve a merge into a production branch; agents may propose and prepare it."
     old = _write(text, memory_class="decision")
-    new = _write(text + " ", memory_class="decision")
+    _write(text + " ", memory_class="decision")
     _age(old, "2026-01-01T00:00:00+00:00")
     assert memory_hygiene_service.run()["total"] == 0
     assert memory_service.get_memory_record(old["id"])["record_status"] == "active"

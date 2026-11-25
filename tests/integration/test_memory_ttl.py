@@ -58,7 +58,7 @@ def test_record_without_expires_at_appears_normally(clean_db):
 
 
 def test_an_expired_record_is_retracted_not_deleted_and_can_be_restored(clean_db):
-    from app.services import audit_service, memory_service
+    from app.services import memory_service
 
     record, _ = write_memory(content="sweep target decision", memory_class="decision", scope="workspace:ttl", topic="Expiring decision", expires_at=_past_iso())
     run_scheduled_maintenance()

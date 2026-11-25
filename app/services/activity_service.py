@@ -1216,7 +1216,6 @@ def end_unattended_blocked(after_days: Optional[int] = None) -> int:
     if days <= 0:
         return 0
     cutoff = (utc_now() - timedelta(days=days)).isoformat()
-    now = utc_now_iso()
     ended = 0
     with get_db() as conn:
         rows = conn.execute(

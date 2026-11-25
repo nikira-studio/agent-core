@@ -316,8 +316,8 @@ def test_existing_connections_inherit_everything(world):
 def test_the_dialogs_offer_the_choice_and_the_table_says_what_a_connection_allows(world):
     from app.services.auth_service import create_session
 
-    ro = world["binding"]("Read only", "read_only")
-    custom = world["binding"]("Chosen", "custom", ["delete_thing"])
+    world["binding"]("Read only", "read_only")
+    world["binding"]("Chosen", "custom", ["delete_thing"])
     world["binding"]("Everything")
     client = world["client"]
     client.cookies.set("session_token", create_session("admin")["session_id"])
@@ -540,7 +540,7 @@ def test_a_read_only_plain_web_connection_shows_n_of_m_and_none_allowed_says_why
     binding = _plain_web_binding(world, ["GET /a", "GET /b", "POST /c"], actions_mode="read_only")
     _, row = _summary_row(world, binding)
     assert row["usable_by_caller"] is True and row["actions"] == {"mode": "read_only", "allowed": 2, "total": 3}
-    only_writes = cs.update_binding(binding["id"], config_json=json.dumps({"allowed": ["POST /c"]}))
+    cs.update_binding(binding["id"], config_json=json.dumps({"allowed": ["POST /c"]}))
     _, row = _summary_row(world, cs.get_binding(binding["id"]))
     assert row["usable_by_caller"] is False and row["actions"]["allowed"] == 0
     assert row["not_usable_because"].startswith("This connection allows none of the capability's actions")

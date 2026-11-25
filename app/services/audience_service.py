@@ -20,7 +20,6 @@ audience endpoints and dialogs.
 from __future__ import annotations
 
 import json
-import sqlite3
 from typing import Iterable, Optional
 
 from app.database import get_db

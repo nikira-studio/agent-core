@@ -1,6 +1,5 @@
 """Edit connection > "What this connection can do", in a real browser."""
 
-import json
 
 import pytest
 

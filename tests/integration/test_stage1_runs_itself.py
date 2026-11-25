@@ -53,7 +53,7 @@ def test_completing_needs_a_task_result_over_mcp_and_rest(test_client, admin_tok
 
 
 def test_closing_a_blocked_record_later_keeps_the_time_its_work_ended(test_client, admin_token):
-    headers = _setup()
+    _setup()
     task = activity_service.create_activity(agent_id="s1-agent", user_id=_OWNER["id"], task_description="Old", memory_scope=WS)
     activity_service.update_activity(task["id"], status="blocked")
     _age(task["id"], ended_at=timedelta(days=20), updated_at=timedelta(days=20))
@@ -71,7 +71,7 @@ def test_closing_a_blocked_record_later_keeps_the_time_its_work_ended(test_clien
 def test_session_context_says_when_a_record_was_closed_out_long_after_its_work(test_client, admin_token):
     from app.services import session_context_service
 
-    headers = _setup()
+    _setup()
     task = activity_service.create_activity(agent_id="s1-agent", user_id=_OWNER["id"], task_description="Old work", memory_scope=WS)
     activity_service.update_activity(task["id"], status="blocked")
     _age(task["id"], ended_at=timedelta(days=20))
@@ -138,7 +138,7 @@ def test_an_open_task_nobody_updates_for_two_days_ends_without_report(test_clien
 def test_a_credential_request_and_the_task_blocked_on_it_are_one_row_for_the_person(test_client, admin_token):
     from app.services import credential_request_service, waiting_service
 
-    headers = _setup()
+    _setup()
     task = activity_service.create_activity(agent_id="s1-agent", user_id=_OWNER["id"], task_description="Needs a key", memory_scope=WS)
     request = credential_request_service.request_credential(
         agent_id="s1-agent", user_id=_OWNER["id"], scope=WS, name="deploy_token", purpose="to deploy"

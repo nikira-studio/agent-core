@@ -103,7 +103,9 @@ def _ensure_agent_keys(db_path: str) -> None:
     con = sqlite3.connect(db_path)
     con.row_factory = sqlite3.Row
     try:
-        has = lambda name: con.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (name,)).fetchone()
+        def has(name):
+            return con.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (name,)).fetchone()
+
         if has("agents") and not has("agent_keys"):
             _migrate_029_agent_keys(con)
         con.commit()

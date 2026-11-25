@@ -1273,7 +1273,6 @@ def _build_agent_setup_output_for(
 ):
     user_scope = f"user:{user['id']}"
     workspace_scope = f"workspace:{workspace['id']}" if workspace else ""
-    default_scope = workspace_scope or user_scope
     agent_scope = f"agent:{agent['id']}"
     agent_display = agent.get("display_name", agent["id"])
     user_display = user.get("display_name", user.get("email", user["id"]))
@@ -1370,17 +1369,8 @@ def _build_instructions(
     user_display,
     workspace_name,
 ):
-    scope_guide = ""
     tool_tips = ""
-    default_scope = workspace_scope or user_scope
-    workspace_scope_label = workspace_scope or "No workspace scope selected"
-    workspace_context_line = (
-        f"- Use `{workspace_scope}` for workspace facts, decisions, implementation notes, bugs, and architecture."
-        if workspace_scope
-        else f"- No workspace selected. Use `{user_scope}` for user-level context and `{agent_scope}` for private scratch context."
-    )
     if target == "claude_code":
-        scope_guide = f"{workspace_context_line}\n- Use `{user_scope}` only for stable preferences or personal working context.\n- Use `{agent_scope}` only for private scratch context."
         tool_tips = f"""## Claude Code Tips
 
 - Claude Code automatically reads `CLAUDE.md` in the workspace root. Consider generating that output instead for a self-contained file.
@@ -1389,7 +1379,6 @@ def _build_instructions(
     export {ENV_PREFIX}API_KEY="your-key-here"
 """
     elif target == "codex":
-        scope_guide = f"- Work in `{default_scope}` for default context.\n- Read `{user_scope}` for user preferences.\n- Keep private notes in `{agent_scope}`."
         tool_tips = f"""## Codex Tips
 
 - Codex reads `AGENTS.md` in the workspace root. Consider generating that output instead for a self-contained file.
@@ -1397,7 +1386,6 @@ def _build_instructions(
 - Set `{ENV_PREFIX}API_KEY` in your environment before starting a Codex session.
 """
     elif target == "cursor":
-        scope_guide = f"{workspace_context_line}\n- Use `{user_scope}` only for stable preferences or personal working context.\n- Use `{agent_scope}` only for private scratch context."
         tool_tips = f"""## Cursor Tips
 
 - Add the MCP config to `.cursor/mcp.json` in the workspace root for workspace-level access, or `~/.cursor/mcp.json` for global access.
@@ -1405,7 +1393,6 @@ def _build_instructions(
 - Cursor's AI chat can use MCP tools directly once the server is connected. Set `{ENV_PREFIX}API_KEY` in Cursor's terminal or your shell profile.
 """
     elif target == "windsurf":
-        scope_guide = f"{workspace_context_line}\n- Use `{user_scope}` only for stable preferences or personal working context.\n- Use `{agent_scope}` only for private scratch context."
         tool_tips = f"""## Windsurf Tips
 
 - Add the MCP config to Windsurf's MCP settings for your workspace.
@@ -1413,7 +1400,6 @@ def _build_instructions(
 - Set `{ENV_PREFIX}API_KEY` in your shell environment before starting a Windsurf session.
 """
     elif target == "antigravity":
-        scope_guide = f"{workspace_context_line}\n- Use `{user_scope}` only for stable preferences or personal working context.\n- Use `{agent_scope}` only for private scratch context."
         tool_tips = f"""## Antigravity Tips
 
 - Add the MCP config to `~/.gemini/config/mcp_config.json`; `url` and `headers` are the fields it needs.
@@ -1422,7 +1408,6 @@ def _build_instructions(
 - Set `{ENV_PREFIX}API_KEY` in your shell environment before starting an Antigravity session.
 """
     else:
-        scope_guide = f"- Default memory scope: `{default_scope}`\n- User scope: `{user_scope}`\n- Private scope: `{agent_scope}`"
         tool_tips = f"""## Generic MCP Client Tips
 
 - The MCP endpoint is `{base_url}/mcp`. Your client should send requests as JSON with `{{"tool": "...", "params": {{...}}}}`.
@@ -1506,7 +1491,6 @@ def _build_session_prompt(
     user_display,
     workspace_name,
 ):
-    default_scope = workspace_scope or user_scope
     tool_line = {
         "claude_code": "You are Claude Code.",
         "codex": "You are Codex.",
@@ -1851,8 +1835,8 @@ def _hook_steps(client_key, base_url):
             f'python "{win_env_script}"'
         )
     mapping = (
-        f"Add your project folder to the workspace: Workspaces → Edit Workspace → Repository folders, one per machine where the project lives, "
-        f"written as that machine names it (on Windows, `C:\\Users\\you\\my-repo`). Admin only. "
+        "Add your project folder to the workspace: Workspaces → Edit Workspace → Repository folders, one per machine where the project lives, "
+        "written as that machine names it (on Windows, `C:\\Users\\you\\my-repo`). Admin only. "
         "The agent also needs read access to the workspace: Agents page → Edit the agent → Advanced access → Can Read From. "
         "Create Workspace can set both."
     )

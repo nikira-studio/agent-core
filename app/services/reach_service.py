@@ -263,7 +263,6 @@ def agent_summary(agent: dict) -> dict:
     names = Names()
     ctx = build_agent_context(agent)
     authority = EffectiveAuthority(context=ctx)
-    enforcer = _credential_enforcer(ctx)
     read = set(agent_service.parse_scopes(agent.get("read_scopes_json", "[]")))
     write = set(agent_service.parse_scopes(agent.get("write_scopes_json", "[]")))
     effective_read, effective_write = set(ctx.read_scopes), set(ctx.write_scopes)

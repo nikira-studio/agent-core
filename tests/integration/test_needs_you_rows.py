@@ -36,7 +36,7 @@ def test_each_row_leads_with_its_task_workspace_agent_and_age_and_says_what_answ
     same = "A reviewed candidate is ready for your decision. Try the preview, then accept or rework."
     # Tasks that belong to different tickets each keep their own open question, even from one agent.
     ex = {ref: _ok(test_client, key, "session_context", memory_scope=WS, host_session_ref=ref)["execution_id"] for ref in "abc"}
-    linked = _ask(test_client, key, ex["c"], "Approve the rate limit change", "Decide this in the review tool.", needs_human_url="https://review.example.com/changes/42")
+    _ask(test_client, key, ex["c"], "Approve the rate limit change", "Decide this in the review tool.", needs_human_url="https://review.example.com/changes/42")
     second = _ask(test_client, key, ex["b"], "Update the 41 routine dependencies", same)
     first = _ask(test_client, key, ex["a"], "Add the subscriber count to the page", same)
     page = test_client.get("/").text
@@ -71,7 +71,7 @@ def test_the_link_is_validated_stored_and_listed(test_client, admin_token):
 
 
 def test_attention_list_does_not_attach_an_empty_session_context(test_client, admin_token):
-    key = _setup()
+    _setup()
     with get_db() as conn:
         owner = conn.execute("SELECT id FROM users LIMIT 1").fetchone()["id"]
     workspace_service.create_workspace("ny-b", "Second", owner)

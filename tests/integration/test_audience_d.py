@@ -169,7 +169,7 @@ def test_the_preview_lists_who_gains_and_who_loses_and_writes_nothing(world):
         json={"binding_id": binding["id"], "audience": [{"kind": "agent", "ref": "off"}]},
         headers=world["headers"],
     ).json()["data"]
-    assert [g["agent_id"] for g in preview["gain"]] == ["off"] and [l["agent_id"] for l in preview["lose"]] == ["on"]
+    assert [g["agent_id"] for g in preview["gain"]] == ["off"] and [entry["agent_id"] for entry in preview["lose"]] == ["on"]
     assert _entries(binding["id"]) == before
 
 

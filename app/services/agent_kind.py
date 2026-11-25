@@ -51,9 +51,11 @@ def recorded_work(conn, agent_id: str) -> list[str]:
     connections stored in its own scope."""
     found: list[str] = []
     own_scope = f"agent:{agent_id}"
-    has_table = lambda name: conn.execute(
-        "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (name,)
-    ).fetchone()
+    def has_table(name):
+        return conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (name,)
+        ).fetchone()
+
     if has_table("agent_activity"):
         n = _count(conn, "SELECT COUNT(*) FROM agent_activity WHERE agent_id = ? OR assigned_agent_id = ?", (agent_id, agent_id))
         if n:

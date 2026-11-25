@@ -1,5 +1,4 @@
 from fastapi import APIRouter, Depends
-import os
 
 from pydantic import BaseModel, Field
 from typing import Optional
