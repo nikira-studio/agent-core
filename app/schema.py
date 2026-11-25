@@ -581,6 +581,7 @@ def _apply_schema_migrations(conn) -> None:
         (29, "several-keys-per-agent", _migrate_029_agent_keys),
         (30, "agent-or-service-kind", _migrate_030_agent_kind),
         (31, "connection-audience-lists", _migrate_031_connection_audience),
+        (32, "execution-handoff-marks", _migrate_032_execution_handoff_marks),
     )
     applied = {
         row["revision"]
@@ -669,6 +670,20 @@ def _migrate_005_unconfirmed_inference_importance_gate(conn) -> None:
     conn.execute(
         "UPDATE system_settings SET value = '90', updated_at = CURRENT_TIMESTAMP "
         "WHERE key = 'unconfirmed_inference_days' AND value = '7'"
+    )
+
+
+def _migrate_032_execution_handoff_marks(conn) -> None:
+    """How far a session has been told about handoffs other sessions closed after it started."""
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS execution_handoff_marks (
+            execution_id TEXT PRIMARY KEY,
+            delivered_through TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            FOREIGN KEY(execution_id) REFERENCES agent_executions(id) ON DELETE CASCADE
+        )
+        """
     )
 
 
@@ -955,14 +970,6 @@ def _ensure_workspace_sync_schema(conn) -> None:
             highest_delivered_sequence INTEGER NOT NULL DEFAULT 0,
             updated_at TEXT NOT NULL,
             PRIMARY KEY(execution_id, memory_scope),
-            FOREIGN KEY(execution_id) REFERENCES agent_executions(id) ON DELETE CASCADE
-        );
-
-        -- How far a session has been told about handoffs other sessions closed after it started.
-        CREATE TABLE IF NOT EXISTS execution_handoff_marks (
-            execution_id TEXT PRIMARY KEY,
-            delivered_through TEXT NOT NULL,
-            updated_at TEXT NOT NULL,
             FOREIGN KEY(execution_id) REFERENCES agent_executions(id) ON DELETE CASCADE
         );
 

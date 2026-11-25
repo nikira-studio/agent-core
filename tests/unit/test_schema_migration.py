@@ -245,6 +245,7 @@ def test_create_schema_records_and_skips_applied_revision(monkeypatch):
         {"revision": 29, "name": "several-keys-per-agent"},
         {"revision": 30, "name": "agent-or-service-kind"},
         {"revision": 31, "name": "connection-audience-lists"},
+        {"revision": 32, "name": "execution-handoff-marks"},
     ]
     assert conn.execute(
         "SELECT 1 FROM sqlite_master WHERE type='table' AND name='credential_resolution_daily'"

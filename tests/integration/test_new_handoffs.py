@@ -149,3 +149,21 @@ def test_the_route_needs_a_host_session_and_an_agent(test_client, admin_token):
     heads, _ = _setup()
     assert test_client.post("/api/session-context/new-handoffs", headers=heads["news-a"], json={}).status_code == 422
     assert test_client.post("/api/session-context/new-handoffs", json={"host_session_ref": "x"}).status_code in (401, 403)
+
+
+def test_an_existing_database_gets_the_marks_table_from_a_migration():
+    import sqlite3
+
+    from app.schema import create_schema
+
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    create_schema(conn)
+    assert conn.execute("SELECT 1 FROM sqlite_master WHERE name = 'execution_handoff_marks'").fetchone()
+    # a database as it was at revision 31: no table, revision 32 not recorded
+    conn.execute("DROP TABLE execution_handoff_marks")
+    conn.execute("DELETE FROM schema_migrations WHERE revision = 32")
+    conn.commit()
+    create_schema(conn)
+    assert conn.execute("SELECT 1 FROM sqlite_master WHERE name = 'execution_handoff_marks'").fetchone()
+    assert conn.execute("SELECT name FROM schema_migrations WHERE revision = 32").fetchone()["name"] == "execution-handoff-marks"
