@@ -60,7 +60,7 @@ In Agent Core, an agent is a name you create for one of your tools, with its own
 2. On the **Agents** tab, choose **+ Create Agent**. Give it an ID (lowercase letters, numbers, hyphens and underscores) such as `coding-agent`, and a name. It gets read and write access to your workspace.
 3. Open the **Connect** tab. Choose your agent and workspace, pick your tool, then choose **Generate One-Time Key**. A box asks you to confirm that you want a new key for that agent. Its other keys keep working. The setup then appears with the key filled in. The key is shown only once, so copy it now.
 
-The page says where your tool keeps its settings. Most tools take settings like these, which use MCP (Model Context Protocol), the standard way AI tools call outside programs. Claude Code, Codex and Cursor support it.
+The page says where your tool keeps its settings. Most tools take settings like these, which use MCP (Model Context Protocol), the standard way AI tools call outside programs. Claude Code, Codex, Cursor and Antigravity support it.
 
 ```json
 {

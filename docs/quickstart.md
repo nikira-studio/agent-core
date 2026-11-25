@@ -123,11 +123,11 @@ The **Connect** page (`http://localhost:3500/integrations`, also a tab on **Agen
 
 1. The setting to add to your tool. Choose **Generate One-Time Key** and confirm, and the key is filled in for you. The key is shown once, so copy it into your tool right away. If you lose it, generate another: an agent can hold several keys (for example one per machine), and a new key does not stop the others. Revoke a key you no longer use under **Agents → More → Keys**. Through the API, `POST /api/agents/coding-agent/keys` with `{"label": "laptop"}` returns a key once.
 2. A `CLAUDE.md` or `AGENTS.md` file to save in your project. It tells the agent to use Agent Core. You can verify the connection before you save it.
-3. For Claude Code and Codex, an optional hook that loads the workspace context when a session starts.
+3. For Claude Code, Codex and Antigravity, an optional hook that loads the workspace context when a session starts.
 
 Do the setting and the hook yourself in a terminal. An agent usually cannot, because it has no network access and cannot write to its own settings folder.
 
-Most tools take the setting as MCP (Model Context Protocol) settings. MCP is the standard way AI tools call outside programs, and Claude Code, Cursor, Claude Desktop and Codex support it:
+Most tools take the setting as MCP (Model Context Protocol) settings. MCP is the standard way AI tools call outside programs, and Claude Code, Cursor, Claude Desktop, Codex and Antigravity support it:
 
 ```json
 {

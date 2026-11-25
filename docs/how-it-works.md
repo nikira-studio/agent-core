@@ -226,7 +226,7 @@ The durable change log does not replace memory or activities. It tells a session
 
 ### Sessions and who set a record
 
-Every time one of your tools starts a session, Agent Core gives that session an id. Activity lists, the session context and records show it, so two sessions of the same agent are no longer one blur. When another session of the same agent was active in the workspace in the last 30 minutes, the session context says so.
+Every time one of your tools starts a session, Agent Core gives that session an id. Activity lists, the session context and records show it, so two sessions of the same agent are no longer one blur. When another session of the same agent was active in the workspace in the last 30 minutes, the session context says so. A session that has the Antigravity hook is also told, once, when another session closes a handoff in its workspace.
 
 A record shows who set that version of it: `person` when someone signed in to the dashboard wrote it, `agent:<name>` when an agent did. Agent Core refuses the person label from an agent, so an agent cannot claim it. An agent can still replace a record that a person wrote. The new version is the agent's, it names the person's version it replaced (`replaces_person_set`), and the person's version stays in the record's history. A retraction shows who made it and, for an agent, from which session.
 
@@ -398,7 +398,7 @@ Every design decision above comes from one of these. When something in Agent Cor
 
 ## What to expect (and what not to)
 
-- **Agents learn of each other's work at session start, or when they ask.** The session context (injected by a session start hook for Claude Code or Codex, fetched with `session_context`, or attached by Core to an agent's first call of any tool after a quiet hour) lists open work, recent results and key records of the workspace; `activity_list` and `workspace_sync` answer later questions. Nothing is pushed to an agent that is already running.
+- **Agents learn of each other's work at session start, or when they ask.** The session context (injected by a session start hook for Claude Code, Codex or Antigravity, fetched with `session_context`, or attached by Core to an agent's first call of any tool after a quiet hour) lists open work, recent results and key records of the workspace; `activity_list` and `workspace_sync` answer later questions. Core never pushes to an agent that is already running. The Antigravity hook comes closest: before each model call it asks whether another session closed a handoff here, and adds it to the conversation once. A handoff delivered that way is information, not a person's approval of anything.
 - **Two agents in one workspace see each other's finished work and shared memories** at their next session start. A workspace does not see another workspace unless an agent is told to look there and is allowed to.
 - **Memory holds decisions and checkable facts, not general knowledge, and it is only as good as what was written.** Core refuses plain logs of one occurrence and identical repeats and retracts leftovers, but it cannot make a vague memory useful: that depends on what agents write, which the generated instructions try to steer.
 - **History lives in two places.** Core keeps who is doing what now, lasting decisions and facts, and one outcome sentence per finished task; the repositories keep the detail (their changelogs and status files), and a task's result points at them.

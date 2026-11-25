@@ -1418,6 +1418,7 @@ def _build_instructions(
 
 - Add the MCP config to `~/.gemini/config/mcp_config.json`; `url` and `headers` are the fields it needs.
 - Restart Antigravity after adding MCP servers if the config does not appear immediately.
+- The Connect page also generates a session start hook for Antigravity (a `hooks.json` entry) that loads this context and tells you when another session closes a handoff.
 - Set `{ENV_PREFIX}API_KEY` in your shell environment before starting an Antigravity session.
 """
     else:
@@ -1940,7 +1941,7 @@ def _hook_markdown(client_key, base_url):
             "- The PreInvocation entry runs before every model call. It asks whether another session closed a handoff in this workspace since "
             "this one started or was last told, and adds it as a system message if so. With nothing new it prints an empty object, waits at most 2 seconds "
             "and never fails a call; each handoff arrives once. Set `AGENT_CORE_HANDOFF_NEWS=0` to turn it off. "
-            "If you registered the hook before this entry existed, add the PreInvocation entry to your `agent-core` group.",
+            "If you installed the hook before this entry existed, download the script again and add the PreInvocation entry to your `agent-core` group.",
             "- The Stop entry asks the agent once per task to record a handoff. It stays silent when the turn was cancelled, failed or cut off, "
             "while background work is still running, and while Antigravity is already continuing because of a stop hook. "
             "Set `AGENT_CORE_HANDOFF_NUDGE=0` to turn it off.",

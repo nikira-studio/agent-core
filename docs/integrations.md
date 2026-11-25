@@ -61,7 +61,7 @@ Clients and setup tools can discover public connection metadata at `/.well-known
 
 ### Antigravity
 
-Antigravity reads MCP servers from `~/.gemini/config/mcp_config.json` (or a workspace's `.agents/mcp_config.json`). A remote server needs `url` and can carry a `headers` entry; `serverUrl` is accepted as an older name for `url`. The legacy SSE transport is not supported, so point it at the `/mcp` endpoint:
+Antigravity reads MCP servers from `~/.gemini/config/mcp_config.json`, or from `.agents/mcp_config.json` in a workspace (the session start hook below reads only your own file in your home folder, so a project's file works for the connection but not for the hook). A remote server needs `url` and can carry a `headers` entry (`serverUrl` is an older name for `url` that still works). The legacy SSE transport is not supported, so point it at the `/mcp` endpoint:
 
 ```json
 {
@@ -75,6 +75,8 @@ Antigravity reads MCP servers from `~/.gemini/config/mcp_config.json` (or a work
   }
 }
 ```
+
+The Connect page also generates a session start hook for Antigravity, so a conversation begins with its workspace context loaded. See [Session start hooks](#session-start-hooks).
 
 ### What MCP gives your agents
 
@@ -650,7 +652,7 @@ The **Connect** page (`/integrations`) generates everything you need for a speci
 - Verification prompts to paste into the agent to confirm it's connected
 - A session start hook for Claude Code, Codex and Antigravity, so a session begins with its workspace context already loaded
 
-The Connect page is three steps. **1. Who is connecting?** Pick the user, workspace and agent. **2. Which tool?** Pick Claude Code, Codex, Cursor, Windsurf, Antigravity or Other MCP tool; the page then shows what that tool needs, in order: **a** its MCP config (the **Generate One-Time Key** button adds a new key to the agent; its other keys keep working), **b** the file it reads (CLAUDE.md for Claude Code, AGENTS.md for Codex, the setup guide for the others), and for Claude Code and Codex **c** the session start hook, with commands for macOS, Linux and Windows. Do **a** and **c** yourself in a terminal: an agent usually cannot, because it runs in a sandbox without network access and cannot write to its own settings folder. **b** is a file in your project, so an agent can save it for you. Steps a and c show whether Agent Core has seen them work. **3. Check it works.** Test the connection address and run the Verification Prompt. Everything else is under **Other outputs**.
+The Connect page is three steps. **1. Who is connecting?** Pick the user, workspace and agent. **2. Which tool?** Pick Claude Code, Codex, Cursor, Windsurf, Antigravity or Other MCP tool; the page then shows what that tool needs, in order: **a** its MCP config (the **Generate One-Time Key** button adds a new key to the agent; its other keys keep working), **b** the file it reads (CLAUDE.md for Claude Code, AGENTS.md for Codex, the setup guide for the others), and for Claude Code, Codex and Antigravity **c** the session start hook, with commands for macOS, Linux and Windows. Do **a** and **c** yourself in a terminal: an agent usually cannot, because it runs in a sandbox without network access and cannot write to its own settings folder. **b** is a file in your project, so an agent can save it for you. Steps a and c show whether Agent Core has seen them work. **3. Check it works.** Test the connection address and run the Verification Prompt. Everything else is under **Other outputs**.
 
 **Other outputs** holds the outputs the steps above do not already show for the chosen tool, as tabs (with no tool chosen it lists all of them): the chosen tool's own instructions file, hook and the Verification Prompt are in the steps and not repeated. Each output type is available for every tool preset:
 
@@ -670,7 +672,15 @@ The Connect page is three steps. **1. Who is connecting?** Pick the user, worksp
 
 ### Session start hooks
 
-A hook runs when a Claude Code, Codex or Antigravity session starts, asks Agent Core for the session context (work waiting on a person, unfinished and handed-off work, recent results, key records) and puts it in front of the agent, so the agent does not have to be told to look. Both hooks also have a Stop entry: when a task is left open with no recorded handoff, the first stop is blocked once with a request to record one (the agent continues with that text), and never again for that task. `AGENT_CORE_HANDOFF_NUDGE=0` turns it off. A Codex hook registered before this has only the SessionStart entry: add the Stop entry from step c and trust it once in `/hooks`. The Connect page generates the install and registration steps (step c once you choose the tool, and the same text as a tab under **Other outputs**); the script itself is served at `/integrations/hooks/`. The hook holds no key: it reads the one in the tool's MCP entry (Claude Code: the project's `.mcp.json` or `~/.claude.json`, or `$CLAUDE_CONFIG_DIR/.claude.json`; Codex: `~/.codex/config.toml` or `$CODEX_HOME/config.toml`).
+A hook is a small script your tool runs at set moments in a session. Agent Core has one for Claude Code, one for Codex and one for Antigravity. A handoff is the short note an agent records when it finishes or stops a task: what was done, what comes next, and any question for a person. Between them the hooks do three things:
+
+- **When a session starts**, the hook asks Agent Core for the session context (work waiting on a person, unfinished and handed-off work, recent results, key records) and puts it in front of the agent, so the agent does not have to be told to look.
+- **Before each model call (Antigravity only)**, the hook asks Agent Core whether another session closed a handoff in the same workspace since this session started, or since the last time it was told about one. If one did, the hook adds it to the conversation, once. `AGENT_CORE_HANDOFF_NEWS=0` turns this off.
+- **When the agent is about to stop with a task still open and no handoff recorded** (a task it opened with `activity_update` and has not closed), the hook asks it once to record one. The agent continues with that text and is never asked again for that task. `AGENT_CORE_HANDOFF_NUDGE=0` turns this off.
+
+A handoff that reaches an agent this way is information, not a person's approval of anything.
+
+The Connect page labels its steps a (the MCP entry), b (the instructions file) and c (the hook). It generates the install and registration steps (step c once you choose the tool, and the same text as a tab under **Other outputs**); the script itself is served at `/integrations/hooks/`. The hook holds no key: it reads the one in the tool's own MCP entry (Claude Code: the project's `.mcp.json` or `~/.claude.json`, or `$CLAUDE_CONFIG_DIR/.claude.json`; Codex: `~/.codex/config.toml` or `$CODEX_HOME/config.toml`; Antigravity: `~/.gemini/config/mcp_config.json`). A hook you registered before one of its entries existed needs that entry added: for Codex the Stop entry (then trust it once in `/hooks`), for Antigravity the PreInvocation entry and a fresh download of the script.
 
 **Where the session start hook runs** (checked November 2026):
 
@@ -681,19 +691,52 @@ A hook runs when a Claude Code, Codex or Antigravity session starts, asks Agent 
 | Claude Cowork | No: it reads neither `settings.json` nor the Claude Code MCP config, so connect it as its own client | | The instructions file |
 | Codex CLI | Yes | `/hooks`, once | |
 | Codex desktop app | Windows: no, a trusted hook is not started (openai/codex issue 35863). Other systems: not checked | Settings > Hooks, the hook marked "needs review" | The instructions file |
-| Antigravity (`agy` CLI) | Not checked yet in a real session. Its documentation says SessionStart runs once when a new conversation starts, and does not say whether a resumed one runs it again | Nothing documented | The instructions file |
+| Antigravity (`agy` CLI) | Yes (checked November 2026 on Linux): the context reaches the model, the Stop request comes once, and a handoff from another session arrives once. Not known: whether a resumed conversation runs the start hook again, which Antigravity's documentation does not say | None was needed in the real session | The instructions file |
 
 Where a hook does not run, the instructions file (CLAUDE.md or AGENTS.md) still tells the agent to load the same context with `session_context`.
 
 **Which workspace a session gets.** The workspace whose Repository folder contains the session's working directory. Add one folder per machine where the project lives, each written as that machine names it, under **Workspaces** → Edit Workspace → Repository folders (or in the Create Workspace dialog); Linux, macOS and Windows forms mix freely, and a Windows folder matches ignoring case and slash direction. The agent also needs read access to the workspace (**Agents** → Edit the agent → Advanced access → Can Read From; Create Workspace can set it). A folder that no workspace the agent can read claims starts without context, and in a project folder the hook says so in one line. An agent that can read exactly one workspace gets it in every folder.
 
-**Windows.** The steps use PowerShell to install the script and register it with the full path, written with forward slashes: Claude Code takes `python C:/Users/you/.claude/hooks/agent_core_hook.py`; Codex has a `commandWindows` entry, and the generated command creates `hooks.json` without overwriting one you have. The commands use the address you opened the dashboard at, so open it from an address the machine you are setting up can reach.
+**Windows.** The steps use PowerShell to install the script and register it with the full path, written with forward slashes: Claude Code takes `python C:/Users/you/.claude/hooks/agent_core_hook.py`; Codex has a `commandWindows` entry, and the generated command creates `hooks.json` without overwriting one you have; Antigravity takes `python "C:/Users/you/.gemini/agent-core/agent_core_hook.py"`, and its generated command also keeps an existing `hooks.json`. The commands use the address you opened the dashboard at, so open it from an address the machine you are setting up can reach.
 
-**Antigravity.** The hook is registered in `~/.gemini/config/hooks.json` (or `<project>/.agents/hooks.json`) as an `agent-core` entry; hooks written in `settings.json` are not loaded. It reads the URL and key from your own `~/.gemini/config/mcp_config.json`, never a project's. Antigravity sends its fields in camelCase, so to try it by hand use `{"hookEventName":"SessionStart","conversationId":"try-1","cwd":"<folder>"}` on the hook's standard input; the Connect page prints the exact command. Its PreInvocation entry runs before every model call (2 seconds at most) and asks Core whether another session closed a handoff in this workspace since this one started or was last told; it adds the answer as a system message, once per handoff, and prints an empty object when there is nothing new. If you registered the hook before this entry existed, add the PreInvocation entry to your `agent-core` group (the Connect page shows it); `AGENT_CORE_HANDOFF_NEWS=0` turns it off. The hook always prints a JSON object, as Antigravity's documentation asks of a hook: an empty one when it has nothing to add, and for Stop a decision that lets the agent stop. What the hook delivers is information for the agent: a handoff in it is never a person's approval of anything.
+**Antigravity, step by step.** You need the `agy` CLI, an agent for it in Agent Core (the [Quickstart](quickstart.md) shows how) and Python 3.8 or newer. On Windows, the Connect page gives the PowerShell version of steps 2 and 3.
 
-**A second machine.** Either copy the existing entry (URL and key) from the machine that already works, or generate a key for this machine: an agent can hold several keys, and a new one does not disconnect the first machine. The entry is in `~/.claude.json` or the project's `.mcp.json` for Claude Code, and `~/.codex/config.toml` for Codex. Change its address if it says `localhost`: the second machine needs one it can reach. Give each tool its own agent when you can, so each has its own access and its own record of work.
+1. Connect the MCP server first. On the Connect page (`/integrations`), choose your user, workspace and agent, then Antigravity. Step a shows an `agent-core` entry with `url` and `headers`: choose **Generate One-Time Key** (the key is shown once) and put the entry inside `mcpServers` in `~/.gemini/config/mcp_config.json`. Create the `config` folder if it does not exist, and keep any servers already in the file. On Windows the file is in the `.gemini\config` folder of your user folder. The hook reads the address and key from this entry.
+2. Install the script. Use the address you opened the dashboard at (`http://localhost:3500` below):
 
-**Checking it.** Step c on the Connect page reads "Hook working: context delivered 3 hours ago from Windows" once a session start made by the hook has arrived for the workspace you chose, and "No session start seen yet" until then. An agent loading its own context does not count. To run the hook yourself, from a project folder, feed it a start event (use `.codex` instead of `.claude` for Codex). On macOS or Linux:
+   ```bash
+   mkdir -p ~/.gemini/agent-core
+   curl -fsSL http://localhost:3500/integrations/hooks/antigravity/agent_core_hook.py -o ~/.gemini/agent-core/agent_core_hook.py
+   ```
+
+3. Register it. Save this as `~/.gemini/config/hooks.json`. If you already have that file, add only the `agent-core` entry to it (`agent-core` is just the name of this group of hooks). To use the hook for one project only, put it in `.agents/hooks.json` at the project root instead. Hooks written in Antigravity's own `settings.json` are not loaded. Antigravity expands `~` in the command and reads `timeout` as seconds.
+
+   ```json
+   {
+     "agent-core": {
+       "SessionStart": [{ "type": "command", "command": "python3 ~/.gemini/agent-core/agent_core_hook.py", "timeout": 15 }],
+       "PreInvocation": [{ "type": "command", "command": "python3 ~/.gemini/agent-core/agent_core_hook.py", "timeout": 2 }],
+       "Stop": [{ "type": "command", "command": "python3 ~/.gemini/agent-core/agent_core_hook.py", "timeout": 10 }]
+     }
+   }
+   ```
+
+   The three entries are the three jobs above, in order: load the context when a conversation starts, check for new handoffs before each model call (at most 2 seconds, and silent when there is nothing new), and ask for a handoff before an open task is left. If you installed the hook before the PreInvocation entry existed, download the script again (step 2), because an older copy ignores the new entry, and add that one line to your `agent-core` entry yourself: the Connect page's command never changes a `hooks.json` you already have.
+4. Map your project folder to a workspace. In the dashboard, open **Workspaces**, edit the workspace, and add the folder under Repository folders (admin only), written as your machine names it. Then check that the agent can read the workspace (**Agents**, edit the agent, Advanced access, Can Read From). "Which workspace a session gets" above has the details.
+5. Try it by hand from that folder. Antigravity names its fields in camelCase (`hookEventName`, `conversationId`), so the test uses those names:
+
+   ```bash
+   echo '{"hookEventName":"SessionStart","conversationId":"try-1","cwd":"'"$PWD"'"}' | python3 ~/.gemini/agent-core/agent_core_hook.py
+   ```
+
+   It prints one line of JSON that starts `{"injectSteps":`. That is how a hook adds a message to an Antigravity conversation, here the session context. If it prints `{}`, no workspace matches the folder; check step 4. To try the PreInvocation entry the same way, send `{"hookEventName":"PreInvocation","conversationId":"try-1"}`: it prints `{}` unless a handoff from another session is waiting.
+6. Start a new conversation in that folder. The context arrives as a system message before the first model call, and step c on the Connect page changes to "Hook working". A run by hand, like the one in step 5, shows there as "Run by hand" instead.
+
+The hook only reads your own `~/.gemini/config/mcp_config.json`, never a project's. It always prints a JSON object, as Antigravity's documentation asks of a hook: an empty one when it has nothing to add, and for Stop a decision that lets the agent stop. A line meant only for you, such as "no connection found", is shown to you and not sent to the model.
+
+**A second machine.** Either copy the existing entry (URL and key) from the machine that already works, or generate a key for this machine: an agent can hold several keys, and a new one does not disconnect the first machine. The entry is in `~/.claude.json` or the project's `.mcp.json` for Claude Code, `~/.codex/config.toml` for Codex, and `~/.gemini/config/mcp_config.json` for Antigravity. Change its address if it says `localhost`: the second machine needs one it can reach. Give each tool its own agent when you can, so each has its own access and its own record of work.
+
+**Checking it.** Step c on the Connect page reads "Hook working: context delivered 3 hours ago from Windows" once a session start made by the hook has arrived for the workspace you chose, and "No session start seen yet" until then. An agent loading its own context does not count. To run the hook yourself, from a project folder, feed it a start event (use `.codex` instead of `.claude` for Codex; Antigravity has its own command in its step-by-step above). On macOS or Linux:
 
 ```bash
 echo '{"hook_event_name":"SessionStart","source":"startup","session_id":"try-1","cwd":"'"$PWD"'"}' | python3 ~/.claude/hooks/agent_core_hook.py
